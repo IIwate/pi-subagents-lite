@@ -59,8 +59,13 @@ async function showResultViewer(
         theme,
         tui.terminal.rows,
         stats,
+        tui.terminal.columns,
       ),
-    { overlay: true },
+    {
+      overlay: true,
+      // Snapshot / result panel: 70% of terminal, centered.
+      overlayOptions: { width: "70%", anchor: "center" },
+    },
   );
 }
 

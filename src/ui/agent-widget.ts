@@ -11,7 +11,7 @@ import {
   getLifetimeTotal,
   getSessionContextPercent,
 } from "../agents/usage.js";
-import { formatMs, buildStatsParts, getDisplayName, truncateDesc, type StatsVisibility } from "./format.js";
+import { formatMs, buildStatsParts, getDisplayName, truncateDesc, STATS_SEP, type StatsVisibility } from "./format.js";
 import type { LiveView } from "../spawn/spawn-coordinator.js";
 
 // Re-export Theme so existing consumers (searchable-select, result-viewer) don't break
@@ -83,7 +83,7 @@ interface RenderBlock {
 }
 
 // ---- Re-exports from format.ts (backward compatibility) ----
-export { formatMs, buildStatsParts, getDisplayName, type StatsVisibility } from "./format.js";
+export { formatMs, buildStatsParts, getDisplayName, STATS_SEP, type StatsVisibility } from "./format.js";
 export type { LiveView as AgentActivity } from "../spawn/spawn-coordinator.js";
 
 // ---- Widget-internal helpers ----
@@ -346,10 +346,14 @@ export class AgentWidget {
       compactions: a.stats.compactionCount,
       cost: a.stats.lifetimeUsage.cost,
       durationMs,
+      // Prefer live session values (actual run) over spawn-time invocation snapshot.
+      modelName: a.execution.session?.model?.id ?? a.display.invocation?.modelName,
+      thinkingLevel: a.execution.session?.thinkingLevel ?? a.display.invocation?.thinkingLevel,
     }, theme, this.statsVisibility);
 
-    const statsLine = statsParts.join("·");
-    return `${icon} ${theme.fg("dim", name)}  ${theme.fg("dim", fullDesc)}  ${wrapInDim(theme, statsLine)}${statusText}`;
+    const statsLine = statsParts.join(STATS_SEP);
+    const statsSuffix = statsLine ? `${STATS_SEP}${wrapInDim(theme, statsLine)}` : "";
+    return `${icon} ${theme.fg("dim", name)}  ${theme.fg("dim", fullDesc)}${statsSuffix}${statusText}`;
   }
 
   /** Build the stats line (toolUses · turns · tokens · cost · elapsed) for a running agent. */
@@ -367,8 +371,11 @@ export class AgentWidget {
       compactions: agent.stats.compactionCount,
       cost: agent.stats.lifetimeUsage.cost,
       durationMs: Date.now() - agent.lifecycle.startedAt,
+      // Prefer live session values (actual run) over spawn-time invocation snapshot.
+      modelName: agent.execution.session?.model?.id ?? agent.display.invocation?.modelName,
+      thinkingLevel: agent.execution.session?.thinkingLevel ?? agent.display.invocation?.thinkingLevel,
     }, theme, this.statsVisibility);
-    return parts.join("·");
+    return parts.join(STATS_SEP);
   }
 
   /** Build RenderBlocks for finished (completed/errored) agents. */
@@ -413,7 +420,8 @@ export class AgentWidget {
       if (this.isCompact()) {
         // Compact: single line with activity inline, truncated description
         const desc = truncateDesc(a.display.description, this.descLengthCompact);
-        const headerLine = `${BRANCH} ${theme.fg("accent", frame)} ${theme.bold(name)}  ${desc}  ${statsLine}  ${theme.fg("dim", activity)}`;
+        const statsSuffix = statsLine ? `${STATS_SEP}${statsLine}` : "";
+        const headerLine = `${BRANCH} ${theme.fg("accent", frame)} ${theme.bold(name)}  ${desc}${statsSuffix}  ${theme.fg("dim", activity)}`;
         blocks.push({
           header: truncate(headerLine),
           continuations: [],
@@ -421,7 +429,9 @@ export class AgentWidget {
       } else {
         // Full: header + continuation lines
         const fullDesc = truncateDesc(a.display.description, this.descLengthFull);
-        const headerLine = `${BRANCH} ${theme.fg("accent", frame)} ${theme.bold(name)}  ${fullDesc}  ${statsLine}`;
+        const statsSuffix = statsLine ? `${STATS_SEP}${statsLine}` : "";
+        const headerLine = `${BRANCH} ${theme.fg("accent", frame)} ${theme.bold(name)}  ${fullDesc}${statsSuffix}`;
+
         const continuations: string[] = [];
         const parts = buildWorktreeOutputParts(a);
         if (parts.length > 0) {

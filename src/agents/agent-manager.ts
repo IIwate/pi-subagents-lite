@@ -289,6 +289,11 @@ export class AgentManager {
       onTextDelta: options.onTextDelta,
       onSessionCreated: (session) => {
         record.execution.session = session;
+        // Snapshot effective model/thinking for widget display (session may inherit settings defaults).
+        const inv = record.display.invocation ?? {};
+        if (!inv.modelName && session.model?.id) inv.modelName = session.model.id;
+        if (!inv.thinkingLevel && session.thinkingLevel) inv.thinkingLevel = session.thinkingLevel;
+        record.display.invocation = inv;
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
           for (const msg of record.execution.pendingSteers) {

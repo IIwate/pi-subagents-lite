@@ -15,7 +15,14 @@ import { resolveType, getAgentConfig, discoverNewAgents } from "./agent-types.js
 import { getLifetimeTotal, getSessionContextPercent } from "./usage.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
-import { parseModelKey, findModelInRegistry, parseThinkingLevel } from "../utils.js";
+import {
+  parseModelKey,
+  findModelInRegistry,
+  parseThinkingLevel,
+  parseModelSpec,
+  resolveExactModel,
+  unknownModelError,
+} from "../utils.js";
 import {
   getPiInstance,
   getSessionCtx,
@@ -82,6 +89,7 @@ export function buildAgentDetails(
     details.durationMs = elapsedMs;
     details.compactions = record.stats.compactionCount;
     details.modelName = record.display.invocation?.modelName;
+    details.thinkingLevel = record.display.invocation?.thinkingLevel;
     details.cost = record.stats.lifetimeUsage.cost;
   }
 
@@ -152,16 +160,33 @@ export async function executeAgentTool(
   const runInBackground = params.run_in_background as boolean | undefined;
   const maxTurns = params.max_turns as number | undefined ?? getAgentConfig(resolvedType)?.maxTurns;
 
-  const modelStr = params.model as string | undefined;
-  const model = findModelInRegistry(modelStr, ctx.modelRegistry, ctx.model);
+  // model may be "id", "provider/id", or "id:thinking" / "provider/id:thinking".
+  const { modelRef, thinkingFromModel } = parseModelSpec(params.model as string | undefined);
+  let model = modelRef
+    ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
+    : undefined;
+
+  // Explicit model was requested but could not be matched exactly → error (no silent parent fallback).
+  if (modelRef && !model) {
+    return errorResult(unknownModelError(modelRef));
+  }
+
+  // No explicit model → inherit injected/config/parent model (toolCallListener may have set params.model).
+  if (!modelRef) {
+    model = findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
+  }
+
   const modelKey = model ? `${model.provider}/${model.id}` : undefined;
 
   // Determine modelName for invocation (always capture for display)
   const modelName = model?.id;
 
-  // Resolve thinking: explicit param > agent config (frontmatter) > undefined (inherit)
+  // Resolve thinking:
+  //   explicit thinking param > model "id:thinking" suffix > agent config > package default
   const thinkingLevel = parseThinkingLevel(params.thinking as string | undefined)
-    ?? getAgentConfig(resolvedType)?.thinkingLevel;
+    ?? thinkingFromModel
+    ?? getAgentConfig(resolvedType)?.thinkingLevel
+    ?? getStore().agent.defaultThinking;
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;
@@ -176,7 +201,7 @@ export async function executeAgentTool(
     graceTurns: getStore().agent.graceTurns,
     worktreePath: validatedWorktreePath,
     worktreeLabel,
-    invocation: { modelName },
+    invocation: { modelName, thinkingLevel },
     runInBackground: runInBackground || getStore().agent.forceBackground,
   });
 
@@ -275,25 +300,49 @@ export async function toolCallListener(
   const subagentType = input.agent as string | undefined;
   const agentConfig = subagentType ? getAgentConfig(subagentType) : undefined;
 
-  const parentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "";
-
-  const effectiveModel = getStore().modelFor(
-    subagentType ?? "general-purpose",
-    parentModelId,
-    agentConfig,
-  );
-
-  if (effectiveModel) {
-    input.model = effectiveModel;
-    // Always inject _modelOverride for renderCall
-    const parsed = parseModelKey(effectiveModel);
-    if (parsed) {
-      input._modelOverride = parsed.modelId;
+  // Normalize "model:thinking" shorthand before other injection logic.
+  if (typeof input.model === "string" && input.model.length > 0) {
+    const { modelRef, thinkingFromModel } = parseModelSpec(input.model);
+    if (modelRef !== undefined) {
+      input.model = modelRef;
+    }
+    // Promote thinking from model suffix only when thinking was not set explicitly.
+    if (thinkingFromModel !== undefined && input.thinking === undefined) {
+      input.thinking = thinkingFromModel;
     }
   }
 
-  // Inject thinking from agent config if not explicitly passed
-  if (input.thinking === undefined && agentConfig?.thinkingLevel !== undefined) {
-    input.thinking = agentConfig.thinkingLevel;
+  // Inject model only when the LLM did not pass one explicitly.
+  // Explicit tool `model` always wins over config/parent defaults.
+  if (input.model === undefined || input.model === null || input.model === "") {
+    const parentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "";
+    const effectiveModel = getStore().modelFor(
+      subagentType ?? "general-purpose",
+      parentModelId,
+      agentConfig,
+    );
+
+    if (effectiveModel) {
+      input.model = effectiveModel;
+    }
+  }
+
+  // Always set _modelOverride for renderCall display (resolved bare id or provider/id).
+  if (typeof input.model === "string" && input.model.length > 0) {
+    const resolved = resolveExactModel(input.model, ctx.modelRegistry, ctx.model?.provider)
+      ?? findModelInRegistry(input.model, ctx.modelRegistry, ctx.model);
+    input._modelOverride = resolved?.id
+      ?? parseModelKey(input.model)?.modelId
+      ?? input.model;
+  }
+
+  // Inject thinking when not explicitly passed: agent config > package default.
+  // Explicit LLM `thinking` param (or model-suffix thinking above) always wins.
+  if (input.thinking === undefined) {
+    const fallback =
+      agentConfig?.thinkingLevel ?? getStore().agent.defaultThinking;
+    if (fallback !== undefined) {
+      input.thinking = fallback;
+    }
   }
 }

@@ -272,6 +272,7 @@ describe("showDebugMenu — agent briefing action (SelectList)", () => {
     expect(message).toContain("prompt");
     expect(message).toContain("description");
     expect(message).toContain("agent");
+    expect(message).toContain("model");
     expect(message).toContain("thinking");
     expect(message).toContain("run_in_background");
     expect(message).toContain("worktree_path");

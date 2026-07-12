@@ -803,7 +803,7 @@ describe("stats visibility integration", () => {
 
     const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
     const allText = lines.join(" ");
-    expect(allText).not.toContain("🛠");
+    expect(allText).not.toContain("calls");
   });
 
   it("hides time when showTime is false", () => {
@@ -857,7 +857,7 @@ describe("stats visibility integration", () => {
 
     const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
     const allText = lines.join(" ");
-    expect(allText).not.toContain("🛠");
+    expect(allText).not.toContain("calls");
   });
 
   it("shows all stats when visibility flags are all true (default)", () => {
@@ -875,9 +875,61 @@ describe("stats visibility integration", () => {
 
     const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
     const allText = lines.join(" ");
-    expect(allText).toContain("🛠");
+    expect(allText).toContain("calls");
     expect(allText).toContain("⟳");
     expect(allText).toContain("↑");
     expect(allText).toContain("$");
+  });
+
+  it("shows model · thinking before calls when invocation is set", () => {
+    const agent = makeRunningAgent("a1");
+    agent.display.invocation = { modelName: "grok-4.5", thinkingLevel: "high" };
+    activity.set("a1", makeActivity("a1"));
+    (manager as any).listAgents = () => [agent];
+
+    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
+    const allText = lines.join(" ");
+    expect(allText).toContain("grok-4.5");
+    expect(allText).toContain("high");
+    expect(allText).toContain("calls");
+    // model · thinking appears before calls
+    expect(allText.indexOf("grok-4.5")).toBeLessThan(allText.indexOf("high"));
+    expect(allText.indexOf("high")).toBeLessThan(allText.indexOf("calls"));
+  });
+
+  it("prefers live session model/thinking over invocation snapshot", () => {
+    const agent = makeRunningAgent("a1");
+    // Invocation may be stale/missing; session reflects the actual run.
+    agent.display.invocation = { modelName: "old-model", thinkingLevel: "high" };
+    agent.execution = {
+      session: {
+        model: { id: "grok-4.5" },
+        thinkingLevel: "low",
+        getSessionStats: () => ({ contextUsage: { percent: 10 } }),
+      },
+    };
+    activity.set("a1", makeActivity("a1"));
+    (manager as any).listAgents = () => [agent];
+
+    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
+    const allText = lines.join(" ");
+    expect(allText).toContain("grok-4.5");
+    expect(allText).toContain("low");
+    expect(allText).not.toContain("old-model");
+    // session low should appear; invocation high should not win
+    expect(allText.indexOf("low")).toBeLessThan(allText.indexOf("calls"));
+  });
+
+  it("uses spaced separator between stats parts", () => {
+    const agent = makeRunningAgent("a1");
+    agent.display.invocation = { modelName: "grok-4.5", thinkingLevel: "high" };
+    activity.set("a1", makeActivity("a1"));
+    (manager as any).listAgents = () => [agent];
+
+    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
+    const allText = lines.join(" ");
+    expect(allText).toContain(" · ");
+    // Description is separated from model with · ; theme wraps each stats part in [dim:...].
+    expect(allText).toMatch(/Test agent a1 · \[dim:grok-4\.5\] · \[dim:high\] · \d+ calls · \d+⟳/);
   });
 });

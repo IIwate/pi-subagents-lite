@@ -8,8 +8,12 @@ import type { AgentOutputLog } from "./agents/output-file.js";
 import type { LifetimeUsage, AgentUsage } from "./agents/usage.js";
 import type { SubagentType, AgentInvocation } from "./agents/types.js";
 
-/** Thinking level for agent models. */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+/**
+ * Thinking level for agent models.
+ * Known levels: off, minimal, low, medium, high, xhigh.
+ * Free-form strings are also allowed (provider-specific thinking maps).
+ */
+export type ThinkingLevel = string;
 
 /** Tool activity event: start/end of a tool invocation. */
 export interface ToolActivity {

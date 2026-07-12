@@ -29,12 +29,57 @@ const allStats = {
 describe("buildStatsParts — visible flag: showTools", () => {
   it("excludes toolUses when showTools is false", () => {
     const parts = buildStatsParts(allStats, mockTheme, { showTools: false });
-    expect(parts.some(p => p.includes("🛠"))).toBe(false);
+    expect(parts.some(p => p.includes("calls"))).toBe(false);
   });
 
   it("includes toolUses when showTools is true (default)", () => {
     const parts = buildStatsParts(allStats, mockTheme);
-    expect(parts.some(p => p.includes("🛠"))).toBe(true);
+    expect(parts.some(p => p.includes("calls"))).toBe(true);
+  });
+});
+
+describe("buildStatsParts — model · thinking", () => {
+  it("shows model and thinking as separate parts before calls", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      modelName: "grok-4.5",
+      thinkingLevel: "high",
+    }, mockTheme);
+    expect(parts[0]).toBe("grok-4.5");
+    expect(parts[1]).toBe("high");
+    expect(parts[2]).toBe("5 calls");
+  });
+
+  it("shows model only when thinking is missing", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      modelName: "grok-4.5",
+    }, mockTheme);
+    expect(parts[0]).toBe("grok-4.5");
+    expect(parts[1]).toBe("5 calls");
+  });
+
+  it("shows thinking only when model is missing", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      thinkingLevel: "high",
+    }, mockTheme);
+    expect(parts[0]).toBe("high");
+    expect(parts[1]).toBe("5 calls");
+  });
+
+  it("omits model/thinking when neither is set", () => {
+    const parts = buildStatsParts(allStats, mockTheme);
+    expect(parts[0]).toBe("5 calls");
+  });
+
+  it("formats tokens with space before ↓ and · before context %", () => {
+    const parts = buildStatsParts(allStats, mockTheme);
+    const tokenPart = parts.find(p => p.includes("↑") && p.includes("↓"));
+    expect(tokenPart).toBeDefined();
+    expect(tokenPart).toContain("↑1k ↓500");
+    expect(tokenPart).toContain(" · 50%");
+    expect(tokenPart).toContain(" · ↻ 2");
   });
 });
 
@@ -98,7 +143,8 @@ describe("buildStatsParts — visible flag: showCost", () => {
 describe("buildStatsParts — visible flag: showTime", () => {
   it("excludes time when showTime is false", () => {
     const parts = buildStatsParts(allStats, mockTheme, { showTime: false });
-    expect(parts.some(p => p.includes("m") || p.includes("s") || p.includes("<1s"))).toBe(false);
+    // Match duration-like tokens, not the "s" inside "calls"
+    expect(parts.some(p => /\d+m|\d+s|<1s/.test(p))).toBe(false);
   });
 
   it("includes time when durationMs is provided and showTime is true", () => {
@@ -131,7 +177,7 @@ describe("buildStatsParts — backward compatibility", () => {
   it("without visible parameter, behaves the same as before", () => {
     const parts = buildStatsParts(allStats, mockTheme);
     expect(parts.length).toBeGreaterThan(0);
-    expect(parts.some(p => p.includes("🛠"))).toBe(true);
+    expect(parts.some(p => p.includes("calls"))).toBe(true);
     expect(parts.some(p => p.includes("⟳"))).toBe(true);
     expect(parts.some(p => p.includes("↑"))).toBe(true);
     expect(parts.some(p => p.includes("$"))).toBe(true);

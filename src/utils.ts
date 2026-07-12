@@ -41,18 +41,20 @@ export function safeReadFile(filePath: string): string | undefined {
   }
 }
 
-/** All valid thinking levels. */
-export const VALID_THINKING_LEVELS: readonly ThinkingLevel[] = [
+/** Common thinking levels shown in menus. Free-form values are also accepted at runtime. */
+export const VALID_THINKING_LEVELS: readonly string[] = [
   "off", "minimal", "low", "medium", "high", "xhigh",
 ] as const;
 
 /**
- * Validate and narrow a raw string value to ThinkingLevel.
- * Returns undefined if the value is not a valid thinking level.
+ * Normalize a raw thinking value.
+ * Accepts any non-empty string (not restricted to VALID_THINKING_LEVELS),
+ * so provider-specific levels can pass through.
  */
 export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
   if (raw === undefined) return undefined;
-  return VALID_THINKING_LEVELS.includes(raw as ThinkingLevel) ? (raw as ThinkingLevel) : undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /**
@@ -72,19 +74,107 @@ export function parseModelKey(modelStr: string): { provider: string; modelId: st
   return { provider: modelStr.slice(0, slashIdx), modelId: modelStr.slice(slashIdx + 1) };
 }
 
+/** Minimal registry surface used for model lookup. */
+export interface ModelLookupRegistry {
+  find(provider: string, modelId: string): Model<any> | undefined;
+  /** Optional; used to resolve bare model ids (no provider prefix). */
+  getAvailable?: () => Array<Model<any>>;
+}
+
 /**
- * Find a model in the registry by "provider/model-id" string.
- * Returns the found model, or the fallback if the string is unparseable or not in registry.
+ * Parse a model tool argument that may embed thinking as `model:thinking`.
+ *
+ * Supported forms:
+ *   - "grok-4.5"
+ *   - "cpa-responses/grok-4.5"
+ *   - "grok-4.5:low"
+ *   - "cpa-responses/grok-4.5:low"
+ *   - "grok-4.5:custom-level"  (free-form thinking, not restricted to known levels)
+ *
+ * When a `:` is present and both sides are non-empty, the suffix after the
+ * last `:` is always treated as thinking (no allowlist check).
+ */
+export function parseModelSpec(raw: string | undefined): {
+  modelRef: string | undefined;
+  thinkingFromModel?: ThinkingLevel;
+} {
+  if (raw === undefined) return { modelRef: undefined };
+  const trimmed = raw.trim();
+  if (!trimmed) return { modelRef: undefined };
+
+  const colonIdx = trimmed.lastIndexOf(":");
+  if (colonIdx > 0) {
+    const modelRef = trimmed.slice(0, colonIdx).trim();
+    const thinkingFromModel = parseThinkingLevel(trimmed.slice(colonIdx + 1));
+    if (modelRef && thinkingFromModel !== undefined) {
+      return { modelRef, thinkingFromModel };
+    }
+  }
+
+  return { modelRef: trimmed };
+}
+
+/**
+ * Resolve an explicit model ref with exact matching only (no silent fallback).
+ *
+ * - "provider/id" → registry.find(provider, id)
+ * - bare id → available models where model.id === bare id (exact)
+ *
+ * When multiple providers share the same id, prefer preferredProvider if set,
+ * otherwise the first match.
+ */
+export function resolveExactModel(
+  modelRef: string,
+  registry: ModelLookupRegistry,
+  preferredProvider?: string,
+): Model<any> | undefined {
+  const trimmed = modelRef.trim();
+  if (!trimmed) return undefined;
+
+  const parsed = parseModelKey(trimmed);
+  if (parsed) {
+    return registry.find(parsed.provider, parsed.modelId);
+  }
+
+  const available = registry.getAvailable?.() ?? [];
+  const exact = available.filter((m) => m.id === trimmed);
+  if (exact.length === 0) return undefined;
+  if (exact.length === 1) return exact[0];
+  if (preferredProvider) {
+    const sameProvider = exact.find((m) => m.provider === preferredProvider);
+    if (sameProvider) return sameProvider;
+  }
+  return exact[0];
+}
+
+/** Build a helpful error when an explicit model ref cannot be resolved. */
+export function unknownModelError(modelRef: string): string {
+  return (
+    `Unknown model id: "${modelRef}". ` +
+    `Use a bare model id that exactly matches an available model (e.g. "grok-4.5"), ` +
+    `or "provider/model-id" (e.g. "cpa-responses/grok-4.5"). ` +
+    `Optional thinking shorthand: "grok-4.5:low". ` +
+    `List available models first (e.g. via your model list / list-models), then retry with a valid id.`
+  );
+}
+
+/**
+ * Find a model in the registry by "provider/model-id" or bare model id.
+ * Returns the found model, or the fallback if not found / empty input.
+ *
+ * Prefer resolveExactModel() for explicit LLM-provided model args (no silent fallback).
  */
 export function findModelInRegistry(
   modelStr: string | undefined,
-  registry: { find(provider: string, modelId: string): Model<any> | undefined },
+  registry: ModelLookupRegistry,
   fallback: Model<any> | undefined,
 ): Model<any> | undefined {
   if (!modelStr) return fallback;
-  const parsed = parseModelKey(modelStr);
-  if (!parsed) return fallback;
-  return registry.find(parsed.provider, parsed.modelId) ?? fallback;
+
+  const trimmed = modelStr.trim();
+  if (!trimmed) return fallback;
+
+  return resolveExactModel(trimmed, registry, fallback?.provider) ?? fallback;
 }
 /** Timeout for git commands (ms). Shared by agent-runner and worktree-validator. */
 export const GIT_EXEC_TIMEOUT_MS = 5000;

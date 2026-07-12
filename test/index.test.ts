@@ -179,8 +179,8 @@ describe("Agent tool schema — stealth", () => {
     expect(agentTool()!.promptGuidelines).toBeUndefined();
   });
 
-  it("excludes model param", () => {
-    expect(hasParam(agentTool()!.parameters, "model")).toBe(false);
+  it("includes model param (optional, LLM can override model)", () => {
+    expect(hasParam(agentTool()!.parameters, "model")).toBe(true);
   });
 
   it("excludes inherit_context param", () => {
@@ -219,6 +219,10 @@ describe("Agent tool schema — stealth", () => {
 
   it("includes run_in_background param (optional)", () => {
     expect(hasParam(agentTool()!.parameters, "run_in_background")).toBe(true);
+  });
+
+  it("includes thinking param (optional, LLM can override thinking level)", () => {
+    expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
   });
 
   it("includes worktree_path param (optional, no .description())", () => {
@@ -283,7 +287,7 @@ describe("tool_call listener — guards", () => {
     expect(result).toBeUndefined();
   });
 
-  it("sets event.input.model for Agent tool calls", async () => {
+  it("sets event.input.model for Agent tool calls when model is omitted", async () => {
     const ctx = {
       model: { provider: "test", id: "parent-model" },
       modelRegistry: {
@@ -307,6 +311,34 @@ describe("tool_call listener — guards", () => {
     expect(event.input.model).toBeDefined();
     expect(typeof event.input.model).toBe("string");
     expect(result).toBeUndefined();
+  });
+
+  it("does not overwrite explicit model on Agent tool calls", async () => {
+    const ctx = {
+      model: { provider: "test", id: "parent-model" },
+      modelRegistry: {
+        find: vi.fn((p: string, i: string) => ({ provider: p, id: i })),
+        getAvailable: vi.fn(() => [
+          { provider: "cpa-responses", id: "grok-4.5" },
+        ]),
+      },
+    };
+
+    const event = {
+      toolName: "Agent",
+      toolCallId: "call_explicit_model",
+      input: {
+        prompt: "do something",
+        description: "test",
+        agent: "general-purpose",
+        model: "cpa-responses/grok-4.5",
+      },
+    };
+
+    await toolCallHandler()!(event, ctx);
+
+    expect(event.input.model).toBe("cpa-responses/grok-4.5");
+    expect(event.input._modelOverride).toBe("grok-4.5");
   });
 });
 

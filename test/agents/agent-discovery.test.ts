@@ -231,7 +231,7 @@ body
     // Should not error on unknown fields
   });
 
-  it("rejects invalid thinking values", () => {
+  it("accepts free-form thinking values", () => {
     const content = `---
 name: agent
 thinking: ultra
@@ -239,7 +239,7 @@ thinking: ultra
 body
 `;
     const result = parseAgentFile(content, "user");
-    expect(result.thinking).toBeUndefined();
+    expect(result.thinking).toBe("ultra");
   });
 
 

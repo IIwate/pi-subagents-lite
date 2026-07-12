@@ -137,7 +137,7 @@ describe("ResultViewer viewport sizing", () => {
     markdownRender.mockReturnValue([]);
   });
 
-  it("uses at least 14 viewport lines with default terminal height (24)", () => {
+  it("uses at least MIN_VIEWPORT lines with default terminal height (24)", () => {
     const viewer = new ResultViewer(
       "test",
       "some content",
@@ -145,11 +145,11 @@ describe("ResultViewer viewport sizing", () => {
       noopTheme,
     );
 
-    // default terminalHeight = 24 => 50% = 12, minus overhead(10) = 2, min 14
+    // default terminalHeight = 24 => 70% = 16, minus overhead(10) = 6, min 20
     expect(viewer.viewportSize).toBe(20);
   });
 
-  it("computes viewport size as ~50% of terminal height for large terminals", () => {
+  it("computes viewport size as ~70% of terminal height for large terminals", () => {
     const viewer = new ResultViewer(
       "test",
       "content",
@@ -158,8 +158,8 @@ describe("ResultViewer viewport sizing", () => {
       60,
     );
 
-    // Full-screen: 60 - 10(overhead) - 2(margin) = 48
-    expect(viewer.viewportSize).toBe(48);
+    // Default (70%): floor(60 * 0.7) - 10(overhead) = 32
+    expect(viewer.viewportSize).toBe(32);
   });
 
   it("scales viewport proportionally for medium terminals", () => {
@@ -171,11 +171,11 @@ describe("ResultViewer viewport sizing", () => {
       50,
     );
 
-    // Full-screen: 50 - 10(overhead) - 2(margin) = 38
-    expect(viewer.viewportSize).toBe(38);
+    // Default (70%): floor(50 * 0.7) - 10(overhead) = 25
+    expect(viewer.viewportSize).toBe(25);
   });
 
-  it("never goes below 14 even for small terminals", () => {
+  it("never goes below MIN_VIEWPORT even for small terminals", () => {
     const viewer = new ResultViewer(
       "test",
       "content",
@@ -184,7 +184,7 @@ describe("ResultViewer viewport sizing", () => {
       18,
     );
 
-    // 50% of 18 = 9, minus overhead(10) = -1, min 14
+    // 70% of 18 = 12, minus overhead(10) = 2, min 20
     expect(viewer.viewportSize).toBe(20);
   });
 });
@@ -196,35 +196,37 @@ describe("ResultViewer full-screen toggle", () => {
     markdownRender.mockReturnValue([]);
   });
 
-  it("starts in full-screen mode", () => {
+  it("starts in normal (70%) mode", () => {
     const viewer = new ResultViewer("test", "content", dummyCallbacks, noopTheme, 40);
-    expect(viewer.isFullScreen).toBe(true);
-    expect(viewer.viewportSize).toBeGreaterThan(20);
+    expect(viewer.isFullScreen).toBe(false);
+    // floor(40 * 0.7) - 10 = 18, min 20
+    expect(viewer.viewportSize).toBe(20);
   });
 
-  it("toggles to normal mode on 'f' key", () => {
+  it("toggles to full-screen mode on 'f' key", () => {
     const viewer = new ResultViewer("test", "content", dummyCallbacks, noopTheme, 40);
-    const fullSize = viewer.viewportSize;
+    const normalSize = viewer.viewportSize;
 
+    viewer.handleInput("f");
+
+    expect(viewer.isFullScreen).toBe(true);
+    expect(viewer.viewportSize).toBeGreaterThan(normalSize);
+  });
+
+  it("toggles back to normal mode on second 'f' key", () => {
+    const viewer = new ResultViewer("test", "content", dummyCallbacks, noopTheme, 40);
+    const normalSize = viewer.viewportSize;
+
+    viewer.handleInput("f");
     viewer.handleInput("f");
 
     expect(viewer.isFullScreen).toBe(false);
-    expect(viewer.viewportSize).toBeLessThan(fullSize);
-  });
-
-  it("toggles back to full-screen on second 'f' key", () => {
-    const viewer = new ResultViewer("test", "content", dummyCallbacks, noopTheme, 40);
-    const fullSize = viewer.viewportSize;
-
-    viewer.handleInput("f");
-    viewer.handleInput("f");
-
-    expect(viewer.isFullScreen).toBe(true);
-    expect(viewer.viewportSize).toBe(fullSize);
+    expect(viewer.viewportSize).toBe(normalSize);
   });
 
   it("full-screen on 50-row terminal uses nearly full height", () => {
     const viewer = new ResultViewer("test", "content", dummyCallbacks, noopTheme, 50);
+    viewer.handleInput("f");
 
     // Full-screen: 50 - 10(overhead) - 2(margin) = 38
     expect(viewer.viewportSize).toBe(38);
@@ -624,10 +626,10 @@ describe("ResultViewer viewport sizing with stats", () => {
       "test", "content", dummyCallbacks, noopTheme, 60, stats,
     );
 
-    // Full-screen without stats: 60 - 10(overhead) - 2(margin) = 48
-    expect(noStats.viewportSize).toBe(48);
-    // Full-screen with stats: 60 - 12(overhead) - 2(margin) = 46
-    expect(withStats.viewportSize).toBe(46);
+    // Default 70% without stats: floor(60 * 0.7) - 10 = 32
+    expect(noStats.viewportSize).toBe(32);
+    // Default 70% with stats: floor(60 * 0.7) - 12 = 30
+    expect(withStats.viewportSize).toBe(30);
   });
 
   it("full-screen accounts for stats line", () => {
@@ -638,8 +640,9 @@ describe("ResultViewer viewport sizing with stats", () => {
     const viewer = new ResultViewer(
       "test", "content", dummyCallbacks, noopTheme, 50, stats,
     );
+    viewer.handleInput("f");
 
-    // Already full-screen by default: 50 - 12(overhead) - 2(margin) = 36
+    // Full-screen with stats: 50 - 12(overhead) - 2(margin) = 36
     expect(viewer.viewportSize).toBe(36);
   });
 });

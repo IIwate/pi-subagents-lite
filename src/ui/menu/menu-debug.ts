@@ -82,7 +82,8 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
   lines.push("| `prompt` | The task for the agent (required) |");
   lines.push("| `description` | One-line summary of what the agent should do (required) |");
   lines.push("| `agent` | Which agent type to use (default: general-purpose) |");
-  lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |");
+  lines.push("| `model` | Optional model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Bare id must exactly match an available model id. Default: configured override or parent model. |");
+  lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Also accepted via `model` as `id:thinking`. |");
   lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll. Continue working while waiting. |");
   lines.push("| `worktree_path` | Optional path to a git worktree of the parent's repo. See below for details. |");
   lines.push("");

@@ -31,6 +31,10 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       prompt: Type.String(),
       description: Type.Optional(Type.String()),
       agent: agentParam,
+      // Optional model override: "id", "provider/id", or "id:thinking". Taught via agent briefing.
+      model: Type.Optional(Type.String()),
+      // Optional thinking override (off/minimal/low/medium/high/xhigh). Taught via agent briefing.
+      thinking: Type.Optional(Type.String()),
       run_in_background: Type.Optional(Type.Boolean()),
       worktree_path: Type.Optional(Type.String()),
     }),

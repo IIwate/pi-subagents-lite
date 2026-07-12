@@ -44,14 +44,11 @@ export interface ResultViewerStats {
 /** Lines scrolled per PageUp/PageDown (kept at a fixed, comfortable amount). */
 const PAGE_STEP = 14;
 
-/** Total outer render width including side borders. */
-const RENDER_WIDTH = 78;
-
 /** Horizontal margin (spaces) on each side of content. */
 const MARGIN = 2;
 
-/** Width available for content: outer width − side borders (2) − margins (2×MARGIN). */
-const CONTENT_WIDTH = RENDER_WIDTH - 2 - MARGIN * 2;
+/** Default share of terminal width/height used by the viewer panel. */
+const PANEL_SIZE_RATIO = 0.7;
 
 /** Fixed non-viewport lines in the component (borders, title, spacers, hints, etc.). */
 const BASE_OVERHEAD = 10;
@@ -61,6 +58,9 @@ const STATS_OVERHEAD = 2;
 
 /** Minimum viewport content lines regardless of terminal size. */
 const MIN_VIEWPORT = 20;
+
+/** Minimum outer panel width including side borders. */
+const MIN_RENDER_WIDTH = 40;
 
 /**
  * Build a MarkdownTheme from the TUI theme instance.
@@ -91,7 +91,7 @@ function buildMarkdownTheme(theme: Theme): MarkdownTheme {
  *   - Top border
  *   - Title bar with agent info
  *   - Separator
- *   - Paginated markdown content (dynamically sized to at least 50% of terminal)
+ *   - Paginated markdown content (default ~70% of terminal height; 'f' for full-screen)
  *   - Scroll position indicator (when scrollable)
  *   - Key hints footer
  *   - Bottom border
@@ -109,6 +109,7 @@ export class ResultViewer extends Container implements Component {
   private fullScreen: boolean;
   private _viewportSize: number;
   private terminalHeight: number;
+  private contentWidth: number;
   private textRef: { text: string }; // mutable ref for refresh
 
   /**
@@ -134,22 +135,24 @@ export class ResultViewer extends Container implements Component {
     theme: Theme,
     terminalHeight: number = 24,
     stats?: ResultViewerStats,
+    terminalWidth: number = 80,
   ) {
     super();
 
     this.callbacks = callbacks;
     this.theme = theme;
     this.scrollOffset = 0;
-    this.fullScreen = true;
+    this.fullScreen = false;
     this.terminalHeight = terminalHeight;
     this.hasStats = stats != null;
-    this._viewportSize = computeViewportSize(terminalHeight, true, this.hasStats);
+    this.contentWidth = computeContentWidth(terminalWidth);
+    this._viewportSize = computeViewportSize(terminalHeight, false, this.hasStats);
     this.textRef = { text };
 
     // Build markdown renderer (pre-render to get total lines)
     const mdTheme = buildMarkdownTheme(theme);
     this.markdown = new Markdown(text, 0, 0, mdTheme);
-    this.renderedLines = this.markdown.render(CONTENT_WIDTH);
+    this.renderedLines = this.markdown.render(this.contentWidth);
 
     this.buildUI(title, stats);
     this.updateViewport();
@@ -176,7 +179,7 @@ export class ResultViewer extends Container implements Component {
 
     // Separator
     this.addChild(
-      new Text(this.theme.fg("muted", "─".repeat(CONTENT_WIDTH)), 0, 0),
+      new Text(this.theme.fg("muted", "─".repeat(this.contentWidth)), 0, 0),
     );
     this.addChild(new Spacer(1));
 
@@ -282,7 +285,7 @@ export class ResultViewer extends Container implements Component {
         this.textRef.text = newText;
         const mdTheme = buildMarkdownTheme(this.theme);
         this.markdown = new Markdown(newText, 0, 0, mdTheme);
-        this.renderedLines = this.markdown.render(CONTENT_WIDTH);
+        this.renderedLines = this.markdown.render(this.contentWidth);
         // Preserve scroll position, clamped to new content bounds
         this.scrollOffset = Math.min(oldOffset, this.renderedLines.length - 1);
         this.updateViewport();
@@ -369,8 +372,20 @@ export class ResultViewer extends Container implements Component {
 }
 
 /**
+ * Compute markdown content width for a panel that occupies PANEL_SIZE_RATIO of the terminal.
+ * Outer width includes side borders; content width also subtracts horizontal margins.
+ */
+function computeContentWidth(terminalWidth: number): number {
+  const renderWidth = Math.max(
+    MIN_RENDER_WIDTH,
+    Math.floor(terminalWidth * PANEL_SIZE_RATIO),
+  );
+  return Math.max(1, renderWidth - 2 - MARGIN * 2);
+}
+
+/**
  * Compute the viewport content line count based on terminal height and full-screen mode.
- * Uses at least 50% of terminal height for the total component; falls back to MIN_VIEWPORT.
+ * Default mode targets ~70% of terminal height for the total component; falls back to MIN_VIEWPORT.
  * When hasStats is true, extra lines are reserved for the stats title line.
  */
 function computeViewportSize(terminalHeight: number, fullScreen: boolean, hasStats: boolean = false): number {
@@ -379,7 +394,7 @@ function computeViewportSize(terminalHeight: number, fullScreen: boolean, hasSta
     // Nearly full screen: leave a small margin
     return Math.max(MIN_VIEWPORT, terminalHeight - overhead - 2);
   }
-  // At least 50% of terminal height
-  const raw = Math.floor(terminalHeight / 2) - overhead;
+  // ~70% of terminal height for the total panel
+  const raw = Math.floor(terminalHeight * PANEL_SIZE_RATIO) - overhead;
   return Math.max(MIN_VIEWPORT, raw);
 }

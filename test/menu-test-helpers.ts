@@ -68,7 +68,7 @@ export function createMockCtx(
         // Otherwise, invoke the factory to trigger side effects (e.g. ResultViewer construction)
         // Provide a mock tui with terminal.rows, a noop theme, and a done callback
         _factory(
-          { terminal: { rows: 40 } },
+          { terminal: { rows: 40, columns: 120 } },
           {
             fg: (_color: string, text: string) => text,
             bold: (text: string) => text,

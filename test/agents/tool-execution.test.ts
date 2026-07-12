@@ -47,11 +47,13 @@ vi.mock("../../src/models/model-precedence.js", () => ({
   resolveModel: vi.fn(() => undefined),
 }));
 
-vi.mock("../../src/utils.js", () => ({
-  parseModelKey: vi.fn(() => null),
-  findModelInRegistry: vi.fn(() => null),
-  parseThinkingLevel: vi.fn(() => undefined),
-}));
+vi.mock("../../src/utils.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/utils.js")>();
+  return {
+    ...actual,
+    // Keep real parseThinkingLevel / parseModelKey / findModelInRegistry for param tests.
+  };
+});
 
 vi.mock("../../src/shell.js", () => ({
   getStore: () => ({
@@ -442,5 +444,150 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     // Should have called discoverNewAgents WITHOUT a worktree dir
     expect(mockDiscoverNewAgents).toHaveBeenCalledTimes(1);
     expect(mockDiscoverNewAgents).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe("executeAgentTool — thinking param", () => {
+  let ctx: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = fakeCtx();
+    mockGetRecord.mockReturnValue({
+      id: "agent-id-123",
+      display: { type: "general-purpose", description: "Test agent" },
+      lifecycle: { status: "running", startedAt: Date.now() },
+      execution: { promise: Promise.resolve("done") },
+      stats: { toolUses: 0, turnCount: 1, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, compactionCount: 0 },
+    });
+  });
+
+  it("forwards explicit thinking=low to spawn", async () => {
+    await executeAgentTool(
+      "tc-think",
+      makeParams({ thinking: "low" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.thinkingLevel).toBe("low");
+  });
+
+  it("forwards free-form thinking values not in the known list", async () => {
+    await executeAgentTool(
+      "tc-think-custom",
+      makeParams({ thinking: "super-high" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.thinkingLevel).toBe("super-high");
+  });
+});
+
+describe("executeAgentTool — model param", () => {
+  let ctx: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = fakeCtx();
+    ctx.model = { provider: "test", id: "parent-model" };
+    ctx.modelRegistry = {
+      find: vi.fn((provider: string, modelId: string) => {
+        if (provider === "cpa-responses" && modelId === "grok-4.5") {
+          return { provider, id: modelId };
+        }
+        return undefined;
+      }),
+      getAvailable: vi.fn(() => [
+        { provider: "cpa-responses", id: "grok-4.5" },
+        { provider: "test", id: "parent-model" },
+      ]),
+    };
+    mockGetRecord.mockReturnValue({
+      id: "agent-id-123",
+      display: { type: "general-purpose", description: "Test agent" },
+      lifecycle: { status: "running", startedAt: Date.now() },
+      execution: { promise: Promise.resolve("done") },
+      stats: { toolUses: 0, turnCount: 1, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, compactionCount: 0 },
+    });
+  });
+
+  it("forwards explicit provider/model-id to spawn", async () => {
+    await executeAgentTool(
+      "tc-model",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+    expect(spawnOptions.modelKey).toBe("cpa-responses/grok-4.5");
+  });
+
+  it("resolves bare model id via registry getAvailable", async () => {
+    await executeAgentTool(
+      "tc-model-bare",
+      makeParams({ model: "grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+    expect(spawnOptions.modelKey).toBe("cpa-responses/grok-4.5");
+  });
+
+  it("parses model:thinking shorthand and applies thinking", async () => {
+    await executeAgentTool(
+      "tc-model-think",
+      makeParams({ model: "grok-4.5:low" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+    expect(spawnOptions.thinkingLevel).toBe("low");
+  });
+
+  it("prefers explicit thinking param over model:thinking suffix", async () => {
+    await executeAgentTool(
+      "tc-model-think-override",
+      makeParams({ model: "grok-4.5:low", thinking: "high" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+    expect(spawnOptions.thinkingLevel).toBe("high");
+  });
+
+  it("returns error when explicit model id does not exist", async () => {
+    const result = await executeAgentTool(
+      "tc-model-missing",
+      makeParams({ model: "does-not-exist:low" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("does-not-exist");
+    expect(result.content[0].text).toContain("list-models");
   });
 });

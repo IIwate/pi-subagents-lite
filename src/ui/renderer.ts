@@ -6,7 +6,7 @@
 
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type { Theme } from "./types.js";
-import { buildStatsParts, formatMs, getDisplayName } from "./format.js";
+import { buildStatsParts, formatMs, getDisplayName, STATS_SEP } from "./format.js";
 
 // ============================================================================
 // Stats rendering helpers
@@ -30,9 +30,11 @@ export function buildStatsLine(d: Record<string, unknown>, theme: Theme, showCos
     contextPercent: d.contextPercent as number | null,
     compactions: (d.compactions as number) ?? 0,
     cost: showCost ? (d.cost as number | undefined) : undefined,
+    modelName: d.modelName as string | undefined,
+    thinkingLevel: d.thinkingLevel as string | undefined,
   }, theme);
   parts.push(formatMs(d.durationMs as number));
-  return parts.join("·");
+  return parts.join(STATS_SEP);
 }
 
 // ============================================================================

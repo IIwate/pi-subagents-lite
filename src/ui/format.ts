@@ -26,15 +26,18 @@ const MAX_DEFAULT_STRING_DISPLAY_LENGTH = 200;
 
 // ---- Internal helpers (used by buildStatsParts) ----
 
+/** Stats line separator with spaces on both sides for readability. */
+export const STATS_SEP = " · ";
+
 /**
  * Token count with optional context-fill % and compaction-count annotations.
  * Thresholds for percent: <70% dim, 70–85% warning, ≥85% error.
  * Compaction count rendered as `↻ N` in dim.
  *
- *   "↑12k↓8k"                    — no annotations
- *   "↑12k↓8k 45%"                — percent only
- *   "↑12k↓8k ↻ 2"                 — compactions only (e.g. right after compact)
- *   "↑12k↓8k 45% ↻ 2"             — both
+ *   "↑12k ↓8k"                         — no annotations
+ *   "↑12k ↓8k · 45%"                   — percent only
+ *   "↑12k ↓8k · ↻ 2"                   — compactions only (e.g. right after compact)
+ *   "↑12k ↓8k · 45% · ↻ 2"             — both
  */
 function formatSessionTokens(
   inputTokens: number,
@@ -46,7 +49,8 @@ function formatSessionTokens(
   const tokenParts: string[] = [];
   if (inputTokens > 0) tokenParts.push(`↑${formatTokens(inputTokens, true)}`);
   if (outputTokens > 0) tokenParts.push(`↓${formatTokens(outputTokens, true)}`);
-  const tokenStr = tokenParts.join("");
+  // Space between ↑ and ↓ so the pair is readable without feeling glued.
+  const tokenStr = tokenParts.join(" ");
   const annot: string[] = [];
   if (percent !== null) {
     const color = percent >= 85 ? "error" : percent >= 70 ? "warning" : "dim";
@@ -56,14 +60,14 @@ function formatSessionTokens(
     annot.push(theme.fg("dim", `↻ ${compactions}`));
   }
   if (annot.length === 0) return tokenStr;
-  return `${tokenStr} ${annot.join(" ")}`;
+  return `${tokenStr}${STATS_SEP}${annot.join(STATS_SEP)}`;
 }
 
 /** Format turn count with optional max limit. Shows max when >= 80% of limit. */
 function formatTurns(turnCount: number, maxTurns: number | null | undefined, theme: Theme): string {
-  if (maxTurns == null) return `${turnCount}⟳ `;
+  if (maxTurns == null) return `${turnCount}⟳`;
   const ratio = turnCount / maxTurns;
-  const text = ratio >= 0.8 ? `${turnCount}≤${maxTurns}⟳ ` : `${turnCount}⟳ `;
+  const text = ratio >= 0.8 ? `${turnCount}≤${maxTurns}⟳` : `${turnCount}⟳`;
   if (ratio >= 1) return theme.fg("error", text);
   if (ratio >= 0.8) return theme.fg("warning", text);
   return text;
@@ -100,7 +104,7 @@ export interface StatsVisibility {
 }
 
 /**
- * Build common stats parts: toolUses · turns · input↓ output with context % · cost · time.
+ * Build common stats parts: model · thinking · calls · turns · tokens · cost · time.
  * Shared by AgentWidget and index.ts for consistent stats display.
  *
  * @param visible - Optional visibility flags. All default to true for backward compatibility.
@@ -117,12 +121,19 @@ export function buildStatsParts(
     compactions: number;
     cost?: number;
     durationMs?: number;
+    /** Model id, e.g. "grok-4.5". Shown before calls. */
+    modelName?: string;
+    /** Thinking level, e.g. "high". Shown as its own part after model. */
+    thinkingLevel?: string;
   },
   theme: Theme,
   visible?: StatsVisibility,
 ): string[] {
   const parts: string[] = [];
-  if (visible?.showTools !== false && args.toolUses > 0) parts.push(`${args.toolUses}🛠 `);
+  // Model and thinking are separate parts so join(STATS_SEP) yields "grok-4.5 · low".
+  if (args.modelName) parts.push(theme.fg("dim", args.modelName));
+  if (args.thinkingLevel) parts.push(theme.fg("dim", args.thinkingLevel));
+  if (visible?.showTools !== false && args.toolUses > 0) parts.push(`${args.toolUses} calls`);
   if (visible?.showTurns !== false && args.turnCount != null) parts.push(formatTurns(args.turnCount, args.maxTurns, theme));
   if (visible?.showInput !== false || visible?.showOutput !== false) {
     const showIn = visible?.showInput !== false;

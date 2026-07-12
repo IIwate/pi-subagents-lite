@@ -393,6 +393,8 @@ async function initSession(
   const model = options.model ?? findModelInRegistry(
     agentConfig?.model, ctx.modelRegistry, ctx.model,
   );
+  // Prefer spawn-time override, then agent frontmatter. When still unset,
+  // createAgentSession falls back to settings defaultThinkingLevel.
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinkingLevel;
   const agentDir = getAgentDir();
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
@@ -402,7 +404,11 @@ async function initSession(
     modelRegistry: ctx.modelRegistry, model,
     tools: getToolNamesForType(type), resourceLoader: loader,
   };
-  if (thinkingLevel) sessionOpts.thinkingLevel = thinkingLevel;
+  // Always pass when set — including "off" — so settings default cannot override.
+  // Free-form thinking strings are allowed; cast for pi's narrower ThinkingLevel type.
+  if (thinkingLevel !== undefined) {
+    sessionOpts.thinkingLevel = thinkingLevel as typeof sessionOpts.thinkingLevel;
+  }
   const result = await createAgentSession(sessionOpts);
 
   // Inject max_tokens into provider request payloads.
