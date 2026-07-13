@@ -139,7 +139,7 @@ describe("AgentStatus tool execute behavior", () => {
       {} as any,
     );
 
-    expect(result.content[0].text).toContain("Don't poll — you'll receive notifications when agents complete.");
+    expect(result.content[0].text).toContain("Don't poll, sleep, or timeout-wait — you'll receive notifications when agents complete and the task advances automatically.");
   });
 
   it("truncates long IDs to 8 characters", async () => {

@@ -303,5 +303,8 @@ describe("showDebugMenu — agent briefing action (SelectList)", () => {
     const message = mockSendUserMessage.mock.calls[0][0];
     expect(message).toContain("run_in_background");
     expect(message).toContain("do NOT poll");
+    expect(message).toContain("sleep");
+    expect(message).toContain("timeout");
+    expect(message).toContain("advances automatically");
   });
 });

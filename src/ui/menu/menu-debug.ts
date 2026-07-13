@@ -84,7 +84,7 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
   lines.push("| `agent` | Which agent type to use (default: general-purpose) |");
   lines.push("| `model` | Optional model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Bare id must exactly match an available model id. Default: configured override or parent model. |");
   lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Also accepted via `model` as `id:thinking`. |");
-  lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll. Continue working while waiting. |");
+  lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll, sleep, or timeout-wait. Parent task advances automatically on completion. |");
   lines.push("| `worktree_path` | Optional path to a git worktree of the parent's repo. See below for details. |");
   lines.push("");
 
@@ -92,7 +92,8 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
   lines.push("## Usage Guidelines\n");
   lines.push("- Agents start fresh with their config — they do NOT inherit the parent conversation");
   lines.push("- For parallel tasks, spawn multiple `run_in_background: true` agents in one turn");
-  lines.push("  → Results are auto-delivered — do NOT poll, the result will arrive when ready");
+  lines.push("  → Results are auto-delivered — do NOT poll, sleep, timeout, or busy-wait");
+  lines.push("  → When a subagent finishes, a notification arrives and the parent task advances automatically");
   lines.push("");
   lines.push("## `worktree_path` Parameter\n");
   lines.push("Use `worktree_path` to run a subagent in a different git worktree of the parent's repository.");

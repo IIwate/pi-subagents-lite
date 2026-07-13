@@ -3,7 +3,7 @@
  *
  * A lightweight informational tool that lists all agents (running, queued,
  * completed, stopped, error) from the manager and returns a clear message
- * about not polling for status.
+ * about not polling / sleep / timeout-waiting for status.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -23,7 +23,7 @@ function formatAgent(record: AgentRecord): string {
  * Execute the AgentStatus tool.
  *
  * Returns a formatted list of all agents with their type, short ID, and status,
- * followed by a nudge message telling the model not to poll.
+ * followed by a nudge message telling the model not to poll, sleep, or timeout-wait.
  */
 export async function executeAgentStatusTool(
   _toolCallId: string,
@@ -35,7 +35,7 @@ export async function executeAgentStatusTool(
   const manager = getManager()!;
   const agents = manager.listAgents();
 
-  const nudge = "Don't poll — you'll receive notifications when agents complete.";
+  const nudge = "Don't poll, sleep, or timeout-wait — you'll receive notifications when agents complete and the task advances automatically.";
 
   if (agents.length === 0) {
     return {

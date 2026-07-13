@@ -118,7 +118,7 @@ IDs come from the `Agent` result, the `StopAgent` error (lists all running IDs),
 
 List all agents with type, short ID, and status. Output: `type·short_id·status, ...` (e.g. `general-purpose·a1b2c3·running, Explore·d4e5f6·completed`).
 
-The result nudges the LLM to wait for automatic notifications instead of polling — preventing wasteful repeated calls while still letting it discover agents when needed.
+The result nudges the LLM not to poll, sleep, or timeout-wait — results are delivered automatically when agents complete and the parent task advances. This prevents wasteful waiting loops while still letting the model discover agents when needed.
 
 ## Custom Agent Types
 
