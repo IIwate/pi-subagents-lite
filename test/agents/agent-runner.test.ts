@@ -95,6 +95,13 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   loadProjectContextFiles: mockModules.mockLoadProjectContextFiles,
 }));
 
+vi.mock("../../src/models/model-scope.js", () => ({
+  getActiveScopedModels: vi.fn(() => undefined),
+  getActiveScopedModelKeys: vi.fn(() => null),
+  isModelInScope: vi.fn(() => true),
+  modelKey: (m: { provider: string; id: string }) => `${m.provider}/${m.id}`,
+}));
+
 // --- Import the module under test ---
 
 import { runAgent, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";

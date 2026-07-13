@@ -225,7 +225,13 @@ The extension picks the right model automatically. Precedence (highest first):
 5. **Agent frontmatter** — `model` in `.md`
 6. **Parent model** — inherit from the calling agent
 
-The LLM never passes `model` — it's injected at call time. Set it once in config or frontmatter and forget.
+The LLM can also pass an optional `model` tool param (`id`, `provider/id`, or `id:thinking`). Explicit tool `model` wins over the chain above.
+
+### Model scope
+
+When pi has an active **Model scope** (`--models` CLI flag or `enabledModels` in settings / `/scoped-models` + Ctrl+S), subagents may only use models in that list. Out-of-scope models are rejected with an error listing allowed models. `/agents` menus only offer in-scope models. No active scope means all available models remain allowed.
+
+Set model once in config or frontmatter (or pass it explicitly) — the scope guard still applies.
 
 ## System Prompt Mode
 

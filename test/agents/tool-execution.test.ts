@@ -21,11 +21,18 @@ import { fakeCtx } from "../fixtures.ts";
 /* ------------------------------------------------------------------ */
 
 // Use vi.hoisted so mock factories can reference these at hoisting time
-const { mockValidateWorktreePath, mockSpawn, mockGetRecord, mockDiscoverNewAgents } = vi.hoisted(() => ({
+const {
+  mockValidateWorktreePath,
+  mockSpawn,
+  mockGetRecord,
+  mockDiscoverNewAgents,
+  mockGetActiveScopedModelKeys,
+} = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
   mockGetRecord: vi.fn(),
   mockDiscoverNewAgents: vi.fn(),
+  mockGetActiveScopedModelKeys: vi.fn(() => null),
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -46,6 +53,15 @@ vi.mock("../../src/agents/agent-types.js", () => ({
 vi.mock("../../src/models/model-precedence.js", () => ({
   resolveModel: vi.fn(() => undefined),
 }));
+
+vi.mock("../../src/models/model-scope.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/models/model-scope.js")>();
+  return {
+    ...actual,
+    // Default: no active scope so existing spawn tests stay unrestricted.
+    getActiveScopedModelKeys: mockGetActiveScopedModelKeys,
+  };
+});
 
 vi.mock("../../src/utils.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/utils.js")>();
@@ -589,5 +605,43 @@ describe("executeAgentTool — model param", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("does-not-exist");
     expect(result.content[0].text).toContain("list-models");
+  });
+
+  it("returns error when model is outside the active Model scope", async () => {
+    mockGetActiveScopedModelKeys.mockReturnValueOnce(
+      new Set(["test/parent-model"]),
+    );
+
+    const result = await executeAgentTool(
+      "tc-model-scope",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("cpa-responses/grok-4.5");
+    expect(result.content[0].text).toContain("model scope");
+    expect(result.content[0].text).toContain("test/parent-model");
+  });
+
+  it("allows models that are inside the active Model scope", async () => {
+    mockGetActiveScopedModelKeys.mockReturnValueOnce(
+      new Set(["cpa-responses/grok-4.5", "test/parent-model"]),
+    );
+
+    await executeAgentTool(
+      "tc-model-in-scope",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
   });
 });

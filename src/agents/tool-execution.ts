@@ -24,6 +24,12 @@ import {
   unknownModelError,
 } from "../utils.js";
 import {
+  getActiveScopedModelKeys,
+  isModelInScope,
+  outOfScopeModelError,
+  modelKey,
+} from "../models/model-scope.js";
+import {
   getPiInstance,
   getSessionCtx,
   getStore,
@@ -176,7 +182,15 @@ export async function executeAgentTool(
     model = findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
   }
 
-  const modelKey = model ? `${model.provider}/${model.id}` : undefined;
+  // Reject models outside the active Model scope (--models / enabledModels).
+  if (model) {
+    const scopedKeys = getActiveScopedModelKeys(ctx.modelRegistry, ctx.cwd);
+    if (!isModelInScope(model, scopedKeys)) {
+      return errorResult(outOfScopeModelError(modelKey(model), scopedKeys!));
+    }
+  }
+
+  const resolvedModelKey = model ? modelKey(model) : undefined;
 
   // Determine modelName for invocation (always capture for display)
   const modelName = model?.id;
@@ -195,7 +209,7 @@ export async function executeAgentTool(
     prompt,
     description,
     model,
-    modelKey,
+    modelKey: resolvedModelKey,
     maxTurns,
     thinkingLevel,
     graceTurns: getStore().agent.graceTurns,

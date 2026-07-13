@@ -28,6 +28,10 @@ _Avoid_: Hidden tool, minimal tool
 A user-configured model preference (per-type or global) that takes precedence over any built-in or frontmatter default. Set via `/agents` > Model settings.
 _Avoid_: Model injection, model preference
 
+**Model scope**:
+The active allowlist of models from pi (`--models` CLI or settings `enabledModels` / `/scoped-models`). Subagent spawns may only activate models in this list; menus are filtered to it. Empty/unset scope means unrestricted.
+_Avoid_: Enabled models list, model filter
+
 **Grace turns**:
 Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Model settings.
 _Avoid_: Grace period, extra turns
@@ -59,6 +63,7 @@ _Avoid_: Callback, notification
 
 - An **Agent type** has an optional **Model override**
 - A **Subagent** is spawned from one **Agent type**
+- A **Subagent** model must be inside the active **Model scope** when one is set
 - A **Subagent** may run in a **Worktree** of the parent's repo
 - An **Agent briefing** describes all available **Agent types** to the LLM
 - A **Stealth tool** requires an **Agent briefing** before the LLM can use it

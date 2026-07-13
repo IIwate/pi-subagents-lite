@@ -14,6 +14,11 @@ import type { ThinkingLevel } from "../../types.js";
 import type { Theme } from "../types.js";
 import { getAgentConfig, getAvailableTypes, resolveType, discoverNewAgents } from "../../agents/agent-types.js";
 import { findModelInRegistry, VALID_THINKING_LEVELS } from "../../utils.js";
+import {
+  getActiveScopedModelKeys,
+  isModelInScope,
+  modelKey,
+} from "../../models/model-scope.js";
 import { buildSettingsListTheme, buildSelectListTheme, createSearchableSelect } from "./helpers.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-io.js";
 import { createModelSelectSubmenu } from "./submenus/model-select.js";
@@ -230,21 +235,36 @@ export async function showSpawnAgentMenu(
           const description = descItem?.currentValue ?? currentDescription;
           const spawnPrompt = promptItem?.currentValue ?? prompt;
 
-          // Resolve model
+          // Resolve model (scope check runs in doSpawn — async)
           let model: ReturnType<typeof findModelInRegistry> = undefined;
-          let modelKey: string | undefined;
+          let resolvedModelKey: string | undefined;
+          const registry = session?.modelRegistry ?? ctx.modelRegistry;
           if (currentModelStr) {
-            const registry = session?.modelRegistry ?? ctx.modelRegistry;
             model = findModelInRegistry(currentModelStr, registry, undefined);
             if (!model) {
               ctx.ui.notify(`Model not found: ${currentModelStr}`, "error");
               done();
               return undefined as any;
             }
-            modelKey = `${model.provider}/${model.id}`;
+            resolvedModelKey = modelKey(model);
           }
 
           const doSpawn = async () => {
+            // Menus filter options, but config defaults may still be out of scope.
+            if (model) {
+              const scopedKeys = getActiveScopedModelKeys(
+                registry,
+                session?.cwd ?? ctx.cwd,
+              );
+              if (!isModelInScope(model, scopedKeys)) {
+                ctx.ui.notify(
+                  `Model not in active model scope: ${modelKey(model)}`,
+                  "error",
+                );
+                return;
+              }
+            }
+
             if (currentWorktreePath) {
               await discoverNewAgents(`${currentWorktreePath}/.pi/agents`);
             }
@@ -263,7 +283,7 @@ export async function showSpawnAgentMenu(
                 prompt: spawnPrompt,
                 description,
                 model,
-                modelKey,
+                modelKey: resolvedModelKey,
                 maxTurns,
                 maxTokens,
                 thinkingLevel: thinking,

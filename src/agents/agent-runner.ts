@@ -22,6 +22,7 @@ import { getAgentConfig, getConfig, getToolNamesForType, resolveVisibleTools } f
 import { extractText } from "../prompt/context.js";
 import type { AgentUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
+import { getActiveScopedModels } from "../models/model-scope.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta, type SkillMeta } from "../prompt/skill-loader.js";
@@ -397,12 +398,15 @@ async function initSession(
   // createAgentSession falls back to settings defaultThinkingLevel.
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinkingLevel;
   const agentDir = getAgentDir();
+  // Inherit parent Model scope so subagent sessions cannot cycle outside it.
+  const scopedModels = getActiveScopedModels(ctx.modelRegistry, ctx.cwd);
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd, agentDir,
     sessionManager: SessionManager.inMemory(cwd),
     settingsManager: SettingsManager.create(cwd, agentDir),
     modelRegistry: ctx.modelRegistry, model,
     tools: getToolNamesForType(type), resourceLoader: loader,
+    ...(scopedModels ? { scopedModels } : {}),
   };
   // Always pass when set — including "off" — so settings default cannot override.
   // Free-form thinking strings are allowed; cast for pi's narrower ThinkingLevel type.

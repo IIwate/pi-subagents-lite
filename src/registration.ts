@@ -5,7 +5,8 @@ import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.
 import { executeAgentStatusTool } from "./agents/agent-status.js";
 import { renderAgentToolCall, renderAgentToolResult, renderSubagentResult } from "./ui/renderer.js";
 import { showAgentsMainMenu } from "./ui/menu/menus.js";
-import { getPiInstance, getStore } from "./shell.js";
+import { listModelOptionsForMenus } from "./models/model-scope.js";
+import { getStore } from "./shell.js";
 
 // ============================================================================
 // Agent tool registration helper — dynamic enum for agent types
@@ -98,7 +99,8 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerCommand("agents", {
     description: "Manage subagents: agent briefing, model settings, concurrency, running agents, agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      const modelOptions = ctx.modelRegistry.getAvailable().map((m) => `${m.provider}/${m.id}`);
+      // Restrict menu picks to the active Model scope when one is set.
+      const modelOptions = listModelOptionsForMenus(ctx.modelRegistry, ctx.cwd);
       await showAgentsMainMenu(ctx, modelOptions);
     },
   });
