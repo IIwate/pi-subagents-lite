@@ -112,6 +112,8 @@ describe("showRunningAgentsMenu — SelectList migration", () => {
 });
 
 describe("buildAgentActionsList — actions submenu", () => {
+  const terminal = { rows: 40, columns: 120 };
+
   beforeEach(() => {
     selectListCalls = [];
     vi.clearAllMocks();
@@ -119,8 +121,9 @@ describe("buildAgentActionsList — actions submenu", () => {
   });
 
   it("shows View result action for completed agent with result", () => {
-    const list = buildAgentActionsList(createMockCtx(), makeRecord(), noopTheme, () => {}, () => {}, () => {});
-    const values = list.items.map((i: any) => i.value);
+    const list = buildAgentActionsList(createMockCtx(), makeRecord(), noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    const values = list!.items.map((i: any) => i.value);
     expect(values).toContain("view-result");
   });
 
@@ -130,8 +133,9 @@ describe("buildAgentActionsList — actions submenu", () => {
       result: "",
       error: "something went wrong",
     });
-    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {});
-    const values = list.items.map((i: any) => i.value);
+    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    const values = list!.items.map((i: any) => i.value);
     expect(values).toContain("view-error");
   });
 
@@ -141,8 +145,9 @@ describe("buildAgentActionsList — actions submenu", () => {
       execution: { session: { messages: [{ role: "user", content: "hi" }] } },
       result: "",
     });
-    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {});
-    const values = list.items.map((i: any) => i.value);
+    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    const values = list!.items.map((i: any) => i.value);
     expect(values).toContain("view-snapshot");
   });
 
@@ -152,17 +157,88 @@ describe("buildAgentActionsList — actions submenu", () => {
       execution: { session: { messages: [] } },
       result: "",
     });
-    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {});
-    const values = list.items.map((i: any) => i.value);
+    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    const values = list!.items.map((i: any) => i.value);
     expect(values).toContain("steer");
     expect(values).toContain("stop");
   });
 
   it("does not show Steer/Stop for completed agent", () => {
-    const list = buildAgentActionsList(createMockCtx(), makeRecord(), noopTheme, () => {}, () => {}, () => {});
-    const values = list.items.map((i: any) => i.value);
+    const list = buildAgentActionsList(createMockCtx(), makeRecord(), noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    const values = list!.items.map((i: any) => i.value);
     expect(values).not.toContain("steer");
     expect(values).not.toContain("stop");
+  });
+
+  it("returns undefined and notifies when agent has no actions", () => {
+    const record = makeRecord({
+      lifecycle: { status: "completed", startedAt: Date.now() - 50000, completedAt: Date.now() - 10000 },
+      result: "",
+      error: "",
+    });
+    const ctx = createMockCtx();
+    const done = vi.fn();
+    const setActive = vi.fn();
+    const list = buildAgentActionsList(ctx, record, noopTheme, done, setActive, () => {}, terminal);
+
+    expect(list).toBeUndefined();
+    expect(done).not.toHaveBeenCalled();
+    expect(setActive).not.toHaveBeenCalled();
+    expect(selectListCalls).toHaveLength(0);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("no actions available"),
+      "info",
+    );
+  });
+
+  it("opens result viewer inline via setActive instead of nested ui.custom", async () => {
+    const record = makeRecord({ result: "some result text" });
+    const ctx = createMockCtx();
+    const setActive = vi.fn();
+    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, setActive, () => {}, terminal);
+    expect(list).toBeDefined();
+
+    await list!.onSelect!({ value: "view-result", label: "View result" });
+
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(setActive).toHaveBeenCalledTimes(1);
+    expect(mockModules.resultViewerCalls).toHaveLength(1);
+    const lastCall = mockModules.resultViewerCalls[0];
+    expect(lastCall[1]).toBe("some result text");
+    expect(lastCall[4]).toBe(40);
+    expect(lastCall[6]).toBe(120);
+    expect(lastCall[5].modelName).toBeUndefined();
+  });
+
+  it("returns to actions list when result viewer closes", async () => {
+    const record = makeRecord({ result: "some result text" });
+    const setActive = vi.fn();
+    const list = buildAgentActionsList(createMockCtx(), record, noopTheme, () => {}, setActive, () => {}, terminal);
+    expect(list).toBeDefined();
+
+    await list!.onSelect!({ value: "view-result", label: "View result" });
+    const viewerArgs = mockModules.resultViewerCalls[0];
+    const callbacks = viewerArgs[2] as { onClose: () => void };
+    callbacks.onClose();
+
+    expect(setActive).toHaveBeenNthCalledWith(1, expect.anything());
+    expect(setActive).toHaveBeenNthCalledWith(2, list);
+  });
+
+  it("notifies when terminal size is unavailable for the viewer", async () => {
+    const record = makeRecord({ result: "some result text" });
+    const ctx = createMockCtx();
+    const setActive = vi.fn();
+    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, setActive, () => {});
+    expect(list).toBeDefined();
+
+    await list!.onSelect!({ value: "view-result", label: "View result" });
+
+    expect(setActive).not.toHaveBeenCalled();
+    expect(mockModules.resultViewerCalls).toHaveLength(0);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Unable to open result viewer", "error");
   });
 
   it("passes modelName from invocation when present", async () => {
@@ -175,8 +251,9 @@ describe("buildAgentActionsList — actions submenu", () => {
       stats: { lifetimeUsage: { input: 12000, output: 8000, cacheWrite: 3000, cost: 0.024 }, toolUses: 10, turnCount: 15, compactionCount: 0 },
     } as any;
     const ctx = createMockCtx();
-    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, () => {}, () => {});
-    await list.onSelect!({ value: "view-result", label: "View result" });
+    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    await list!.onSelect!({ value: "view-result", label: "View result" });
     const lastCall = mockModules.resultViewerCalls[mockModules.resultViewerCalls.length - 1];
     expect(lastCall[5].modelName).toBe("gpt-4o");
   });
@@ -191,8 +268,9 @@ describe("buildAgentActionsList — actions submenu", () => {
       stats: { lifetimeUsage: { input: 12000, output: 8000, cacheWrite: 3000, cost: 0.024 }, toolUses: 10, turnCount: 15, compactionCount: 0 },
     } as any;
     const ctx = createMockCtx();
-    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, () => {}, () => {});
-    await list.onSelect!({ value: "view-result", label: "View result" });
+    const list = buildAgentActionsList(ctx, record, noopTheme, () => {}, () => {}, () => {}, terminal);
+    expect(list).toBeDefined();
+    await list!.onSelect!({ value: "view-result", label: "View result" });
     const lastCall = mockModules.resultViewerCalls[mockModules.resultViewerCalls.length - 1];
     expect(lastCall[5].modelName).toBeUndefined();
   });

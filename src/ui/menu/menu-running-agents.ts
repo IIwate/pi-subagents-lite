@@ -5,16 +5,20 @@
  * Agent list is a snapshot at construction time (stale until re-entry is acceptable).
  * Selecting an agent opens an actions submenu (SelectList).
  *
+ * Result / snapshot / error viewers are swapped in-place via the same
+ * delegating component. Nested ctx.ui.custom calls are intentionally avoided
+ * so focus stays on the running-agents menu component.
+ *
  * Exports:
  *   - showRunningAgentsMenu: list running/queued/completed agents
  *   - buildAgentActionsList: per-agent action sub-menu (view result, steer, stop)
  *
  * Private helper (single-consumer, co-located):
- *   - showResultViewer: show ResultViewer for agent result/error/snapshot
+ *   - createResultViewer: build ResultViewer for agent result/error/snapshot
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Input, SelectList, type SelectItem } from "@earendil-works/pi-tui";
+import { Input, SelectList, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { AgentRecord } from "../../types.js";
 import { SHORT_ID_LENGTH } from "../../types.js";
 import { ResultViewer, type ResultViewerStats } from "../result-viewer.js";
@@ -25,15 +29,24 @@ import { getManager, getStore } from "../../shell.js";
 import type { Theme } from "../types.js";
 
 /**
- * Show a ResultViewer for an agent's result, error, or snapshot.
- * @param kind — "result", "error", or "snapshot" — used for the title suffix
+ * Build a ResultViewer for an agent's result, error, or snapshot.
+ * Returns null when terminal dimensions are unavailable so the caller can
+ * fall back without trapping focus.
  */
-async function showResultViewer(
-  ctx: ExtensionCommandContext,
+function createResultViewer(
   record: AgentRecord,
   kind: "result" | "error" | "snapshot",
   text: string,
-): Promise<void> {
+  theme: Theme,
+  terminal: { rows?: number; columns?: number } | undefined,
+  onClose: () => void,
+): ResultViewer | null {
+  const rows = terminal?.rows;
+  const columns = terminal?.columns;
+  if (typeof rows !== "number" || typeof columns !== "number") {
+    return null;
+  }
+
   const titleSuffix = kind === "result"
     ? record.id.slice(0, SHORT_ID_LENGTH)
     : kind === "snapshot"
@@ -50,40 +63,39 @@ async function showResultViewer(
       ? () => buildSnapshotMarkdown(record.execution.session!.messages)
       : undefined;
 
-  await ctx.ui.custom<void>(
-    (tui, theme, _kb, done) =>
-      new ResultViewer(
-        `${getDisplayName(record.display.type)} · ${titleSuffix}`,
-        text,
-        { onClose: () => done(), onRefresh: refreshCallback },
-        theme,
-        tui.terminal.rows,
-        stats,
-        tui.terminal.columns,
-      ),
-    {
-      overlay: true,
-      // Snapshot / result panel: 70% of terminal, centered.
-      overlayOptions: { width: "70%", anchor: "center" },
-    },
+  return new ResultViewer(
+    `${getDisplayName(record.display.type)} · ${titleSuffix}`,
+    text,
+    { onClose, onRefresh: refreshCallback },
+    theme,
+    rows,
+    stats,
+    columns,
   );
 }
 
 /**
  * Build a SelectList of actions for a single agent (view result/error/snapshot,
  * steer, stop) for use as a submenu inside a delegating component.
- * @param done — return to the parent agent list (cancel / no actions).
- * @param setActive — swap the delegating component's active child (steer input).
+ *
+ * Returns undefined when the agent has no actions so the caller never swaps
+ * focus onto an empty SelectList (which renders "No matching commands" and
+ * cannot cancel, trapping keyboard input).
+ *
+ * @param done — return to the parent agent list (cancel).
+ * @param setActive — swap the delegating component's active child (viewer/steer).
  * @param onClose — close the entire menu (stop).
+ * @param terminal — terminal size used when opening an inline ResultViewer.
  */
 export function buildAgentActionsList(
   ctx: ExtensionCommandContext,
   record: AgentRecord,
   theme: Theme,
   done: () => void,
-  setActive: (c: import("@earendil-works/pi-tui").Component) => void,
+  setActive: (c: Component) => void,
   onClose: () => void,
-): SelectList {
+  terminal?: { rows?: number; columns?: number },
+): SelectList | undefined {
   const items: SelectItem[] = [];
   const shortId = record.id.slice(0, SHORT_ID_LENGTH);
   const isRunning = record.lifecycle.status === "running" || record.lifecycle.status === "queued";
@@ -107,20 +119,33 @@ export function buildAgentActionsList(
 
   if (items.length === 0) {
     ctx.ui.notify(`Agent ${shortId} — no actions available`, "info");
-    done();
-    return new SelectList([], 5, buildSelectListTheme(theme));
+    // Stay on the parent agent list. Never return an empty SelectList:
+    // pi-tui renders that as "No matching commands" with no cancel path.
+    return undefined;
   }
 
   const list = new SelectList(items, 10, buildSelectListTheme(theme));
+
+  const openViewer = (kind: "result" | "error" | "snapshot", text: string) => {
+    const viewer = createResultViewer(record, kind, text, theme, terminal, () => {
+      setActive(list);
+    });
+    if (!viewer) {
+      ctx.ui.notify(`Unable to open ${kind} viewer`, "error");
+      return;
+    }
+    setActive(viewer);
+  };
+
   list.onSelect = async (item) => {
     if (item.value === "view-snapshot") {
       const messages = record.execution.session!.messages;
       const markdown = buildSnapshotMarkdown(messages);
-      await showResultViewer(ctx, record, "snapshot", markdown);
+      openViewer("snapshot", markdown);
     } else if (item.value === "view-result") {
-      await showResultViewer(ctx, record, "result", record.result!);
+      openViewer("result", record.result!);
     } else if (item.value === "view-error") {
-      await showResultViewer(ctx, record, "error", record.error!);
+      openViewer("error", record.error!);
     } else if (item.value === "steer") {
       // Swap to an inline steer input within the menu context.
       const input = new Input();
@@ -160,7 +185,7 @@ export async function showRunningAgentsMenu(
     (r) => r.lifecycle.status === "running" || r.lifecycle.status === "queued",
   );
 
-  await ctx.ui.custom((_tui, theme, _kb, done) => {
+  await ctx.ui.custom((tui, theme, _kb, done) => {
     const buildAgentItems = (): SelectItem[] => {
       const items: SelectItem[] = agents.map((record) => {
         const elapsed = Math.round((Date.now() - record.lifecycle.startedAt) / 1000);
@@ -197,11 +222,26 @@ export async function showRunningAgentsMenu(
         done(undefined);
         return;
       }
+      if (item.value === "__sep__") {
+        return;
+      }
       const record = agents.find((r) => r.id === item.value);
-      if (record) {
-        const actionsList = buildAgentActionsList(ctx, record, theme, () => {
+      if (!record) return;
+
+      const actionsList = buildAgentActionsList(
+        ctx,
+        record,
+        theme,
+        () => {
           delegator.setActive(agentList);
-        }, delegator.setActive.bind(delegator), () => done(undefined));
+        },
+        delegator.setActive.bind(delegator),
+        () => done(undefined),
+        tui.terminal,
+      );
+      // Only swap when there is a real actions list. Empty agents already
+      // notified the user and must not replace focus with a dead SelectList.
+      if (actionsList) {
         delegator.setActive(actionsList);
       }
     };
