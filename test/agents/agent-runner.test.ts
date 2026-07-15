@@ -35,6 +35,7 @@ const mockModules = vi.hoisted(() => ({
   mockPreloadSkills: vi.fn().mockReturnValue([]),
   mockLoadSkillMeta: vi.fn().mockReturnValue([]),
   mockCreateAgentSession: vi.fn(),
+  mockSessionManagerInMemory: vi.fn(),
   mockDefaultResourceLoader: MockDefaultResourceLoader,
   mockGetAgentDir: vi.fn(),
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
@@ -89,7 +90,7 @@ vi.mock("../../src/shell.js", () => ({
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession: mockModules.mockCreateAgentSession,
   DefaultResourceLoader: mockModules.mockDefaultResourceLoader,
-  SessionManager: { inMemory: vi.fn() },
+  SessionManager: { inMemory: mockModules.mockSessionManagerInMemory },
   SettingsManager: { create: vi.fn() },
   getAgentDir: mockModules.mockGetAgentDir,
   loadProjectContextFiles: mockModules.mockLoadProjectContextFiles,
@@ -139,6 +140,7 @@ function resetMocks() {
   mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash", "edit"]);
   mockModules.mockBuildAgentPrompt.mockReturnValue("system prompt");
   mockModules.mockExtractText.mockReturnValue("");
+  mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
   mockModules.mockPreloadSkills.mockReturnValue([]);
 }
@@ -167,6 +169,54 @@ function createMockSession() {
     _getListeners: () => listeners,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  runAgent — session state inheritance                               */
+/* ------------------------------------------------------------------ */
+
+describe("runAgent — session state inheritance", () => {
+  beforeEach(() => {
+    resetMocks();
+    fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("copies only the latest custom entry for each type into the child session", async () => {
+    const childSessionManager = { appendCustomEntry: vi.fn() };
+    mockModules.mockSessionManagerInMemory.mockReturnValue(childSessionManager);
+    const latestFastData = { enabled: true, nested: { value: 1 } };
+
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    const ctx = fakeCtx();
+    ctx.sessionManager = {
+      getBranch: () => [
+        { type: "custom", customType: "cliproxyapi-fast-mode", data: { enabled: false } },
+        { type: "custom", customType: "other-extension", data: { value: 1 } },
+        { type: "message", message: {} },
+        { type: "custom", customType: "cliproxyapi-fast-mode", data: latestFastData },
+      ],
+    };
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
+
+    expect(childSessionManager.appendCustomEntry).toHaveBeenCalledTimes(2);
+    expect(childSessionManager.appendCustomEntry).toHaveBeenNthCalledWith(
+      1,
+      "other-extension",
+      { value: 1 },
+    );
+    expect(childSessionManager.appendCustomEntry).toHaveBeenNthCalledWith(
+      2,
+      "cliproxyapi-fast-mode",
+      latestFastData,
+    );
+    const inheritedFastData = childSessionManager.appendCustomEntry.mock.calls[1][1];
+    inheritedFastData.nested.value = 2;
+    expect(latestFastData).toEqual({ enabled: true, nested: { value: 1 } });
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /*  runAgent — tool filtering (excluded tools)                         */

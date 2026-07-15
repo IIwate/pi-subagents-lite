@@ -382,6 +382,30 @@ function createResourceLoader(
   };
 }
 
+/**
+ * Copy the latest state entry for every extension into an isolated child session.
+ *
+ * Custom entries are explicitly for extension session state and never enter LLM
+ * context. Copying them before extensions bind lets child sessions restore parent
+ * preferences such as CLIProxyAPI Fast mode without inheriting conversation data.
+ */
+export function inheritCustomSessionEntries(
+  parentEntries: Iterable<{ type: string; customType?: string; data?: unknown }>,
+  childSessionManager: Pick<SessionManager, "appendCustomEntry">,
+): void {
+  const latestEntries = new Map<string, unknown>();
+  for (const entry of parentEntries) {
+    if (entry.type !== "custom" || typeof entry.customType !== "string" || !entry.customType.trim()) {
+      continue;
+    }
+    latestEntries.delete(entry.customType);
+    latestEntries.set(entry.customType, entry.data);
+  }
+  for (const [customType, data] of latestEntries) {
+    childSessionManager.appendCustomEntry(customType, structuredClone(data));
+  }
+}
+
 /** Create an agent session with the resolved model and thinking level. */
 async function initSession(
   ctx: ExtensionContext,
@@ -398,11 +422,13 @@ async function initSession(
   // createAgentSession falls back to settings defaultThinkingLevel.
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinkingLevel;
   const agentDir = getAgentDir();
+  const sessionManager = SessionManager.inMemory(cwd);
+  inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
   // Inherit parent Model scope so subagent sessions cannot cycle outside it.
   const scopedModels = getActiveScopedModels(ctx.modelRegistry, ctx.cwd);
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd, agentDir,
-    sessionManager: SessionManager.inMemory(cwd),
+    sessionManager,
     settingsManager: SettingsManager.create(cwd, agentDir),
     modelRegistry: ctx.modelRegistry, model,
     tools: getToolNamesForType(type), resourceLoader: loader,

@@ -357,6 +357,7 @@ export function tempDirWithFiles(
 export function fakeCtx(): any {
   return {
     cwd: "/home/test/project",
+    sessionManager: { getBranch: () => [] },
     modelRegistry: { find: vi.fn() },
     model: { provider: "test", id: "model" },
     getSystemPrompt: vi.fn(),
