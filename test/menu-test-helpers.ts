@@ -14,13 +14,12 @@ import { vi } from "vitest";
 
 /**
  * Select menu item by partial name match.
- * Maps short names to menu items: 'model', 'concurrency', 'running', 'widget', 'debug'
+ * Maps short names to menu items: 'model', 'concurrency', 'widget', 'debug'
  */
 export function selectByName(name: string): (title: string, items: string[]) => string | undefined {
   const nameMap: Record<string, string> = {
     model: "Model settings",
     concurrency: "Concurrency settings",
-    running: "Running agents",
     widget: "Widget settings",
     debug: "Debug",
     settings: "Settings",
@@ -65,7 +64,7 @@ export function createMockCtx(
         if (customIdx < customValues.length) {
           return customValues[customIdx++];
         }
-        // Otherwise, invoke the factory to trigger side effects (e.g. ResultViewer construction)
+        // Otherwise, invoke the factory to trigger component construction side effects
         // Provide a mock tui with terminal.rows, a noop theme, and a done callback
         _factory(
           { terminal: { rows: 40, columns: 120 } },

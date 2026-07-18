@@ -17,13 +17,9 @@ export const mockModules = {
   },
   mockSessionOverrides: { default: null } as Record<string, any>,
   mockSessionShowCost: undefined as boolean | undefined,
-  resultViewerCalls: [] as any[][],
   mockManager: {
     setConcurrency: vi.fn(),
-    listAgents: vi.fn(() => []),
     getRecord: vi.fn(),
-    abort: vi.fn(),
-    steer: vi.fn(),
     spawn: vi.fn(() => "agent-id-123"),
   },
   mockSessionCtx: {
@@ -79,21 +75,9 @@ vi.mock("../src/ui/searchable-select.js", () => ({
   },
 }));
 
-vi.mock("../src/ui/result-viewer.js", () => ({
-  ResultViewer: class {
-    constructor(...args: any[]) {
-      mockModules.resultViewerCalls.push(args);
-    }
-  },
-}));
-
 vi.mock("../src/ui/format.js", () => ({
   getDisplayName: vi.fn((t: string) => t),
   truncateDesc: vi.fn((t: string) => t),
-}));
-
-vi.mock("../src/prompt/context.js", () => ({
-  buildSnapshotMarkdown: vi.fn(),
 }));
 
 vi.mock("../src/config/config-io.js", () => ({

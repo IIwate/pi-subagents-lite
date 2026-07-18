@@ -10,7 +10,6 @@
  *   - menu-model-settings.ts: showModelSettingsMenu
  *   - menu-concurrency.ts: showConcurrencySettingsMenu
  *   - menu-widget-settings.ts: showWidgetSettingsMenu
- *   - menu-running-agents.ts: showRunningAgentsMenu
  *   - menu-debug.ts: showDebugMenu
  *   - menu-spawn-options.ts: showSpawnOptionsMenu
  *   - menu-system-prompt.ts: showSystemPromptMenu
@@ -24,7 +23,6 @@ import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { showModelSettingsMenu } from "./menu-model-settings.js";
 import { showConcurrencySettingsMenu } from "./menu-concurrency.js";
 import { showWidgetSettingsMenu } from "./menu-widget-settings.js";
-import { showRunningAgentsMenu } from "./menu-running-agents.js";
 import { showDebugMenu } from "./menu-debug.js";
 import { showSpawnOptionsMenu } from "./menu-spawn-options.js";
 import { showSystemPromptMenu } from "./menu-system-prompt.js";
@@ -84,7 +82,6 @@ export async function showAgentsMainMenu(
   modelOptions: string[],
 ): Promise<void> {
   const items: SelectItem[] = [
-    { value: "running", label: "Running agents", description: "List running/queued agents" },
     { value: "spawn", label: "Spawn agent", description: "Manually spawn a new agent" },
     { value: "settings", label: "Settings", description: "Model, concurrency, and widget settings" },
     { value: "debug", label: "Debug", description: "Agent types, briefing, diagnostics" },
@@ -92,7 +89,6 @@ export async function showAgentsMainMenu(
 
   await runSelectMenu(ctx, "Agents", items, async (choice) => {
     switch (choice) {
-      case "running": await showRunningAgentsMenu(ctx); break;
       case "spawn": await showSpawnAgentMenu(ctx, modelOptions); break;
       case "settings": await showSettingsMenu(ctx, modelOptions); break;
       case "debug": await showDebugMenu(ctx); break;

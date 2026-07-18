@@ -411,7 +411,7 @@ export async function showSpawnAgentMenu(
         id: "description",
         label: "Description",
         currentValue: currentDescription,
-        description: "Short label shown in the agents list",
+        description: "Short label shown in the live widget",
         submenu: createInputSubmenu(ctx),
       },
       {

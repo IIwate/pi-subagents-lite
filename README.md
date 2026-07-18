@@ -34,7 +34,7 @@ Names like `Agent`, `StopAgent`, `AgentStatus`, `run_in_background`, `worktree_p
 - **Cost & usage tracking** — input/output/cache tokens and dollar cost per agent (toggle in stats)
 - **Live widget** — persistent status bar with running/completed agents, full and compact modes
 - **Interactive agent switching** — switch the visible transcript between the main agent and subagents, then message the selected subagent directly
-- **Result viewer** — fullscreen markdown with stats
+- **Selected-agent footer** — live child token, context, model, and thinking status when a subagent is selected
 - **Worktrees** — run agents in a git worktree via `worktree_path`
 - **Output logs** — `tail -f` friendly, ISO-timestamped with configurable thinking buffer (OFF, 80, 200, 500, 1000 chars). Flush rounds to sentence boundaries.
 
@@ -81,7 +81,7 @@ Foreground results land inline:
    Explore project directory structure
 ```
 
-Stop a running agent from `/agents`:
+Stop a running agent with the `StopAgent` tool:
 
 ```
 ○ Agents
@@ -113,7 +113,7 @@ Stop a running agent by ID.
 |---|---|---|
 | `agent_id` | ✅ | The agent ID returned by `Agent` at spawn |
 
-IDs come from the `Agent` result, the `StopAgent` error (lists all running IDs), or `/agents` → **Running agents**. Display format is `id (type)` (e.g. `a1b2c3 (Explore)`).
+IDs come from the `Agent` result or the `StopAgent` error, which lists running agents in `id (type)` format (for example, `a1b2c3 (Explore)`).
 
 ### `AgentStatus`
 
@@ -151,8 +151,8 @@ A minimal agent — just `name` and `description` — gets everything: all tools
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | filename | Agent type name (the `agent` enum value). Must be unique. |
-| `display_name` | string | `name` | Label in the widget, `/agents` menu, and result viewer. |
-| `description` | string | `""` | One-sentence description in the `/agents` list and tool rendering. |
+| `display_name` | string | `name` | Label in the widget, agent selector, and tool result. |
+| `description` | string | `""` | One-sentence description shown in the live widget and tool rendering. |
 | `tools` | `true` \| `string[]` \| `false` | `true` | **Tool whitelist** — which tool schemas the LLM sees. Accepts built-in names and extension tool references (see below). Mutually exclusive with `exclude_tools`. |
 | `exclude_tools` | `string[]` | none | **Tool blacklist** — all tools except these are visible. Supports `ext/*` syntax. Mutually exclusive with `tools` (when `tools` is `string[]`). |
 | `extensions` | `true` \| `string[]` \| `false` | `true` | **Extension loader** — which extensions load (hooks + commands fire). Does NOT control tool visibility. Mutually exclusive with `exclude_extensions`. |
@@ -248,9 +248,8 @@ When `includeContextFiles` is `true` (default), AGENTS.md files from the project
 
 ### `/agents`
 
-Management menu with four sections:
+Management menu with three sections:
 
-- **Running agents** — status and description; per-agent actions (view snapshot, result, error; steer; stop) and bulk stop
 - **Spawn agent** — manually spawn without the LLM. Pick a type (with search), enter a prompt, tune options (model, thinking, max turns, max tokens, grace turns, background), then spawn. Options pre-fill from agent config.
 - **Settings**
   - **Model settings** — global default, per-type overrides, session overrides, clear all
@@ -258,6 +257,7 @@ Management menu with four sections:
   - **System prompt** — mode, custom prompt file, include AGENTS.md, load skills/extensions implicitly
   - **Concurrency** — default limit, per-provider and per-model slots (with search), reset to defaults
   - **Widget settings** — force compact, max lines, description length, thinking buffer size, ctrl+o shortcut, usage stats (toggle tools, turns, input/output tokens, context %, cost, time)
+- **Debug** — agent types, generated briefing, and runtime diagnostics
 
 ## Interface
 
@@ -295,10 +295,6 @@ After the first subagent is dispatched, a selector appears below the editor with
 - Select **Main agent** to restore the parent transcript and normal input routing.
 
 All `/agents` menus and actions remain available while a subagent view is selected.
-
-### Result viewer
-
-Fullscreen markdown viewer for completed agent results — opens automatically from `/agents`. Keys: `↑↓` / `PgUp/PgDn` navigate · `g`/`G` top/bottom · `f` fullscreen · `r` refresh · `q`/`Esc` close. Stats line: `↑12.0k · ↓8.0k · W3.0k · $0.024 · 15 turns · 47s`.
 
 With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·↑10.2k↓1.8k $0.008·10s`) and the status bar totals it (`agents: $0.008`). Toggle as a session override from Model settings.
 

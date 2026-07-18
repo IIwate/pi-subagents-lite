@@ -14,7 +14,7 @@ import {
 import { formatMs, buildStatsParts, getDisplayName, truncateDesc, STATS_SEP, type StatsVisibility } from "./format.js";
 import type { LiveView } from "../spawn/spawn-coordinator.js";
 
-// Re-export Theme so existing consumers (searchable-select, result-viewer) don't break
+// Re-export Theme for backward compatibility with existing consumers
 export type { Theme } from "./types.js";
 
 // ---- Constants ----

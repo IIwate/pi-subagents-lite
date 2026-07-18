@@ -32,12 +32,29 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("shows 4 items: Running agents, Spawn agent, Settings, Debug", async () => {
+  it("shows Spawn agent, Settings, and Debug without Running agents", async () => {
     const ctx = createMockCtx();
+    let rendered = "";
+    ctx.ui.custom.mockImplementation(async (factory: any) => {
+      const component = factory(
+        { terminal: { rows: 40, columns: 120 } },
+        {
+          fg: (_color: string, text: string) => text,
+          bold: (text: string) => text,
+        },
+        null,
+        () => {},
+      );
+      rendered = component.render(120).join("\n");
+      return undefined;
+    });
+
     await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
-    // The SelectList is passed to ctx.ui.custom; items are in the factory
-    // We verify via the custom call — the factory is invoked
-    expect(ctx.ui.custom).toHaveBeenCalled();
+
+    expect(rendered).toContain("Spawn agent");
+    expect(rendered).toContain("Settings");
+    expect(rendered).toContain("Debug");
+    expect(rendered).not.toContain("Running agents");
   });
 
   it("Escape closes the menu", async () => {

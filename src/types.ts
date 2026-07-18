@@ -160,7 +160,7 @@ export interface AgentExecutionState {
 
 /**
  * Accumulated statistics: usage breakdown, tool uses, turn count.
- * Used by widget (stats display), tool-execution (details building), menus (result viewer).
+ * Used by widget stats, footer rendering, and tool result details.
  */
 export interface AgentAccumulatedStats {
   /**
