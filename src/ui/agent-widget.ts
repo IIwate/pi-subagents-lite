@@ -23,7 +23,7 @@ export type { Theme } from "./types.js";
 const DEFAULT_MAX_WIDGET_LINES = 12;
 
 /** Braille spinner frames for animated running indicator. */
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /** Non-success statuses — used for linger behavior and icon rendering. */
 const ERROR_STATUSES = new Set(["error", "aborted", "turn_limited", "stopped"]);

@@ -176,6 +176,7 @@ describe("AgentNavigator", () => {
 
   afterEach(() => {
     navigator?.dispose();
+    vi.useRealTimers();
   });
 
   it("registers a below-editor selector containing main and subagents", () => {
@@ -197,6 +198,25 @@ describe("AgentNavigator", () => {
       expect.any(Function),
       { placement: "belowEditor" },
     );
+  });
+
+  it("animates the running status icon on the refresh timer", () => {
+    vi.useFakeTimers();
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    expect(selector.render(120).join("\n")).toContain("⠋ Explore");
+
+    vi.advanceTimersByTime(80);
+    expect(selector.render(120).join("\n")).toContain("⠙ Explore");
+    expect(tui.requestRender).toHaveBeenCalled();
+
+    vi.advanceTimersByTime(80);
+    expect(selector.render(120).join("\n")).toContain("⠹ Explore");
   });
 
   it("requires Enter before changing the active agent", () => {

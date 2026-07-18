@@ -25,6 +25,7 @@ import {
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { summarizeToolArgs } from "./format.js";
+import { SPINNER } from "./agent-widget.js";
 import type { Theme } from "./types.js";
 
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
@@ -110,9 +111,9 @@ function appendWrapped(lines: string[], text: string, width: number): void {
   }
 }
 
-function statusIcon(record: AgentRecord): string {
+function statusIcon(record: AgentRecord, spinnerFrame: string): string {
   switch (record.lifecycle.status) {
-    case "running": return "⠋";
+    case "running": return spinnerFrame;
     case "queued": return "◦";
     case "completed": return "✓";
     case "turn_limited": return "✓";
@@ -332,6 +333,7 @@ export class AgentNavigator {
   /** Candidate row moved by Up/Down while the selector has focus. */
   private highlightedAgentId: string | null = null;
   private listFocused = false;
+  private spinnerFrame = 0;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private selectorRegistered = false;
   private selectorTui: TUI | undefined;
@@ -384,7 +386,10 @@ export class AgentNavigator {
   ensureTimer(): void {
     if (!this.uiCtx) return;
     if (!this.refreshTimer) {
-      this.refreshTimer = setInterval(() => this.update(), REFRESH_INTERVAL_MS);
+      this.refreshTimer = setInterval(() => {
+        this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
+        this.update();
+      }, REFRESH_INTERVAL_MS);
     }
     this.update();
   }
@@ -657,6 +662,7 @@ export class AgentNavigator {
       ? "↑↓ choose · Enter select · Esc editor"
       : "empty editor + ↓ to choose";
     const lines = [theme.fg("dim", `Agents · ${hint}`)];
+    const spinnerFrame = SPINNER[this.spinnerFrame];
 
     if (start > 0) {
       lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
@@ -674,7 +680,7 @@ export class AgentNavigator {
       }
 
       const record = entry.record;
-      const icon = statusIcon(record);
+      const icon = statusIcon(record, spinnerFrame);
       const shortId = record.id.slice(0, 8);
       const label = `${record.display.type} ${shortId}`;
       const status = record.lifecycle.status === "running" ? "" : ` ${record.lifecycle.status}`;
