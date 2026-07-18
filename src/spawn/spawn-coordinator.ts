@@ -1,6 +1,7 @@
-import { getPiInstance, getSessionCtx, getWidget } from "../shell.js";
+import { getNavigator, getPiInstance, getSessionCtx, getWidget } from "../shell.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord, SpawnConfig, ToolActivity } from "../types.js";
 import type { AgentManager, SpawnOptions } from "../agents/agent-manager.js";
@@ -109,6 +110,7 @@ export class SpawnCoordinator {
     if (widget) {
       widget.ensureTimer();
     }
+    getNavigator()?.ensureTimer();
 
     // Track background agents + capture ctx for fallback notification
     if (intent.runInBackground) {
@@ -136,6 +138,39 @@ export class SpawnCoordinator {
   /** Read the live view for an agent. Widget calls this. */
   liveView(id: string): LiveView | undefined {
     return this.liveViews.get(id);
+  }
+
+  /** Route user input to a running or settled subagent session. */
+  async interact(agentId: string, message: string, images?: ImageContent[]): Promise<boolean> {
+    const record = this.manager.getRecord(agentId);
+    if (!record) return false;
+
+    // Deliver the completed background result before mutating the same record
+    // for an interactive continuation.
+    if (this.pendingNudges.delete(agentId)) {
+      this.emitIndividualNudge(agentId);
+    }
+
+    let liveView = this.liveViews.get(agentId);
+    if (!liveView) {
+      liveView = { activeTools: new Map(), responseText: "" };
+      this.liveViews.set(agentId, liveView);
+    }
+
+    const accepted = await this.manager.interact(
+      agentId,
+      message,
+      this.createLiveViewCallbacks(liveView),
+      images,
+    );
+    if (!accepted && record.lifecycle.status !== "running") {
+      this.liveViews.delete(agentId);
+    }
+    if (accepted) {
+      getWidget()?.ensureTimer();
+      getNavigator()?.ensureTimer();
+    }
+    return accepted;
   }
 
   /** Check if an agent was spawned as background. */

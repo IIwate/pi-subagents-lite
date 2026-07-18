@@ -43,6 +43,8 @@ function makeMockManager(agents: any[], totalAgentCost = 0): AgentManager {
     getAgent: () => undefined,
     setConcurrency: () => {},
     getTotalAgentCost: () => totalAgentCost,
+    getUnaccountedAgentCost: (id: string) =>
+      agents.find(agent => agent.id === id)?.stats.lifetimeUsage.cost ?? 0,
   } as any as AgentManager;
 }
 

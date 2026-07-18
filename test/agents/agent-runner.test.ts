@@ -105,7 +105,7 @@ vi.mock("../../src/models/model-scope.js", () => ({
 
 // --- Import the module under test ---
 
-import { runAgent, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";
+import { continueAgentSession, runAgent, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";
 
 const defaultConfig = {
   displayName: "Agent",
@@ -215,6 +215,22 @@ describe("runAgent — session state inheritance", () => {
     const inheritedFastData = childSessionManager.appendCustomEntry.mock.calls[1][1];
     inheritedFastData.nested.value = 2;
     expect(latestFastData).toEqual({ enabled: true, nested: { value: 1 } });
+  });
+
+  it("aborts a session when the parent signal was already aborted", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const controller = new AbortController();
+    controller.abort();
+
+    await runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      signal: controller.signal,
+    });
+
+    expect(session.abort).toHaveBeenCalled();
+    expect(session.prompt).not.toHaveBeenCalled();
   });
 });
 
@@ -662,7 +678,84 @@ describe("subscribeToSessionEvents — cost extraction", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  runAgent — extension name-based filtering                          */
+/*  continueAgentSession                                               */
+/* ------------------------------------------------------------------ */
+
+describe("continueAgentSession", () => {
+  it("prompts the existing session and forwards live callbacks", async () => {
+    const session = createMockSession();
+    const onTextDelta = vi.fn();
+    const onTurnEnd = vi.fn();
+    const onToolActivity = vi.fn();
+
+    session.prompt.mockImplementation(async () => {
+      const listeners = [...session._getListeners()];
+      for (const listener of listeners) {
+        listener({
+          type: "message_update",
+          message: { role: "assistant" },
+          assistantMessageEvent: { type: "text_delta", delta: "continued" },
+        });
+        listener({ type: "tool_execution_start", toolName: "read" });
+        listener({ type: "tool_execution_end", toolName: "read" });
+        listener({ type: "turn_end" });
+      }
+    });
+
+    const result = await continueAgentSession(session as any, "next task", {
+      onTextDelta,
+      onTurnEnd,
+      onToolActivity,
+    });
+
+    expect(session.prompt).toHaveBeenCalledWith("next task", undefined);
+    expect(result).toEqual({
+      responseText: "continued",
+      aborted: false,
+      turnLimited: false,
+    });
+    expect(onTextDelta).toHaveBeenCalledWith("continued", "continued");
+    expect(onTurnEnd).toHaveBeenCalledWith(1);
+    expect(onToolActivity).toHaveBeenCalledWith({ type: "start", toolName: "read" });
+    expect(onToolActivity).toHaveBeenCalledWith({ type: "end", toolName: "read" });
+    expect(session._getListeners()).toHaveLength(0);
+  });
+
+  it("forwards images to the existing session", async () => {
+    const session = createMockSession();
+    const images = [{ type: "image", data: "abc", mimeType: "image/png" }] as any;
+
+    await continueAgentSession(session as any, "inspect", { images });
+
+    expect(session.prompt).toHaveBeenCalledWith("inspect", { images });
+  });
+
+  it("enforces max turns and grace turns on continuation prompts", async () => {
+    const session = createMockSession();
+    session.prompt.mockImplementation(async () => {
+      for (let i = 0; i < 2; i++) {
+        for (const listener of [...session._getListeners()]) {
+          listener({ type: "turn_end" });
+        }
+      }
+    });
+
+    const result = await continueAgentSession(session as any, "continue", {
+      maxTurns: 1,
+      graceTurns: 0,
+    });
+
+    expect(session.steer).toHaveBeenCalledWith(
+      "You have reached your turn limit. Wrap up immediately — provide your final answer now.",
+    );
+    expect(session.abort).toHaveBeenCalled();
+    expect(result.aborted).toBe(true);
+    expect(result.turnLimited).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  runAgent — extension name-based filtering                         */
 /* ------------------------------------------------------------------ */
 
 describe("runAgent — extension name-based filtering", () => {

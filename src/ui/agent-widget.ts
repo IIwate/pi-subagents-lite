@@ -624,8 +624,11 @@ export class AgentWidget {
     let statusText = total > 0 ? `${total} agent${total === 1 ? "" : "s"}` : `agents`;
     if (this.showCost) {
       const sessionCost = this.manager.getTotalAgentCost();
-      // Also include in-flight running agents (not yet completed, so not in accumulator)
-      const runningCost = running.reduce((sum, a) => sum + a.stats.lifetimeUsage.cost, 0);
+      // Include only in-flight cost not already accounted by a previous run.
+      const runningCost = running.reduce(
+        (sum, agent) => sum + this.manager.getUnaccountedAgentCost(agent.id),
+        0,
+      );
       const totalCost = sessionCost + runningCost;
       if (totalCost > 0) statusText += `: ${formatCost(totalCost)}`;
     }

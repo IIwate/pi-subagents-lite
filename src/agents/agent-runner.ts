@@ -6,6 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
@@ -58,6 +59,19 @@ interface RunResult {
   turnLimited: boolean;
 }
 
+/** Options for prompting an already-created subagent session. */
+export interface ContinueAgentOptions extends RunCallbacks {
+  images?: ImageContent[];
+  maxTurns?: number;
+  graceTurns?: number;
+}
+
+export interface ContinueAgentResult {
+  responseText: string;
+  aborted: boolean;
+  turnLimited: boolean;
+}
+
 /**
  * Subscribe to a session and collect the last assistant message text.
  * Returns an object with a `getText()` getter and an `unsubscribe` function.
@@ -96,7 +110,11 @@ function getLastAssistantText(session: AgentSession): string {
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
   if (!signal) return () => {};
-  const onAbort = () => session.abort();
+  const onAbort = () => { void session.abort(); };
+  if (signal.aborted) {
+    onAbort();
+    return () => {};
+  }
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
 }
@@ -536,7 +554,9 @@ async function runTurnLoop(
   const collector = collectResponseText(session, options.onTextDelta);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
   try {
-    await session.prompt(prompt);
+    if (!options.signal?.aborted) {
+      await session.prompt(prompt);
+    }
   } finally {
     unsubTurns();
     unsubEvents();
@@ -544,6 +564,36 @@ async function runTurnLoop(
     cleanupAbort();
   }
   return collector.getText().trim() || getLastAssistantText(session);
+}
+
+/**
+ * Prompt an existing subagent session after its original task has settled.
+ * This preserves the child conversation and tool configuration while wiring
+ * the same usage/activity callbacks used by the initial run.
+ */
+export async function continueAgentSession(
+  session: AgentSession,
+  prompt: string,
+  options: ContinueAgentOptions = {},
+): Promise<ContinueAgentResult> {
+  const turnTracking = wireTurnTracking(session, options);
+  const unsubscribeEvents = subscribeToSessionEvents(session, options);
+  const collector = collectResponseText(session, options.onTextDelta);
+
+  try {
+    const promptOptions = options.images?.length ? { images: options.images } : undefined;
+    await session.prompt(prompt, promptOptions);
+  } finally {
+    turnTracking.unsubscribe();
+    unsubscribeEvents();
+    collector.unsubscribe();
+  }
+
+  return {
+    responseText: collector.getText().trim() || getLastAssistantText(session),
+    aborted: turnTracking.getAborted(),
+    turnLimited: turnTracking.getTurnLimited(),
+  };
 }
 
 // ── main entry ─────────────────────────────────────────────────────

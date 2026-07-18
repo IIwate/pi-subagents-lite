@@ -5,8 +5,9 @@
  */
 
 import { randomUUID } from "node:crypto";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { runAgent } from "./agent-runner.js";
+import { continueAgentSession, runAgent } from "./agent-runner.js";
 import { AgentOutputLog } from "./output-file.js";
 import { getStore } from "../shell.js";
 import {
@@ -54,6 +55,7 @@ export interface ConcurrencyConfig {
 
 type OnAgentComplete = (record: AgentRecord) => void;
 type OnAgentStart = (record: AgentRecord) => void;
+type OnAgentRemove = (record: AgentRecord) => void;
 
 /** Internal per-model concurrency state. */
 interface ConcurrencySlot {
@@ -80,9 +82,13 @@ export class AgentManager {
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
+  private onRemove?: OnAgentRemove;
 
   /** Session-level cumulative agent cost. Survives agent eviction. */
   private totalAgentCost = 0;
+
+  /** Cost already added to the session total for each agent. */
+  private accountedCosts = new Map<string, number>();
 
   /** Per-model concurrency slots keyed by "provider/modelId". */
   private concurrencySlots = new Map<string, ConcurrencySlot>();
@@ -221,6 +227,9 @@ export class AgentManager {
       },
       execution: {
         abortController,
+        settled: false,
+        modelKey: options.modelKey,
+        graceTurns: options.graceTurns,
       },
       stats: {
         lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
@@ -259,6 +268,7 @@ export class AgentManager {
 
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();
+    record.execution.settled = false;
 
     // Create output log for this agent (creates file + writes [USER] entry)
     record.execution.outputLog = new AgentOutputLog(id, prompt, undefined, this.bufferSize);
@@ -296,8 +306,8 @@ export class AgentManager {
         record.display.invocation = inv;
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
-          for (const msg of record.execution.pendingSteers) {
-            session.steer(msg).catch(() => {
+          for (const pending of record.execution.pendingSteers) {
+            session.steer(pending.message, pending.images).catch(() => {
               // Steer is advisory — a failure here (e.g. session already aborting)
               // is fine; the user can re-send if needed.
             });
@@ -342,12 +352,12 @@ export class AgentManager {
               cost: record.stats.lifetimeUsage.cost,
             });
           } catch { /* ignore */ }
-          record.execution.outputLog = undefined;
         }
 
         // Decrement per-model concurrency count
         if (concurrencySlot) concurrencySlot.running--;
 
+        record.execution.settled = true;
         this.safeNotifyComplete(record);
         this.drainQueue();
       });
@@ -357,7 +367,10 @@ export class AgentManager {
 
   /** Notify completion callback, ignoring any errors. */
   private safeNotifyComplete(record: AgentRecord): void {
-    this.totalAgentCost += record.stats.lifetimeUsage.cost;
+    const previousCost = this.accountedCosts.get(record.id) ?? 0;
+    const currentCost = record.stats.lifetimeUsage.cost;
+    this.totalAgentCost += Math.max(0, currentCost - previousCost);
+    this.accountedCosts.set(record.id, currentCost);
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
 
@@ -365,9 +378,23 @@ export class AgentManager {
     this.onComplete = cb;
   }
 
+  setOnRemove(cb: OnAgentRemove): void {
+    this.onRemove = cb;
+  }
+
   /** Get the session-level cumulative agent cost. Survives agent eviction. */
   getTotalAgentCost(): number {
     return this.totalAgentCost;
+  }
+
+  /** Cost accumulated by an agent since its last settled accounting point. */
+  getUnaccountedAgentCost(id: string): number {
+    const record = this.agents.get(id);
+    if (!record) return 0;
+    return Math.max(
+      0,
+      record.stats.lifetimeUsage.cost - (this.accountedCosts.get(id) ?? 0),
+    );
   }
 
   /**
@@ -439,7 +466,7 @@ export class AgentManager {
    * Send a steering message to a running agent.
    * If the session hasn't been created yet, the message is queued.
    */
-  async steer(id: string, message: string): Promise<boolean> {
+  async steer(id: string, message: string, images?: ImageContent[]): Promise<boolean> {
     const record = this.agents.get(id);
     if (!record) return false;
 
@@ -448,17 +475,114 @@ export class AgentManager {
     if (!record.execution.session) {
       // Session not yet created — queue the steer
       if (!record.execution.pendingSteers) record.execution.pendingSteers = [];
-      record.execution.pendingSteers.push(message);
+      record.execution.pendingSteers.push({ message, images });
       return true;
     }
 
     try {
-      await record.execution.session.steer(message);
+      await record.execution.session.steer(message, images);
       return true;
     } catch {
       // steer failures are surfaced to the caller via the boolean return value
       return false;
     }
+  }
+
+  /**
+   * Send a user message to an agent. Running agents receive a steering message;
+   * settled agents resume their existing session with a new prompt.
+   */
+  async interact(
+    id: string,
+    message: string,
+    callbacks: RunCallbacks = {},
+    images?: ImageContent[],
+  ): Promise<boolean> {
+    const record = this.agents.get(id);
+    if (!record || record.lifecycle.status === "queued") return false;
+
+    if (record.lifecycle.status === "running") {
+      return this.steer(id, message, images);
+    }
+
+    const session = record.execution.session;
+    if (!session || !record.execution.settled || session.isStreaming) return false;
+
+    let concurrencySlot: ConcurrencySlot | undefined;
+    if (record.execution.modelKey) {
+      const slot = this.getSlot(record.execution.modelKey);
+      if (slot.running >= slot.limit) return false;
+      slot.running++;
+      concurrencySlot = slot;
+    }
+
+    const previousTurns = record.stats.turnCount ?? 0;
+    const abortController = new AbortController();
+    const abortSession = () => { void session.abort(); };
+    abortController.signal.addEventListener("abort", abortSession, { once: true });
+
+    record.execution.abortController = abortController;
+    record.execution.settled = false;
+    record.lifecycle.status = "running";
+    record.lifecycle.startedAt = Date.now();
+    record.lifecycle.completedAt = undefined;
+    record.lifecycle.resultConsumed = undefined;
+    record.error = undefined;
+    try { record.execution.outputLog?.resume(session); } catch { /* best effort */ }
+
+    const trackedCallbacks = this.createRecordCallbacks(record, callbacks);
+    const promise = continueAgentSession(session, message, {
+      ...trackedCallbacks,
+      images,
+      maxTurns: record.stats.maxTurns,
+      graceTurns: record.execution.graceTurns,
+      onTextDelta: callbacks.onTextDelta,
+      onTurnEnd: (turnCount) => {
+        record.stats.turnCount = previousTurns + turnCount;
+        callbacks.onTurnEnd?.(turnCount);
+      },
+    })
+      .then(({ responseText, aborted, turnLimited }) => {
+        if (record.lifecycle.status !== "stopped") {
+          record.lifecycle.status = aborted
+            ? "aborted"
+            : turnLimited
+              ? "turn_limited"
+              : "completed";
+        }
+        record.result = responseText;
+        record.stats.contextPercent = getSessionContextPercent(session);
+        record.lifecycle.completedAt ??= Date.now();
+        record.lifecycle.resultConsumed = true;
+        return responseText;
+      })
+      .catch((err) => {
+        if (record.lifecycle.status !== "stopped") {
+          record.lifecycle.status = "error";
+        }
+        record.error = errorMessage(err);
+        record.lifecycle.completedAt ??= Date.now();
+        record.lifecycle.resultConsumed = true;
+        return "";
+      })
+      .finally(() => {
+        abortController.signal.removeEventListener("abort", abortSession);
+        try {
+          record.execution.outputLog?.finalize({
+            turnCount: record.stats.turnCount ?? 0,
+            toolUseCount: record.stats.toolUses,
+            totalTokens: getLifetimeTotal(record.stats.lifetimeUsage),
+            cost: record.stats.lifetimeUsage.cost,
+          });
+        } catch { /* best effort */ }
+        if (concurrencySlot) concurrencySlot.running--;
+        record.execution.settled = true;
+        this.safeNotifyComplete(record);
+        this.drainQueue();
+      });
+
+    record.execution.promise = promise;
+    return true;
   }
 
   getRecord(id: string): AgentRecord | undefined {
@@ -501,6 +625,8 @@ export class AgentManager {
     record.execution.session?.dispose();
     record.execution.session = undefined;
     this.agents.delete(id);
+    this.accountedCosts.delete(id);
+    try { this.onRemove?.(record); } catch { /* ignore */ }
   }
 
   private cleanup() {
@@ -523,5 +649,6 @@ export class AgentManager {
       record.execution.session?.dispose();
     }
     this.agents.clear();
+    this.accountedCosts.clear();
   }
 }

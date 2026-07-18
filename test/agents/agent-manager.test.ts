@@ -12,6 +12,7 @@ let uuidCounter = 0;
 
 const mockModules = vi.hoisted(() => ({
   mockRunAgent: vi.fn(),
+  mockContinueAgentSession: vi.fn(),
   mockRandomUUID: vi.fn(() => {
     uuidCounter++;
     return `agent-${String(uuidCounter).padStart(8, "0")}`;
@@ -34,6 +35,7 @@ vi.mock("node:fs", () => mockModules.fsMock);
 
 vi.mock("../../src/agents/agent-runner.js", () => ({
   runAgent: mockModules.mockRunAgent,
+  continueAgentSession: mockModules.mockContinueAgentSession,
 }));
 
 // Controllable mock for getStore(), used by delta estimation tests
@@ -48,7 +50,14 @@ vi.mock("../../src/shell.js", () => ({
 }));
 
 function mockAgentSession(): any {
-  return { subscribe: vi.fn(), messages: [], dispose: vi.fn() };
+  return {
+    subscribe: vi.fn(() => vi.fn()),
+    messages: [],
+    isStreaming: false,
+    dispose: vi.fn(),
+    steer: vi.fn().mockResolvedValue(undefined),
+    abort: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 function mockRunResult(overrides?: Partial<ReturnType<typeof mockRunResult>>) {
@@ -71,6 +80,7 @@ describe("AgentManager", () => {
   beforeEach(() => {
     mockModules.resetUuidCounter();
     mockModules.mockRunAgent.mockReset();
+    mockModules.mockContinueAgentSession.mockReset();
     onComplete = vi.fn();
   });
 
@@ -312,6 +322,157 @@ describe("AgentManager", () => {
     });
   });
 
+  // ── Direct interaction ──
+
+  describe("interact", () => {
+    it("steers a running agent", async () => {
+      manager = new AgentManager(onComplete);
+      const deferred = makeResolvablePromise();
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      record.execution.session = session;
+
+      await expect(manager.interact(id, "new direction")).resolves.toBe(true);
+      expect(session.steer).toHaveBeenCalledWith("new direction", undefined);
+
+      deferred.resolve(mockRunResult({ session }));
+    });
+
+    it("forwards images when steering a running agent", async () => {
+      manager = new AgentManager(onComplete);
+      const deferred = makeResolvablePromise();
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+      const images = [{ type: "image", data: "abc", mimeType: "image/png" }] as any;
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      manager.getRecord(id)!.execution.session = session;
+
+      await expect(manager.interact(id, "inspect this", {}, images)).resolves.toBe(true);
+      expect(session.steer).toHaveBeenCalledWith("inspect this", images);
+
+      deferred.resolve(mockRunResult({ session }));
+    });
+
+    it("resumes a settled agent session", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+      mockModules.mockContinueAgentSession.mockResolvedValue({
+        responseText: "continued result",
+        aborted: false,
+        turnLimited: false,
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      await record.execution.promise;
+
+      expect(mockModules.mockContinueAgentSession).toHaveBeenCalledWith(
+        session,
+        "continue",
+        expect.objectContaining({
+          onToolActivity: expect.any(Function),
+          onTurnEnd: expect.any(Function),
+        }),
+      );
+      expect(record.lifecycle.status).toBe("completed");
+      expect(record.result).toBe("continued result");
+      expect(mockModules.mockContinueAgentSession).toHaveBeenCalledWith(
+        session,
+        "continue",
+        expect.objectContaining({
+          maxTurns: record.stats.maxTurns,
+          graceTurns: record.execution.graceTurns,
+        }),
+      );
+    });
+
+    it("rejects a stopped agent until its previous execution settles", async () => {
+      manager = new AgentManager(onComplete);
+      const deferred = makeResolvablePromise();
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      record.execution.session = session;
+      manager.abort(id, "user");
+
+      await expect(manager.interact(id, "resume too early")).resolves.toBe(false);
+      expect(mockModules.mockContinueAgentSession).not.toHaveBeenCalled();
+
+      deferred.resolve(mockRunResult({ session, aborted: true }));
+    });
+
+    it("respects model concurrency when resuming a settled agent", async () => {
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/model": 1 },
+      });
+      const firstSession = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValueOnce(mockRunResult({ session: firstSession }));
+
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(firstId)!.execution.promise;
+
+      const secondDeferred = makeResolvablePromise();
+      const secondSession = mockAgentSession();
+      mockModules.mockRunAgent.mockReturnValueOnce(secondDeferred.promise);
+      manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        modelKey: "test/model",
+      });
+
+      await expect(manager.interact(firstId, "resume")).resolves.toBe(false);
+      expect(mockModules.mockContinueAgentSession).not.toHaveBeenCalled();
+
+      secondDeferred.resolve(mockRunResult({ session: secondSession }));
+    });
+
+    it("rejects interaction for queued agents", async () => {
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/model": 1 },
+      });
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        modelKey: "test/model",
+      });
+      const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        modelKey: "test/model",
+      });
+
+      await expect(manager.interact(queuedId, "hello")).resolves.toBe(false);
+      deferred.resolve(mockRunResult());
+    });
+  });
+
   // ── Cost accumulation ──
 
   describe("totalAgentCost", () => {
@@ -332,6 +493,23 @@ describe("AgentManager", () => {
       await manager.getRecord(id)!.execution.promise;
 
       expect(manager.getTotalAgentCost()).toBe(0.05);
+    });
+
+    it("reports only cost added since the previous settled run", async () => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      record.stats.lifetimeUsage.cost = 0.05;
+      await record.execution.promise;
+
+      expect(manager.getUnaccountedAgentCost(id)).toBe(0);
+      record.stats.lifetimeUsage.cost = 0.08;
+      expect(manager.getUnaccountedAgentCost(id)).toBeCloseTo(0.03);
     });
 
     it("persists cost after agent is evicted from map", async () => {
@@ -436,6 +614,8 @@ describe("AgentManager", () => {
 
     it("evicts consumed completed records older than the cutoff", async () => {
       manager = new AgentManager(onComplete);
+      const onRemove = vi.fn();
+      manager.setOnRemove(onRemove);
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
@@ -448,6 +628,7 @@ describe("AgentManager", () => {
       (manager as any).cleanup();
 
       expect(manager.getRecord(id)).toBeUndefined();
+      expect(onRemove).toHaveBeenCalledWith(record);
     });
 
     it("does not evict records younger than the cutoff", async () => {

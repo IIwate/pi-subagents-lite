@@ -174,8 +174,9 @@ export function streamToOutputFile(
   path: string,
   stats?: { turnCount: number; toolUseCount: number; totalTokens: number; cost: number },
   bufferSize: number = 0,
+  startMessageIndex: number = 1,
 ): () => void {
-  let writtenCount = 1; // initial user prompt already written
+  let writtenCount = startMessageIndex;
   let thinkingBuffer = "";
   let streamedThinkingBlocks = 0; // thinking blocks written live; skipped in the final flush
   let streamedThinkingChars = 0; // track total chars streamed for deduplication
@@ -313,8 +314,23 @@ export class AgentOutputLog {
    * before the DONE line is written.
    */
   attach(session: AgentSession): void {
+    this.attachFrom(session, 1);
+  }
+
+  /** Resume logging a settled session without replaying its existing messages. */
+  resume(session: AgentSession): void {
+    this.attachFrom(session, session.messages.length);
+  }
+
+  private attachFrom(session: AgentSession, startMessageIndex: number): void {
     this.statsRef = { turnCount: 0, toolUseCount: 0, totalTokens: 0, cost: 0 };
-    this.cleanup = streamToOutputFile(session, this.path, this.statsRef, this.bufferSize);
+    this.cleanup = streamToOutputFile(
+      session,
+      this.path,
+      this.statsRef,
+      this.bufferSize,
+      startMessageIndex,
+    );
   }
 
   /**

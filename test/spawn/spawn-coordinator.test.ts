@@ -43,6 +43,7 @@ vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
   getSessionCtx: () => ({ isIdle: () => true }),
   getWidget: () => null,
+  getNavigator: () => null,
 }));
 
 function makeMockManager() {
@@ -71,6 +72,7 @@ function makeMockManager() {
     listAgents: vi.fn(() => [...records.values()]),
     abort: vi.fn(() => true),
     steer: vi.fn(async () => true),
+    interact: vi.fn(async () => true),
     getTotalAgentCost: vi.fn(() => 0),
     dispose: vi.fn(),
     onComplete: undefined as any,
@@ -188,6 +190,53 @@ describe("SpawnCoordinator", () => {
     });
 
     expect(coordinator.isBackground(result.agentId)).toBe(false);
+  });
+
+  it("routes direct interaction through the manager with live callbacks", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await coordinator.spawn(mockPi, ctx, {
+      type: "builder",
+      prompt: "do something",
+      description: "Test",
+      graceTurns: 6,
+      runInBackground: true,
+    });
+
+    const images = [{ type: "image", data: "abc", mimeType: "image/png" }] as any;
+    const accepted = await coordinator.interact(result.agentId, "focus on tests", images);
+
+    expect(accepted).toBe(true);
+    expect(manager.interact).toHaveBeenCalledWith(
+      result.agentId,
+      "focus on tests",
+      expect.objectContaining({
+        onToolActivity: expect.any(Function),
+        onTextDelta: expect.any(Function),
+      }),
+      images,
+    );
+  });
+
+  it("delivers a pending background nudge before interactive continuation", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await coordinator.spawn(mockPi, ctx, {
+      type: "builder",
+      prompt: "do something",
+      description: "Test",
+      graceTurns: 6,
+      runInBackground: true,
+    });
+    const record = manager.getRecord(result.agentId);
+    record.lifecycle.status = "completed";
+    record.result = "original result";
+    coordinator.onAgentComplete(record);
+
+    await coordinator.interact(result.agentId, "continue");
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mockPi.sendMessage.mock.calls[0][0].content).toContain("completed");
+    expect(mockPi.sendMessage.mock.calls[0][0].content).toContain("original result");
+    expect(manager.interact).toHaveBeenCalled();
   });
 
   describe("nudge scheduling", () => {

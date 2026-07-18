@@ -31,13 +31,16 @@ vi.mock("@earendil-works/pi-tui", () => ({
 }));
 
 function makeMockManager(agents: any[], totalAgentCost = 0): AgentManager {
-  return {
+  const manager = {
     listAgents: () => agents,
     getAgent: () => undefined,
     setConcurrency: () => {},
     getTotalAgentCost: () => totalAgentCost,
+    getUnaccountedAgentCost: (id: string) =>
+      manager.listAgents().find(agent => agent.id === id)?.stats.lifetimeUsage.cost ?? 0,
     // other methods not used by widget
-  } as any as AgentManager;
+  };
+  return manager as any as AgentManager;
 }
 
 function makeMockTheme(): any {

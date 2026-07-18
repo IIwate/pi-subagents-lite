@@ -5,6 +5,7 @@ import { registerAgents, getAvailableTypes, setAgentScanDirs } from "./agents/ag
 import { scanAgentFilesInDir, mergeAgents } from "./agents/agent-discovery.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentWidget, type UICtx } from "./ui/agent-widget.js";
+import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { toolCallListener } from "./agents/tool-execution.js";
 import { registerAgentTool } from "./registration.js";
@@ -12,11 +13,13 @@ import {
   getPiInstance,
   getManager,
   getWidget,
+  getNavigator,
   getCoordinator,
   getStore,
   setSessionCtx,
   setManager,
   setWidget,
+  setNavigator,
   setCoordinator,
 } from "./shell.js";
 
@@ -31,6 +34,7 @@ import {
 export function ensureManagerAndWidget(): void {
   const currentManager = getManager();
   const currentWidget = getWidget();
+  const currentNavigator = getNavigator();
 
   // Create manager if missing
   if (!currentManager) {
@@ -58,6 +62,7 @@ export function ensureManagerAndWidget(): void {
       // Mark finished and update widget
       getWidget()?.markFinished(record.id);
       getWidget()?.update();
+      getNavigator()?.update();
     });
   }
 
@@ -73,6 +78,14 @@ export function ensureManagerAndWidget(): void {
     // newWidget.setShowCost(...) + syncWidgetSettings() calls).
     getStore().setDeps({ widget: newWidget });
   }
+
+  if (!currentNavigator) {
+    setNavigator(new AgentNavigator(
+      getManager()!,
+      async (agentId, text) => getCoordinator()?.interact(agentId, text) ?? false,
+    ));
+  }
+  getManager()?.setOnRemove(() => getNavigator()?.update());
 }
 
 /**
@@ -118,6 +131,28 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 export function setupEventListeners(pi: ExtensionAPI): void {
   pi.on("tool_call", toolCallListener);
 
+  pi.on("input", async (event, ctx) => {
+    if (event.source !== "interactive") return;
+    const selectedAgentId = getNavigator()?.selectedId();
+    const text = event.text.trim();
+    if (
+      !selectedAgentId
+      || text.startsWith("/")
+      || text.startsWith("!")
+    ) return;
+
+    const accepted = await getCoordinator()?.interact(
+      selectedAgentId,
+      event.text,
+      event.images,
+    ) ?? false;
+    if (!accepted) {
+      ctx.ui.setEditorText(event.text);
+      ctx.ui.notify("Selected subagent is not available for interaction", "warning");
+    }
+    return { action: "handled" as const };
+  });
+
   pi.on("tool_execution_start", async (_event, ctx) => {
     // Set UI context on first tool execution
     if (!getWidget()) {
@@ -138,6 +173,9 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     await loadConfigAndRegisterAgents(ctx);
     // Re-register with updated agent type list (now includes user/project agents)
     registerAgentTool(pi);
+    if (ctx.mode === "tui") {
+      getNavigator()?.setUICtx(ctx.ui);
+    }
     // Register ctrl+o listener
     if (ctx.hasUI && !unregisterTerminalInput) {
       unregisterTerminalInput = ctx.ui.onTerminalInput((data: string) => {
@@ -172,7 +210,9 @@ export function setupEventListeners(pi: ExtensionAPI): void {
         ctx.ui.notify(`${active.length} agent(s) killed by reload`, "warning");
       }
     }
-    // Dispose coordinator, store, widget, then manager
+    // Dispose navigator, coordinator, store, widget, then manager
+    getNavigator()?.dispose();
+    setNavigator(null);
     getCoordinator()?.dispose();
     setCoordinator(null);
     getStore().dispose();

@@ -33,6 +33,7 @@ Names like `Agent`, `StopAgent`, `AgentStatus`, `run_in_background`, `worktree_p
 - **Steering** — inject mid-execution guidance into running agents
 - **Cost & usage tracking** — input/output/cache tokens and dollar cost per agent (toggle in stats)
 - **Live widget** — persistent status bar with running/completed agents, full and compact modes
+- **Interactive agent switching** — switch the visible transcript between the main agent and subagents, then message the selected subagent directly
 - **Result viewer** — fullscreen markdown with stats
 - **Worktrees** — run agents in a git worktree via `worktree_path`
 - **Output logs** — `tail -f` friendly, ISO-timestamped with configurable thinking buffer (OFF, 80, 200, 500, 1000 chars). Flush rounds to sentence boundaries.
@@ -279,6 +280,20 @@ Persistent bar above the editor showing running and completed agents, updating l
 Turn format uses `≤` and `⟳` (`5≤30⟳` = 5 of 30 turns). Turn count is colored by usage: normal < 80%, warning 80–99%, error at 100%. The max is hidden when well below the limit. Token glyphs (`↑` input, `↓` output) are self-explanatory — no "tokens" label.
 
 Compact mode is active when **Force compact** is ON, or **ctrl+o shortcut** is ON and the user has collapsed tool expansion. Force compact always wins.
+
+### Agent switching
+
+After the first subagent is dispatched, a selector appears below the editor with the main agent and every retained subagent. The solid circle marks the transcript and input target currently selected.
+
+- With an empty editor, press `↓` to focus the selector.
+- Press `↑` / `↓` to move the highlighted candidate, then press `Enter` to switch.
+- Press `Esc` or `↑` above the main-agent row to return focus to the editor without changing the active agent.
+- When a subagent is selected, Pi's main chat, pending-message, and working-status regions are replaced with that subagent's live conversation while the editor, agent widgets, and footer remain in place.
+- Switching clears stale terminal scrollback so mouse scrolling shows only the active agent's transcript.
+- Messages submitted from the editor are routed to the selected subagent. Running agents receive steering messages; completed agents resume their existing child session.
+- Select **Main agent** to restore the parent transcript and normal input routing.
+
+All `/agents` menus and actions remain available while a subagent view is selected.
 
 ### Result viewer
 

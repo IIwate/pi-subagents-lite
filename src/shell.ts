@@ -13,6 +13,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "./agents/agent-manager.js";
 import type { AgentWidget } from "./ui/agent-widget.js";
+import type { AgentNavigator } from "./ui/agent-navigator.js";
 import type { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { ConfigStore } from "./config/config-store.js";
 
@@ -25,6 +26,7 @@ interface Shell {
   sessionCtx: ExtensionContext;
   manager: AgentManager | null;
   widget: AgentWidget | null;
+  navigator: AgentNavigator | null;
   store: ConfigStore;
   coordinator: SpawnCoordinator | null;
 }
@@ -38,6 +40,7 @@ const shell: Shell = {
   sessionCtx: null!,
   manager: null,
   widget: null,
+  navigator: null,
   store: new ConfigStore(),
   coordinator: null,
 };
@@ -64,6 +67,11 @@ export function getManager(): AgentManager | null {
 /** The current AgentWidget, or null if not yet created. */
 export function getWidget(): AgentWidget | null {
   return shell.widget;
+}
+
+/** The current keyboard-driven agent navigator, or null if not yet created. */
+export function getNavigator(): AgentNavigator | null {
+  return shell.navigator;
 }
 
 /** The ConfigStore (lives for the lifetime of the extension). */
@@ -94,6 +102,10 @@ export function setManager(m: AgentManager | null): void {
 
 export function setWidget(w: AgentWidget | null): void {
   shell.widget = w;
+}
+
+export function setNavigator(navigator: AgentNavigator | null): void {
+  shell.navigator = navigator;
 }
 
 export function setCoordinator(c: SpawnCoordinator | null): void {

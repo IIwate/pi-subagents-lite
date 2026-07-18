@@ -2,7 +2,7 @@
  * Type definitions for the subagent system.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
+import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentOutputLog } from "./agents/output-file.js";
 import type { LifetimeUsage, AgentUsage } from "./agents/usage.js";
@@ -146,8 +146,14 @@ export interface AgentExecutionState {
   session?: AgentSession;
   abortController?: AbortController;
   promise?: Promise<string>;
+  /** Whether the current execution promise has fully settled. */
+  settled?: boolean;
+  /** Resolved model key used for concurrency accounting. */
+  modelKey?: string;
+  /** Grace turns retained for direct follow-up prompts. */
+  graceTurns?: number;
   /** Steering messages queued before the session was ready. */
-  pendingSteers?: string[];
+  pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
   /** Lifecycle wrapper for the output file stream. */
   outputLog?: AgentOutputLog;
 }

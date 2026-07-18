@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   existsSync,
   mkdirSync,
+  realpathSync,
   symlinkSync,
   rmSync,
   writeFileSync,
@@ -62,8 +63,9 @@ function makePi(
 }
 
 function makeTempDir(prefix = "wt-test"): { dir: string; cleanup: () => void } {
-  const dir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  const rawDir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(rawDir, { recursive: true });
+  const dir = realpathSync(rawDir);
   return {
     dir,
     cleanup: () => {

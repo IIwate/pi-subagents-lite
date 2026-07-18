@@ -503,6 +503,35 @@ describe("AgentOutputLog", () => {
     expect(content.trim().split("\n").at(-1)!).toContain("[DONE]");
   });
 
+  it("resumes logging without replaying existing messages", () => {
+    const dir = fixture.getDir();
+    const log = new AgentOutputLog(testAgentId, "test", dir);
+    const session = createMockSession() as any;
+    const messages: any[] = [
+      { role: "user", content: "test" },
+      { role: "assistant", content: [{ type: "text", text: "First answer." }] },
+    ];
+    Object.defineProperty(session, "messages", { get: () => messages, configurable: true });
+
+    log.attach(session);
+    session._fireTurnEnd();
+    log.finalize({ turnCount: 1, toolUseCount: 0, totalTokens: 100, cost: 0 });
+
+    log.resume(session);
+    messages.push(
+      { role: "user", content: "continue" },
+      { role: "assistant", content: [{ type: "text", text: "Second answer." }] },
+    );
+    session._fireTurnEnd();
+    log.finalize({ turnCount: 2, toolUseCount: 0, totalTokens: 200, cost: 0 });
+
+    const content = readFileSync(log.path, "utf-8");
+    expect(content.match(/First answer\./g)).toHaveLength(1);
+    expect(content).toContain("[USER] continue");
+    expect(content).toContain("Second answer.");
+    expect(content.match(/\[DONE\]/g)).toHaveLength(2);
+  });
+
   it("unsubscribes from session on finalize", () => {
     const dir = fixture.getDir();
     const log = new AgentOutputLog(testAgentId, "test", dir);
