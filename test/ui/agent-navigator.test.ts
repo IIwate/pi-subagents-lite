@@ -96,15 +96,25 @@ function makeTui(prefixCount = 1): any {
   const statusIndex = chatIndex + 2;
   const editorIndex = chatIndex + 4;
   const belowIndex = chatIndex + 5;
+  const footerIndex = chatIndex + 6;
+  const originalFooter = {
+    render: () => ["parent cwd", "parent stats"],
+    invalidate: vi.fn(),
+  };
+  Object.defineProperty(originalFooter, "constructor", {
+    value: { name: "FooterComponent" },
+  });
   return {
     chatIndex,
     pendingIndex,
     statusIndex,
     editorIndex,
     belowIndex,
+    footerIndex,
     originalChat,
     originalPending,
     originalStatus,
+    originalFooter,
     children: [
       ...Array.from({ length: prefixCount }, (_, index) => makeContainer(`header ${index}`)),
       originalChat,
@@ -113,7 +123,7 @@ function makeTui(prefixCount = 1): any {
       makeContainer("above widgets"),
       makeContainer("editor"),
       makeContainer("below widgets"),
-      makeComponent("footer"),
+      originalFooter,
     ],
     terminal: {
       columns: 120,
@@ -239,6 +249,7 @@ describe("AgentNavigator", () => {
     expect(tui.children[tui.chatIndex]).not.toBe(tui.originalChat);
     expect(tui.children[tui.pendingIndex]).not.toBe(tui.originalPending);
     expect(tui.children[tui.statusIndex]).not.toBe(tui.originalStatus);
+    expect(tui.children[tui.footerIndex]).not.toBe(tui.originalFooter);
     expect(tui.terminal.write).toHaveBeenCalledWith("\x1b[3J");
   });
 
@@ -282,6 +293,7 @@ describe("AgentNavigator", () => {
     expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
     expect(tui.children[tui.pendingIndex]).toBe(tui.originalPending);
     expect(tui.children[tui.statusIndex]).toBe(tui.originalStatus);
+    expect(tui.children[tui.footerIndex]).toBe(tui.originalFooter);
   });
 
   it("decorates the editor and forwards printable input after leaving the list", () => {
@@ -370,6 +382,138 @@ describe("AgentNavigator", () => {
     expect(ui.widgets.has("agent-navigator-transcript")).toBe(false);
   });
 
+  it("replaces Main footer stats with the selected subagent state", () => {
+    const record = makeRecord();
+    Object.assign(record.execution.session, {
+      model: {
+        id: "child-model",
+        provider: "test",
+        reasoning: true,
+        contextWindow: 128_000,
+      },
+      thinkingLevel: "high",
+      autoCompactionEnabled: true,
+      modelRegistry: { isUsingOAuth: () => false },
+      getSessionStats: () => ({
+        tokens: {
+          input: 12_000,
+          output: 3_000,
+          cacheRead: 20_000,
+          cacheWrite: 0,
+          total: 35_000,
+        },
+        cost: 0.25,
+      }),
+      getContextUsage: () => ({ percent: 25, contextWindow: 128_000 }),
+      sessionManager: {
+        getEntries: () => [],
+      },
+    });
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const footerLines = tui.children[tui.footerIndex].render(120);
+    expect(footerLines[0]).toBe("parent cwd");
+    expect(footerLines[1]).toContain("↑12k");
+    expect(footerLines[1]).toContain("25.0%/128k (auto)");
+    expect(footerLines[1]).toContain("child-model • high");
+    expect(footerLines[1]).not.toContain("parent stats");
+  });
+
+  it("hides a one-line Main custom footer while a subagent is selected", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const tui = makeTui();
+    tui.originalFooter.render = () => ["main-model • xhigh"];
+    mountSelector(ui, tui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const footerLines = tui.children[tui.footerIndex].render(120);
+    expect(footerLines).toHaveLength(1);
+    expect(footerLines[0]).not.toContain("main-model");
+  });
+
+  it("adopts a footer replaced by another extension while Main is selected", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+    const replacementFooter = {
+      render: () => ["replacement cwd", "replacement stats"],
+      invalidate: vi.fn(),
+    };
+    tui.children[tui.footerIndex] = replacementFooter;
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[A");
+    navigator.handleTerminalInput("\r");
+
+    expect(tui.children[tui.footerIndex]).toBe(replacementFooter);
+  });
+
+  it("reconciles a footer appended by another extension on the child screen", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const replacementFooter = {
+      render: () => ["replacement cwd", "replacement stats"],
+      invalidate: vi.fn(),
+    };
+    const staleChildFooter = tui.children[tui.footerIndex];
+    tui.children.push(replacementFooter);
+    tui.originalFooter.render = () => { throw new Error("disposed footer rendered"); };
+
+    expect(staleChildFooter.render(120)).toEqual([]);
+    expect(tui.children).toHaveLength(tui.footerIndex + 1);
+    expect(tui.children[tui.footerIndex]).not.toBe(replacementFooter);
+    expect(tui.requestRender).toHaveBeenCalled();
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[A");
+    navigator.handleTerminalInput("\r");
+    expect(tui.children[tui.footerIndex]).toBe(replacementFooter);
+  });
+
+  it("keeps footer reconciliation active while a completed child is selected", () => {
+    const record = makeRecord("agent-12345678", "completed");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    expect((navigator as any).refreshTimer).toBeUndefined();
+    mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    expect((navigator as any).refreshTimer).toBeDefined();
+  });
+
   it("does not start a refresh timer before a TUI context is attached", () => {
     navigator = new AgentNavigator(makeManager([makeRecord()]));
 
@@ -414,6 +558,7 @@ describe("AgentNavigator", () => {
     navigator = undefined;
 
     expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.children[tui.footerIndex]).toBe(tui.originalFooter);
     expect(tui.terminal.write).not.toHaveBeenCalled();
   });
 

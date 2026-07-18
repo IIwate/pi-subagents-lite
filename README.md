@@ -288,7 +288,8 @@ After the first subagent is dispatched, a selector appears below the editor with
 - With an empty editor, press `↓` to focus the selector.
 - Press `↑` / `↓` to move the highlighted candidate, then press `Enter` to switch.
 - Press `Esc` or `↑` above the main-agent row to return focus to the editor without changing the active agent.
-- When a subagent is selected, Pi's main chat, pending-message, and working-status regions are replaced with that subagent's live conversation while the editor, agent widgets, and footer remain in place.
+- When a subagent is selected, Pi's main chat, pending-message, and working-status regions are replaced with that subagent's live conversation while the editor and agent widgets remain in place.
+- The footer switches its usage/context line to the selected subagent's live tokens, cache usage, cost, context window, model, and thinking level; switching back to Main restores the original footer.
 - Switching clears stale terminal scrollback so mouse scrolling shows only the active agent's transcript.
 - Messages submitted from the editor are routed to the selected subagent. Running agents receive steering messages; completed agents resume their existing child session.
 - Select **Main agent** to restore the parent transcript and normal input routing.
