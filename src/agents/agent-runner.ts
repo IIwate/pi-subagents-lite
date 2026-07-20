@@ -448,7 +448,7 @@ async function initSession(
     cwd, agentDir,
     sessionManager,
     settingsManager: SettingsManager.create(cwd, agentDir),
-    modelRegistry: ctx.modelRegistry, model,
+    model,
     tools: getToolNamesForType(type), resourceLoader: loader,
     ...(scopedModels ? { scopedModels } : {}),
   };

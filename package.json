@@ -1,5 +1,5 @@
 {
-  "name": "pi-subagents-lite",
+  "name": "@router-for-me/pi-subagents-lite",
   "version": "1.5.0",
   "description": "Lightweight sub-agents for pi — spawn specialized agents with isolated sessions, tools, and models.",
   "keywords": [
@@ -17,15 +17,18 @@
   "packageManager": "bun@1",
   "engines": {
     "bun": ">=1.0.0",
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AlexParamonov/pi-subagents-lite.git"
+    "url": "git+https://github.com/luispater/pi-subagents-lite.git"
   },
-  "homepage": "https://github.com/AlexParamonov/pi-subagents-lite#readme",
+  "homepage": "https://github.com/luispater/pi-subagents-lite#readme",
   "bugs": {
-    "url": "https://github.com/AlexParamonov/pi-subagents-lite/issues"
+    "url": "https://github.com/luispater/pi-subagents-lite/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.80.1",

@@ -1,11 +1,24 @@
-# pi-subagents-lite
+# @router-for-me/pi-subagents-lite
 
-[![npm version](https://img.shields.io/npm/v/pi-subagents-lite)](https://www.npmjs.com/package/pi-subagents-lite)
+[![npm version](https://img.shields.io/npm/v/%40router-for-me%2Fpi-subagents-lite)](https://www.npmjs.com/package/@router-for-me/pi-subagents-lite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Sub-agents for [pi](https://pi.dev) — schema-first, zero-fluff.**
 
 Spawn specialized agents with isolated sessions, custom tools, and per-type models at minimal token cost.
+
+## Differences from Upstream
+
+This package is a fork of [AlexParamonov/pi-subagents-lite](https://github.com/AlexParamonov/pi-subagents-lite) that diverged after upstream v1.4.8. Compared with the upstream `main` branch, this fork:
+
+- replaces the separate running-agents menu and result viewer with interactive transcript switching between the main agent and subagents;
+- adds a selected-agent footer with live token, context, cost, model, and thinking statistics;
+- lets messages steer running subagents or resume completed child sessions in place;
+- carries the latest parent custom session entries into isolated child sessions without copying conversation history;
+- enforces pi's active model scope for tool and menu launches while supporting explicit tool-level model selection;
+- improves model/thinking parsing, status rendering, spinner feedback, and automatic-completion guidance.
+
+The branches have also diverged through upstream's v1.4.9 and v1.4.10 maintenance line. See the [live branch comparison](https://github.com/AlexParamonov/pi-subagents-lite/compare/main...luispater:main) for the fork-side diff from the common ancestor.
 
 ## Schema-First Design
 
@@ -41,9 +54,9 @@ Names like `Agent`, `StopAgent`, `AgentStatus`, `run_in_background`, `worktree_p
 ## Install
 
 ```bash
-pi install npm:pi-subagents-lite
-pi install -l npm:pi-subagents-lite   # project-local
-pi -e npm:pi-subagents-lite           # try without installing
+pi install npm:@router-for-me/pi-subagents-lite
+pi install -l npm:@router-for-me/pi-subagents-lite   # project-local
+pi -e npm:@router-for-me/pi-subagents-lite           # try without installing
 ```
 
 ## Quick Start
@@ -100,10 +113,12 @@ Spawn a sub-agent.
 | `prompt` | ✅ | The task for the sub-agent |
 | `description` | | Brief description for the caller (optional — derived from `prompt` if omitted) |
 | `agent` | | Type name — `general-purpose`, `Explore`, or any custom type. **Auto-populated** from `.md` files in your agent directories; drop a file, it appears in the enum. `hidden: true` hides a type from the list (still callable by name). |
+| `model` | | Model override as `id`, `provider/id`, or `id:thinking`; takes precedence over configured defaults |
+| `thinking` | | Thinking override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `run_in_background` | | Fire-and-forget; result delivered automatically when done |
 | `worktree_path` | | Absolute path to a git worktree. Agent runs in that worktree's context, discovers agents from its `.pi/agents/`, and shows a worktree label in the UI. Validated against the parent repo's git common dir. |
 
-> `model`, `max_turns`, `max_tokens`, and `thinking` are **not visible to the LLM** — injected at call time from agent config and frontmatter. See [Custom Agent Types](#custom-agent-types).
+> `max_turns` and `max_tokens` are **not visible to the LLM** — they are injected at call time from agent config and frontmatter. See [Custom Agent Types](#custom-agent-types).
 
 ### `StopAgent`
 
@@ -160,7 +175,7 @@ A minimal agent — just `name` and `description` — gets everything: all tools
 | `skills` | `true` \| `string[]` \| `false` | `true` | **Skill whitelist** — which skills are available (metadata in system prompt). |
 | `preload_skills` | `string[]` \| `false` | `false` | **Full skill injection** — dump complete SKILL.md content into the system prompt instead of metadata-only. |
 | `model` | string | inherit parent | Default model as `"provider/model-id"`. See [Model Resolution](#model-resolution). |
-| `thinking` | string | inherit parent | One of: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
+| `thinking` | string | inherit parent | One of: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a provider-specific value. |
 | `max_turns` | number | unlimited | Soft turn limit. Agent gets a steer at the limit, then `max_turns + graceTurns` before hard abort. |
 | `max_tokens` | number | unlimited | Max output tokens per LLM response. Injected into provider request payloads. |
 | `hidden` | `true` \| `false` | `false` | `true` hides the type from the enum (LLM can't see or invoke it). Still callable by name. |
@@ -381,8 +396,8 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
 
 ## Requirements
 
-- Node.js >= 18
-- pi >= 0.74.0
+- Node.js >= 22.19.0
+- pi >= 0.80.1
 
 ## License
 

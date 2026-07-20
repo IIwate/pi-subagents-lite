@@ -55,6 +55,9 @@ describe("stripThinkingSuffix", () => {
     expect(stripThinkingSuffix("cpa-responses/grok-4.5:high")).toBe(
       "cpa-responses/grok-4.5",
     );
+    expect(stripThinkingSuffix("cpa-responses/grok-4.5:max")).toBe(
+      "cpa-responses/grok-4.5",
+    );
   });
 
   it("keeps colons that are not thinking suffixes", () => {
@@ -83,6 +86,7 @@ describe("patternMatchesModel", () => {
 
   it("ignores thinking suffix on patterns", () => {
     expect(patternMatchesModel("cpa-responses/grok-4.5:high", grok)).toBe(true);
+    expect(patternMatchesModel("cpa-responses/grok-4.5:max", grok)).toBe(true);
   });
 });
 

@@ -192,6 +192,7 @@ describe("parseThinkingLevel", () => {
   it("accepts known levels", () => {
     expect(parseThinkingLevel("low")).toBe("low");
     expect(parseThinkingLevel("xhigh")).toBe("xhigh");
+    expect(parseThinkingLevel("max")).toBe("max");
   });
 
   it("accepts free-form levels", () => {

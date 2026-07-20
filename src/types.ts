@@ -10,7 +10,7 @@ import type { SubagentType, AgentInvocation } from "./agents/types.js";
 
 /**
  * Thinking level for agent models.
- * Known levels: off, minimal, low, medium, high, xhigh.
+ * Known levels: off, minimal, low, medium, high, xhigh, max.
  * Free-form strings are also allowed (provider-specific thinking maps).
  */
 export type ThinkingLevel = string;

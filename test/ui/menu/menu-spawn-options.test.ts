@@ -293,6 +293,13 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
     expect(dt.currentValue).toBe("high");
   });
 
+  it("offers max thinking level", async () => {
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
+    expect(dt.values).toContain("max");
+  });
+
   it("sets thinking level via onChange", async () => {
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
