@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@router-for-me/pi-subagents-lite",
+      "name": "@iiwate/pi-subagents-lite",
       "dependencies": {
         "@earendil-works/pi-agent-core": "^0.80.1",
         "@sinclair/typebox": "^0.34.49",
