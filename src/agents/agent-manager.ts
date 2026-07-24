@@ -603,6 +603,21 @@ export class AgentManager {
   }
 
   /**
+   * Manually clear an agent from the TUI list.
+   * Running/queued agents are stopped first, then the record is removed immediately.
+   */
+  clear(id: string, stoppedBy: StopInitiator = "user"): boolean {
+    const record = this.agents.get(id);
+    if (!record) return false;
+
+    if (!isTerminalStatus(record.lifecycle.status)) {
+      this.stopAgent(record, stoppedBy);
+    }
+    this.removeRecord(id, record);
+    return true;
+  }
+
+  /**
    * Stop an agent by aborting its session or removing it from the queue.
    * Returns true if the agent was stopped, false if it wasn't running/queued.
    */

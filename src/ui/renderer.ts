@@ -6,20 +6,19 @@
 
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type { Theme } from "./types.js";
-import { buildStatsParts, formatMs, getDisplayName, STATS_SEP } from "./format.js";
+import { buildStatsParts, formatMs, getDisplayName, STATS_SEP, truncateDesc } from "./format.js";
 
 // ============================================================================
 // Stats rendering helpers
 // ============================================================================
 
-/** Format agent display name with optional model: "Agent (mimo-v2.5-pro)" or "Agent". */
+/** Format agent type name only: "Agent". */
 export function agentNameLabel(d: Record<string, unknown>, theme: Theme): string {
-  const typeName = getDisplayName((d.type as string) || "");
-  const modelName = d.modelName as string | undefined;
-  return modelName ? `${theme.bold(typeName)} (${modelName})` : theme.bold(typeName);
+  const typeName = getDisplayName((d.type as string) || "") || "Agent";
+  return theme.bold(typeName);
 }
 
-/** Build the stats line for an agent result card. */
+/** Build stats after the name/desc: "grok-4.5 · high · 1 calls · …". */
 export function buildStatsLine(d: Record<string, unknown>, theme: Theme, showCost: boolean): string {
   const parts = buildStatsParts({
     toolUses: (d.toolUses as number) ?? 0,
@@ -30,66 +29,36 @@ export function buildStatsLine(d: Record<string, unknown>, theme: Theme, showCos
     contextPercent: d.contextPercent as number | null,
     compactions: (d.compactions as number) ?? 0,
     cost: showCost ? (d.cost as number | undefined) : undefined,
-    modelName: d.modelName as string | undefined,
-    thinkingLevel: d.thinkingLevel as string | undefined,
+    modelName: typeof d.modelName === "string" ? d.modelName : undefined,
+    thinkingLevel: typeof d.thinkingLevel === "string" ? d.thinkingLevel : undefined,
   }, theme);
   parts.push(formatMs(d.durationMs as number));
   return parts.join(STATS_SEP);
 }
 
+/** One-line result header matching the below-editor agent list. */
+function formatAgentResultHeader(
+  d: Record<string, unknown>,
+  icon: string,
+  theme: Theme,
+  showCost: boolean,
+): string {
+  const namePart = agentNameLabel(d, theme);
+  const desc = typeof d.description === "string" ? d.description.trim() : "";
+  const descPart = desc ? `  ${theme.fg("text", truncateDesc(desc, 50))}` : "";
+  const statsLine = buildStatsLine(d, theme, showCost);
+  return statsLine
+    ? `${icon} ${namePart}${descPart}${STATS_SEP}${statsLine}`
+    : `${icon} ${namePart}${descPart}`;
+}
+
 // ============================================================================
 // Agent tool renderers
 // ============================================================================
-
-/** Render the Agent tool call line (e.g., "▸ Agent (model)"). */
-export function renderAgentToolCall(
-  args: Record<string, unknown>,
-  theme: Theme,
-): Text {
-  const typeName = getDisplayName((args.agent as string) || "");
-  const label = typeName || "Agent";
-  let text = `▸ ${theme.fg("accent", theme.bold(label))}`;
-
-  const modelOverride = args._modelOverride as string | undefined;
-  if (modelOverride) {
-    text += ` (${modelOverride})`;
-  }
-
-  return new Text(text, 0, 0);
-}
-
-/** Render the Agent tool result — compact or expanded. */
-export function renderAgentToolResult(
-  result: { content: Array<{ type: string; text?: string }>; details?: Record<string, unknown>; isError?: boolean },
-  options: { expanded?: boolean },
-  theme: Theme,
-  showCost: boolean,
-): Text {
-  const { expanded } = options;
-  const text = result.content[0]?.type === "text" ? result.content[0].text ?? "" : "";
-  const d = result.details;
-  const icon = result.isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-  const desc = (d?.description as string) || "";
-
-  if (d && d.turnCount != null) {
-    const namePart = agentNameLabel(d, theme);
-    const statsLine = buildStatsLine(d, theme, showCost);
-    let lines = `${icon} ${namePart}·${statsLine}\n  ${theme.fg("text", desc)}`;
-    if (expanded && text) {
-      lines += "\n" + text.split("\n").map(l => `  ${l}`).join("\n");
-    }
-    return new Text(lines, 0, 0);
-  }
-
-  // Minimal card — background spawns (no stats) use space placeholder
-  const isBackground = text.includes("running in background") || text.includes("queued");
-  const prefix = isBackground ? "  " : `${icon} `;
-  if (desc) {
-    return new Text(`${prefix}${theme.fg("text", desc)}`, 0, 0);
-  }
-
-  return new Text(`${prefix}${theme.fg("dim", text)}`, 0, 0);
-}
+//
+// Agent tool chat rendering is silent (registration: renderShell self + empty
+// Container). Progress lives only in the below-editor agent list.
+// formatAgentResultHeader below is still used by subagent-result messages.
 
 // ============================================================================
 // Message renderer — subagent-result (background agent completion)
@@ -114,9 +83,7 @@ export function renderSubagentResult(
     const isError = d.status === "error" || d.status === "aborted" || d.status === "stopped";
     const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
 
-    const namePart = agentNameLabel(d, theme);
-    const statsLine = buildStatsLine(d, theme, showCost);
-    let headerLine = `${icon} ${namePart}·${statsLine}\n  ${theme.fg("text", (d.description as string) || "")}`;
+    let headerLine = formatAgentResultHeader(d, icon, theme, showCost);
     if (d.outputFile as string) {
       headerLine += `\n  ${theme.fg("dim", `tail -f ${d.outputFile}`)}`;
     }

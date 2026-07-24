@@ -24,13 +24,21 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentRecord } from "../types.js";
-import { summarizeToolArgs } from "./format.js";
+import { getSessionContextPercent } from "../agents/usage.js";
+import {
+  buildStatsParts,
+  getDisplayName,
+  STATS_SEP,
+  summarizeToolArgs,
+  truncateDesc,
+} from "./format.js";
 import { renderAgentFooterStats } from "./agent-footer.js";
 import { SPINNER } from "./agent-widget.js";
 import type { Theme } from "./types.js";
 
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
-const REFRESH_INTERVAL_MS = 80;
+// 80ms was smooth but forced full TUI repaints (powerline classic ghost lines / IME flicker).
+const REFRESH_INTERVAL_MS = 500;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
 const PI_0801_ROOT_CHILDREN = 8;
 const PI_08010_ROOT_CHILDREN = 9;
@@ -336,9 +344,17 @@ export class AgentNavigator {
   private selectedAgentId: string | null = null;
   /** Candidate row moved by Up/Down while the selector has focus. */
   private highlightedAgentId: string | null = null;
+  /** Agent id waiting for Ctrl+D → Enter clear confirmation. */
+  private confirmingClearId: string | null = null;
   private listFocused = false;
   private spinnerFrame = 0;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  /** Skip requestRender when list content is unchanged between timer ticks. */
+  private lastRenderSig = "";
+  /** Last estimated below-editor list height; shrink → force full TUI reflow. */
+  private lastListPaintHeight = 0;
+  /** Previous lifecycle status per agent — terminal transition forces reflow. */
+  private lastAgentStatus = new Map<string, AgentRecord["lifecycle"]["status"]>();
   private selectorRegistered = false;
   private selectorTui: TUI | undefined;
   private screenSwap: ScreenSwapState | undefined;
@@ -427,7 +443,8 @@ export class AgentNavigator {
 
   /**
    * Enter the list from an empty editor with Down. Up/Down only moves the
-   * candidate row; Enter confirms the switch. Escape or Up above Main returns
+   * candidate row; Enter confirms the switch. Ctrl+D clears a non-active
+   * subagent (Enter confirms, Esc cancels). Escape or Up above Main returns
    * input to the editor without changing the active agent.
    */
   handleTerminalInput(data: string): { consume?: boolean } | undefined {
@@ -437,6 +454,7 @@ export class AgentNavigator {
     if (!this.listFocused) {
       if (matchesKey(data, Key.down) && this.uiCtx?.getEditorText() === "") {
         this.listFocused = true;
+        this.confirmingClearId = null;
         this.highlightedAgentId = this.selectedAgentId;
         this.requestRender();
         return { consume: true };
@@ -444,10 +462,29 @@ export class AgentNavigator {
       return undefined;
     }
 
+    // Confirming clear: only Enter / Esc, ignore everything else (resume-style).
+    if (this.confirmingClearId !== null) {
+      if (matchesKey(data, Key.enter)) {
+        this.confirmClear();
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.confirmingClearId = null;
+        this.requestRender();
+        return { consume: true };
+      }
+      return { consume: true };
+    }
+
     if (matchesKey(data, Key.escape)) {
       this.listFocused = false;
       this.highlightedAgentId = this.selectedAgentId;
       this.requestRender();
+      return { consume: true };
+    }
+
+    if (matchesKey(data, Key.ctrl("d"))) {
+      this.beginClearConfirmation();
       return { consume: true };
     }
 
@@ -491,6 +528,61 @@ export class AgentNavigator {
       this.requestRender();
     }
     return undefined;
+  }
+
+  /** Ctrl+D target rules: never Main, never the currently selected subagent. */
+  private beginClearConfirmation(): void {
+    const id = this.highlightedAgentId;
+    if (id === null) {
+      this.uiCtx?.notify("Cannot clear Main agent", "warning");
+      return;
+    }
+    if (id === this.selectedAgentId) {
+      this.uiCtx?.notify("Cannot clear the active subagent — switch to Main first", "warning");
+      return;
+    }
+    if (!this.manager.getRecord(id)) {
+      this.uiCtx?.notify("Agent not found", "warning");
+      return;
+    }
+    this.confirmingClearId = id;
+    this.requestRender();
+  }
+
+  private confirmClear(): void {
+    const id = this.confirmingClearId;
+    this.confirmingClearId = null;
+    if (!id) {
+      this.requestRender();
+      return;
+    }
+    if (id === this.selectedAgentId) {
+      this.uiCtx?.notify("Cannot clear the active subagent — switch to Main first", "warning");
+      this.requestRender();
+      return;
+    }
+
+    const entries = this.navigationEntries();
+    const index = entries.findIndex(entry => entry.id === id);
+    const cleared = this.manager.clear(id, "user");
+    if (!cleared) {
+      this.uiCtx?.notify("Agent not found", "warning");
+      this.requestRender();
+      return;
+    }
+
+    const remaining = this.navigationEntries();
+    if (remaining.length <= 1) {
+      this.listFocused = false;
+      this.highlightedAgentId = null;
+    } else {
+      const nextIndex = Math.min(Math.max(index, 0), remaining.length - 1);
+      // Prefer the row that slid into this slot; fall back to previous neighbor.
+      this.highlightedAgentId = remaining[nextIndex]?.id
+        ?? remaining[nextIndex - 1]?.id
+        ?? null;
+    }
+    this.update();
   }
 
   private navigationEntries(): NavigationEntry[] {
@@ -715,26 +807,67 @@ export class AgentNavigator {
     tui.requestRender(true);
   }
 
-  private requestRender(): void {
+  private requestRender(force = false): void {
     const tui = this.screenSwap?.tui ?? this.selectorTui;
-    tui?.requestRender();
+    tui?.requestRender(force);
+  }
+
+  /**
+   * Full TUI reflow after main-session Working row drops (agent_end).
+   * Clears residual blank lines between editor and below-editor list.
+   */
+  forceLayoutReflow(): void {
+    this.lastRenderSig = "";
+    this.requestRender(true);
+  }
+
+  /**
+   * Approximate on-screen rows for the selector (matches renderSelector caps).
+   * Used only to detect shrink so we can force-clear leftover blank lines.
+   */
+  private estimateListPaintHeight(agentCount: number): number {
+    const entryCount = agentCount + 1; // Main row
+    const rows = this.selectorTui?.terminal.rows
+      ?? this.screenSwap?.tui.terminal.rows
+      ?? 40;
+    const maxVisible = Math.min(6, Math.max(3, Math.floor(rows / 5)));
+    const visible = Math.min(entryCount, maxVisible);
+    let height = visible;
+    if (this.listFocused) height += 1; // focus / confirm hint
+    if (entryCount > maxVisible) height += 2; // ↑/↓ hidden lines (upper bound)
+    return height;
   }
 
   private renderSelector(tui: TUI, theme: Theme): string[] {
     const entries = this.navigationEntries();
     const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
     const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
-    const maxVisible = Math.max(2, Math.floor(tui.terminal.rows / 3));
+    // Cap list height so chat is not pushed off-screen (was rows/3 ≈ 12–16 on tall terms).
+    // ~6 rows: Main + a handful of agents; overflow via ↑/↓ N hidden + focus scrolling.
+    const maxVisible = Math.min(6, Math.max(3, Math.floor(tui.terminal.rows / 5)));
     const visibleCount = Math.min(entries.length, maxVisible);
     const maxStart = Math.max(0, entries.length - visibleCount);
     const start = Math.min(maxStart, Math.max(0, focusIndex - Math.floor(visibleCount / 2)));
     const end = start + visibleCount;
     const visibleEntries = entries.slice(start, end);
 
-    const hint = this.listFocused
-      ? "↑↓ choose · Enter select · Esc editor"
-      : "empty editor + ↓ to choose";
-    const lines = [theme.fg("dim", `Agents · ${hint}`)];
+    // No permanent header chrome; only show a short focus hint while navigating.
+    // Leading space matches powerline/Pi editor pad (" > ") so hints sit under the input, not flush-left.
+    const lines: string[] = [];
+    const cols = tui.terminal.columns;
+    if (this.listFocused) {
+      if (this.confirmingClearId !== null) {
+        lines.push(truncateToWidth(
+          ` ${theme.fg("error", "Delete? Enter confirm · Esc cancel")}`,
+          cols,
+        ));
+      } else {
+        lines.push(truncateToWidth(
+          ` ${theme.fg("dim", "↑↓ move · Enter select · Ctrl+D clear · Esc editor")}`,
+          cols,
+        ));
+      }
+    }
     const spinnerFrame = SPINNER[this.spinnerFrame];
 
     if (start > 0) {
@@ -754,12 +887,33 @@ export class AgentNavigator {
 
       const record = entry.record;
       const icon = statusIcon(record, spinnerFrame);
-      const shortId = record.id.slice(0, 8);
-      const label = `${record.display.type} ${shortId}`;
-      const status = record.lifecycle.status === "running" ? "" : ` ${record.lifecycle.status}`;
+      const name = getDisplayName(record.display.type);
+      const desc = truncateDesc(record.display.description, 50);
+      const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
+      const statsParts = buildStatsParts({
+        toolUses: record.stats.toolUses,
+        turnCount: record.stats.turnCount,
+        maxTurns: record.stats.maxTurns,
+        input: record.stats.lifetimeUsage.input,
+        output: record.stats.lifetimeUsage.output,
+        contextPercent: record.execution.session
+          ? getSessionContextPercent(record.execution.session)
+          : record.stats.contextPercent ?? null,
+        compactions: record.stats.compactionCount,
+        cost: record.stats.lifetimeUsage.cost,
+        durationMs,
+        modelName: record.execution.session?.model?.id ?? record.display.invocation?.modelName,
+        thinkingLevel: record.execution.session?.thinkingLevel
+          ?? record.display.invocation?.thinkingLevel,
+      }, theme);
+      const statsLine = statsParts.join(STATS_SEP);
+      const label = statsLine
+        ? `${name}  ${desc}${STATS_SEP}${statsLine}`
+        : `${name}  ${desc}`;
       const text = highlighted ? theme.bold(label) : label;
+      const iconColor = record.lifecycle.status === "running" ? "accent" : "dim";
       lines.push(truncateToWidth(
-        `${focus} ${circle} ${theme.fg(record.lifecycle.status === "running" ? "accent" : "dim", icon)} ${text}${theme.fg("dim", status)}`,
+        `${focus} ${circle} ${theme.fg(iconColor, icon)} ${text}`,
         tui.terminal.columns,
       ));
     }
@@ -897,9 +1051,18 @@ export class AgentNavigator {
     if (records.length === 0) {
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
+      this.confirmingClearId = null;
       this.listFocused = false;
+      // Capture TUI before unregister clears selectorTui. setWidget(undefined) only
+      // removes the component; without requestRender the belowEditor gap stays until
+      // the next user input (same as Pi: clear widget + requestRender to reflow).
+      const tui = this.screenSwap?.tui ?? this.selectorTui;
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
       this.unregisterWidgets();
+      this.lastRenderSig = "";
+      this.lastListPaintHeight = 0;
+      this.lastAgentStatus.clear();
+      tui?.requestRender(true);
       if (this.refreshTimer) {
         clearInterval(this.refreshTimer);
         this.refreshTimer = undefined;
@@ -913,6 +1076,9 @@ export class AgentNavigator {
     }
     if (this.highlightedAgentId && !records.some(record => record.id === this.highlightedAgentId)) {
       this.highlightedAgentId = this.selectedAgentId;
+    }
+    if (this.confirmingClearId && !records.some(record => record.id === this.confirmingClearId)) {
+      this.confirmingClearId = null;
     }
 
     if (!this.selectorRegistered) {
@@ -928,9 +1094,22 @@ export class AgentNavigator {
         return selector;
       }, { placement: "belowEditor" });
       this.selectorRegistered = true;
+      this.lastRenderSig = "";
     }
 
-    this.requestRender();
+    const sig = this.listRenderSignature(records);
+    if (sig !== this.lastRenderSig) {
+      this.lastRenderSig = sig;
+      // Pi differential render leaves blank rows when layout shrinks (list or Working).
+      const paintHeight = this.estimateListPaintHeight(records.length);
+      const shrink = paintHeight < this.lastListPaintHeight;
+      this.lastListPaintHeight = paintHeight;
+      const completed = this.consumeTerminalTransitions(records);
+      this.requestRender(shrink || completed);
+    } else {
+      // Keep status map warm even when signature throttles (elapsed-only ticks).
+      this.syncAgentStatusMap(records);
+    }
 
     if (!this.selectedAgentId && !records.some(record =>
       record.lifecycle.status === "running" || record.lifecycle.status === "queued"
@@ -938,6 +1117,66 @@ export class AgentNavigator {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+  }
+
+  private isTerminalStatus(status: AgentRecord["lifecycle"]["status"]): boolean {
+    return status !== "running" && status !== "queued";
+  }
+
+  private syncAgentStatusMap(records: AgentRecord[]): void {
+    const seen = new Set<string>();
+    for (const record of records) {
+      seen.add(record.id);
+      this.lastAgentStatus.set(record.id, record.lifecycle.status);
+    }
+    for (const id of this.lastAgentStatus.keys()) {
+      if (!seen.has(id)) this.lastAgentStatus.delete(id);
+    }
+  }
+
+  /** True if any agent newly entered a terminal status since last paint. */
+  private consumeTerminalTransitions(records: AgentRecord[]): boolean {
+    let terminalTransition = false;
+    const seen = new Set<string>();
+    for (const record of records) {
+      seen.add(record.id);
+      const prev = this.lastAgentStatus.get(record.id);
+      const next = record.lifecycle.status;
+      if (prev !== undefined && prev !== next && this.isTerminalStatus(next)) {
+        terminalTransition = true;
+      }
+      this.lastAgentStatus.set(record.id, next);
+    }
+    for (const id of [...this.lastAgentStatus.keys()]) {
+      if (!seen.has(id)) this.lastAgentStatus.delete(id);
+    }
+    return terminalTransition;
+  }
+
+  /** Cheap signature so timer ticks without real list changes do not repaint. */
+  private listRenderSignature(records: AgentRecord[]): string {
+    const parts = records.map((record) => {
+      const elapsedSec = Math.floor(
+        ((record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt) / 1000,
+      );
+      return [
+        record.id,
+        record.lifecycle.status,
+        record.stats.toolUses,
+        record.stats.turnCount,
+        elapsedSec,
+        record.stats.lifetimeUsage.input,
+        record.stats.lifetimeUsage.output,
+      ].join(":");
+    });
+    return [
+      parts.join("|"),
+      this.spinnerFrame,
+      this.selectedAgentId ?? "",
+      this.highlightedAgentId ?? "",
+      this.listFocused ? "1" : "0",
+      this.confirmingClearId ?? "",
+    ].join("#");
   }
 
   private unregisterWidgets(): void {

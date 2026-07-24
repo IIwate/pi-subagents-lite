@@ -199,10 +199,11 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
     const text = selector.render(120).join("\n");
 
+    // Row format: ○/● + spinner/status + display name + description (+ stats).
     expect(text).toContain("Main agent");
-    expect(text).toContain("Explore agent-12");
-    expect(text).toContain("●");
-    expect(text).toContain("○");
+    expect(text).toContain("Inspect the project");
+    expect(text).toMatch(/[○●]/);
+    expect(text).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/); // running spinner glyph
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
       "agent-navigator-selector",
       expect.any(Function),
@@ -219,14 +220,18 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
 
-    expect(selector.render(120).join("\n")).toContain("⠋ Explore");
+    const frame0 = selector.render(120).join("\n");
+    expect(frame0).toContain("⠋");
+    expect(frame0).toContain("Inspect the project");
 
-    vi.advanceTimersByTime(80);
-    expect(selector.render(120).join("\n")).toContain("⠙ Explore");
+    // REFRESH_INTERVAL_MS is 500 (was 80) — only advance one interval per frame.
+    vi.advanceTimersByTime(500);
+    const frame1 = selector.render(120).join("\n");
+    expect(frame1).toContain("⠙");
     expect(tui.requestRender).toHaveBeenCalled();
 
-    vi.advanceTimersByTime(80);
-    expect(selector.render(120).join("\n")).toContain("⠹ Explore");
+    vi.advanceTimersByTime(500);
+    expect(selector.render(120).join("\n")).toContain("⠹");
   });
 
   it("requires Enter before changing the active agent", () => {
@@ -263,7 +268,10 @@ describe("AgentNavigator", () => {
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
-    expect(selector.render(120).join("\n")).toContain("› ○ ⠋ Explore");
+    const focused = selector.render(120).join("\n");
+    expect(focused).toContain("› ○ ⠋");
+    expect(focused).toContain("Inspect the project");
+    expect(focused).toContain("↑↓ move"); // focus hint while list-focused
 
     navigator.handleTerminalInput("\x1b");
 

@@ -162,6 +162,14 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     getWidget()?.onTurnStart();
   });
 
+  // Main session run ended — Working row is gone; force reflow so Pi's
+  // differential render does not leave blank gaps above the agent list.
+  // nextTick: let Pi remove Working before we repaint.
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!ctx.hasUI) return;
+    setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
+  });
+
 
   // session_start — load config, scan agents, register into registry,
   // then re-register Agent tool with dynamic agent type enum

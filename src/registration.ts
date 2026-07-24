@@ -1,9 +1,10 @@
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAvailableTypes } from "./agents/agent-types.js";
+import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
-import { renderAgentToolCall, renderAgentToolResult, renderSubagentResult } from "./ui/renderer.js";
+import { renderSubagentResult } from "./ui/renderer.js";
 import { showAgentsMainMenu } from "./ui/menu/menus.js";
 import { listModelOptionsForMenus } from "./models/model-scope.js";
 import { getStore } from "./shell.js";
@@ -41,17 +42,11 @@ export function registerAgentTool(pi: ExtensionAPI): void {
     }),
     execute: executeAgentTool,
 
-    renderCall: (args, theme) => renderAgentToolCall(args as Record<string, unknown>, theme),
-
-    renderResult: (result, options, theme) => {
-      const showCost = getStore().agent.showCost;
-      return renderAgentToolResult(
-        result as { content: Array<{ type: string; text?: string }>; details?: Record<string, unknown>; isError?: boolean },
-        options as { expanded?: boolean },
-        theme,
-        showCost,
-      );
-    },
+    // Silent in chat — progress only in the below-editor list.
+    // renderShell self + empty content → tool-execution.render() returns [].
+    renderShell: "self",
+    renderCall: () => new Container(),
+    renderResult: () => new Container(),
   });
 }
 

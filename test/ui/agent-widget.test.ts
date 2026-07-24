@@ -287,12 +287,13 @@ describe("widget connectors", () => {
 });
 
 describe("status bar format", () => {
-  it("shows 'N agents: $cost' format with running agents", () => {
+  // Status is count-only (running+queued) to avoid powerline repaint thrash from live cost.
+
+  it("shows plural count for multiple running agents without cost", () => {
     const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
     const activity = new Map();
     const manager = makeMockManager([], 0);
     const widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(true);
     widget.setUICtx(uiCtx);
 
     const a1 = makeRunningAgent("a1");
@@ -302,32 +303,37 @@ describe("status bar format", () => {
     (manager as any).listAgents = () => [a1, a2];
     widget.update();
 
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", expect.stringMatching(/^2 agents: \$0\.\d+$/));
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "2 agents");
+    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
+    expect(text).not.toContain("$");
   });
 
-  it("shows 'agents: $cost' format when no running/queued agents but finished exist", () => {
+  it("does not keep a status badge when only finished agents remain", () => {
     const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
     const activity = new Map();
     const manager = makeMockManager([], 0.01);
     const widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(true);
     widget.setUICtx(uiCtx);
 
-    // Only finished agents, no running/queued
+    // Seed a running badge first so we can observe clear-on-finish.
+    const running = makeRunningAgent("r1");
+    (manager as any).listAgents = () => [running];
+    widget.update();
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+
     const finished = makeFinishedAgent("f1");
-    widget.markFinished("f1");
     (manager as any).listAgents = () => [finished];
     widget.update();
 
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", expect.stringMatching(/^agents: \$0\.\d+$/));
+    // Finished-only: no in-flight agents → clear status key (not "agents: $cost").
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", undefined);
   });
 
-  it("shows 'N agents' without cost when cost is zero", () => {
+  it("shows singular count for one running agent", () => {
     const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
     const activity = new Map();
     const manager = makeMockManager([], 0);
     const widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(true);
     widget.setUICtx(uiCtx);
 
     const agent = makeRunningAgent("a1");
@@ -335,67 +341,18 @@ describe("status bar format", () => {
     (manager as any).listAgents = () => [agent];
     widget.update();
 
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", expect.stringMatching(/^1 agent$/));
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
   });
 });
 
-describe("status bar cost from accumulator", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  it("uses getTotalAgentCost for status bar when no running agents", () => {
+describe("status bar ignores cost accumulator", () => {
+  it("does not embed session total cost in the status text", () => {
     const uiCtx = {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
     };
-    activity = new Map();
-    // No running agents, but totalAgentCost is $1.23 (from evicted agents)
-    manager = makeMockManager([], 1.23);
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(true);
-    widget.setUICtx(uiCtx);
-
-    // Trigger an update with a running agent so the status bar is emitted
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 0.05;
-    (manager as any).listAgents = () => [agent];
-    widget.update();
-
-    // Status bar should include $1.28 ($1.23 session + $0.05 running)
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", expect.stringContaining("$1.28"));
-  });
-
-  it("shows accumulated cost even when no running agents have cost", () => {
-    const uiCtx = {
-      setStatus: vi.fn(),
-      setWidget: vi.fn(),
-    };
-    activity = new Map();
-    // Running agent with $0 cost, but session accumulator has $2.50
-    manager = makeMockManager([], 2.50);
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(true);
-    widget.setUICtx(uiCtx);
-
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 0; // Running agent has no cost yet
-    (manager as any).listAgents = () => [agent];
-    widget.update();
-
-    // Should show $2.50 from accumulator
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", expect.stringContaining("$2.50"));
-  });
-
-  it("hides cost when showCost is false", () => {
-    const uiCtx = {
-      setStatus: vi.fn(),
-      setWidget: vi.fn(),
-    };
-    activity = new Map();
-    manager = makeMockManager([], 1.50);
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setShowCost(false);
+    const manager = makeMockManager([], 1.23);
+    const widget = new AgentWidget(manager, () => undefined);
     widget.setUICtx(uiCtx);
 
     const agent = makeRunningAgent("a1");
@@ -403,11 +360,30 @@ describe("status bar cost from accumulator", () => {
     (manager as any).listAgents = () => [agent];
     widget.update();
 
-    // Should NOT contain $ when cost is hidden
-    const statusCall = (uiCtx.setStatus as any).mock.calls.find(
-      (c: any[]) => c[0] === "subagents",
-    );
-    expect(statusCall[1]).not.toContain("$");
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
+    expect(text).not.toMatch(/\$/);
+    expect(text).not.toContain("1.28");
+  });
+
+  it("does not embed accumulated cost when running agent cost is zero", () => {
+    const uiCtx = {
+      setStatus: vi.fn(),
+      setWidget: vi.fn(),
+    };
+    const manager = makeMockManager([], 2.50);
+    const widget = new AgentWidget(manager, () => undefined);
+    widget.setUICtx(uiCtx);
+
+    const agent = makeRunningAgent("a1");
+    agent.stats.lifetimeUsage.cost = 0;
+    (manager as any).listAgents = () => [agent];
+    widget.update();
+
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
+    expect(text).not.toContain("2.50");
+    expect(text).not.toContain("$");
   });
 });
 

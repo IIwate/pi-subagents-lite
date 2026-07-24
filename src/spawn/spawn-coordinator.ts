@@ -276,7 +276,8 @@ export class SpawnCoordinator {
           customType: "subagent-result",
           content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${formatResultContent(record)}`,
           details,
-          display: true,
+          // Silent in TUI — list + toast carry the human signal; LLM still gets the text.
+          display: false,
         },
         {
           deliverAs,

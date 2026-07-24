@@ -39,8 +39,8 @@ const WIDGET_KEY = "agents";
 /** Status bar key used with setStatus(). */
 const STATUS_KEY = "subagents";
 
-/** Widget refresh interval in milliseconds. */
-const WIDGET_REFRESH_INTERVAL = 80;
+/** Status-bar poll interval. Tree UI is off; only setStatus needs this. */
+const WIDGET_REFRESH_INTERVAL = 1000;
 
 /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
 const ERROR_LINGER_TURNS = 2;
@@ -271,11 +271,12 @@ export class AgentWidget {
     this.update();
   }
 
-  /** Ensure the widget update timer is running. */
+  /** Ensure the status poll timer is running; refresh once immediately. */
   ensureTimer() {
     if (!this.widgetInterval) {
       this.widgetInterval = setInterval(() => this.update(), WIDGET_REFRESH_INTERVAL);
     }
+    this.update();
   }
 
   /** Categorize all agents into running, queued, and visible finished groups. */
@@ -618,20 +619,11 @@ export class AgentWidget {
     }
   }
 
-  /** Update the status bar text, only if it changed. */
-  private updateStatusBar(runningCount: number, queuedCount: number, running: AgentRecord[]) {
+  /** Update the status bar text, only if it changed (avoids powerline immediate repaints). */
+  private updateStatusBar(runningCount: number, queuedCount: number, _running: AgentRecord[]) {
     const total = runningCount + queuedCount;
-    let statusText = total > 0 ? `${total} agent${total === 1 ? "" : "s"}` : `agents`;
-    if (this.showCost) {
-      const sessionCost = this.manager.getTotalAgentCost();
-      // Include only in-flight cost not already accounted by a previous run.
-      const runningCost = running.reduce(
-        (sum, agent) => sum + this.manager.getUnaccountedAgentCost(agent.id),
-        0,
-      );
-      const totalCost = sessionCost + runningCost;
-      if (totalCost > 0) statusText += `: ${formatCost(totalCost)}`;
-    }
+    // Count only — do not append live cost (that forced setStatus every tick when showCost).
+    const statusText = total > 0 ? `${total} agent${total === 1 ? "" : "s"}` : undefined;
     if (statusText !== this.lastStatusText) {
       this.uiCtx?.setStatus(STATUS_KEY, statusText);
       this.lastStatusText = statusText;
@@ -670,26 +662,11 @@ export class AgentWidget {
     // Status bar — only call setStatus when the text actually changes
     this.updateStatusBar(running.length, queued.length, running);
 
-    this.widgetFrame++;
-
-    // Register widget callback once; subsequent updates use requestRender()
-    // which re-invokes render() without replacing the component (avoids layout thrashing).
-    if (!this.widgetRegistered) {
-      this.uiCtx.setWidget(WIDGET_KEY, (tui, theme) => {
-        this.tui = tui;
-        return {
-          render: () => this.renderWidget(tui, theme),
-          invalidate: () => {
-            // Theme changed — force re-registration so factory captures fresh theme.
-            this.widgetRegistered = false;
-            this.tui = undefined;
-          },
-        };
-      }, { placement: "aboveEditor" });
-      this.widgetRegistered = true;
-    } else {
-      // Widget already registered — just request a re-render of existing components.
-      this.tui?.requestRender?.();
+    // Above-editor tree is disabled: agent-navigator selector below the editor owns the list UI.
+    if (this.widgetRegistered) {
+      this.uiCtx.setWidget(WIDGET_KEY, undefined);
+      this.widgetRegistered = false;
+      this.tui = undefined;
     }
   }
 
