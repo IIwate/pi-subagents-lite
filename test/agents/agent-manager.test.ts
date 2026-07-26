@@ -57,7 +57,15 @@ function mockAgentSession(): any {
     dispose: vi.fn(),
     steer: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
+    extensionRunner: { emit: vi.fn().mockResolvedValue(undefined) },
   };
+}
+
+/** Emitted shutdown events for a mock session, in emit order. */
+function shutdownEvents(session: any): any[] {
+  return session.extensionRunner.emit.mock.calls
+    .map(([event]: [any]) => event)
+    .filter((event: any) => event?.type === "session_shutdown");
 }
 
 function mockRunResult(overrides?: Partial<ReturnType<typeof mockRunResult>>) {
@@ -643,6 +651,89 @@ describe("AgentManager", () => {
       (manager as any).cleanup();
 
       expect(manager.getRecord(id)).toBeDefined();
+    });
+  });
+
+  // ── Child session teardown ──
+
+  describe("session teardown", () => {
+    /**
+     * Subagents load their own extension instances, so the parent's
+     * session_shutdown never reaches them. Without an explicit emit here,
+     * extensions holding session-scoped resources leak on every removal.
+     */
+    it("emits session_shutdown before disposing a cleared agent's session", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      expect(manager.clear(id)).toBe(true);
+      await manager.dispose();
+
+      expect(shutdownEvents(session)).toEqual([{ type: "session_shutdown", reason: "quit" }]);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(session.extensionRunner.emit.mock.invocationCallOrder[0])
+        .toBeLessThan(session.dispose.mock.invocationCallOrder[0]);
+    });
+
+    it("emits session_shutdown when a stale record is evicted by cleanup", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+      record.lifecycle.resultConsumed = true;
+      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
+
+      (manager as any).cleanup();
+      await manager.dispose();
+
+      expect(shutdownEvents(session)).toHaveLength(1);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("awaits every child shutdown before dispose() resolves", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      const emitted = makeResolvablePromise();
+      let shutdownFinished = false;
+      session.extensionRunner.emit.mockImplementation(async () => {
+        await emitted.promise;
+        shutdownFinished = true;
+      });
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      const disposed = manager.dispose();
+      expect(shutdownFinished).toBe(false);
+
+      emitted.resolve(undefined);
+      await disposed;
+
+      expect(shutdownFinished).toBe(true);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("still disposes the session when a shutdown handler throws", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      session.extensionRunner.emit.mockRejectedValue(new Error("handler exploded"));
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      manager.clear(id);
+      await expect(manager.dispose()).resolves.toBeUndefined();
+
+      expect(session.dispose).toHaveBeenCalledTimes(1);
     });
   });
 

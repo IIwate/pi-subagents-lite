@@ -102,6 +102,9 @@ export class AgentManager {
   /** Queue of agents waiting to start, keyed by modelKey. */
   private queue: { id: string; modelKey: string; args: SpawnArgs }[] = [];
 
+  /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
+  private closing = new Set<Promise<void>>();
+
   constructor(
     onComplete?: OnAgentComplete,
     concurrency?: ConcurrencyConfig,
@@ -635,12 +638,34 @@ export class AgentManager {
     return true;
   }
 
-  /** Dispose a record's session and remove it from the map. */
+  /**
+   * Emit session_shutdown to a child session's extensions, then dispose it.
+   *
+   * AgentSession.dispose() does not emit session_shutdown, so extensions holding
+   * session-scoped resources (processes, sockets, watchers) never release them
+   * when a subagent is cleared, evicted, or killed with the parent. Subagents run
+   * their own extension instances, so the parent's shutdown does not cover them.
+   */
+  private closeSession(session: AgentSession): Promise<void> {
+    const done = (async () => {
+      try {
+        await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      } finally {
+        session.dispose();
+      }
+    })().catch(() => { /* teardown is best effort — never block agent removal */ });
+    this.closing.add(done);
+    void done.finally(() => this.closing.delete(done));
+    return done;
+  }
+
+  /** Shut down and dispose a record's session, then remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
-    record.execution.session?.dispose();
+    const session = record.execution.session;
     record.execution.session = undefined;
     this.agents.delete(id);
     this.accountedCosts.delete(id);
+    if (session) void this.closeSession(session);
     try { this.onRemove?.(record); } catch { /* ignore */ }
   }
 
@@ -657,13 +682,16 @@ export class AgentManager {
     }
   }
 
-  dispose() {
+  async dispose() {
     clearInterval(this.cleanupInterval);
     this.queue = [];
     for (const record of this.agents.values()) {
-      record.execution.session?.dispose();
+      const session = record.execution.session;
+      record.execution.session = undefined;
+      if (session) void this.closeSession(session);
     }
     this.agents.clear();
     this.accountedCosts.clear();
+    await Promise.all(this.closing);
   }
 }
