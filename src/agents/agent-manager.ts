@@ -30,6 +30,9 @@ const CLEANUP_INTERVAL_MS = 60_000;
 /** Age after which a completed agent record is evicted (milliseconds). */
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 
+/** 等待子会话 shutdown handler 的上限，超时后照常 dispose（milliseconds）。 */
+const SESSION_SHUTDOWN_TIMEOUT_MS = 3_000;
+
 /** UUID prefix length for agent IDs stored in the agents map (uniqueness). */
 const AGENT_ID_PREFIX_LENGTH = 17;
 
@@ -104,6 +107,9 @@ export class AgentManager {
 
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
+
+  /** dispose() 已启动。防止 shutdown 链意外重入时并发修改 closing 集合。 */
+  private disposing = false;
 
   constructor(
     onComplete?: OnAgentComplete,
@@ -652,12 +658,28 @@ export class AgentManager {
    * session-scoped resources (processes, sockets, watchers) never release them
    * when a subagent is cleared, evicted, or killed with the parent. Subagents run
    * their own extension instances, so the parent's shutdown does not cover them.
+   *
+   * emit() 串行 await 每个 handler 且不设超时，任一子扩展的 handler 挂起都会让
+   * 父进程退出流程永久卡死（events.ts 的 session_shutdown → dispose() → 宿主
+   * 的 process.exit 再也跑不到）。因此对 emit 单独限时，超时后仍执行
+   * session.dispose() 释放本地资源。
+   *
+   * 依赖 index.ts 的 isInsideSubagentSpawn() 早退：子会话内的本扩展实例不注册
+   * session_shutdown 监听，所以这里的 emit 不会递归回 dispose()。
    */
   private closeSession(session: AgentSession): Promise<void> {
     const done = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+        await Promise.race([
+          session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }),
+          new Promise<void>(resolve => {
+            timer = setTimeout(resolve, SESSION_SHUTDOWN_TIMEOUT_MS);
+            timer.unref?.();
+          }),
+        ]);
       } finally {
+        if (timer) clearTimeout(timer);
         session.dispose();
       }
     })().catch(() => { /* teardown is best effort — never block agent removal */ });
@@ -690,6 +712,8 @@ export class AgentManager {
   }
 
   async dispose() {
+    if (this.disposing) return;
+    this.disposing = true;
     clearInterval(this.cleanupInterval);
     this.queue = [];
     for (const record of this.agents.values()) {

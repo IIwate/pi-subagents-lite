@@ -94,6 +94,7 @@ describe("AgentManager", () => {
 
   afterEach(() => {
     manager?.dispose();
+    vi.useRealTimers();
   });
 
   // ── Concurrency ──
@@ -766,6 +767,67 @@ describe("AgentManager", () => {
       manager.clear(id);
       await expect(manager.dispose()).resolves.toBeUndefined();
 
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * emit() 串行 await 每个 handler 且不设超时。子扩展的 handler 永久挂起时，
+     * 没有超时兜底会让父进程退出流程卡死在 dispose() 上，用户只能强杀。
+     */
+    it("挂起的 shutdown handler 超时后仍 dispose 会话并放行 dispose()", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      // 永不 resolve 的 handler
+      session.extensionRunner.emit.mockReturnValue(new Promise(() => {}));
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      let disposeSettled = false;
+      const disposed = manager.dispose().then(() => { disposeSettled = true; });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(disposeSettled).toBe(false);
+      expect(session.dispose).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await disposed;
+
+      expect(disposeSettled).toBe(true);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * 子会话内的本扩展实例靠 index.ts 的 isInsideSubagentSpawn() 早退才不注册
+     * session_shutdown。该不变量一旦破裂，子实例的 handler 会在 emit 期间递归
+     * 调回父 manager 的 dispose()——而它要 await 的正是这个尚未返回的 emit，
+     * 没有幂等守卫就是死锁。
+     */
+    it("shutdown handler 内递归调用 dispose() 不死锁", async () => {
+      // 用假定时器屏蔽 3s 超时兜底，只考察守卫本身能否解开循环等待
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      let reentrantSettled = false;
+      session.extensionRunner.emit.mockImplementation(async () => {
+        // 先让出一次，等 closeSession 把自己的 done 放进 closing；
+        // 此后重入的 dispose() 会去 await 这个由 emit 自身驱动的 promise
+        await Promise.resolve();
+        // 模拟子会话扩展在 shutdown 期间调回父 manager
+        await manager.dispose();
+        reentrantSettled = true;
+      });
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      await manager.dispose();
+
+      expect(reentrantSettled).toBe(true);
+      expect(shutdownEvents(session)).toHaveLength(1);
       expect(session.dispose).toHaveBeenCalledTimes(1);
     });
   });
