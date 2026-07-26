@@ -1,5 +1,10 @@
 # Manual testing for `worktree_path` (wave 1)
 
+> **Fork note (2026-07)**: 本 fork 已移除编辑器上方的树状 widget 与
+> `C-o` 紧凑模式切换；进度改由编辑器下方的代理列表承担。下文测试
+> 步骤已同步更新；文末两节 "Live verification" 是当时的操作记录，
+> 保留原貌（其中的 `C-o` 按键当时触发的是 pi 内建按键说明开关）。
+
 Wave 1 ships a new `Agent` tool param. The wave's manual testing section
 (`tasks/worktree-path-param/waves/1-deliver-worktree-path/wave.md`) is
 LLM-driven ("prompt the parent LLM to spawn a subagent in /etc"). That makes
@@ -21,7 +26,6 @@ tmux new-session -d -s pi-test -x 200 -y 50
 tmux send-keys -t pi-test "cd /tmp/wt-test && pi" Enter
 sleep 3 && tmux capture-pane -t pi-test -p -S -200   # full visible frame
 tmux send-keys -t pi-test "spawn a subagent in /tmp/wt-feature" Enter
-tmux send-keys -t pi-test C-o                        # toggle compact mode
 sleep 1 && tmux capture-pane -t pi-test -p -S -200
 tmux kill-session -t pi-test
 ```
@@ -31,7 +35,7 @@ tmux kill-session -t pi-test
 
 ## Why use it
 
-The TUI is what the user sees. The widget's full-vs-compact-mode behaviour,
+The TUI is what the user sees. The below-editor agent list's behaviour,
 the briefing text that lands in the parent, and the live redraw during a
 parallel spawn are not testable through vitest alone — vitest covers the
 renderer's input contract, not the visible output. tmux covers the visible
@@ -41,7 +45,7 @@ output without requiring a human at a keyboard.
 
 - **`capture-pane` flicker.** Ink redraws incrementally; a captured frame
   may show partial state. Poll with a short sleep and pick the first snapshot
-  matching an end-state marker (widget line visible, final assistant turn
+  matching an end-state marker (agent list row visible, final assistant turn
   present, etc.). Capture with `-S -200` to get the full scrollback, not just
   the visible window. **Verified live**: `watch -n 0.2 date` redraws in place;
   two captures 300ms apart returned clean, distinct frames with no
@@ -118,25 +122,23 @@ deployments go through `pi install` and pi's normal extension loader.
    `.pi/agents/` is scanned).
 3. **US-6 (param omitted).** Open the spawn menu via `/agents >
    Spawn agent`. Leave the "Worktree" row at "Inherits parent cwd",
-   enter a prompt that runs `sleep 5`, Spawn. Verify the widget shows
-   the agent with no worktree label. Confirms the parent's-cwd path
-   is preserved when the param is omitted.
-4. **US-3, US-5 (parallel widget, distinct labels).** Open the spawn
+   enter a prompt that runs `sleep 5`, Spawn. Verify the below-editor
+   agent list shows the agent with no worktree label. Confirms the
+   parent's-cwd path is preserved when the param is omitted.
+4. **US-3, US-5 (parallel list rows, distinct labels).** Open the spawn
    menu, pick `add-widget-settings`, enter a prompt that runs
    `sleep 20`, Spawn. Open the menu again, pick `break-circular-dep`,
-   Spawn. Poll `capture-pane` over ~20s. Verify the widget shows two
-   entries with distinct worktree labels. No LLM in the loop.
-5. `send-keys C-o`. Capture. Assert labels absent (compact mode).
-   `C-o` again. Assert labels return.
-6. **US-1 (LLM spawns into a worktree).** Prompt the LLM: "Spawn a
+   Spawn. Poll `capture-pane` over ~20s. Verify the agent list shows
+   two rows with distinct worktree labels. No LLM in the loop.
+5. **US-1 (LLM spawns into a worktree).** Prompt the LLM: "Spawn a
    subagent in `<target-worktree-path>` that runs `sleep 5` and
-   reports when done." Verify the widget shows the agent with the
+   reports when done." Verify the agent list shows the agent with the
    worktree label. Confirms the briefing taught the LLM the param.
-7. **US-4 (worktree-local agent type).** Drop a
+6. **US-4 (worktree-local agent type).** Drop a
    `.pi/agents/feature-reviewer.md` into the target worktree with
    valid frontmatter. Prompt the LLM: "Use the `feature-reviewer`
    agent on this worktree." Assert the spawn succeeds.
-8. **Validation rejections, deletion-mid-run, cross-platform label.**
+7. **Validation rejections, deletion-mid-run, cross-platform label.**
    Covered by vitest (see the Vitest section above). No tmux step
    needed.
 
@@ -145,7 +147,7 @@ deployments go through `pi install` and pi's normal extension loader.
 - Hand-test from a keyboard. tmux + `send-keys` replaces that and is
   repeatable in CI.
 - Babysit the LLM. Hard timeouts, then bail.
-- Cover the widget in vitest beyond the renderer's input contract.
+- Cover the agent list in vitest beyond the renderer's input contract.
 
 ## What I got wrong
 

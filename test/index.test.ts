@@ -123,13 +123,11 @@ vi.mock("../src/agents/default-agents.js", () => ({
   DEFAULT_AGENTS: new Map(),
 }));
 
+// 与真实导出面对齐（AgentWidget + SPINNER）。SPINNER 须非空：
+// agent-navigator 以 `% SPINNER.length` 取帧，空数组会得到 NaN 下标。
 vi.mock("../src/ui/agent-widget.js", () => ({
   AgentWidget: class {},
-  buildStatsParts: vi.fn(),
-  formatMs: vi.fn(),
-  getDisplayName: vi.fn(),
-  SPINNER: [],
-  ERROR_STATUSES: new Set(),
+  SPINNER: ["⠋"],
 }));
 
 /* ------------------------------------------------------------------ */

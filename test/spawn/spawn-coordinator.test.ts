@@ -135,37 +135,6 @@ describe("SpawnCoordinator", () => {
     expect(manager.spawn.mock.calls[0][4].isBackground).toBe(false);
   });
 
-  it("creates a live view on spawn", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
-      type: "builder",
-      prompt: "do something",
-      description: "Test",
-      graceTurns: 6,
-      runInBackground: true,
-    });
-
-    const view = coordinator.liveView(result.agentId);
-    expect(view).toBeDefined();
-    expect(view!.activeTools).toBeInstanceOf(Map);
-    expect(view!.responseText).toBe("");
-  });
-
-  it("cleans up live view on foreground completion", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
-      type: "builder",
-      prompt: "do something",
-      description: "Test",
-      graceTurns: 6,
-      runInBackground: false,
-    });
-
-    // After foreground spawn completes, live view should be cleaned up
-    const view = coordinator.liveView(result.agentId);
-    expect(view).toBeUndefined();
-  });
-
   it("registers background agent in backgroundAgentIds", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await coordinator.spawn(mockPi, ctx, {
@@ -192,7 +161,7 @@ describe("SpawnCoordinator", () => {
     expect(coordinator.isBackground(result.agentId)).toBe(false);
   });
 
-  it("routes direct interaction through the manager with live callbacks", async () => {
+  it("routes direct interaction through the manager", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await coordinator.spawn(mockPi, ctx, {
       type: "builder",
@@ -206,15 +175,7 @@ describe("SpawnCoordinator", () => {
     const accepted = await coordinator.interact(result.agentId, "focus on tests", images);
 
     expect(accepted).toBe(true);
-    expect(manager.interact).toHaveBeenCalledWith(
-      result.agentId,
-      "focus on tests",
-      expect.objectContaining({
-        onToolActivity: expect.any(Function),
-        onTextDelta: expect.any(Function),
-      }),
-      images,
-    );
+    expect(manager.interact).toHaveBeenCalledWith(result.agentId, "focus on tests", {}, images);
   });
 
   it("delivers a pending background nudge before interactive continuation", async () => {
@@ -320,16 +281,6 @@ describe("SpawnCoordinator", () => {
   });
 
   describe("onAgentComplete", () => {
-    it("deletes live view on completion", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      // Manually add a live view
-      (coordinator as any).liveViews.set("agent-1", { activeTools: new Map(), responseText: "" });
-
-      coordinator.onAgentComplete({ id: "agent-1" } as AgentRecord);
-
-      expect(coordinator.liveView("agent-1")).toBeUndefined();
-    });
-
     it("schedules nudge for background agents", async () => {
       const coordinator = new SpawnCoordinator(manager as any);
 
@@ -408,15 +359,6 @@ describe("SpawnCoordinator", () => {
       // Timer should be cleared — advancing time should not emit
       vi.advanceTimersByTime(500);
       expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("clears live views", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      (coordinator as any).liveViews.set("agent-1", { activeTools: new Map(), responseText: "" });
-
-      coordinator.dispose();
-
-      expect(coordinator.liveView("agent-1")).toBeUndefined();
     });
   });
 

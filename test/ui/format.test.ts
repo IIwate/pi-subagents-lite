@@ -1,5 +1,5 @@
 /**
- * widget-stats-filtering.test.ts — Tests for configurable widget stats filtering.
+ * format.test.ts — Tests for configurable stats filtering (buildStatsParts).
  *
  * buildStatsParts accepts a `visible` parameter controlling which stat
  * parts appear in the output. All flags default to true for backward

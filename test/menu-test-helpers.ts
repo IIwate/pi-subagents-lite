@@ -14,13 +14,13 @@ import { vi } from "vitest";
 
 /**
  * Select menu item by partial name match.
- * Maps short names to menu items: 'model', 'concurrency', 'widget', 'debug'
+ * Maps short names to menu items: 'model', 'concurrency', 'display', 'debug'
  */
 export function selectByName(name: string): (title: string, items: string[]) => string | undefined {
   const nameMap: Record<string, string> = {
     model: "Model settings",
     concurrency: "Concurrency settings",
-    widget: "Widget settings",
+    display: "Display settings",
     debug: "Debug",
     settings: "Settings",
     spawn: "Spawn agent",

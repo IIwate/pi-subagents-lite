@@ -63,7 +63,7 @@ export async function showSettingsMenu(
     { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
     { value: "spawnoptions", label: "Spawn options", description: "Default thinking, max turns, background, grace turns" },
     { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
-    { value: "widget", label: "Display settings", description: "Stats visibility and log display options" },
+    { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
   ];
 
   await runSelectMenu(ctx, "Settings", items, async (choice) => {
@@ -72,7 +72,8 @@ export async function showSettingsMenu(
       case "concurrency": await showConcurrencySettingsMenu(ctx, modelOptions); break;
       case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
       case "systemprompt": await showSystemPromptMenu(ctx); break;
-      case "widget": await showWidgetSettingsMenu(ctx); break;
+      // 函数名/文件名沿用 widget-settings（避免文件改名扰动历史），菜单语义为显示设置
+      case "display": await showWidgetSettingsMenu(ctx); break;
     }
   });
 }

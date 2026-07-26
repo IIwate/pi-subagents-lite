@@ -51,10 +51,6 @@ _Avoid_: Worktree name
 
 ### Runtime
 
-**Activity tracker**:
-Per-agent transient display state (active tools, streaming response text) bridging spawn callbacks and the TUI widget renderer. Accumulated stats live on the AgentRecord, not here.
-_Avoid_: Agent monitor, agent stats
-
 **Nudge**:
 A completion notification delivered to the parent session after a background agent finishes. Batched with a 200ms hold to coalesce rapid completions.
 _Avoid_: Callback, notification
@@ -67,7 +63,6 @@ _Avoid_: Callback, notification
 - A **Subagent** may run in a **Worktree** of the parent's repo
 - An **Agent briefing** describes all available **Agent types** to the LLM
 - A **Stealth tool** requires an **Agent briefing** before the LLM can use it
-- An **Activity tracker** is created per spawn and cleaned up on completion
 - A **Nudge** is emitted when a background agent completes or errors
 - **Grace turns** are added to the max turns limit to determine when a steered agent is hard-aborted
 - A **Worktree path** is the absolute resolved path passed via `worktree_path`

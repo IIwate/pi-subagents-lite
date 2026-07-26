@@ -482,7 +482,10 @@ export class AgentNavigator {
         this.listFocused = true;
         this.confirmingClearId = null;
         this.highlightedAgentId = this.selectedAgentId;
-        this.requestRender();
+        // 键盘分支统一走 update()：高度基线（lastListPaintHeight）随每次
+        // 变化更新，收缩时才能触发强制重绘清掉残留空行。update() 内部有
+        // 签名节流，代价可控。
+        this.update();
         return { consume: true };
       }
       return undefined;
@@ -496,13 +499,13 @@ export class AgentNavigator {
       }
       if (matchesKey(data, Key.escape)) {
         this.confirmingClearId = null;
-        this.requestRender();
+        this.update();
         return { consume: true };
       }
       // Ctrl+C 不吞：取消确认并放行，避免阻断中断/退出链路。
       if (matchesKey(data, Key.ctrl("c"))) {
         this.confirmingClearId = null;
-        this.requestRender();
+        this.update();
         return undefined;
       }
       return { consume: true };
@@ -511,7 +514,7 @@ export class AgentNavigator {
     if (matchesKey(data, Key.escape)) {
       this.listFocused = false;
       this.highlightedAgentId = this.selectedAgentId;
-      this.requestRender();
+      this.update();
       return { consume: true };
     }
 
@@ -542,7 +545,7 @@ export class AgentNavigator {
       } else {
         this.highlightedAgentId = entries[highlightedIndex - 1]?.id ?? null;
       }
-      this.requestRender();
+      this.update();
       return { consume: true };
     }
 
@@ -550,14 +553,14 @@ export class AgentNavigator {
       if (highlightedIndex < entries.length - 1) {
         this.highlightedAgentId = entries[highlightedIndex + 1]?.id ?? null;
       }
-      this.requestRender();
+      this.update();
       return { consume: true };
     }
 
     if (data.length === 1 && data.charCodeAt(0) >= 32) {
       this.listFocused = false;
       this.highlightedAgentId = this.selectedAgentId;
-      this.requestRender();
+      this.update();
     }
     return undefined;
   }
@@ -578,19 +581,19 @@ export class AgentNavigator {
       return;
     }
     this.confirmingClearId = id;
-    this.requestRender();
+    this.update();
   }
 
   private confirmClear(): void {
     const id = this.confirmingClearId;
     this.confirmingClearId = null;
     if (!id) {
-      this.requestRender();
+      this.update();
       return;
     }
     if (id === this.selectedAgentId) {
       this.uiCtx?.notify("Cannot clear the active subagent — switch to Main first", "warning");
-      this.requestRender();
+      this.update();
       return;
     }
 
@@ -599,7 +602,7 @@ export class AgentNavigator {
     const cleared = this.manager.clear(id, "user");
     if (!cleared) {
       this.uiCtx?.notify("Agent not found", "warning");
-      this.requestRender();
+      this.update();
       return;
     }
 

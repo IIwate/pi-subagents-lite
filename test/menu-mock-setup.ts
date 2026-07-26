@@ -8,6 +8,7 @@
  */
 
 import { vi } from "vitest";
+import { CONFIG_AGENT_NON_MODEL_KEYS } from "../src/config/types.js";
 
 // Create the mock modules object
 export const mockModules = {
@@ -100,18 +101,11 @@ vi.mock("../src/shell.js", () => {
   const mockStore = {
     get agent() {
       const a = mockModules.mockConfig.agent;
-      const widgetMaxLines = a.widgetMaxLines ?? 12;
       return {
         defaultModel: a.default ?? null,
         forceBackground: a.forceBackground === true,
         showCost: mockModules.mockSessionShowCost ?? (a.showCost === true),
         graceTurns: a.graceTurns ?? 6,
-        widgetMaxLines,
-        widgetMaxLinesCompact: a.widgetMaxLinesCompact ?? Math.floor(widgetMaxLines / 2),
-        widgetCompact: a.widgetCompact === true,
-        widgetShortcut: a.widgetShortcut === true,
-        widgetDescLengthFull: a.widgetDescLengthFull ?? 50,
-        widgetDescLengthCompact: a.widgetDescLengthCompact ?? 30,
         systemPromptMode: a.systemPromptMode ?? "replace",
         includeContextFiles: a.includeContextFiles ?? true,
         defaultThinking: a.defaultThinking,
@@ -166,7 +160,8 @@ vi.mock("../src/shell.js", () => {
         clearModelOverride(type: string) { delete mockModules.mockConfig.agent[type]; },
         clearAllModelOverrides() {
           const preserved: Record<string, unknown> = {};
-          for (const key of ['default', 'forceBackground', 'graceTurns', 'showCost', 'showTools', 'showTurns', 'showInput', 'showOutput', 'showContext', 'showTime', 'deltaInputTokens', 'widgetMaxLines', 'widgetMaxLinesCompact', 'widgetDescLengthFull', 'widgetDescLengthCompact', 'widgetCompact', 'widgetShortcut', 'systemPromptMode', 'includeContextFiles', 'defaultThinking', 'defaultMaxTurns', 'loadSkillsImplicitly', 'loadExtensionsImplicitly']) {
+          // 与生产 clearAllModelOverrides 共用同一份非模型键列表，避免两处漂移
+          for (const key of CONFIG_AGENT_NON_MODEL_KEYS) {
             const val = mockModules.mockConfig.agent[key];
             if (val != null || key === 'default' || key === 'forceBackground') {
               preserved[key] = val;
@@ -191,14 +186,6 @@ vi.mock("../src/shell.js", () => {
         setShowTime(enabled: boolean) { mockModules.mockConfig.agent.showTime = enabled; },
         setDeltaInputTokens(enabled: boolean) { mockModules.mockConfig.agent.deltaInputTokens = enabled; },
         setOutputThinkingBufferSize(size: number) { mockModules.mockConfig.agent.outputThinkingBufferSize = size; }
-      },
-      widget: {
-        setCompact(enabled: boolean) { mockModules.mockConfig.agent.widgetCompact = enabled; },
-        setMaxLines(lines: number) { mockModules.mockConfig.agent.widgetMaxLines = lines; },
-        setMaxLinesCompact(lines: number) { mockModules.mockConfig.agent.widgetMaxLinesCompact = lines; },
-        setDescLengthFull(n: number) { mockModules.mockConfig.agent.widgetDescLengthFull = n; },
-        setDescLengthCompact(n: number) { mockModules.mockConfig.agent.widgetDescLengthCompact = n; },
-        setShortcut(enabled: boolean) { mockModules.mockConfig.agent.widgetShortcut = enabled; },
       },
       concurrency: {
         setDefault(n: number) { mockModules.mockConfig.concurrency.default = n; },

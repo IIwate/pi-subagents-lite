@@ -3,7 +3,7 @@ import { SHORT_ID_LENGTH } from "../types.js";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord, SpawnConfig, ToolActivity } from "../types.js";
+import type { AgentRecord, SpawnConfig } from "../types.js";
 import type { AgentManager, SpawnOptions } from "../agents/agent-manager.js";
 import { buildAgentDetails, formatResultContent } from "../agents/tool-execution.js";
 
@@ -11,22 +11,16 @@ import { buildAgentDetails, formatResultContent } from "../agents/tool-execution
  * spawn-coordinator.ts — Spawn-and-track coordination for subagents.
  *
  * Single entry point for both LLM tool and menu spawn paths.
- * Owns: LiveView store, Nudge system (schedule/batch/emit), background agent tracking.
+ * Owns: Nudge system (schedule/batch/emit), background agent tracking.
  * Delegates concurrency and record lifecycle to AgentManager (peers, not ownership).
  *
- * Decision refs: D3 (forward events to live-view), D4 (stats on record only),
- * D6 (Nudge owned here), D2 (peers with AgentManager).
+ * Decision refs: D4 (stats on record only), D6 (Nudge owned here),
+ * D2 (peers with AgentManager).
  */
 
 // ============================================================================
 // Types
 // ============================================================================
-
-/** Coordinator-owned per-agent live display state. Only transient UI state. */
-export interface LiveView {
-  activeTools: Map<string, string>;  // keyed by toolName_timestamp
-  responseText: string;
-}
 
 /** Input for spawn(). Built by each caller from its own validation. */
 export interface SpawnIntent extends SpawnConfig {
@@ -54,9 +48,6 @@ const NUDGE_DELAY_MS = 200;
 // ============================================================================
 
 export class SpawnCoordinator {
-  /** Per-agent live display state. Widget reads from here + record for stats. */
-  private liveViews = new Map<string, LiveView>();
-
   /** Agent IDs spawned as background — only these trigger a nudge on completion. */
   private backgroundAgentIds = new Set<string>();
 
@@ -83,26 +74,15 @@ export class SpawnCoordinator {
     ctx: ExtensionContext,
     intent: SpawnIntent,
   ): Promise<SpawnResult> {
-    // Create live view BEFORE spawn so callbacks can close over it
-    const liveView: LiveView = {
-      activeTools: new Map(),
-      responseText: "",
-    };
-    const liveViewCallbacks = this.createLiveViewCallbacks(liveView);
-
     // Shared config fields (SpawnConfig) pass through unchanged; only the
     // intent-only fields (type/prompt/runInBackground) need translation.
     const { type, prompt, runInBackground, ...config } = intent;
     const spawnOptions: SpawnOptions = {
       ...config,
       isBackground: runInBackground,
-      ...liveViewCallbacks,
     };
 
     const agentId = this.manager.spawn(pi, ctx, type, prompt, spawnOptions);
-
-    // Register live view
-    this.liveViews.set(agentId, liveView);
 
     // Ensure widget timer is running so it displays the new agent
     // (menu path calls this explicitly, but tool path doesn't)
@@ -127,17 +107,9 @@ export class SpawnCoordinator {
       // Foreground tool handler reads the result inline on return — mark it
       // consumed so the cleanup timer may evict the record once it ages out.
       record.lifecycle.resultConsumed = true;
-
-      // Clean up live view (foreground completion handled inline)
-      this.liveViews.delete(agentId);
     }
 
     return { agentId, record };
-  }
-
-  /** Read the live view for an agent. Widget calls this. */
-  liveView(id: string): LiveView | undefined {
-    return this.liveViews.get(id);
   }
 
   /** Route user input to a running or settled subagent session. */
@@ -151,21 +123,7 @@ export class SpawnCoordinator {
       this.emitIndividualNudge(agentId);
     }
 
-    let liveView = this.liveViews.get(agentId);
-    if (!liveView) {
-      liveView = { activeTools: new Map(), responseText: "" };
-      this.liveViews.set(agentId, liveView);
-    }
-
-    const accepted = await this.manager.interact(
-      agentId,
-      message,
-      this.createLiveViewCallbacks(liveView),
-      images,
-    );
-    if (!accepted && record.lifecycle.status !== "running") {
-      this.liveViews.delete(agentId);
-    }
+    const accepted = await this.manager.interact(agentId, message, {}, images);
     if (accepted) {
       getWidget()?.ensureTimer();
       getNavigator()?.ensureTimer();
@@ -200,7 +158,7 @@ export class SpawnCoordinator {
 
   /**
    * Called by AgentManager's onComplete callback (wired at session_start).
-   * Owns the completion side-effects: nudge scheduling, live-view cleanup.
+   * Owns the completion side-effects: nudge scheduling.
    */
   onAgentComplete(record: AgentRecord): void {
     // Schedule nudge for background agents
@@ -208,43 +166,21 @@ export class SpawnCoordinator {
       this.scheduleNudge(record.id);
       this.backgroundAgentIds.delete(record.id);
     }
-
-    // Clean up live view
-    this.liveViews.delete(record.id);
   }
 
-  /** Dispose: clear timer, live views, and background tracking. */
+  /** Dispose: clear timer and background tracking. */
   dispose(): void {
     if (this.nudgeTimer) {
       clearTimeout(this.nudgeTimer);
       this.nudgeTimer = null;
     }
     this.pendingNudges.clear();
-    this.liveViews.clear();
     this.backgroundAgentIds.clear();
     this.backgroundContexts.clear();
     this.disposed = true;
   }
 
   // ── Private ──
-
-  /** Create callbacks that bridge manager events to a specific live view. */
-  private createLiveViewCallbacks(view: LiveView): Pick<SpawnOptions, "onToolActivity" | "onTextDelta"> {
-    return {
-      onToolActivity: (activity: ToolActivity) => {
-        if (activity.type === "start") {
-          view.activeTools.set(`${activity.toolName}_${Date.now()}`, activity.toolName);
-        } else {
-          for (const [key, name] of view.activeTools) {
-            if (name === activity.toolName) { view.activeTools.delete(key); break; }
-          }
-        }
-      },
-      onTextDelta: (_delta: string, fullText: string) => {
-        view.responseText = fullText;
-      },
-    };
-  }
 
   /** Emit an individual nudge for a completed background agent. */
   private emitIndividualNudge(agentId: string): void {

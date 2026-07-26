@@ -40,6 +40,9 @@ export class AgentWidget {
 
   /** Ensure the status poll timer is running; refresh once immediately. */
   ensureTimer() {
+    // 无 UI 时不建表：update() 会在 uiCtx 缺失时早退，走不到停表分支，
+    // headless 会话里定时器会 1Hz 空转到会话结束。
+    if (!this.uiCtx) return;
     if (!this.statusInterval) {
       this.statusInterval = setInterval(() => this.update(), STATUS_REFRESH_INTERVAL);
     }
