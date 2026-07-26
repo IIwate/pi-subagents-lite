@@ -36,7 +36,6 @@
     "@earendil-works/pi-tui": "^0.80.1"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.80.1",
     "@sinclair/typebox": "^0.34.49"
   },
   "files": [

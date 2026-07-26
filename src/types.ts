@@ -4,7 +4,6 @@
 
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { AgentOutputLog } from "./agents/output-file.js";
 import type { LifetimeUsage, AgentUsage } from "./agents/usage.js";
 import type { SubagentType, AgentInvocation } from "./agents/types.js";
 
@@ -40,7 +39,7 @@ export interface AgentRecord {
   error?: string;
   /** Lifecycle state: status, timestamps. */
   lifecycle: AgentLifecycle;
-  /** Display-oriented info: type, description, output file, invocation. */
+  /** Display-oriented info: type, description, invocation. */
   display: AgentDisplayInfo;
   /** Execution internals: session, abort controller, pending steers. */
   execution: AgentExecutionState;
@@ -120,18 +119,14 @@ export interface AgentLifecycle {
 }
 
 /**
- * Display-oriented fields: type name, description, output file, invocation params.
- * Used by widget (rendering), menus (listing), renderer (display).
+ * Display-oriented fields: type name, description, invocation params.
+ * Used by the agent list and management menus.
  */
 export interface AgentDisplayInfo {
   type: SubagentType;
   description: string;
-  /** Path to the streaming output transcript file. */
-  outputFile?: string;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
   invocation?: AgentInvocation;
-  /** The tool_use_id from the original Agent tool call. */
-  toolCallId?: string;
   /** Resolved absolute path of the worktree this agent is running in. */
   worktreePath?: string;
   /** Short display label for the worktree (e.g., "feature" or "feature/packages/web"). */
@@ -154,13 +149,11 @@ export interface AgentExecutionState {
   graceTurns?: number;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
-  /** Lifecycle wrapper for the output file stream. */
-  outputLog?: AgentOutputLog;
 }
 
 /**
  * Accumulated statistics: usage breakdown, tool uses, turn count.
- * Used by widget stats, footer rendering, and tool result details.
+ * Used by the agent list and selected-session footer.
  */
 export interface AgentAccumulatedStats {
   /**

@@ -255,6 +255,14 @@ describe("tool registration", () => {
     const names = api.tools.map((t) => t.name);
     expect(names).toEqual(["Agent", "StopAgent", "AgentStatus"]);
   });
+
+  it("keeps every subagent tool out of the chat feed", () => {
+    for (const tool of api.tools) {
+      expect(tool.renderShell).toBe("self");
+      expect(tool.renderCall?.().children).toEqual([]);
+      expect(tool.renderResult?.().children).toEqual([]);
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ */

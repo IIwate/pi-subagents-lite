@@ -70,8 +70,6 @@ export interface ResolvedAgentSettings {
   readonly showTime: boolean;
   /** Whether to estimate input token delta for vLLM (no cache reporting). */
   readonly deltaInputTokens: boolean;
-  /** Buffer size for streaming thinking blocks to output file. 0 = disabled. */
-  readonly outputThinkingBufferSize: number;
 }
 
 /** Side-effect targets, injected after construction. */
@@ -120,7 +118,6 @@ export class ConfigStore {
       showContext: a.showContext !== false,
       showTime: a.showTime !== false,
       deltaInputTokens: a.deltaInputTokens !== false,
-      outputThinkingBufferSize: a.outputThinkingBufferSize ?? 0,
     };
   }
 
@@ -252,10 +249,6 @@ export class ConfigStore {
       setShowTime: (enabled: boolean) => this.setAgentVisibility("showTime", enabled),
       setDeltaInputTokens: (enabled: boolean): void => {
         this.config.agent.deltaInputTokens = enabled;
-        this.persist();
-      },
-      setOutputThinkingBufferSize: (size: number): void => {
-        this.config.agent.outputThinkingBufferSize = size;
         this.persist();
       },
     },

@@ -48,8 +48,6 @@ export interface SubagentsConfig {
     showContext?: boolean;
     /** Whether to show elapsed time in widget stats line. Default: true. */
     showTime?: boolean;
-    /** When > 0, thinking deltas stream to output file during message_update events. Default: 0 (disabled). */
-    outputThinkingBufferSize?: number;
     [agentType: string]: string | null | undefined | boolean | number;
   };
   concurrency: {

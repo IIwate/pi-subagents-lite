@@ -5,7 +5,6 @@
  *   - createMockExtensionAPI: mock ExtensionAPI for index test
  *   - hasParam: check TypeBox schema for a parameter
  *   - loadExtension: import and invoke the extension factory
- *   - createMockSession: mock agent session for output-file tests
  *   - tempDirFixture: temp directory setup/teardown for filesystem tests
  *   - makeAgentMd: build agent .md content from frontmatter fields
  *   - tempDirWithFiles: create a temp dir with files for scanAgentFilesInDir tests
@@ -96,6 +95,9 @@ export interface RegisteredTool {
   promptGuidelines?: string;
   parameters: any; // TypeBox TSchema
   execute?: (...args: any[]) => any;
+  renderShell?: string;
+  renderCall?: (...args: any[]) => any;
+  renderResult?: (...args: any[]) => any;
 }
 
 export interface RegisteredCommand {
@@ -109,20 +111,13 @@ export interface ListenerRegistration {
   handler: (...args: any[]) => any;
 }
 
-export interface RegisteredMessageRenderer {
-  customType: string;
-  renderer: (...args: any[]) => any;
-}
-
 export interface MockExtensionAPI {
   tools: RegisteredTool[];
   commands: RegisteredCommand[];
   listeners: ListenerRegistration[];
-  messageRenderers: RegisteredMessageRenderer[];
   api: {
     registerTool: ReturnType<typeof vi.fn>;
     registerCommand: ReturnType<typeof vi.fn>;
-    registerMessageRenderer: ReturnType<typeof vi.fn>;
     on: ReturnType<typeof vi.fn>;
     sendUserMessage: ReturnType<typeof vi.fn>;
     sendMessage: ReturnType<typeof vi.fn>;
@@ -137,22 +132,17 @@ export function createMockExtensionAPI(): MockExtensionAPI {
   const tools: RegisteredTool[] = [];
   const commands: RegisteredCommand[] = [];
   const listeners: ListenerRegistration[] = [];
-  const messageRenderers: RegisteredMessageRenderer[] = [];
 
   return {
     tools,
     commands,
     listeners,
-    messageRenderers,
     api: {
       registerTool: vi.fn((tool: any) => {
         tools.push(tool);
       }),
       registerCommand: vi.fn((name: string, opts: any) => {
         commands.push({ name, ...opts });
-      }),
-      registerMessageRenderer: vi.fn((customType: string, renderer: any) => {
-        messageRenderers.push({ customType, renderer });
       }),
       on: vi.fn((event: string, handler: any) => {
         listeners.push({ event, handler });
@@ -180,74 +170,6 @@ export function hasParam(schema: any, paramName: string): boolean {
 export async function loadExtension(api: any) {
   const factory = (await import("../src/index.js")).default;
   return factory(api);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Mock session for output-file tests                                */
-/* ------------------------------------------------------------------ */
-
-export interface MockSession {
-  messages: Array<{ role: string; content: any }>;
-  subscribe: ReturnType<typeof vi.fn>;
-  _addMessage: (role: string, content: string) => void;
-  _fireTurnEnd: () => void;
-  _fireMessageStart: () => void;
-  _fireThinkingStart: () => void;
-  _fireThinkingDelta: (delta: string) => void;
-  _fireThinkingEnd: (content: string) => void;
-  _getListeners: () => Array<(event: any) => void>;
-}
-
-/**
- * Create a mock agent session for testing streamToOutputFile.
- */
-export function createMockSession(): MockSession {
-  const listeners: Array<(event: any) => void> = [];
-  let msgIdx = 0;
-
-  return {
-    messages: [] as Array<{ role: string; content: any }>,
-    subscribe: vi.fn((listener: (event: any) => void) => {
-      listeners.push(listener);
-      return () => {
-        const idx = listeners.indexOf(listener);
-        if (idx >= 0) listeners.splice(idx, 1);
-      };
-    }),
-    _addMessage: (role: string, content: string) => {
-      msgIdx++;
-      const msg: any = { role, content };
-      if (role === "assistant") {
-        msg.content = [{ type: "text", text: content }];
-      }
-      (msg as any)._idx = msgIdx;
-    },
-    _fireTurnEnd: () => {
-      for (const fn of listeners) fn({ type: "turn_end" });
-    },
-    _fireMessageStart: () => {
-      for (const fn of listeners) fn({ type: "message_start" });
-    },
-    _fireThinkingStart: () => {
-      for (const fn of listeners) fn({
-        type: "message_update",
-        assistantMessageEvent: { type: "thinking_start" },
-      });
-    },
-    _fireThinkingDelta: (delta: string) => {
-      for (const fn of listeners) fn({
-        type: "message_update",
-        assistantMessageEvent: { type: "thinking_delta", delta },
-      });
-    },
-    _fireThinkingEnd: (content: string) => {
-      for (const fn of listeners) fn({
-        type: "message_update",
-        assistantMessageEvent: { type: "thinking_end", content },
-      });
-    },
-    _getListeners: () => listeners,
-  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,8 +267,6 @@ export function tempDirWithFiles(
   };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Output file cleanup                                               */
 /* ------------------------------------------------------------------ */
 /*  Fake context / pi                                                 */
 /* ------------------------------------------------------------------ */

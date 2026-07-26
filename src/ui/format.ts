@@ -1,9 +1,7 @@
 /**
  * format.ts — Consolidated display formatting helpers.
  *
- * Single source of truth for all display-formatting functions used across
- * the UI layer. Previously scattered across agent-widget.ts, output-file.ts,
- * and agent-types.ts by historical accident.
+ * Single source of truth for display-formatting functions used across the UI layer.
  *
  * Pure functions — no module-level state, no side effects.
  */

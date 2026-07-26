@@ -1,17 +1,4 @@
-/**
- * menu-widget-settings.ts — Display settings menu.
- *
- * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
- * SettingsList maintains internal cursor state, fixing the cursor-position
- * reset bug that occurred with ctx.ui.select.
- *
- * Structure:
- *   Main list: thinkingBuffer, usageStats
- *   Usage stats submenu: eight visibility toggles for the agent list below the editor
- *
- * Exports:
- *   - showWidgetSettingsMenu
- */
+/** Display settings for the below-editor agent list. */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
@@ -39,20 +26,13 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
 
   const onChange = (id: string, newValue: string) => {
     const stat = statConfig.get(id);
-    if (stat) {
-      stat.set(newValue === "ON");
-      ctx.ui.notify(`${stat.label} ${newValue}`, "info");
-      return;
-    }
-
-    if (id === "thinkingBuffer") {
-      store.mutate.agent.setOutputThinkingBufferSize(newValue === "OFF" ? 0 : Number(newValue));
-      ctx.ui.notify(`Thinking buffer ${newValue}`, "info");
-    }
+    if (!stat) return;
+    stat.set(newValue === "ON");
+    ctx.ui.notify(`${stat.label} ${newValue}`, "info");
   };
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const statDescriptions: Record<string, string> = {
+    const descriptions: Record<string, string> = {
       showTools: "Show tool call count (N calls) in the agent list.",
       showTurns: "Show turn count (⟳ ) in the agent list.",
       showInput: "Show input tokens (↑) in the agent list.",
@@ -62,34 +42,15 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
       showCost: "Show dollar cost ($) in the agent list.",
       showTime: "Show elapsed time in the agent list.",
     };
-    const statItems: SettingItem[] = [...statConfig.entries()].map(([id, cfg]) => ({
+    const items: SettingItem[] = [...statConfig.entries()].map(([id, cfg]) => ({
       id,
       label: cfg.label,
       currentValue: cfg.get() ? "ON" : "OFF",
       values: ["ON", "OFF"],
-      description: statDescriptions[id],
+      description: descriptions[id],
     }));
 
-    const items: SettingItem[] = [
-      {
-        id: "thinkingBuffer",
-        label: "Log file thinking buffer",
-        currentValue: store.agent.outputThinkingBufferSize === 0 ? "OFF" : String(store.agent.outputThinkingBufferSize),
-        values: ["OFF", "80", "200", "500", "1000"],
-        description: "Controls log file thinking buffering in chars. OFF = only at turn end, 80 = flush after 80 chars.",
-      },
-      { id: "__sep__", label: " ", currentValue: "" },
-      {
-        id: "usageStats",
-        label: "Usage stats",
-        currentValue: "→",
-        submenu: (_currentValue, done2) =>
-          new SettingsList(statItems, 7, buildSettingsListTheme(theme), onChange, () => done2()),
-        description: "Toggle which usage stats appear in the agent list.",
-      },
-    ];
-
-    const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), onChange, () => done(undefined));
+    const settingsList = new SettingsList(items, 10, buildSettingsListTheme(theme), onChange, () => done(undefined));
     return new SettingsListWrapper(settingsList, { title: "Display Settings", theme, onCancel: () => done(undefined) });
   });
 }

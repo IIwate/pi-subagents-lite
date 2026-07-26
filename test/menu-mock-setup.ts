@@ -92,9 +92,7 @@ vi.mock("../src/config/config-io.js", () => ({
 }));
 
 vi.mock("../src/agents/tool-execution.js", () => ({
-  buildAgentDetails: vi.fn(() => ({})),
-  successResult: vi.fn((text: string, details?: any) => ({ content: [{ type: "text", text }], details })),
-  errorResult: vi.fn((text: string, details?: any) => ({ content: [{ type: "text", text }], isError: true, details })),
+  formatResultContent: vi.fn((record: any) => record.result ?? ""),
 }));
 
 vi.mock("../src/shell.js", () => {
@@ -119,7 +117,6 @@ vi.mock("../src/shell.js", () => {
         showContext: a.showContext !== false,
         showTime: a.showTime !== false,
         deltaInputTokens: a.deltaInputTokens !== false,
-        outputThinkingBufferSize: a.outputThinkingBufferSize ?? 0,
       };
     },
     get concurrency() {
@@ -184,8 +181,7 @@ vi.mock("../src/shell.js", () => {
         setShowOutput(enabled: boolean) { mockModules.mockConfig.agent.showOutput = enabled; },
         setShowContext(enabled: boolean) { mockModules.mockConfig.agent.showContext = enabled; },
         setShowTime(enabled: boolean) { mockModules.mockConfig.agent.showTime = enabled; },
-        setDeltaInputTokens(enabled: boolean) { mockModules.mockConfig.agent.deltaInputTokens = enabled; },
-        setOutputThinkingBufferSize(size: number) { mockModules.mockConfig.agent.outputThinkingBufferSize = size; }
+        setDeltaInputTokens(enabled: boolean) { mockModules.mockConfig.agent.deltaInputTokens = enabled; }
       },
       concurrency: {
         setDefault(n: number) { mockModules.mockConfig.concurrency.default = n; },

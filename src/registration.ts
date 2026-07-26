@@ -4,10 +4,16 @@ import { getAvailableTypes } from "./agents/agent-types.js";
 import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
-import { renderSubagentResult } from "./ui/renderer.js";
 import { showAgentsMainMenu } from "./ui/menu/menus.js";
 import { listModelOptionsForMenus } from "./models/model-scope.js";
-import { getStore } from "./shell.js";
+
+// Subagent state belongs to the below-editor list. Results still reach the LLM,
+// but all three tools render zero chat rows so Pi's default tool cards cannot leak back in.
+const SILENT_TOOL_RENDERING = {
+  renderShell: "self" as const,
+  renderCall: () => new Container(),
+  renderResult: () => new Container(),
+};
 
 // ============================================================================
 // Agent tool registration helper — dynamic enum for agent types
@@ -42,11 +48,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
     }),
     execute: executeAgentTool,
 
-    // Silent in chat — progress only in the below-editor list.
-    // renderShell:"self" plus an empty Container makes Pi's ToolExecution component render zero rows.
-    renderShell: "self",
-    renderCall: () => new Container(),
-    renderResult: () => new Container(),
+    ...SILENT_TOOL_RENDERING,
   });
 }
 
@@ -68,6 +70,7 @@ export function registerTools(pi: ExtensionAPI): void {
       agent_id: Type.String(),
     }),
     execute: executeStopAgentTool,
+    ...SILENT_TOOL_RENDERING,
   });
 
   // AgentStatus tool — stealth schema, list all agents and their statuses
@@ -77,17 +80,7 @@ export function registerTools(pi: ExtensionAPI): void {
     label: "AgentStatus",
     parameters: Type.Object({}),
     execute: executeAgentStatusTool,
-  });
-
-  // Message renderer — subagent-result (background agent completion)
-  pi.registerMessageRenderer("subagent-result", (message, options, theme) => {
-    const showCost = getStore().agent.showCost;
-    return renderSubagentResult(
-      message as { content?: string; details?: Record<string, unknown> },
-      options as { expanded?: boolean },
-      theme,
-      showCost,
-    );
+    ...SILENT_TOOL_RENDERING,
   });
 
   // Command registration

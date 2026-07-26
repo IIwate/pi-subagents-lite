@@ -40,11 +40,6 @@
 **Failed:** Initial review caught silent warning loss on runTurnLoop throw. Builder missed try/finally concern on first pass.
 **Next:** When deferring side effects, always consider error paths. try/finally guarantees flush.
 
-### stream-thinking-to-output
-**Worked:** Single config knob (`outputThinkingBufferSize`). Buffer-then-flush with deduplication via `thinkingBlockInProgress` flag.
-**Failed:** Builder committed to main instead of worktree branch. Had to cherry-pick and reset main. Nudge notifications broke after git state corruption.
-**Next:** Verify worktree branch before spawning. If nudges stop working, restart harness rather than debugging live state.
-
 ### fix-settings-cursor-position
 **Next:** SettingsList supports toggles, submenus, section separators (via `__sep__` items), and static display. Does NOT support: multi-step dialogs, action buttons, or dynamic item sets. Never call ctx.ui.input/select/custom from within active SettingsList. Design submenu-Component layer before touching complex menus.
 

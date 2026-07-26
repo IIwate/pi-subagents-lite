@@ -5,7 +5,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord, SpawnConfig } from "../types.js";
 import type { AgentManager, SpawnOptions } from "../agents/agent-manager.js";
-import { buildAgentDetails, formatResultContent } from "../agents/tool-execution.js";
+import { formatResultContent } from "../agents/tool-execution.js";
 
 /**
  * spawn-coordinator.ts — Spawn-and-track coordination for subagents.
@@ -194,11 +194,6 @@ export class SpawnCoordinator {
     const record = this.manager.getRecord(agentId);
     if (!record) return;
 
-    const details = buildAgentDetails(record, {
-      includeStats: true,
-      includeStatus: true,
-    });
-
     try {
       // Pick delivery mode based on parent session state:
       // - steer: queues while running, delivers before next LLM call
@@ -211,7 +206,6 @@ export class SpawnCoordinator {
         {
           customType: "subagent-result",
           content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${formatResultContent(record)}`,
-          details,
           // Keep the TUI silent: users see completion in the list below the editor,
           // while the LLM still receives the full result text.
           display: false,

@@ -8,7 +8,6 @@ import { randomUUID } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { continueAgentSession, runAgent } from "./agent-runner.js";
-import { AgentOutputLog } from "./output-file.js";
 import { getStore } from "../shell.js";
 import {
   type AgentRecord,
@@ -21,7 +20,7 @@ import {
   type ToolActivity,
 } from "../types.js";
 import type { SubagentType } from "./types.js";
-import { addUsage, getLifetimeTotal, getSessionContextPercent, type AgentUsage } from "./usage.js";
+import { addUsage, getSessionContextPercent, type AgentUsage } from "./usage.js";
 import { errorMessage } from "../utils.js";
 
 /** How often to check for expired agent records (milliseconds). */
@@ -118,7 +117,6 @@ export class AgentManager {
     onComplete?: OnAgentComplete,
     concurrency?: ConcurrencyConfig,
     onStart?: OnAgentStart,
-    private bufferSize: number = 0,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
@@ -282,10 +280,6 @@ export class AgentManager {
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
 
-    // Create output log for this agent (creates file + writes [USER] entry)
-    record.execution.outputLog = new AgentOutputLog(id, prompt, undefined, this.bufferSize);
-    record.display.outputFile = record.execution.outputLog.path;
-
     this.onStart?.(record);
 
     // Wire parent abort signal to stop the subagent when the parent is interrupted
@@ -326,10 +320,6 @@ export class AgentManager {
           }
           record.execution.pendingSteers = undefined;
         }
-        // Attach output log stream to session
-        if (record.execution.outputLog) {
-          record.execution.outputLog.attach(session);
-        }
         options.onSessionCreated?.(session);
       },
     })
@@ -354,18 +344,6 @@ export class AgentManager {
         return "";
       })
       .finally(() => {
-        // Finalize output log with final stats
-        if (record.execution.outputLog) {
-          try {
-            record.execution.outputLog.finalize({
-              turnCount: record.stats.turnCount ?? 0,
-              toolUseCount: record.stats.toolUses,
-              totalTokens: getLifetimeTotal(record.stats.lifetimeUsage),
-              cost: record.stats.lifetimeUsage.cost,
-            });
-          } catch { /* ignore */ }
-        }
-
         // Decrement per-model concurrency count
         if (concurrencySlot) concurrencySlot.running--;
 
@@ -547,7 +525,6 @@ export class AgentManager {
     record.lifecycle.completedAt = undefined;
     record.lifecycle.resultConsumed = undefined;
     record.error = undefined;
-    try { record.execution.outputLog?.resume(session); } catch { /* best effort */ }
 
     const trackedCallbacks = this.createRecordCallbacks(record, callbacks);
     const promise = continueAgentSession(session, message, {
@@ -586,14 +563,6 @@ export class AgentManager {
       })
       .finally(() => {
         abortController.signal.removeEventListener("abort", abortSession);
-        try {
-          record.execution.outputLog?.finalize({
-            turnCount: record.stats.turnCount ?? 0,
-            toolUseCount: record.stats.toolUses,
-            totalTokens: getLifetimeTotal(record.stats.lifetimeUsage),
-            cost: record.stats.lifetimeUsage.cost,
-          });
-        } catch { /* best effort */ }
         if (concurrencySlot) concurrencySlot.running--;
         record.execution.settled = true;
         this.safeNotifyComplete(record);

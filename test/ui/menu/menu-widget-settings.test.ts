@@ -1,16 +1,9 @@
-/**
- * menu-widget-settings.test.ts — Display settings menu tests.
- *
- * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
- * The menu contains only thinkingBuffer and usageStats; tree-widget settings were removed with the renderer.
- */
+/** Display settings menu tests. */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockModules } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
-import { getAgentConfig } from "../../../src/agents/agent-types.js";
 
-// Capture SettingsList constructor calls from pi-tui
 let settingsListCalls: Array<{
   items: any[];
   maxVisible: number;
@@ -30,159 +23,80 @@ vi.mock("@earendil-works/pi-tui", () => ({
   },
 }));
 
-// Import AFTER mock setup
 import { showWidgetSettingsMenu } from "../../../src/ui/menu/menu-widget-settings.js";
 
 function resetMocks(): void {
   mockModules.mockConfig.agent = {
-    default: null, forceBackground: false,
-    showTools: true, showTurns: true, showInput: true, showOutput: true,
-    showContext: true, showCost: false, showTime: true,
+    default: null,
+    forceBackground: false,
+    showTools: true,
+    showTurns: true,
+    showInput: true,
+    deltaInputTokens: true,
+    showOutput: true,
+    showContext: true,
+    showCost: false,
+    showTime: true,
   };
   mockModules.mockSessionOverrides.default = null;
   mockModules.mockSessionShowCost = undefined;
   vi.clearAllMocks();
   settingsListCalls = [];
-  (getAgentConfig as any).mockImplementation(() => undefined);
 }
 
-describe("showWidgetSettingsMenu — SettingsList integration", () => {
+describe("showWidgetSettingsMenu", () => {
   beforeEach(resetMocks);
 
-  it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
+  it("uses one native settings list", async () => {
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
-    expect(ctx.ui.custom).toHaveBeenCalled();
+
+    expect(ctx.ui.custom).toHaveBeenCalledOnce();
     expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(settingsListCalls).toHaveLength(1);
+    expect(settingsListCalls[0].items.map(item => item.id)).toEqual([
+      "showTools",
+      "showTurns",
+      "showInput",
+      "deltaInputTokens",
+      "showOutput",
+      "showContext",
+      "showCost",
+      "showTime",
+    ]);
   });
 
-  it("does not expose removed tree-widget settings", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const ids = settingsListCalls[0].items.map((i: any) => i.id);
-    expect(ids).not.toContain("compact");
-    expect(ids).not.toContain("shortcut");
-    expect(ids).not.toContain("maxLines");
-    expect(ids).not.toContain("maxLinesCompact");
-    expect(ids).not.toContain("descLengthFull");
-    expect(ids).not.toContain("descLengthCompact");
-    expect(ids).toContain("thinkingBuffer");
-    expect(ids).toContain("usageStats");
-  });
-});
-
-describe("showWidgetSettingsMenu — Usage stats submenu", () => {
-  beforeEach(resetMocks);
-
-  it("usageStats item has submenu function", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const usageStats = settingsListCalls[0].items.find((i: any) => i.id === "usageStats");
-    expect(typeof usageStats.submenu).toBe("function");
-  });
-
-  it("stat items have correct ON/OFF values from store", async () => {
-    mockModules.mockConfig.agent.showTools = true;
+  it("shows current ON/OFF values", async () => {
     mockModules.mockConfig.agent.showTurns = false;
     mockModules.mockConfig.agent.showCost = false;
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
 
-    const usageStats = settingsListCalls[0].items.find((i: any) => i.id === "usageStats");
-    usageStats.submenu("", vi.fn());
-
-    const statItems = settingsListCalls[1].items;
-    expect(statItems.find((i: any) => i.id === "showTools").currentValue).toBe("ON");
-    expect(statItems.find((i: any) => i.id === "showTurns").currentValue).toBe("OFF");
-    expect(statItems.find((i: any) => i.id === "showCost").currentValue).toBe("OFF");
+    const items = settingsListCalls[0].items;
+    expect(items.find(item => item.id === "showTools").currentValue).toBe("ON");
+    expect(items.find(item => item.id === "showTurns").currentValue).toBe("OFF");
+    expect(items.find(item => item.id === "showCost").currentValue).toBe("OFF");
   });
 
-  it("stat toggle onChange updates store", async () => {
-    mockModules.mockConfig.agent.showTools = true;
+  it("updates every display setting", async () => {
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
+    const { onChange } = settingsListCalls[0];
 
-    const usageStats = settingsListCalls[0].items.find((i: any) => i.id === "usageStats");
-    usageStats.submenu("", vi.fn());
-
-    settingsListCalls[1].onChange("showTools", "OFF");
-    expect(mockModules.mockConfig.agent.showTools).toBe(false);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("stat toggle onChange for all 7 stats", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const usageStats = settingsListCalls[0].items.find((i: any) => i.id === "usageStats");
-    usageStats.submenu("", vi.fn());
-
-    settingsListCalls[1].onChange("showTools", "OFF");
-    expect(mockModules.mockConfig.agent.showTools).toBe(false);
-
-    settingsListCalls[1].onChange("showTurns", "OFF");
-    expect(mockModules.mockConfig.agent.showTurns).toBe(false);
-
-    settingsListCalls[1].onChange("showInput", "OFF");
-    expect(mockModules.mockConfig.agent.showInput).toBe(false);
-
-    settingsListCalls[1].onChange("showOutput", "OFF");
-    expect(mockModules.mockConfig.agent.showOutput).toBe(false);
-
-    settingsListCalls[1].onChange("showContext", "OFF");
-    expect(mockModules.mockConfig.agent.showContext).toBe(false);
-
-    settingsListCalls[1].onChange("showCost", "ON");
+    for (const id of [
+      "showTools",
+      "showTurns",
+      "showInput",
+      "deltaInputTokens",
+      "showOutput",
+      "showContext",
+      "showTime",
+    ]) {
+      onChange(id, "OFF");
+      expect(mockModules.mockConfig.agent[id]).toBe(false);
+    }
+    onChange("showCost", "ON");
     expect(mockModules.mockConfig.agent.showCost).toBe(true);
-
-    settingsListCalls[1].onChange("showTime", "OFF");
-    expect(mockModules.mockConfig.agent.showTime).toBe(false);
-  });
-});
-
-describe("showWidgetSettingsMenu — thinking buffer", () => {
-  beforeEach(() => {
-    resetMocks();
-    mockModules.mockConfig.agent.outputThinkingBufferSize = 0;
-  });
-
-  it("has thinkingBuffer item with ring values", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const item = settingsListCalls[0].items.find((i: any) => i.id === "thinkingBuffer");
-    expect(item).toBeDefined();
-  });
-
-  it("shows OFF when outputThinkingBufferSize is 0", async () => {
-    mockModules.mockConfig.agent.outputThinkingBufferSize = 0;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const item = settingsListCalls[0].items.find((i: any) => i.id === "thinkingBuffer");
-    expect(item.currentValue).toBe("OFF");
-  });
-
-  it("shows number when outputThinkingBufferSize is nonzero", async () => {
-    mockModules.mockConfig.agent.outputThinkingBufferSize = 200;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const item = settingsListCalls[0].items.find((i: any) => i.id === "thinkingBuffer");
-    expect(item.currentValue).toBe("200");
-  });
-
-  it("onChange updates store with numeric value", async () => {
-    mockModules.mockConfig.agent.outputThinkingBufferSize = 0;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    settingsListCalls[0].onChange("thinkingBuffer", "500");
-    expect(mockModules.mockConfig.agent.outputThinkingBufferSize).toBe(500);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("onChange OFF sets value to 0", async () => {
-    mockModules.mockConfig.agent.outputThinkingBufferSize = 200;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    settingsListCalls[0].onChange("thinkingBuffer", "OFF");
-    expect(mockModules.mockConfig.agent.outputThinkingBufferSize).toBe(0);
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(8);
   });
 });

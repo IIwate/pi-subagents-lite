@@ -29,12 +29,12 @@ Manual spawn, model/concurrency settings, stats visibility, and agent-type manag
 This package is a fork of [luispater/pi-subagents-lite](https://github.com/luispater/pi-subagents-lite) that diverged after upstream v1.5.0. Compared with the upstream `main` branch, this fork:
 
 - uses a single below-editor agent list as the only progress UI (the above-editor tree widget is removed, along with its compact/max-lines settings);
-- keeps the chat feed free of `Agent` tool cards (silent tool render); the list owns progress and stats;
+- keeps the chat feed free of `Agent`, `StopAgent`, and `AgentStatus` tool cards; the list owns visible progress and stats;
 - delivers background completion to the LLM with `display: false` (no purple result card, no toast);
 - caps the list height (~6 rows with hidden-row scrolling), slows list/status refresh, and reports in-flight count only via `setStatus`;
 - supports manual agent clear from the list (`Ctrl+D`, with confirm) and forces TUI reflow when the list shrinks, a subagent finishes, or the main session ends — reducing blank gaps under classic powerline layouts.
 
-For the shared feature set (custom agent types, model precedence, concurrency limits, worktrees, output logs), see the [upstream README](https://github.com/luispater/pi-subagents-lite#readme).
+For the shared feature set (custom agent types, model precedence, concurrency limits, and worktrees), see the [upstream README](https://github.com/luispater/pi-subagents-lite#readme).
 
 ## License
 

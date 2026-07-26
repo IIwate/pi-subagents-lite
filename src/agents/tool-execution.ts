@@ -3,8 +3,7 @@ import { getStatusNote } from "../status-note.js";
  * tool-execution.ts — Agent tool execution handlers.
  *
  * Contains the execute callbacks registered for the Agent tool.
- * Spawn coordination, nudge scheduling, and live-view tracking have moved
- * to spawn-coordinator.ts. buildAgentDetails stays here as a pure helper.
+ * Spawn coordination, nudge scheduling, and live-view tracking live in spawn-coordinator.ts.
  */
 
 import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
@@ -12,7 +11,6 @@ import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import { resolveType, getAgentConfig, discoverNewAgents } from "./agent-types.js";
-import { getLifetimeTotal, getSessionContextPercent } from "./usage.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
@@ -42,72 +40,18 @@ import {
 // ============================================================================
 
 /** Shortcut for a successful tool result. */
-function successResult(text: string, details?: Record<string, unknown>) {
-  return { content: [{ type: "text", text }], details };
+function successResult(text: string) {
+  return { content: [{ type: "text", text }] };
 }
 
 /** Shortcut for an error tool result. */
-function errorResult(text: string, details?: Record<string, unknown>) {
-  return { content: [{ type: "text", text }], isError: true as const, details };
-}
-
-// ============================================================================
-// Activity tracking
-// ============================================================================
-
-/**
- * Build a details Record from an AgentRecord, controlled by options.
- *
- * Always includes `type` and `description`. Optional groups:
- * - `includeStatus`: adds `status`, `outputFile`
- * - `includeStats`: adds turn/token/cost/context/compaction/model fields
- *
- * Consolidates the identical field-selection logic previously duplicated
- * across emitIndividualNudge, executeSpawnForeground, and executeSpawnBackground.
- */
-export function buildAgentDetails(
-  record: AgentRecord,
-  opts?: { includeStats?: boolean; includeStatus?: boolean },
-): Record<string, unknown> {
-  const details: Record<string, unknown> = {
-    type: record.display.type,
-    description: record.display.description,
-  };
-
-  if (record.display.worktreePath) {
-    details.worktreePath = record.display.worktreePath;
-  }
-
-  if (opts?.includeStatus) {
-    details.status = record.lifecycle.status;
-    details.outputFile = record.display.outputFile;
-  }
-
-  if (opts?.includeStats) {
-    const elapsedMs = record.lifecycle.completedAt ? record.lifecycle.completedAt - record.lifecycle.startedAt : 0;
-
-    details.turnCount = record.stats.turnCount;
-    details.maxTurns = record.stats.maxTurns;
-    details.toolUses = record.stats.toolUses;
-    details.input = record.stats.lifetimeUsage.input;
-    details.output = record.stats.lifetimeUsage.output;
-    details.contextPercent = getSessionContextPercent(record.execution.session);
-    details.durationMs = elapsedMs;
-    details.compactions = record.stats.compactionCount;
-    details.modelName = record.display.invocation?.modelName;
-    details.thinkingLevel = record.display.invocation?.thinkingLevel;
-    details.cost = record.stats.lifetimeUsage.cost;
-  }
-
-  return details;
+function errorResult(text: string) {
+  return { content: [{ type: "text", text }], isError: true as const };
 }
 
 /**
- * Result text plus status note, for display.
- *
- * Shared by the foreground tool result and the subagent-result nudge so both
- * callers stay in sync on the nullish default and separator handling — they
- * have diverged before. getStatusNote owns the leading separator.
+ * Result text plus status note for foreground returns and background nudges.
+ * Keeping one formatter prevents their completion semantics from drifting.
  */
 export function formatResultContent(record: AgentRecord): string {
   return (record.result ?? "") + getStatusNote(record.lifecycle);
@@ -225,18 +169,15 @@ export async function executeAgentTool(
     // Background: return immediately
     const suffix = `A notification will arrive when done — do NOT poll, sleep, timeout, check status, or redo the delegated work. The parent task advances automatically when the subagent completes.\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
-    const details = buildAgentDetails(record);
-    return successResult(`[${label}] ${suffix}`, details);
+    return successResult(`[${label}] ${suffix}`);
   }
 
   // Foreground: record.execution.promise is already awaited by coordinator.spawn()
-  const details = buildAgentDetails(record, { includeStats: true });
-
   if (record.lifecycle.status === "error") {
-    return errorResult(`Agent failed: ${record.error || "unknown error"}`, details);
+    return errorResult(`Agent failed: ${record.error || "unknown error"}`);
   }
 
-  return successResult(formatResultContent(record), details);
+  return successResult(formatResultContent(record));
 }
 
 // ============================================================================
