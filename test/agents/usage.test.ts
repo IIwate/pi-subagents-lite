@@ -4,15 +4,13 @@
  * Tests cover:
  *   - LifetimeUsage type includes cost field
  *   - addUsage accumulates cost alongside tokens
- *   - getLifetimeTotal includes cost in sum
- *   - Backward compatibility (existing token fields unchanged)
+ *   - Token and cost formatting
  */
 
 import { describe, it, expect } from "vitest";
 import {
   type LifetimeUsage,
   addUsage,
-  getLifetimeTotal,
   formatTokens,
   formatCost,
 } from "../../src/agents/usage.js";
@@ -59,27 +57,6 @@ describe("addUsage", () => {
     addUsage(target, { input: 200, output: 100, cacheWrite: 20, cost: 5.0 });
     addUsage(target, { input: 50, output: 25, cacheWrite: 5, cost: 1.25 });
     expect(target).toEqual({ input: 350, output: 175, cacheWrite: 35, cost: 8.75 });
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  getLifetimeTotal — includes cost                                   */
-/* ------------------------------------------------------------------ */
-
-describe("getLifetimeTotal", () => {
-  it("returns sum of input + output + cacheWrite + cost", () => {
-    const u: LifetimeUsage = { input: 100, output: 50, cacheWrite: 10, cost: 5 };
-    // 100 + 50 + 10 + 5 = 165
-    expect(getLifetimeTotal(u)).toBe(165);
-  });
-
-  it("returns 0 for undefined", () => {
-    expect(getLifetimeTotal(undefined)).toBe(0);
-  });
-
-  it("returns 0 when all components are 0", () => {
-    const u: LifetimeUsage = { input: 0, output: 0, cacheWrite: 0, cost: 0 };
-    expect(getLifetimeTotal(u)).toBe(0);
   });
 });
 

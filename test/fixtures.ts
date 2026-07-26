@@ -54,7 +54,6 @@ export function shellMock(fns: ShellMockFns = {}) {
     getRecord: vi.fn(),
     listAgents: vi.fn(() => []),
     spawn: vi.fn(),
-    getTotalAgentCost: vi.fn(() => 0),
   };
   const pi = fns.pi ?? { sendMessage: vi.fn(), exec: vi.fn() };
   const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };

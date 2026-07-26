@@ -32,14 +32,12 @@ function resetMocks(): void {
     showTools: true,
     showTurns: true,
     showInput: true,
-    deltaInputTokens: true,
     showOutput: true,
     showContext: true,
     showCost: false,
     showTime: true,
   };
   mockModules.mockSessionOverrides.default = null;
-  mockModules.mockSessionShowCost = undefined;
   vi.clearAllMocks();
   settingsListCalls = [];
 }
@@ -58,7 +56,6 @@ describe("showWidgetSettingsMenu", () => {
       "showTools",
       "showTurns",
       "showInput",
-      "deltaInputTokens",
       "showOutput",
       "showContext",
       "showCost",
@@ -87,7 +84,6 @@ describe("showWidgetSettingsMenu", () => {
       "showTools",
       "showTurns",
       "showInput",
-      "deltaInputTokens",
       "showOutput",
       "showContext",
       "showTime",
@@ -97,6 +93,6 @@ describe("showWidgetSettingsMenu", () => {
     }
     onChange("showCost", "ON");
     expect(mockModules.mockConfig.agent.showCost).toBe(true);
-    expect(ctx.ui.notify).toHaveBeenCalledTimes(8);
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(7);
   });
 });

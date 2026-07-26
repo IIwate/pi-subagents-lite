@@ -6,7 +6,7 @@
  * reset bug that occurred with ctx.ui.select.
  *
  * Exports:
- *   - showSpawnOptionsMenu: default spawn-time options (thinking, max turns, force background, grace turns)
+ *   - showSpawnOptionsMenu: default spawn-time options (thinking, force background, grace turns)
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -38,19 +38,6 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
         ctx.ui.notify(`Grace turns set to ${parsed}`, "info");
       }),
       description: "Extra turns after the soft turn limit before a hard abort.",
-    },
-    {
-      id: "defaultMaxTurns",
-      label: "Default max turns",
-      currentValue: String(store.agent.defaultMaxTurns ?? "(not set)"),
-      submenu: createNumericSubmenu(ctx, { min: 1 }, (parsed) => {
-        store.mutate.agent.setDefaultMaxTurns(parsed);
-        ctx.ui.notify(`Default max turns set to ${parsed}`, "info");
-      }, () => {
-        store.mutate.agent.setDefaultMaxTurns(undefined);
-        ctx.ui.notify("Default max turns cleared", "info");
-      }),
-      description: "Soft turn limit; agent is steered here, then hard-aborts after grace turns. Blank = unlimited.",
     },
     {
       id: "defaultThinking",

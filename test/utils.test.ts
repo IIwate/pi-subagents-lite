@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFileSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
+import { describe, it, expect } from "vitest";
 import {
   isUnsafeName,
-  isSymlink,
-  safeReadFile,
   findModelInRegistry,
   parseModelKey,
   parseModelSpec,
@@ -12,7 +8,6 @@ import {
   resolveExactModel,
   unknownModelError,
 } from "../src/utils.ts";
-import { tempDirFixture } from "./fixtures";
 
 /* ------------------------------------------------------------------ */
 /*  isUnsafeName                                                      */
@@ -60,72 +55,6 @@ describe("isUnsafeName", () => {
 
   it("rejects names with slashes", () => {
     expect(isUnsafeName("a/b")).toBe(true);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  isSymlink                                                         */
-/* ------------------------------------------------------------------ */
-
-describe("isSymlink", () => {
-  const { setup, getDir, teardown } = tempDirFixture("isSymlink-test");
-
-  beforeEach(() => setup());
-  afterEach(() => teardown());
-
-  it("returns false for a regular file", () => {
-    const file = join(getDir(), "regular.txt");
-    writeFileSync(file, "hello", "utf-8");
-    expect(isSymlink(file)).toBe(false);
-  });
-
-  it("returns true for a symlink", () => {
-    const target = join(getDir(), "target.txt");
-    writeFileSync(target, "target content", "utf-8");
-    const link = join(getDir(), "link.txt");
-    symlinkSync(target, link);
-    expect(isSymlink(link)).toBe(true);
-  });
-
-  it("returns false for a non-existent file", () => {
-    expect(isSymlink(join(getDir(), "nonexistent.txt"))).toBe(false);
-  });
-
-  it("returns false for a directory", () => {
-    expect(isSymlink(getDir())).toBe(false);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  safeReadFile                                                      */
-/* ------------------------------------------------------------------ */
-
-describe("safeReadFile", () => {
-  const { setup, getDir, teardown } = tempDirFixture("safeReadFile-test");
-
-  beforeEach(() => setup());
-  afterEach(() => teardown());
-
-  it("reads a normal file", () => {
-    const file = join(getDir(), "normal.txt");
-    writeFileSync(file, "file content", "utf-8");
-    expect(safeReadFile(file)).toBe("file content");
-  });
-
-  it("returns undefined for a symlink", () => {
-    const target = join(getDir(), "target.txt");
-    writeFileSync(target, "secret", "utf-8");
-    const link = join(getDir(), "link.txt");
-    symlinkSync(target, link);
-    expect(safeReadFile(link)).toBeUndefined();
-  });
-
-  it("returns undefined for a missing file", () => {
-    expect(safeReadFile(join(getDir(), "missing.txt"))).toBeUndefined();
-  });
-
-  it("returns undefined for a directory", () => {
-    expect(safeReadFile(getDir())).toBeUndefined();
   });
 });
 

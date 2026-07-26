@@ -80,7 +80,6 @@ import { showModelSettingsMenu } from "../../../src/ui/menu/menu-model-settings.
 function resetAgentState(): void {
   mockModules.mockConfig.agent = { default: null, forceBackground: false };
   mockModules.mockSessionOverrides = { default: null };
-  mockModules.mockSessionShowCost = undefined;
 }
 
 describe("showModelSettingsMenu — SettingsList migration", () => {

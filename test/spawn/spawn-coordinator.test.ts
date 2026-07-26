@@ -1,8 +1,7 @@
 /**
  * spawn-coordinator.test.ts — Tests for SpawnCoordinator.
 
- * Verifies: spawn (foreground/background), nudge batching, live-view lifecycle,
- * onAgentComplete, dispose, stale pi protection.
+ * Verifies foreground/background spawn, nudge batching, completion, and disposal.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -18,7 +17,7 @@ vi.mock("../../src/agents/agent-types.js", () => ({
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
-  validateWorktreePath: vi.fn(async () => ({ ok: true, resolvedPath: "/wt", label: "wt" })),
+  validateWorktreePath: vi.fn(async () => ({ ok: true, resolvedPath: "/wt" })),
 }));
 
 vi.mock("../../src/utils.js", () => ({
@@ -54,7 +53,7 @@ function makeMockManager() {
       const record: any = {
         id,
         display: { type, description: options.description },
-        lifecycle: { status: options.isBackground ? "running" : "running", startedAt: Date.now() },
+        lifecycle: { status: "running", startedAt: Date.now() },
         execution: { promise: Promise.resolve("done") },
         stats: {
           lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
@@ -73,10 +72,8 @@ function makeMockManager() {
     abort: vi.fn(() => true),
     steer: vi.fn(async () => true),
     interact: vi.fn(async () => true),
-    getTotalAgentCost: vi.fn(() => 0),
     dispose: vi.fn(),
     onComplete: undefined as any,
-    onStart: undefined as any,
   };
 }
 
@@ -117,7 +114,7 @@ describe("SpawnCoordinator", () => {
     expect(manager.spawn).toHaveBeenCalledTimes(1);
     expect(manager.spawn.mock.calls[0][2]).toBe("builder");
     expect(manager.spawn.mock.calls[0][3]).toBe("do something");
-    expect(manager.spawn.mock.calls[0][4].isBackground).toBe(true);
+    expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("runInBackground");
   });
 
   it("spawns a foreground agent and awaits its promise", async () => {
@@ -132,33 +129,6 @@ describe("SpawnCoordinator", () => {
 
     expect(result.agentId).toBeTruthy();
     expect(result.record).toBeTruthy();
-    expect(manager.spawn.mock.calls[0][4].isBackground).toBe(false);
-  });
-
-  it("registers background agent in backgroundAgentIds", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
-      type: "builder",
-      prompt: "do something",
-      description: "Test bg",
-      graceTurns: 6,
-      runInBackground: true,
-    });
-
-    expect(coordinator.isBackground(result.agentId)).toBe(true);
-  });
-
-  it("does not register foreground agent in backgroundAgentIds", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
-      type: "builder",
-      prompt: "do something",
-      description: "Test fg",
-      graceTurns: 6,
-      runInBackground: false,
-    });
-
-    expect(coordinator.isBackground(result.agentId)).toBe(false);
   });
 
   it("routes direct interaction through the manager", async () => {
@@ -175,7 +145,7 @@ describe("SpawnCoordinator", () => {
     const accepted = await coordinator.interact(result.agentId, "focus on tests", images);
 
     expect(accepted).toBe(true);
-    expect(manager.interact).toHaveBeenCalledWith(result.agentId, "focus on tests", {}, images);
+    expect(manager.interact).toHaveBeenCalledWith(result.agentId, "focus on tests", images);
   });
 
   it("delivers a pending background nudge before interactive continuation", async () => {
@@ -295,8 +265,6 @@ describe("SpawnCoordinator", () => {
       vi.advanceTimersByTime(200);
       expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
-      // Should be removed from background set
-      expect(coordinator.isBackground(result.agentId)).toBe(false);
     });
 
     it("does not schedule nudge for foreground agents", () => {

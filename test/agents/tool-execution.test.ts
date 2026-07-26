@@ -37,11 +37,6 @@ const {
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
   validateWorktreePath: mockValidateWorktreePath,
-  computeLabel: vi.fn((resolved: string, root: string) => {
-    if (resolved === root) return root.split("/").pop() || root;
-    const rel = resolved.slice(root.length + 1);
-    return `${root.split("/").pop()}/${rel}`;
-  }),
 }));
 
 vi.mock("../../src/agents/agent-types.js", () => ({
@@ -88,7 +83,6 @@ vi.mock("../../src/shell.js", () => ({
     spawn: mockSpawn,
     getRecord: mockGetRecord,
     listAgents: vi.fn(() => []),
-    getTotalAgentCost: vi.fn(() => 0),
     abort: vi.fn(() => false),
   }),
   getWidget: () => ({
@@ -110,8 +104,6 @@ vi.mock("../../src/shell.js", () => ({
         modelKey: intent.modelKey,
         graceTurns: intent.graceTurns,
         worktreePath: intent.worktreePath,
-        worktreeLabel: intent.worktreeLabel,
-        isBackground: intent.runInBackground,
       });
       const record = mockGetRecord(id);
       if (!intent.runInBackground && record?.execution?.promise) {
@@ -119,7 +111,6 @@ vi.mock("../../src/shell.js", () => ({
       }
       return { agentId: id, record };
     }),
-    isBackground: vi.fn(() => false),
     scheduleNudge: vi.fn(),
     onAgentComplete: vi.fn(),
     dispose: vi.fn(),
@@ -128,7 +119,6 @@ vi.mock("../../src/shell.js", () => ({
 
 vi.mock("../../src/agents/usage.js", () => ({
   addUsage: vi.fn(),
-  getLifetimeTotal: vi.fn(() => 0),
   getSessionContextPercent: vi.fn(() => null),
 }));
 
@@ -176,8 +166,6 @@ describe("executeAgentTool — worktree_path validation", () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: true,
       resolvedPath: "/wt/feature",
-      worktreeRoot: "/wt/feature",
-      label: "feature",
     });
 
     await executeAgentTool("tc-1", makeParams({ worktree_path: "/wt/feature" }), undefined, undefined, ctx);
@@ -246,8 +234,6 @@ describe("executeAgentTool — worktree_path validation", () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: true,
       resolvedPath: "/wt/feature",
-      worktreeRoot: "/wt/feature",
-      label: "feature",
     });
 
     await executeAgentTool("tc-4", makeParams({ worktree_path: "/wt/feature" }), undefined, undefined, ctx);
@@ -291,14 +277,12 @@ describe("executeAgentTool — worktree_path validation", () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: true,
       resolvedPath: "/wt/feature",
-      worktreeRoot: "/wt/feature",
-      label: "feature",
     });
     // Foreground spawn completes immediately
     mockGetRecord.mockReturnValue({
       id: "agent-id-123",
       result: "Agent completed successfully",
-      display: { type: "general-purpose", description: "Test agent", worktreeLabel: "feature" },
+      display: { type: "general-purpose", description: "Test agent" },
       lifecycle: { status: "completed", startedAt: Date.now() - 1000, completedAt: Date.now() },
       execution: { promise: Promise.resolve("Agent completed successfully") },
       stats: {
@@ -345,7 +329,7 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     ctx = fakeCtx();
     mockGetRecord.mockReturnValue({
       id: "agent-id-bg",
-      display: { type: "general-purpose", description: "Test agent", worktreeLabel: "feature" },
+      display: { type: "general-purpose", description: "Test agent" },
       lifecycle: { status: "running", startedAt: Date.now() },
       execution: {},
       stats: {
@@ -360,8 +344,6 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: true,
       resolvedPath: "/wt/feature",
-      worktreeRoot: "/wt/feature",
-      label: "feature",
     });
 
     const result = await executeAgentTool(
@@ -420,8 +402,6 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: true,
       resolvedPath: "/wt/feature",
-      worktreeRoot: "/wt/feature",
-      label: "feature",
     });
 
     // First resolveType call returns undefined (type not known)

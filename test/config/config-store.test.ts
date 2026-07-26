@@ -199,9 +199,8 @@ describe("ConfigStore model-override clearing", () => {
     expect(saves).toHaveLength(1);
   });
 
-  it("clearAllModelOverrides preserves non-model settings, drops per-type overrides", () => {
+  it("clearAllModelOverrides preserves active settings and drops stale keys", () => {
     const { io } = memIO({
-      // widgetMaxLines is a legacy config key for a removed feature; preserve it instead of treating it as a model override.
       agent: { default: "keep-default", forceBackground: true, graceTurns: 7, showCost: true, widgetMaxLines: 14, Explore: "m1", general: "m2" },
       concurrency: { default: 4 },
     });
@@ -214,81 +213,7 @@ describe("ConfigStore model-override clearing", () => {
     expect(snap.forceBackground).toBe(true);
     expect(snap.graceTurns).toBe(7);
     expect(snap.showCost).toBe(true);
-    expect(snap.widgetMaxLines).toBe(14);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  Session showCost override                                           */
-/* ------------------------------------------------------------------ */
-
-describe("ConfigStore session showCost override", () => {
-  it("session setShowCost overrides config value", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: false }, concurrency: { default: 4 } });
-    const store = new ConfigStore(io);
-    expect(store.agent.showCost).toBe(false);
-    store.mutate.session.setShowCost(true);
-    expect(store.agent.showCost).toBe(true);
-  });
-
-  it("session setShowCost is not persisted", () => {
-    const { io, saves } = memIO();
-    const store = new ConfigStore(io);
-    saves.length = 0;
-    store.mutate.session.setShowCost(true);
-    expect(saves).toHaveLength(0);
-    expect(store.agent.showCost).toBe(true);
-  });
-
-  it("session clearShowCost reverts to config value", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: false }, concurrency: { default: 4 } });
-    const store = new ConfigStore(io);
-    store.mutate.session.setShowCost(true);
-    expect(store.agent.showCost).toBe(true);
-    store.mutate.session.clearShowCost();
-    expect(store.agent.showCost).toBe(false);
-  });
-
-  it("session setShowCost syncs visibility to the navigator", () => {
-    const { io } = memIO();
-    const { nav, calls } = navigatorStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ navigator: nav });
-    calls.length = 0;
-    store.mutate.session.setShowCost(true);
-    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
-  });
-
-  it("session clearShowCost restores configured visibility in the navigator", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
-    const { nav, calls } = navigatorStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ navigator: nav });
-    calls.length = 0;
-    store.mutate.session.setShowCost(false);
-    expect(calls.some(c => c.includes('"showCost":false'))).toBe(true);
-    calls.length = 0;
-    store.mutate.session.clearShowCost();
-    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
-  });
-
-  it("reload clears session showCost override", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: false }, concurrency: { default: 4 } });
-    const store = new ConfigStore(io);
-    store.mutate.session.setShowCost(true);
-    expect(store.agent.showCost).toBe(true);
-    store.reload();
-    expect(store.agent.showCost).toBe(false);
-  });
-
-  it("hasSessionShowCost reflects session state", () => {
-    const { io } = memIO();
-    const store = new ConfigStore(io);
-    expect(store.hasSessionShowCost).toBe(false);
-    store.mutate.session.setShowCost(true);
-    expect(store.hasSessionShowCost).toBe(true);
-    store.mutate.session.clearShowCost();
-    expect(store.hasSessionShowCost).toBe(false);
+    expect(snap.widgetMaxLines).toBeUndefined();
   });
 });
 
@@ -342,22 +267,20 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.systemPromptMode).toBe("replace");
   });
 
-  it("optional properties default to undefined", () => {
+  it("optional thinking defaults to undefined", () => {
     const store = new ConfigStore(memIO().io);
     expect(store.agent.defaultThinking).toBeUndefined();
-    expect(store.agent.defaultMaxTurns).toBeUndefined();
   });
 
   it("configured values override defaults", () => {
     const { io } = memIO({
-      agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", defaultMaxTurns: 50, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
+      agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
     expect(store.agent.includeContextFiles).toBe(false);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("high");
-    expect(store.agent.defaultMaxTurns).toBe(50);
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
@@ -370,7 +293,6 @@ describe("ConfigStore agent properties", () => {
     store.mutate.agent.setIncludeContextFiles(false);
     store.mutate.agent.setSystemPromptMode("custom");
     store.mutate.agent.setDefaultThinking("medium");
-    store.mutate.agent.setDefaultMaxTurns(30);
     store.mutate.agent.setLoadSkillsImplicitly(false);
     store.mutate.agent.setLoadExtensionsImplicitly(false);
     store.mutate.agent.setDisableDefaultAgents(true);
@@ -378,28 +300,23 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.includeContextFiles).toBe(false);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("medium");
-    expect(store.agent.defaultMaxTurns).toBe(30);
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
-    expect(saves).toHaveLength(7);
+    expect(saves).toHaveLength(6);
   });
 
-  it("setDefaultThinking/MaxTurns(undefined) removes the field", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, defaultThinking: "high", defaultMaxTurns: 50 }, concurrency: { default: 4 } });
+  it("setDefaultThinking(undefined) removes the field", () => {
+    const { io } = memIO({ agent: { default: null, forceBackground: false, defaultThinking: "high" }, concurrency: { default: 4 } });
     const store = new ConfigStore(io);
     store.mutate.agent.setDefaultThinking(undefined);
-    store.mutate.agent.setDefaultMaxTurns(undefined);
     expect(store.agent.defaultThinking).toBeUndefined();
-    expect(store.agent.defaultMaxTurns).toBeUndefined();
     expect(store.agentConfigSnapshot().defaultThinking).toBeUndefined();
-    expect(store.agentConfigSnapshot().defaultMaxTurns).toBeUndefined();
   });
 
-  it("clearAllModelOverrides preserves all agent properties", () => {
+  it("clearAllModelOverrides preserves all active agent properties", () => {
     const { io } = memIO({
-      // widgetDescLength* are also legacy keys for removed features and must remain preserved.
-      agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", defaultMaxTurns: 25, widgetDescLengthFull: 80, widgetDescLengthCompact: 20, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
+      agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", widgetDescLengthFull: 80, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
@@ -408,9 +325,7 @@ describe("ConfigStore agent properties", () => {
     expect(snap.includeContextFiles).toBe(false);
     expect(snap.systemPromptMode).toBe("custom");
     expect(snap.defaultThinking).toBe("low");
-    expect(snap.defaultMaxTurns).toBe(25);
-    expect(snap.widgetDescLengthFull).toBe(80);
-    expect(snap.widgetDescLengthCompact).toBe(20);
+    expect(snap.widgetDescLengthFull).toBeUndefined();
     expect(snap.loadSkillsImplicitly).toBe(false);
     expect(snap.loadExtensionsImplicitly).toBe(false);
     expect(snap.disableDefaultAgents).toBe(true);

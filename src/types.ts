@@ -4,7 +4,7 @@
 
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { LifetimeUsage, AgentUsage } from "./agents/usage.js";
+import type { LifetimeUsage } from "./agents/usage.js";
 import type { SubagentType, AgentInvocation } from "./agents/types.js";
 
 /**
@@ -14,21 +14,10 @@ import type { SubagentType, AgentInvocation } from "./agents/types.js";
  */
 export type ThinkingLevel = string;
 
-/** Tool activity event: start/end of a tool invocation. */
-export interface ToolActivity {
-  type: "start" | "end";
-  toolName: string;
-}
-
-/**
- * Resolved model + run-limit tunables shared by every spawn/run shape
- * (RunOptions, SpawnOptions, SpawnIntent). Add a tunable here once and it
- * flows through the whole chain.
- */
+/** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
   model?: Model<any>;
   maxTurns?: number;
-  maxTokens?: number;
   thinkingLevel?: ThinkingLevel;
   graceTurns?: number;
 }
@@ -53,17 +42,13 @@ export interface EnvInfo {
   platform: string;
 }
 
-/**
- * Streaming/callback surface shared by RunOptions and SpawnOptions.
- * Bridges agent-runner events to record tracking and live-view updates.
- */
+/** Internal runner events consumed by AgentManager record tracking. */
 export interface RunCallbacks {
-  onToolActivity?: (activity: ToolActivity) => void;
-  onTextDelta?: (delta: string, fullText: string) => void;
+  onToolUse?: () => void;
   onSessionCreated?: (session: AgentSession) => void;
   onTurnEnd?: (turnCount: number) => void;
-  onAssistantUsage?: (usage: AgentUsage) => void;
-  onCompaction?: (info: CompactionInfo) => void;
+  onAssistantUsage?: (usage: LifetimeUsage) => void;
+  onCompaction?: () => void;
 }
 
 /**
@@ -75,21 +60,11 @@ export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
   worktreePath?: string;
-  worktreeLabel?: string;
   invocation?: AgentInvocation;
 }
 
 /** How many characters of agent ID to show in display. */
 export const SHORT_ID_LENGTH = 8;
-
-/** Reason for a context compaction event. */
-export type CompactionReason = "manual" | "threshold" | "overflow";
-
-/** Info payload emitted when a session compacts successfully. */
-export interface CompactionInfo {
-  reason: CompactionReason;
-  tokensBefore: number;
-}
 
 // ---------------------------------------------------------------------------
 // Sub-object interfaces for decomposed AgentRecord
@@ -127,10 +102,6 @@ export interface AgentDisplayInfo {
   description: string;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
   invocation?: AgentInvocation;
-  /** Resolved absolute path of the worktree this agent is running in. */
-  worktreePath?: string;
-  /** Short display label for the worktree (e.g., "feature" or "feature/packages/web"). */
-  worktreeLabel?: string;
 }
 
 /**
@@ -169,8 +140,6 @@ export interface AgentAccumulatedStats {
   maxTurns?: number;
   /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
   compactionCount: number;
-  /** Previous input token count for delta estimation (vLLM doesn't report cache hits). */
-  prevInputTokens?: number;
   /** Last-known context usage percentage (0–100), captured at completion. */
   contextPercent?: number | null;
 }

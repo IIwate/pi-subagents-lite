@@ -48,8 +48,6 @@ export interface ResolvedAgentSettings {
   readonly includeContextFiles: boolean;
   /** Default thinking level for spawned agents. Undefined = inherit from agent config. */
   readonly defaultThinking: ThinkingLevel | undefined;
-  /** Default max turns for spawned agents. Undefined = unlimited. */
-  readonly defaultMaxTurns: number | undefined;
   /** Global default for skills loading: true (load all) or false (none). */
   readonly loadSkillsImplicitly: boolean;
   /** Global default for extensions loading: true (load all) or false (none). */
@@ -68,8 +66,6 @@ export interface ResolvedAgentSettings {
   readonly showContext: boolean;
   /** Whether to show elapsed time in widget stats line. */
   readonly showTime: boolean;
-  /** Whether to estimate input token delta for vLLM (no cache reporting). */
-  readonly deltaInputTokens: boolean;
 }
 
 /** Side-effect targets, injected after construction. */
@@ -81,7 +77,6 @@ export interface ConfigStoreDeps {
 export class ConfigStore {
   private config: SubagentsConfig;
   private sessionOverrides: SessionModelOverrides = { default: null };
-  private sessionShowCost: boolean | undefined;
   private navigator?: AgentNavigator;
   private manager?: AgentManager;
 
@@ -91,23 +86,17 @@ export class ConfigStore {
 
   // ── Reads ──────────────────────────────────────────────────────
 
-  /** Whether a session-level showCost override is active. */
-  get hasSessionShowCost(): boolean {
-    return this.sessionShowCost !== undefined;
-  }
-
   get agent(): ResolvedAgentSettings {
     const a = this.config.agent;
 
     return {
       defaultModel: a.default ?? null,
       forceBackground: a.forceBackground === true,
-      showCost: this.sessionShowCost ?? (a.showCost === true),
+      showCost: a.showCost === true,
       graceTurns: a.graceTurns ?? 6,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
       includeContextFiles: a.includeContextFiles ?? true,
       defaultThinking: a.defaultThinking as ThinkingLevel | undefined,
-      defaultMaxTurns: a.defaultMaxTurns,
       loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
       loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
       disableDefaultAgents: a.disableDefaultAgents === true,
@@ -117,7 +106,6 @@ export class ConfigStore {
       showOutput: a.showOutput !== false,
       showContext: a.showContext !== false,
       showTime: a.showTime !== false,
-      deltaInputTokens: a.deltaInputTokens !== false,
     };
   }
 
@@ -167,10 +155,6 @@ export class ConfigStore {
 
   readonly mutate = {
     agent: {
-      setDefaultModel: (value: string | null): void => {
-        this.config.agent.default = value;
-        this.persist();
-      },
       setModelOverride: (type: string, value: string | null): void => {
         this.config.agent[type] = value;
         this.persist();
@@ -197,7 +181,6 @@ export class ConfigStore {
       },
       setShowCost: (enabled: boolean): void => {
         this.config.agent.showCost = enabled;
-        this.sessionShowCost = undefined;
         this.persist();
         this.syncStatsVisibility();
       },
@@ -221,14 +204,6 @@ export class ConfigStore {
         }
         this.persist();
       },
-      setDefaultMaxTurns: (n: number | undefined): void => {
-        if (n === undefined) {
-          delete this.config.agent.defaultMaxTurns;
-        } else {
-          this.config.agent.defaultMaxTurns = n;
-        }
-        this.persist();
-      },
       setLoadSkillsImplicitly: (value: boolean): void => {
         this.config.agent.loadSkillsImplicitly = value;
         this.persist();
@@ -247,10 +222,6 @@ export class ConfigStore {
       setShowOutput: (enabled: boolean) => this.setAgentVisibility("showOutput", enabled),
       setShowContext: (enabled: boolean) => this.setAgentVisibility("showContext", enabled),
       setShowTime: (enabled: boolean) => this.setAgentVisibility("showTime", enabled),
-      setDeltaInputTokens: (enabled: boolean): void => {
-        this.config.agent.deltaInputTokens = enabled;
-        this.persist();
-      },
     },
     concurrency: {
       setDefault: (n: number): void => {
@@ -295,16 +266,6 @@ export class ConfigStore {
       clearAll: (): void => {
         this.sessionOverrides = { default: null };
       },
-      /** Set a session showCost override. Not persisted. */
-      setShowCost: (enabled: boolean): void => {
-        this.sessionShowCost = enabled;
-        this.syncStatsVisibility();
-      },
-      /** Clear session showCost override, reverting to config value. */
-      clearShowCost: (): void => {
-        this.sessionShowCost = undefined;
-        this.syncStatsVisibility();
-      },
     },
   };
 
@@ -314,7 +275,6 @@ export class ConfigStore {
   reload(): void {
     this.config = this.io.load();
     this.sessionOverrides = { default: null };
-    this.sessionShowCost = undefined;
     this.syncAllDeps();
   }
 

@@ -862,6 +862,11 @@ export class AgentNavigator {
   }
 
   private renderSelector(tui: TUI, theme: Theme): string[] {
+    // Keep the registered component stable across idle periods. Removing and re-adding the
+    // whole below-editor widget corrupts Pi's differential row cache when the next editor
+    // update arrives; an empty render preserves identity while contributing zero height.
+    if (this.manager.listAgents().length === 0) return [];
+
     const entries = this.navigationEntries();
     const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
     const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
@@ -1070,15 +1075,12 @@ export class AgentNavigator {
       this.highlightedAgentId = null;
       this.confirmingClearId = null;
       this.listFocused = false;
-      // Capture TUI before unregister clears selectorTui. setWidget(undefined) only
-      // removes the component; without requestRender the belowEditor gap stays until
-      // the next user input (same as Pi: clear widget + requestRender to reflow).
-      const tui = this.screenSwap?.tui ?? this.selectorTui;
+      // Render the existing widget at zero height instead of unregistering it. Pi's native
+      // shrink pass then observes the footer and selector changes in one stable component tree.
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
-      this.unregisterWidgets();
       this.lastRenderSig = "";
       this.lastAgentStatus.clear();
-      tui?.requestRender(true);
+      this.requestRender();
       if (this.refreshTimer) {
         clearInterval(this.refreshTimer);
         this.refreshTimer = undefined;
@@ -1194,9 +1196,10 @@ export class AgentNavigator {
   }
 
   /**
-   * Pi defaults clearOnShrink to off, which leaves a deleted selector row visible until
-   * a later repaint. Use Pi's exact whole-layout shrink detection while this widget is
-   * mounted, then restore the host preference so unrelated UI keeps its redraw policy.
+   * Pi defaults clearOnShrink to off, which leaves removed below-editor rows visible when
+   * later footer/editor updates race the final list render. Keep Pi's native whole-layout
+   * shrink detection enabled for this navigator's lifetime, then restore the host preference
+   * on context replacement or disposal. Revisit if Pi makes widget removal atomic.
    */
   private enableShrinkClearing(tui: TUI): void {
     if (this.shrinkClearingTui === tui) return;
@@ -1220,7 +1223,6 @@ export class AgentNavigator {
       this.selectorRegistered = false;
       this.selectorTui = undefined;
     }
-    this.restoreShrinkClearing();
   }
 
   dispose(): void {
@@ -1231,9 +1233,8 @@ export class AgentNavigator {
     const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
     if (this.restoreMainScreen()) this.requestRender();
     this.unregisterWidgets();
-    // unregisterWidgets restores the host clearOnShrink preference before Pi renders.
-    // Force this final reflow so reload/dispose cannot leave the removed selector rows behind.
     tui?.requestRender(true);
+    this.restoreShrinkClearing();
     this.screenSwap = undefined;
     this.hostTui = undefined;
     this.restoreEditor?.();

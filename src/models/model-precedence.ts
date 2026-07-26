@@ -28,8 +28,6 @@ export interface SubagentsConfig {
     includeContextFiles?: boolean;
     /** Default thinking level for spawned agents. Undefined = inherit from agent config. */
     defaultThinking?: ThinkingLevel;
-    /** Default max turns for spawned agents. Undefined = unlimited. */
-    defaultMaxTurns?: number;
     /** Global default for skills loading when agent doesn't explicitly set skills. true (default) or false. */
     loadSkillsImplicitly?: boolean;
     /** Global default for extensions loading when agent doesn't explicitly set extensions. true (default) or false. */

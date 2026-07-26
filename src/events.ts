@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_AGENTS } from "./agents/default-agents.js";
-import { registerAgents, getAvailableTypes, setAgentScanDirs } from "./agents/agent-types.js";
+import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import { scanAgentFilesInDir, mergeAgents } from "./agents/agent-discovery.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentWidget, type UICtx } from "./ui/agent-widget.js";
@@ -10,7 +10,6 @@ import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { toolCallListener } from "./agents/tool-execution.js";
 import { registerAgentTool } from "./registration.js";
 import {
-  getPiInstance,
   getManager,
   getWidget,
   getNavigator,

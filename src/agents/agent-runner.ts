@@ -21,12 +21,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getAgentConfig, getConfig, getToolNamesForType, resolveVisibleTools } from "./agent-types.js";
 import { extractText } from "../prompt/context.js";
-import type { AgentUsage } from "./usage.js";
+import type { LifetimeUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 import { getActiveScopedModels } from "../models/model-scope.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
-import { preloadSkills, loadSkillMeta, type SkillMeta } from "../prompt/skill-loader.js";
+import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
 import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
 import type { SubagentType, SystemPromptMode } from "./types.js";
 import { getStore, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
@@ -103,10 +103,7 @@ function enableCodexStreamErrorRetry(session: AgentSession): void {
  * Subscribe to a session and collect the last assistant message text.
  * Returns an object with a `getText()` getter and an `unsubscribe` function.
  */
-function collectResponseText(
-  session: AgentSession,
-  onTextDelta?: (delta: string, fullText: string) => void,
-) {
+function collectResponseText(session: AgentSession) {
   let text = "";
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "message_start") {
@@ -114,7 +111,6 @@ function collectResponseText(
     }
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text += event.assistantMessageEvent.delta;
-      onTextDelta?.(event.assistantMessageEvent.delta, text);
     }
   });
   return { getText: () => text, unsubscribe };
@@ -152,14 +148,13 @@ function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => 
  * assistant messages at runtime, but this shape isn't reflected in the
  * AgentSessionEvent public types.
  */
-function usageFromAssistantMessage(msg: Record<string, unknown>): AgentUsage | undefined {
+function usageFromAssistantMessage(msg: Record<string, unknown>): LifetimeUsage | undefined {
   const usage = msg.usage as Record<string, unknown> | undefined;
   if (!usage) return undefined;
   return {
     input: (usage.input as number) ?? 0,
     output: (usage.output as number) ?? 0,
     cacheWrite: (usage.cacheWrite as number) ?? 0,
-    cacheRead: (usage.cacheRead as number) ?? 0,
     cost: ((usage.cost as Record<string, unknown>)?.total as number) ?? 0,
   };
 }
@@ -170,17 +165,14 @@ function usageFromAssistantMessage(msg: Record<string, unknown>): AgentUsage | u
  */
 export function subscribeToSessionEvents(
   session: AgentSession,
-  options: Pick<RunOptions, "onToolActivity" | "onAssistantUsage" | "onCompaction">,
+  options: Pick<RunOptions, "onToolUse" | "onAssistantUsage" | "onCompaction">,
 ): () => void {
-  if (!options.onToolActivity && !options.onAssistantUsage && !options.onCompaction) {
+  if (!options.onToolUse && !options.onAssistantUsage && !options.onCompaction) {
     return () => {};
   }
   return session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "tool_execution_start") {
-      options.onToolActivity?.({ type: "start", toolName: event.toolName });
-    }
     if (event.type === "tool_execution_end") {
-      options.onToolActivity?.({ type: "end", toolName: event.toolName });
+      options.onToolUse?.();
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
       const msg = event.message as unknown as Record<string, unknown>;
@@ -190,7 +182,7 @@ export function subscribeToSessionEvents(
       }
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
-      options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
+      options.onCompaction?.();
     }
   });
 }
@@ -487,9 +479,8 @@ async function initSession(
   const result = await createAgentSession(sessionOpts);
   enableCodexStreamErrorRetry(result.session);
 
-  // Inject max_tokens into provider request payloads.
-  // Spawn-time value wins over agent config (frontmatter).
-  const maxTokens = options.maxTokens ?? agentConfig?.maxTokens;
+  // Inject the agent frontmatter max_tokens into provider request payloads.
+  const maxTokens = agentConfig?.maxTokens;
   if (maxTokens != null && maxTokens > 0 && model) {
     const field = (model.compat as any)?.maxTokensField ?? "max_tokens";
     const origOnPayload = result.session.agent.onPayload;
@@ -521,11 +512,7 @@ async function createAndConfigureSession(
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
   );
-  await session.bindExtensions({
-    onError: (err) => options.onToolActivity?.({
-      type: "end", toolName: `extension-error:${err.extensionPath}`,
-    }),
-  });
+  await session.bindExtensions({});
   const filteredTools = resolveVisibleTools({
     activeTools: session.getActiveToolNames(),
     tools: agentConfig?.tools,
@@ -579,7 +566,7 @@ async function runTurnLoop(
   unsubTurns: () => void,
 ) {
   const unsubEvents = subscribeToSessionEvents(session, options);
-  const collector = collectResponseText(session, options.onTextDelta);
+  const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
   try {
     if (!options.signal?.aborted) {
@@ -606,7 +593,7 @@ export async function continueAgentSession(
 ): Promise<ContinueAgentResult> {
   const turnTracking = wireTurnTracking(session, options);
   const unsubscribeEvents = subscribeToSessionEvents(session, options);
-  const collector = collectResponseText(session, options.onTextDelta);
+  const collector = collectResponseText(session);
 
   try {
     const promptOptions = options.images?.length ? { images: options.images } : undefined;

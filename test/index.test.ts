@@ -344,7 +344,6 @@ describe("tool_call listener — guards", () => {
     await toolCallHandler()!(event, ctx);
 
     expect(event.input.model).toBe("cpa-responses/grok-4.5");
-    expect(event.input._modelOverride).toBe("grok-4.5");
   });
 });
 

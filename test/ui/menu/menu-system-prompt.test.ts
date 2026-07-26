@@ -45,7 +45,6 @@ describe("showSystemPromptMenu — SettingsList integration", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });
@@ -63,7 +62,6 @@ describe("showSystemPromptMenu — system prompt mode", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });
@@ -99,7 +97,6 @@ describe("showSystemPromptMenu — Create prompt file", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false, systemPromptMode: "custom" };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
     existsSyncSpy = vi.spyOn(fs, "existsSync");
@@ -164,7 +161,6 @@ describe("showSystemPromptMenu — Include AGENTS.md", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });
@@ -197,7 +193,6 @@ describe("showSystemPromptMenu — Load skills implicitly", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });
@@ -230,7 +225,6 @@ describe("showSystemPromptMenu — Load extensions implicitly", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });
@@ -263,7 +257,6 @@ describe("showSystemPromptMenu — item order", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
   });

@@ -1,11 +1,6 @@
 /**
  * utils.ts — Security helpers and general utilities.
- *
- * Security helpers (isUnsafeName, isSymlink, safeReadFile) protect against
- * path traversal and symlink attacks in agent/skill name resolution.
  */
-
-import { lstatSync, readFileSync } from "node:fs";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "./types.js";
 
@@ -15,30 +10,6 @@ import type { ThinkingLevel } from "./types.js";
  */
 export function isUnsafeName(name: string): boolean {
   return !name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
-}
-
-/**
- * Returns true if the given path is a symlink (defense against symlink attacks).
- */
-export function isSymlink(filePath: string): boolean {
-  try {
-    return lstatSync(filePath).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Safely read a file, rejecting symlinks.
- * Returns undefined if the file doesn't exist, is a symlink, or can't be read.
- */
-export function safeReadFile(filePath: string): string | undefined {
-  try {
-    if (isSymlink(filePath)) return undefined;
-    return readFileSync(filePath, "utf-8");
-  } catch {
-    return undefined;
-  }
 }
 
 /** Common thinking levels shown in menus. Free-form values are also accepted at runtime. */

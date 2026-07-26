@@ -9,18 +9,6 @@
  */
 export type LifetimeUsage = { input: number; output: number; cacheWrite: number; cost: number };
 
-/**
- * A single per-turn usage event as emitted upstream. Adds `cacheRead`, which
- * LifetimeUsage omits from totals (see issue #38). Used to estimate input
- * deltas for providers like vLLM that don't report cache hits.
- */
-export type AgentUsage = LifetimeUsage & { cacheRead: number };
-
-/** Sum of lifetime usage components (including cost), or 0 if undefined. */
-export function getLifetimeTotal(u?: LifetimeUsage): number {
-  return u ? u.input + u.output + u.cacheWrite + u.cost : 0;
-}
-
 /** Add a usage delta into a target accumulator (mutates target). */
 export function addUsage(into: LifetimeUsage, delta: LifetimeUsage): void {
   into.input += delta.input;

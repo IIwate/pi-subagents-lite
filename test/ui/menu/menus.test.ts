@@ -16,7 +16,6 @@ import { showAgentsMainMenu, showSettingsMenu } from "../../../src/ui/menu/menus
 function resetAgentState(): void {
   mockModules.mockConfig.agent = { default: null, forceBackground: false };
   mockModules.mockSessionOverrides.default = null;
-  mockModules.mockSessionShowCost = undefined;
 }
 
 describe("showAgentsMainMenu — SelectList dispatcher", () => {
@@ -32,7 +31,7 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("shows Spawn agent, Settings, and Debug without Running agents", async () => {
+  it("shows Settings and Debug without manual spawn or running-agent entries", async () => {
     const ctx = createMockCtx();
     let rendered = "";
     ctx.ui.custom.mockImplementation(async (factory: any) => {
@@ -51,7 +50,7 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
 
     await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
 
-    expect(rendered).toContain("Spawn agent");
+    expect(rendered).not.toContain("Spawn agent");
     expect(rendered).toContain("Settings");
     expect(rendered).toContain("Debug");
     expect(rendered).not.toContain("Running agents");

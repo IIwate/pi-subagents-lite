@@ -1,13 +1,7 @@
 /**
  * worktree-validator.test.ts — Tests for worktree path validation.
  *
- * Covers: validation logic, resolution, label computation, error cases.
- *
- * Merged from acceptance tests (HEAD) and slice 1-1 tests (feature branch).
- * Acceptance tests for `computeWorktreeLabel` unit and `result.skipped` were
- * adapted to integration tests through `validateWorktreePath`, since the
- * implementation does not export `computeWorktreeLabel` and returns
- * `{ ok: true }` (no `skipped` field) for empty paths.
+ * Covers path validation, canonical resolution, and failure boundaries.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -30,10 +24,7 @@ import {
 
 // ── helpers ──────────────────────────────────────────────────────
 
-function makePi(
-  gitCommonDirResults: Map<string, string | null>,
-  showToplevelResults?: Map<string, string | null>,
-) {
+function makePi(gitCommonDirResults: Map<string, string | null>) {
   return {
     exec: vi.fn(async (cmd: string, args: string[], opts?: any) => {
       if (cmd === "git" && args[0] === "rev-parse") {
@@ -44,17 +35,6 @@ function makePi(
             return { code: 128, stdout: "", stderr: "not a git repo" };
           }
           return { code: 0, stdout: result, stderr: "" };
-        }
-        if (args[1] === "--show-toplevel") {
-          if (showToplevelResults) {
-            const result = showToplevelResults.get(cwd);
-            if (result === null || result === undefined) {
-              return { code: 128, stdout: "", stderr: "not a git repo" };
-            }
-            return { code: 0, stdout: result, stderr: "" };
-          }
-          // Default: toplevel is the cwd itself
-          return { code: 0, stdout: cwd, stderr: "" };
         }
       }
       throw new Error(`Unexpected exec: ${cmd} ${args.join(" ")}`);
@@ -108,17 +88,11 @@ describe("validateWorktreePath", () => {
       [parentCwd, commonDir],
       [worktreePath, commonDir],
     ]);
-    const toplevelResults = new Map<string, string | null>([
-      [worktreePath, worktreePath],
-    ]);
-
-    const result = await validateWorktreePath(makePi(gitResults, toplevelResults), worktreePath, parentCwd);
+    const result = await validateWorktreePath(makePi(gitResults), worktreePath, parentCwd);
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
     expect(success.resolvedPath).toBe(normalizedPath(worktreePath));
-    expect(success.worktreeRoot).toBe(normalizedPath(worktreePath));
-    expect(success.label).toBe("feature");
   });
 
   it("accepts the main checkout (parent and target share git-common-dir via .git dir)", async () => {
@@ -138,26 +112,6 @@ describe("validateWorktreePath", () => {
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
     expect(success.resolvedPath).toBe(normalizedPath(mainCheckout));
-  });
-
-  it("returns worktree root and non-empty label on success", async () => {
-    const parentCwd = join(tmpDir, "parent");
-    const worktreePath = join(tmpDir, "wt-feature");
-    mkdirSync(parentCwd, { recursive: true });
-    mkdirSync(worktreePath, { recursive: true });
-
-    const commonDir = join(tmpDir, "shared.git");
-    const gitResults = new Map<string, string | null>([
-      [parentCwd, commonDir],
-      [worktreePath, commonDir],
-    ]);
-
-    const result = await validateWorktreePath(makePi(gitResults), worktreePath, parentCwd);
-    expect(result.ok).toBe(true);
-    const success = result as WorktreeValidationSuccess;
-    expect(success.worktreeRoot).toBeDefined();
-    expect(typeof success.label).toBe("string");
-    expect(success.label!.length).toBeGreaterThan(0);
   });
 
   // ── relative path resolution ──────────────────────────────────
@@ -220,62 +174,6 @@ describe("validateWorktreePath", () => {
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
     expect(success.resolvedPath).toBe(normalizedPath(absolutePath));
-  });
-
-  // ── label computation ─────────────────────────────────────────
-
-  it("computes label as basename when path equals worktree root", async () => {
-    const parentCwd = join(tmpDir, "parent");
-    const worktreePath = join(tmpDir, "my-feature");
-    mkdirSync(parentCwd, { recursive: true });
-    mkdirSync(worktreePath, { recursive: true });
-
-    const commonDir = join(tmpDir, "shared.git");
-    const gitResults = new Map<string, string | null>([
-      [parentCwd, commonDir],
-      [worktreePath, commonDir],
-    ]);
-    const toplevelResults = new Map<string, string | null>([
-      [worktreePath, worktreePath],
-    ]);
-
-    const result = await validateWorktreePath(makePi(gitResults, toplevelResults), worktreePath, parentCwd);
-
-    expect(result.ok).toBe(true);
-    expect((result as WorktreeValidationSuccess).label).toBe("my-feature");
-  });
-
-  it("computes label as basename/relative for subdirectory of worktree root", async () => {
-    const parentCwd = join(tmpDir, "parent");
-    const worktreeRoot = join(tmpDir, "feature");
-    const subPath = join(tmpDir, "feature", "packages", "web");
-    mkdirSync(parentCwd, { recursive: true });
-    mkdirSync(subPath, { recursive: true });
-
-    const commonDir = join(tmpDir, "shared.git");
-    const gitResults = new Map<string, string | null>([
-      [parentCwd, commonDir],
-      [subPath, commonDir],
-    ]);
-    const toplevelResults = new Map<string, string | null>([
-      [subPath, worktreeRoot],
-    ]);
-
-    const result = await validateWorktreePath(makePi(gitResults, toplevelResults), subPath, parentCwd);
-
-    expect(result.ok).toBe(true);
-    const success = result as WorktreeValidationSuccess;
-    expect(success.label).toBe("feature/packages/web");
-    expect(success.worktreeRoot).toBe(normalizedPath(worktreeRoot));
-  });
-
-  it("label uses forward slashes even for Windows-style relative paths", async () => {
-    // Simulate a Windows-style path scenario by testing computeLabel directly
-    const { computeLabel } = await import("../../src/spawn/worktree-validator.js");
-    // On any OS, computeLabel should produce forward-slash output
-    const label = computeLabel("C:\\Users\\dev\\feature\\packages\\web", "C:\\Users\\dev\\feature");
-    expect(label).toBe("feature/packages/web");
-    expect(label).not.toContain("\\\\");
   });
 
   it("resolvedPath uses forward slashes (no backslash separators)", async () => {

@@ -27,11 +27,6 @@ import { showDebugMenu } from "./menu-debug.js";
 import { showSpawnOptionsMenu } from "./menu-spawn-options.js";
 import { showSystemPromptMenu } from "./menu-system-prompt.js";
 
-// Spawn wizard — co-located in this folder.
-import { showSpawnAgentMenu } from "./menu-spawn-wizard.js";
-export { showSpawnAgentMenu };
-
-
 /**
  * Render `items` as a titled SelectList and dispatch the chosen value.
  * Re-loops after each dispatch until the user cancels (Esc or Back).
@@ -61,7 +56,7 @@ export async function showSettingsMenu(
   const items: SelectItem[] = [
     { value: "model", label: "Model settings", description: "Set global default and per-type model overrides" },
     { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
-    { value: "spawnoptions", label: "Spawn options", description: "Default thinking, max turns, background, grace turns" },
+    { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
     { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
     { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
   ];
@@ -83,14 +78,12 @@ export async function showAgentsMainMenu(
   modelOptions: string[],
 ): Promise<void> {
   const items: SelectItem[] = [
-    { value: "spawn", label: "Spawn agent", description: "Manually spawn a new agent" },
     { value: "settings", label: "Settings", description: "Model, concurrency, and display settings" },
     { value: "debug", label: "Debug", description: "Agent types, briefing, diagnostics" },
   ];
 
   await runSelectMenu(ctx, "Agents", items, async (choice) => {
     switch (choice) {
-      case "spawn": await showSpawnAgentMenu(ctx, modelOptions); break;
       case "settings": await showSettingsMenu(ctx, modelOptions); break;
       case "debug": await showDebugMenu(ctx); break;
     }

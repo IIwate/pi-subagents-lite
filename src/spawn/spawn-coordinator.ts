@@ -4,7 +4,7 @@ import { SHORT_ID_LENGTH } from "../types.js";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord, SpawnConfig } from "../types.js";
-import type { AgentManager, SpawnOptions } from "../agents/agent-manager.js";
+import type { AgentManager } from "../agents/agent-manager.js";
 import { formatResultContent } from "../agents/tool-execution.js";
 
 /**
@@ -74,13 +74,8 @@ export class SpawnCoordinator {
     ctx: ExtensionContext,
     intent: SpawnIntent,
   ): Promise<SpawnResult> {
-    // Shared config fields (SpawnConfig) pass through unchanged; only the
-    // intent-only fields (type/prompt/runInBackground) need translation.
-    const { type, prompt, runInBackground, ...config } = intent;
-    const spawnOptions: SpawnOptions = {
-      ...config,
-      isBackground: runInBackground,
-    };
+    // Shared config fields pass through unchanged; coordinator-only fields are removed.
+    const { type, prompt, runInBackground, ...spawnOptions } = intent;
 
     const agentId = this.manager.spawn(pi, ctx, type, prompt, spawnOptions);
 
@@ -93,14 +88,14 @@ export class SpawnCoordinator {
     getNavigator()?.ensureTimer();
 
     // Track background agents + capture ctx for fallback notification
-    if (intent.runInBackground) {
+    if (runInBackground) {
       this.backgroundAgentIds.add(agentId);
       this.backgroundContexts.set(agentId, ctx);
     }
 
     const record = this.manager.getRecord(agentId)!;
 
-    if (!intent.runInBackground) {
+    if (!runInBackground) {
       // Foreground: await completion
       await record.execution.promise;
 
@@ -123,17 +118,12 @@ export class SpawnCoordinator {
       this.emitIndividualNudge(agentId);
     }
 
-    const accepted = await this.manager.interact(agentId, message, {}, images);
+    const accepted = await this.manager.interact(agentId, message, images);
     if (accepted) {
       getWidget()?.ensureTimer();
       getNavigator()?.ensureTimer();
     }
     return accepted;
-  }
-
-  /** Check if an agent was spawned as background. */
-  isBackground(agentId: string): boolean {
-    return this.backgroundAgentIds.has(agentId);
   }
 
   /**

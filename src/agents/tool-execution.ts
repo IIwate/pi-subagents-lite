@@ -3,7 +3,7 @@ import { getStatusNote } from "../status-note.js";
  * tool-execution.ts — Agent tool execution handlers.
  *
  * Contains the execute callbacks registered for the Agent tool.
- * Spawn coordination, nudge scheduling, and live-view tracking live in spawn-coordinator.ts.
+ * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
  */
 
 import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
@@ -14,7 +14,6 @@ import { resolveType, getAgentConfig, discoverNewAgents } from "./agent-types.js
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
-  parseModelKey,
   findModelInRegistry,
   parseThinkingLevel,
   parseModelSpec,
@@ -71,7 +70,6 @@ export async function executeAgentTool(
   // Validate worktree_path early — needed for on-demand agent discovery
   const rawWorktreePath = params.worktree_path as string | undefined;
   let validatedWorktreePath: string | undefined;
-  let worktreeLabel: string | undefined;
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
     try {
       const parentCwd = getSessionCtx()?.cwd ?? ctx.cwd;
@@ -85,7 +83,6 @@ export async function executeAgentTool(
         return errorResult(validation.error);
       }
       validatedWorktreePath = validation.resolvedPath;
-      worktreeLabel = validation.label;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return errorResult(`worktree_path validation failed: ${msg}`);
@@ -108,7 +105,7 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || prompt.split("\n")[0].slice(0, 80) || prompt.slice(0, 80);
   const runInBackground = params.run_in_background as boolean | undefined;
-  const maxTurns = params.max_turns as number | undefined ?? getAgentConfig(resolvedType)?.maxTurns;
+  const maxTurns = getAgentConfig(resolvedType)?.maxTurns;
 
   // model may be "id", "provider/id", or "id:thinking" / "provider/id:thinking".
   const { modelRef, thinkingFromModel } = parseModelSpec(params.model as string | undefined);
@@ -158,7 +155,6 @@ export async function executeAgentTool(
     thinkingLevel,
     graceTurns: getStore().agent.graceTurns,
     worktreePath: validatedWorktreePath,
-    worktreeLabel,
     invocation: { modelName, thinkingLevel },
     runInBackground: runInBackground || getStore().agent.forceBackground,
   });
@@ -280,15 +276,6 @@ export async function toolCallListener(
     if (effectiveModel) {
       input.model = effectiveModel;
     }
-  }
-
-  // Always set _modelOverride for renderCall display (resolved bare id or provider/id).
-  if (typeof input.model === "string" && input.model.length > 0) {
-    const resolved = resolveExactModel(input.model, ctx.modelRegistry, ctx.model?.provider)
-      ?? findModelInRegistry(input.model, ctx.modelRegistry, ctx.model);
-    input._modelOverride = resolved?.id
-      ?? parseModelKey(input.model)?.modelId
-      ?? input.model;
   }
 
   // Inject thinking when not explicitly passed: agent config > package default.

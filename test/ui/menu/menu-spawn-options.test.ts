@@ -54,7 +54,6 @@ describe("showSpawnOptionsMenu — SettingsList integration", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -73,7 +72,6 @@ describe("showSpawnOptionsMenu — force background", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -107,7 +105,6 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -175,105 +172,10 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   });
 });
 
-describe("showSpawnOptionsMenu — default max turns", () => {
-  beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-  });
-
-  it("shows 'Default max turns · unlimited' when no default is set", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    expect(dmt.currentValue).toBe("(not set)");
-    expect(typeof dmt.submenu).toBe("function");
-  });
-
-  it("shows configured max turns value", async () => {
-    mockModules.mockConfig.agent.defaultMaxTurns = 50;
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    expect(dmt.currentValue).toBe("50");
-  });
-
-  it("max turns submenu accepts valid number", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    const mockDone = vi.fn();
-    dmt.submenu("unlimited", mockDone);
-
-    inputInstances[0].onSubmit!("30");
-    expect(mockModules.mockConfig.agent.defaultMaxTurns).toBe(30);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-    expect(mockDone).toHaveBeenCalledWith("30");
-  });
-
-  it("max turns submenu accepts 'unlimited'", async () => {
-    mockModules.mockConfig.agent.defaultMaxTurns = 50;
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    const mockDone = vi.fn();
-    dmt.submenu("50", mockDone);
-
-    inputInstances[0].onSubmit!("unlimited");
-    expect(mockModules.mockConfig.agent.defaultMaxTurns).toBeUndefined();
-    expect(mockDone).toHaveBeenCalledWith("(not set)");
-  });
-
-  it("max turns submenu rejects value < 1", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    const mockDone = vi.fn();
-    dmt.submenu("unlimited", mockDone);
-
-    inputInstances[0].onSubmit!("0");
-    expect(mockModules.mockConfig.agent.defaultMaxTurns).toBeUndefined();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-    expect(mockDone).not.toHaveBeenCalled();
-  });
-
-  it("max turns submenu rejects invalid input", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    const mockDone = vi.fn();
-    dmt.submenu("unlimited", mockDone);
-
-    inputInstances[0].onSubmit!("abc");
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-    expect(mockDone).not.toHaveBeenCalled();
-  });
-
-  it("max turns submenu handles escape", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-
-    const dmt = settingsListCalls[0].items.find((i: any) => i.id === "defaultMaxTurns");
-    const mockDone = vi.fn();
-    dmt.submenu("unlimited", mockDone);
-
-    inputInstances[0].onEscape!();
-    expect(mockDone).toHaveBeenCalled();
-  });
-});
-
 describe("showSpawnOptionsMenu — default thinking level", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { default: null, forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];

@@ -49,6 +49,4 @@ export interface AgentInvocation {
   /** Short display name, e.g. "haiku" — only set when different from parent. */
   modelName?: string;
   thinkingLevel?: ThinkingLevel;
-  maxTurns?: number;
-  runInBackground?: boolean;
 }

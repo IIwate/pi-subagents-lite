@@ -23,7 +23,6 @@ export function selectByName(name: string): (title: string, items: string[]) => 
     display: "Display settings",
     debug: "Debug",
     settings: "Settings",
-    spawn: "Spawn agent",
     spawnoptions: "Spawn options",
   };
   const search = nameMap[name.toLowerCase()] ?? name;

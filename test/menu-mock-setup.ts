@@ -17,35 +17,11 @@ export const mockModules = {
     concurrency: { default: 4 } as Record<string, any>,
   },
   mockSessionOverrides: { default: null } as Record<string, any>,
-  mockSessionShowCost: undefined as boolean | undefined,
-  mockManager: {
-    setConcurrency: vi.fn(),
-    getRecord: vi.fn(),
-    spawn: vi.fn(() => "agent-id-123"),
-  },
-  mockSessionCtx: {
-    modelRegistry: {
-      find: vi.fn((provider: string, modelId: string) => {
-        const known: Record<string, { provider: string; id: string }> = {
-          "openai/gpt-4o": { provider: "openai", id: "gpt-4o" },
-          "anthropic/claude-sonnet-4-20250514": { provider: "anthropic", id: "claude-sonnet-4-20250514" },
-        };
-        return known[`${provider}/${modelId}`];
-      }),
-      getAvailable: vi.fn(() => [
-        { provider: "anthropic", id: "claude-sonnet-4-20250514" },
-        { provider: "openai", id: "gpt-4o" },
-      ]),
-    },
-    model: { provider: "test", id: "parent-model" },
-    cwd: "/test",
-  },
-  mockPiExec: vi.fn(),
   mockPiInstance: null as any,
 };
 
 // Set up the Pi instance mock
-mockModules.mockPiInstance = { sendUserMessage: vi.fn(), exec: mockModules.mockPiExec };
+mockModules.mockPiInstance = { sendUserMessage: vi.fn() };
 
 // --- vi.mock() calls ---
 
@@ -102,12 +78,11 @@ vi.mock("../src/shell.js", () => {
       return {
         defaultModel: a.default ?? null,
         forceBackground: a.forceBackground === true,
-        showCost: mockModules.mockSessionShowCost ?? (a.showCost === true),
+        showCost: a.showCost === true,
         graceTurns: a.graceTurns ?? 6,
         systemPromptMode: a.systemPromptMode ?? "replace",
         includeContextFiles: a.includeContextFiles ?? true,
         defaultThinking: a.defaultThinking,
-        defaultMaxTurns: a.defaultMaxTurns,
         loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
         loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
         showTools: a.showTools !== false,
@@ -116,7 +91,6 @@ vi.mock("../src/shell.js", () => {
         showOutput: a.showOutput !== false,
         showContext: a.showContext !== false,
         showTime: a.showTime !== false,
-        deltaInputTokens: a.deltaInputTokens !== false,
       };
     },
     get concurrency() {
@@ -131,9 +105,6 @@ vi.mock("../src/shell.js", () => {
     },
     sessionModelOverride(type: string) {
       return mockModules.mockSessionOverrides[type] ?? null;
-    },
-    get hasSessionShowCost() {
-      return mockModules.mockSessionShowCost !== undefined;
     },
     agentConfigSnapshot() {
       return mockModules.mockConfig.agent;
@@ -152,7 +123,6 @@ vi.mock("../src/shell.js", () => {
     },
     mutate: {
       agent: {
-        setDefaultModel(value: string | null) { mockModules.mockConfig.agent.default = value; },
         setModelOverride(type: string, value: string | null) { mockModules.mockConfig.agent[type] = value; },
         clearModelOverride(type: string) { delete mockModules.mockConfig.agent[type]; },
         clearAllModelOverrides() {
@@ -172,7 +142,6 @@ vi.mock("../src/shell.js", () => {
         setSystemPromptMode(mode: string) { mockModules.mockConfig.agent.systemPromptMode = mode; },
         setIncludeContextFiles(enabled: boolean) { mockModules.mockConfig.agent.includeContextFiles = enabled; },
         setDefaultThinking(level: string | undefined) { mockModules.mockConfig.agent.defaultThinking = level; },
-        setDefaultMaxTurns(n: number | undefined) { mockModules.mockConfig.agent.defaultMaxTurns = n; },
         setLoadSkillsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadSkillsImplicitly = value; },
         setLoadExtensionsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadExtensionsImplicitly = value; },
         setShowTools(enabled: boolean) { mockModules.mockConfig.agent.showTools = enabled; },
@@ -180,8 +149,7 @@ vi.mock("../src/shell.js", () => {
         setShowInput(enabled: boolean) { mockModules.mockConfig.agent.showInput = enabled; },
         setShowOutput(enabled: boolean) { mockModules.mockConfig.agent.showOutput = enabled; },
         setShowContext(enabled: boolean) { mockModules.mockConfig.agent.showContext = enabled; },
-        setShowTime(enabled: boolean) { mockModules.mockConfig.agent.showTime = enabled; },
-        setDeltaInputTokens(enabled: boolean) { mockModules.mockConfig.agent.deltaInputTokens = enabled; }
+        setShowTime(enabled: boolean) { mockModules.mockConfig.agent.showTime = enabled; }
       },
       concurrency: {
         setDefault(n: number) { mockModules.mockConfig.concurrency.default = n; },
@@ -207,44 +175,12 @@ vi.mock("../src/shell.js", () => {
         setOverride(type: string, model: string) { mockModules.mockSessionOverrides[type] = model; },
         clearOverride(type: string) { delete mockModules.mockSessionOverrides[type]; },
         clearAll() { mockModules.mockSessionOverrides = { default: null }; },
-        setShowCost(enabled: boolean) { mockModules.mockSessionShowCost = enabled; },
-        clearShowCost() { mockModules.mockSessionShowCost = undefined; },
       },
     },
   };
 
   return {
     getStore: () => mockStore,
-    getManager: () => mockModules.mockManager,
-    getWidget: vi.fn(() => undefined),
     getPiInstance: () => mockModules.mockPiInstance,
-    getSessionCtx: () => mockModules.mockSessionCtx,
-    getCoordinator: vi.fn(() => ({
-      spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
-        const id = mockModules.mockManager.spawn(
-          _pi, _ctx, intent.type, intent.prompt, {
-            description: intent.description,
-            model: intent.model,
-            maxTurns: intent.maxTurns,
-            thinkingLevel: intent.thinkingLevel,
-            isBackground: intent.runInBackground,
-            modelKey: intent.modelKey,
-            graceTurns: intent.graceTurns,
-            worktreePath: intent.worktreePath,
-            worktreeLabel: intent.worktreeLabel,
-            invocation: intent.invocation,
-          },
-        );
-        const record = mockModules.mockManager.getRecord(id);
-        if (!intent.runInBackground && record?.execution?.promise) {
-          await record.execution.promise;
-        }
-        return { agentId: id, record };
-      }),
-      isBackground: vi.fn(() => false),
-      scheduleNudge: vi.fn(),
-      onAgentComplete: vi.fn(),
-      dispose: vi.fn(),
-    })),
   };
 });

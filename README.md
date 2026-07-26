@@ -22,7 +22,7 @@ Progress appears only in the below-editor agent list (one row per agent, capped 
 - **`Ctrl+D` on a row** — clear that agent from the list (`Enter` confirms, `Esc` cancels). Running agents are stopped first.
 - With a subagent selected, typing in the editor messages that subagent directly; select Main to return.
 
-Manual spawn, model/concurrency settings, stats visibility, and agent-type management live under `/agents`.
+Model/concurrency settings, stats visibility, and agent-type management live under `/agents`.
 
 ## Differences from Upstream
 
@@ -30,6 +30,7 @@ This package is a fork of [luispater/pi-subagents-lite](https://github.com/luisp
 
 - uses a single below-editor agent list as the only progress UI (the above-editor tree widget is removed, along with its compact/max-lines settings);
 - keeps the chat feed free of `Agent`, `StopAgent`, and `AgentStatus` tool cards; the list owns visible progress and stats;
+- starts subagents only through the `Agent` tool; `/agents` remains for settings and diagnostics, without a duplicate manual spawn wizard;
 - delivers background completion to the LLM with `display: false` (no purple result card, no toast);
 - caps the list height (~6 rows with hidden-row scrolling), slows list/status refresh, and reports in-flight count only via `setStatus`;
 - supports manual agent clear from the list (`Ctrl+D`, with confirm) and forces TUI reflow when the list shrinks, a subagent finishes, or the main session ends — reducing blank gaps under classic powerline layouts.

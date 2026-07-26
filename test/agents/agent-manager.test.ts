@@ -1,8 +1,7 @@
 /**
  * agent-manager.test.ts — Tests for AgentManager.
  *
- * Covers: concurrency limits (per-model, per-provider, default),
- * queue draining, config updates, cost accumulation.
+ * Covers concurrency, queueing, interaction, cleanup, and child-session shutdown.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -18,35 +17,15 @@ const mockModules = vi.hoisted(() => ({
     return `agent-${String(uuidCounter).padStart(8, "0")}`;
   }),
   resetUuidCounter: () => { uuidCounter = 0; },
-  fsMock: {
-    writeFileSync: vi.fn(),
-    readFileSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    appendFileSync: vi.fn(),
-    existsSync: vi.fn(),
-  },
 }));
 
 vi.mock("node:crypto", () => ({
   randomUUID: mockModules.mockRandomUUID,
 }));
 
-vi.mock("node:fs", () => mockModules.fsMock);
-
 vi.mock("../../src/agents/agent-runner.js", () => ({
   runAgent: mockModules.mockRunAgent,
   continueAgentSession: mockModules.mockContinueAgentSession,
-}));
-
-// Controllable mock for getStore(), used by delta estimation tests
-const mockStoreState = { deltaInputTokens: true };
-
-vi.mock("../../src/shell.js", () => ({
-  getStore: () => ({
-    agent: {
-      deltaInputTokens: mockStoreState.deltaInputTokens,
-    },
-  }),
 }));
 
 function mockAgentSession(): any {
@@ -108,9 +87,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small", isBackground: true });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/4b_small", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/4b_small" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -128,8 +107,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
@@ -151,8 +130,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
 
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
 
@@ -183,9 +162,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/27b", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b", isBackground: true });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/27b", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/27b" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/27b" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -207,9 +186,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "claude/sonnet", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "claude/sonnet", isBackground: true });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "claude/sonnet", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "claude/sonnet" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "claude/sonnet" });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "claude/sonnet" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -238,10 +217,10 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/27b", isBackground: true });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/3b", isBackground: true });
-      const id4 = manager.spawn(pi, ctx, "general-purpose", "task 4", { description: "task 4", modelKey: "claude/sonnet", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/27b" });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/3b" });
+      const id4 = manager.spawn(pi, ctx, "general-purpose", "task 4", { description: "task 4", modelKey: "claude/sonnet" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -268,8 +247,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
@@ -288,8 +267,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b", isBackground: true });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
 
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
 
@@ -314,8 +293,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "bg task", { description: "bg task", modelKey: "llamacpp/4b", isBackground: true });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "fg task", { description: "fg task", modelKey: "llamacpp/4b", isBackground: false });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "bg task", { description: "bg task", modelKey: "llamacpp/4b" });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "fg task", { description: "fg task", modelKey: "llamacpp/4b" });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
@@ -366,7 +345,7 @@ describe("AgentManager", () => {
       });
       manager.getRecord(id)!.execution.session = session;
 
-      await expect(manager.interact(id, "inspect this", {}, images)).resolves.toBe(true);
+      await expect(manager.interact(id, "inspect this", images)).resolves.toBe(true);
       expect(session.steer).toHaveBeenCalledWith("inspect this", images);
 
       deferred.resolve(mockRunResult({ session }));
@@ -396,7 +375,7 @@ describe("AgentManager", () => {
         session,
         "continue",
         expect.objectContaining({
-          onToolActivity: expect.any(Function),
+          onToolUse: expect.any(Function),
           onTurnEnd: expect.any(Function),
         }),
       );
@@ -482,165 +461,6 @@ describe("AgentManager", () => {
     });
   });
 
-  // ── Cost accumulation ──
-
-  describe("totalAgentCost", () => {
-    it("starts at zero", () => {
-      manager = new AgentManager(onComplete);
-      expect(manager.getTotalAgentCost()).toBe(0);
-    });
-
-    it("accumulates cost when an agent completes", async () => {
-      manager = new AgentManager(onComplete);
-      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-      const ctx = fakeCtx();
-      const pi = fakePi();
-
-      const id = manager.spawn(pi, ctx, "general-purpose", "task", { description: "test task", modelKey: "test/model" });
-      manager.getRecord(id)!.stats.lifetimeUsage.cost = 0.05;
-      await manager.getRecord(id)!.execution.promise;
-
-      expect(manager.getTotalAgentCost()).toBe(0.05);
-    });
-
-    it("reports only cost added since the previous settled run", async () => {
-      manager = new AgentManager(onComplete);
-      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
-        description: "task",
-        modelKey: "test/model",
-      });
-      const record = manager.getRecord(id)!;
-      record.stats.lifetimeUsage.cost = 0.05;
-      await record.execution.promise;
-
-      expect(manager.getUnaccountedAgentCost(id)).toBe(0);
-      record.stats.lifetimeUsage.cost = 0.08;
-      expect(manager.getUnaccountedAgentCost(id)).toBeCloseTo(0.03);
-    });
-
-    it("persists cost after agent is evicted from map", async () => {
-      manager = new AgentManager(onComplete);
-      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-      const ctx = fakeCtx();
-      const pi = fakePi();
-
-      const id = manager.spawn(pi, ctx, "general-purpose", "task", { description: "test task", modelKey: "test/model" });
-      const record = manager.getRecord(id)!;
-      record.stats.lifetimeUsage.cost = 0.03;
-      await record.execution.promise;
-
-      expect(manager.getTotalAgentCost()).toBe(0.03);
-
-      // Record is consumed (result read) — eligible for eviction when old.
-      record.lifecycle.resultConsumed = true;
-      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
-      (manager as any).cleanup();
-
-      expect(manager.getRecord(id)).toBeUndefined();
-      expect(manager.getTotalAgentCost()).toBe(0.03);
-    });
-
-    it("accumulates cost from multiple agents", async () => {
-      manager = new AgentManager(onComplete);
-      mockModules.mockRunAgent.mockResolvedValueOnce(mockRunResult());
-
-      const ctx = fakeCtx();
-      const pi = fakePi();
-
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "first", modelKey: "test/model" });
-      manager.getRecord(id1)!.stats.lifetimeUsage.cost = 0.02;
-      await manager.getRecord(id1)!.execution.promise;
-      expect(manager.getTotalAgentCost()).toBe(0.02);
-
-      mockModules.mockRunAgent.mockResolvedValueOnce(mockRunResult());
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "second", modelKey: "test/model" });
-      manager.getRecord(id2)!.stats.lifetimeUsage.cost = 0.05;
-      await manager.getRecord(id2)!.execution.promise;
-      expect(manager.getTotalAgentCost()).toBe(0.07);
-    });
-
-    it("includes cost from failed agents", async () => {
-      manager = new AgentManager(onComplete);
-      mockModules.mockRunAgent.mockRejectedValueOnce(new Error("boom"));
-
-      const ctx = fakeCtx();
-      const pi = fakePi();
-
-      const id = manager.spawn(pi, ctx, "general-purpose", "task", { description: "failing", modelKey: "test/model" });
-      manager.getRecord(id)!.stats.lifetimeUsage.cost = 0.01;
-      await manager.getRecord(id)!.execution.promise;
-
-      expect(manager.getTotalAgentCost()).toBe(0.01);
-    });
-
-    it("includes cost from stopped agents", async () => {
-      manager = new AgentManager(onComplete);
-
-      const deferred = makeResolvablePromise();
-      mockModules.mockRunAgent.mockReturnValueOnce(deferred.promise);
-
-      const ctx = fakeCtx();
-      const pi = fakePi();
-
-      const id = manager.spawn(pi, ctx, "general-purpose", "task", { description: "stoppable", modelKey: "test/model" });
-      manager.getRecord(id)!.stats.lifetimeUsage.cost = 0.04;
-
-      manager.abort(id, "agent");
-
-      deferred.resolve({
-        responseText: "",
-        session: mockAgentSession(),
-        aborted: true,
-        turnLimited: false,
-      });
-
-      await new Promise(r => setTimeout(r, 10));
-
-      expect(manager.getTotalAgentCost()).toBe(0.04);
-    });
-
-    it("does not double-count cleared running agents and records late cost", async () => {
-      manager = new AgentManager(onComplete);
-      const session = mockAgentSession();
-      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
-
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
-        description: "task",
-        modelKey: "test/model",
-      });
-      const record = manager.getRecord(id)!;
-      record.stats.lifetimeUsage.cost = 0.05;
-      await record.execution.promise;
-      expect(manager.getTotalAgentCost()).toBe(0.05);
-
-      const deferred = makeResolvablePromise();
-      let onLateUsage: ((usage: any) => void) | undefined;
-      mockModules.mockContinueAgentSession.mockImplementation((_session, _message, options) => {
-        onLateUsage = options.onAssistantUsage;
-        return deferred.promise;
-      });
-      await expect(manager.interact(id, "continue")).resolves.toBe(true);
-      record.stats.lifetimeUsage.cost = 0.08;
-
-      // clear() settles only the currently known 0.03.
-      expect(manager.clear(id, "user")).toBe(true);
-      expect(manager.getRecord(id)).toBeUndefined();
-      expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
-
-      // The final 0.02 usage arrives only when the request ends; settle must add the delta, not the full amount again.
-      onLateUsage?.({ input: 0, output: 0, cacheWrite: 0, cost: 0.02, cacheRead: 0 });
-      deferred.resolve({ responseText: "", aborted: true, turnLimited: false });
-      await new Promise(r => setTimeout(r, 10));
-
-      expect(manager.getTotalAgentCost()).toBeCloseTo(0.10);
-      expect((manager as any).accountedCosts.has(id)).toBe(false);
-      expect((manager as any).removedCostSnapshots.has(id)).toBe(false);
-    });
-  });
   // ── Cleanup eviction ──
 
   describe("cleanup", () => {
@@ -858,108 +678,4 @@ describe("AgentManager", () => {
     });
   });
 
-describe("delta estimation", () => {
-  /**
-   * Helper: capture the onAssistantUsage callback passed to runAgent,
-   * so we can invoke it manually with different usage values.
-   */
-  function getOnAssistantUsage() {
-    const call = mockModules.mockRunAgent.mock.calls[mockModules.mockRunAgent.mock.calls.length - 1];
-    const callbacks = call[3]; // 4th arg is the callbacks object
-    return callbacks.onAssistantUsage;
-  }
-
-  beforeEach(() => {
-    mockStoreState.deltaInputTokens = true;
-  });
-
-  it("uses full input on first message (no prevInputTokens yet)", () => {
-    manager = new AgentManager(onComplete);
-    mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
-    const record = manager.getRecord(id)!;
-    const onUsage = getOnAssistantUsage();
-
-    // First usage report: 100 input tokens, no cacheRead
-    onUsage({ input: 100, output: 50, cacheWrite: 0, cost: 0, cacheRead: 0 });
-
-    // Full input recorded on first message
-    expect(record.stats.lifetimeUsage.input).toBe(100);
-    expect(record.stats.lifetimeUsage.output).toBe(50);
-    expect(record.stats.prevInputTokens).toBe(100);
-  });
-
-  it("computes delta when delta enabled and cacheRead is 0", () => {
-    manager = new AgentManager(onComplete);
-    mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
-    const record = manager.getRecord(id)!;
-    const onUsage = getOnAssistantUsage();
-
-    // First message: 100 input
-    onUsage({ input: 100, output: 50, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(100);
-
-    // Second message: 250 input (150 new tokens added to context)
-    onUsage({ input: 250, output: 30, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(250); // 100 + 150 delta
-    expect(record.stats.lifetimeUsage.output).toBe(80); // 50 + 30
-    expect(record.stats.prevInputTokens).toBe(250);
-  });
-
-  it("uses full input when cacheRead > 0 (provider reports caching)", () => {
-    manager = new AgentManager(onComplete);
-    mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
-    const record = manager.getRecord(id)!;
-    const onUsage = getOnAssistantUsage();
-
-    // First message: 100 input
-    onUsage({ input: 100, output: 50, cacheWrite: 10, cost: 0, cacheRead: 80 });
-    expect(record.stats.lifetimeUsage.input).toBe(100);
-
-    // Second message: 200 input with cacheRead > 0 — delta estimation skipped
-    onUsage({ input: 200, output: 30, cacheWrite: 0, cost: 0, cacheRead: 150 });
-    expect(record.stats.lifetimeUsage.input).toBe(300); // 100 + 200 (full, no delta)
-  });
-
-  it("prevents negative delta when input shrinks (e.g. after compaction)", () => {
-    manager = new AgentManager(onComplete);
-    mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
-    const record = manager.getRecord(id)!;
-    const onUsage = getOnAssistantUsage();
-
-    // First message: 500 input
-    onUsage({ input: 500, output: 50, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(500);
-
-    // After compaction: 200 input (shrunk) — delta would be -300, clamped to 200
-    onUsage({ input: 200, output: 30, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(700); // 500 + 200 (full, delta skipped)
-  });
-
-  it("skips delta estimation when setting is disabled", () => {
-    mockStoreState.deltaInputTokens = false;
-
-    manager = new AgentManager(onComplete);
-    mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
-
-    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
-    const record = manager.getRecord(id)!;
-    const onUsage = getOnAssistantUsage();
-
-    // First message: 100 input
-    onUsage({ input: 100, output: 50, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(100);
-
-    // Second message: 250 input — delta disabled, so full input used
-    onUsage({ input: 250, output: 30, cacheWrite: 0, cost: 0, cacheRead: 0 });
-    expect(record.stats.lifetimeUsage.input).toBe(350); // 100 + 250 (full, no delta)
-  });
-});
 }); // end describe AgentManager

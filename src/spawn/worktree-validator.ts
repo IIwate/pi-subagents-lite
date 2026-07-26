@@ -27,10 +27,6 @@ export interface WorktreeValidationSuccess {
   ok: true;
   /** Resolved absolute path (symlinks followed, relative resolved). Undefined when path is empty/omitted. */
   resolvedPath?: string;
-  /** Worktree root directory. */
-  worktreeRoot?: string;
-  /** Short display label for the widget. */
-  label?: string;
 }
 
 /** Failed validation result. */
@@ -87,8 +83,7 @@ async function getGitCommonDir(
  * 3. Resolve symlinks (realpath)
  * 4. Check exists + is directory
  * 5. Get and compare git-common-dir for parent and target
- * 6. Get worktree root via --show-toplevel
- * 7. Normalize and compute display label
+ * 6. Normalize the validated path
  *
  * @param pi - Minimal exec interface (pi.exec)
  * @param worktreePath - The raw worktree_path value from the LLM
@@ -149,54 +144,8 @@ export async function validateWorktreePath(
     return { ok: false, error: WORKTREE_VALIDATION_ERRORS.DIFFERENT_REPO };
   }
 
-  // Step 6: Get the worktree root via git rev-parse --show-toplevel
-  let worktreeRoot: string;
-  try {
-    const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd: realPath, timeout: GIT_EXEC_TIMEOUT_MS });
-    if (result.code !== 0) {
-      worktreeRoot = realPath;
-    } else {
-      const raw = result.stdout.trim();
-      worktreeRoot = raw ? (path.isAbsolute(raw) ? raw : path.resolve(realPath, raw)) : realPath;
-    }
-  } catch {
-    worktreeRoot = realPath;
-  }
-
-  // Step 7: Normalize and compute display label
-  const normalizedRealPath = realPath.replace(/\\/g, "/");
-  const normalizedRoot = worktreeRoot.replace(/\\/g, "/");
-  const label = computeLabel(normalizedRealPath, normalizedRoot);
-
   return {
     ok: true,
-    resolvedPath: normalizedRealPath,
-    worktreeRoot: normalizedRoot,
-    label,
+    resolvedPath: realPath.replace(/\\/g, "/"),
   };
-}
-
-/**
- * Compute a short display label for the worktree path.
- *
- * Rules:
- * - Root of worktree → basename (e.g., "/wt/feature" → "feature")
- * - Subdirectory → basename/relative (e.g., "/wt/feature/packages/web" → "feature/packages/web")
- * - Always forward slashes regardless of host OS
- */
-export function computeLabel(resolvedPath: string, worktreeRoot: string): string {
-  // Normalize both paths to forward slashes for cross-platform comparison
-  const normalizedResolved = resolvedPath.replace(/\\/g, "/");
-  const normalizedRoot = worktreeRoot.replace(/\\/g, "/");
-
-  const rootBasename = normalizedRoot.split("/").filter(Boolean).pop() ?? "";
-
-  if (normalizedResolved === normalizedRoot) {
-    return rootBasename;
-  }
-
-  // Compute relative path using posix separator
-  const relative = path.posix.relative(normalizedRoot, normalizedResolved);
-
-  return `${rootBasename}/${relative}`;
 }

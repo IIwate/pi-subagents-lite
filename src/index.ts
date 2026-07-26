@@ -15,7 +15,7 @@
  *   - Tool execution and menus read/write through store
  *
  * Commands:
- *   - /agents: Management menu (spawn, model settings, concurrency, debug)
+ *   - /agents: Management menu (model settings, concurrency, debug)
  *
  * Events:
  *   - tool_call: Inject model into Agent tool calls

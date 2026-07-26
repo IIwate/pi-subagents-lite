@@ -264,14 +264,19 @@ describe("AgentNavigator", () => {
     records.length = 0;
     navigator.update();
 
-    expect(tui.getClearOnShrink()).toBe(false);
-    expect(tui.requestRender).toHaveBeenCalledWith(true);
+    // The component stays registered but contributes zero rows. Keeping the component
+    // identity stable prevents the next idle editor update from reusing stale row offsets.
+    expect(ui.widgets.get("agent-navigator-selector")).toBeTypeOf("function");
+    expect(tui.getClearOnShrink()).toBe(true);
+    expect(tui.requestRender).toHaveBeenCalledWith(false);
 
-    // The parent Working row disappears after the final list row. The navigator must
-    // retain the host TUI long enough for agent_end to clear stale editor/footer rows.
     tui.requestRender.mockClear();
     navigator.forceLayoutReflow();
     expect(tui.requestRender).toHaveBeenCalledWith(true);
+
+    navigator.dispose();
+    navigator = undefined;
+    expect(tui.getClearOnShrink()).toBe(false);
   });
 
   it("passes through Ctrl+C and cancels clear confirmation", () => {
@@ -642,7 +647,7 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager(records));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    const { tui } = mountSelector(ui);
+    const { tui, selector } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
@@ -653,7 +658,8 @@ describe("AgentNavigator", () => {
 
     expect(navigator.selectedId()).toBeNull();
     expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
-    expect(ui.widgets.size).toBe(0);
+    expect(ui.widgets.size).toBe(1);
+    expect(selector.render(120)).toEqual([]);
   });
 
   it("restores root components without writing to the terminal during dispose", () => {

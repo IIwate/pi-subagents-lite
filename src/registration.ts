@@ -85,7 +85,7 @@ export function registerTools(pi: ExtensionAPI): void {
 
   // Command registration
   pi.registerCommand("agents", {
-    description: "Manage subagents: spawn agents, model settings, concurrency, briefing, and agent types",
+    description: "Manage subagents: model settings, concurrency, briefing, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       // Restrict menu picks to the active Model scope when one is set.
       const modelOptions = listModelOptionsForMenus(ctx.modelRegistry, ctx.cwd);

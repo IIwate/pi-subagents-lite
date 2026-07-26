@@ -2,7 +2,6 @@
  * numeric-input-submenu.ts — Shared input submenu Components.
  *
  * - createNumericSubmenu: numeric input with validation
- * - createInputSubmenu: plain text input
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -61,36 +60,6 @@ export function createNumericSubmenu(
       }
       opts.onValid?.(parsed);
       done(String(parsed));
-    };
-    input.onEscape = () => done();
-    return input;
-  };
-}
-
-/**
- * Returns a `(initialValue, done) => Input` function for plain text submenus.
- *
- * If `required` is true, empty input shows an error and does not call `done`.
- * If `required` is false (default), empty input calls `done()` to clear.
- */
-export function createInputSubmenu(
-  ctx: ExtensionCommandContext,
-  options?: { required?: boolean },
-): (initialValue: string, done: (value?: string) => void) => Input {
-  return (initialValue, done) => {
-    const input = new Input();
-    input.setValue(initialValue);
-    input.onSubmit = (value) => {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        if (options?.required) {
-          ctx.ui.notify("Cannot be empty", "error");
-          return;
-        }
-        done();
-        return;
-      }
-      done(trimmed);
     };
     input.onEscape = () => done();
     return input;

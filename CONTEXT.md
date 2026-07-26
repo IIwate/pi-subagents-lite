@@ -45,10 +45,6 @@ _Avoid_: Git worktree, sibling worktree
 **Worktree path**:
 The resolved absolute filesystem path passed to the `worktree_path` param. Used as the subagent's working directory for its session, resource loader, and system prompt.
 
-**Worktree label**:
-A short human-readable identifier derived from the worktree path. `basename(root)` when targeting the root, else `basename(root)/<relative subpath>`.
-_Avoid_: Worktree name
-
 ### Runtime
 
 **Nudge**:
@@ -66,8 +62,12 @@ _Avoid_: Callback, notification
 - A **Nudge** is emitted when a background agent completes or errors
 - **Grace turns** are added to the max turns limit to determine when a steered agent is hard-aborted
 - A **Worktree path** is the absolute resolved path passed via `worktree_path`
-- A **Worktree label** is derived from a **Worktree path** for compact display
 - The `worktree_path` tool param is taught to the LLM via the **Agent briefing**
+
+## Product boundaries
+
+- The `Agent` tool is the only spawn entry point. `/agents` owns settings and diagnostics, not a second user-driven spawn flow. Revisit only if users need to start agents without involving the parent LLM.
+- Input usage accumulates provider-reported values without a vLLM-specific delta heuristic. Revisit only when a supported backend demonstrably reports cumulative prompt tokens without usable cache accounting.
 
 ## Test boundaries
 

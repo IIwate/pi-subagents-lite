@@ -8,19 +8,15 @@ import { randomUUID } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { continueAgentSession, runAgent } from "./agent-runner.js";
-import { getStore } from "../shell.js";
 import {
   type AgentRecord,
   type AgentStatus,
-  type CompactionInfo,
   type RunCallbacks,
   type StopInitiator,
-  SHORT_ID_LENGTH,
   type SpawnConfig,
-  type ToolActivity,
 } from "../types.js";
 import type { SubagentType } from "./types.js";
-import { addUsage, getSessionContextPercent, type AgentUsage } from "./usage.js";
+import { addUsage, getSessionContextPercent } from "./usage.js";
 import { errorMessage } from "../utils.js";
 
 /** How often to check for expired agent records (milliseconds). */
@@ -56,7 +52,6 @@ export interface ConcurrencyConfig {
 }
 
 type OnAgentComplete = (record: AgentRecord) => void;
-type OnAgentStart = (record: AgentRecord) => void;
 type OnAgentRemove = (record: AgentRecord) => void;
 
 /** Internal per-model concurrency state. */
@@ -73,8 +68,7 @@ interface SpawnArgs {
   options: SpawnOptions;
 }
 
-export interface SpawnOptions extends SpawnConfig, RunCallbacks {
-  isBackground?: boolean;
+export interface SpawnOptions extends SpawnConfig {
   /** Parent abort signal — when aborted, the subagent is also stopped. */
   signal?: AbortSignal;
 }
@@ -83,17 +77,7 @@ export class AgentManager {
   private agents = new Map<string, AgentRecord>();
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
-  private onStart?: OnAgentStart;
   private onRemove?: OnAgentRemove;
-
-  /** Session-level cumulative agent cost. Survives agent eviction. */
-  private totalAgentCost = 0;
-
-  /** Cost already added to the session total for each agent. */
-  private accountedCosts = new Map<string, number>();
-
-  /** Cost snapshots for cleared running agents, retained until final usage arrives. */
-  private removedCostSnapshots = new Map<string, number>();
 
   /** Per-model concurrency slots keyed by "provider/modelId". */
   private concurrencySlots = new Map<string, ConcurrencySlot>();
@@ -116,10 +100,8 @@ export class AgentManager {
   constructor(
     onComplete?: OnAgentComplete,
     concurrency?: ConcurrencyConfig,
-    onStart?: OnAgentStart,
   ) {
     this.onComplete = onComplete;
-    this.onStart = onStart;
     this.defaultConcurrency = concurrency?.default ?? DEFAULT_CONCURRENCY_LIMIT;
 
     // Initialize per-provider slots from config (shared pool)
@@ -232,8 +214,6 @@ export class AgentManager {
         type,
         description: options.description,
         invocation: options.invocation,
-        worktreePath: options.worktreePath,
-        worktreeLabel: options.worktreeLabel,
       },
       execution: {
         abortController,
@@ -280,8 +260,6 @@ export class AgentManager {
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
 
-    this.onStart?.(record);
-
     // Wire parent abort signal to stop the subagent when the parent is interrupted
     if (options.signal) {
       options.signal.addEventListener("abort", () => this.abort(id, "agent"), { once: true });
@@ -292,17 +270,14 @@ export class AgentManager {
       agentId: id,
       model: options.model,
       maxTurns: options.maxTurns,
-      maxTokens: options.maxTokens,
       thinkingLevel: options.thinkingLevel,
       cwd: options.worktreePath,
       graceTurns: options.graceTurns,
       signal: record.execution.abortController!.signal,
-      ...this.createRecordCallbacks(record, options),
+      ...this.createRecordCallbacks(record),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
-        options.onTurnEnd?.(turnCount);
       },
-      onTextDelta: options.onTextDelta,
       onSessionCreated: (session) => {
         record.execution.session = session;
         // Snapshot effective model/thinking for widget display (session may inherit settings defaults).
@@ -320,7 +295,6 @@ export class AgentManager {
           }
           record.execution.pendingSteers = undefined;
         }
-        options.onSessionCreated?.(session);
       },
     })
       .then(({ responseText, session, aborted, turnLimited }) => {
@@ -357,17 +331,6 @@ export class AgentManager {
 
   /** Notify completion callback, ignoring any errors. */
   private safeNotifyComplete(record: AgentRecord): void {
-    const retained = this.agents.has(record.id);
-    const removedSnapshot = this.removedCostSnapshots.get(record.id);
-    if (retained || removedSnapshot !== undefined) {
-      const previousCost = retained
-        ? (this.accountedCosts.get(record.id) ?? 0)
-        : (removedSnapshot ?? 0);
-      const currentCost = record.stats.lifetimeUsage.cost;
-      this.totalAgentCost += Math.max(0, currentCost - previousCost);
-      if (retained) this.accountedCosts.set(record.id, currentCost);
-      else this.removedCostSnapshots.delete(record.id);
-    }
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
 
@@ -379,56 +342,17 @@ export class AgentManager {
     this.onRemove = cb;
   }
 
-  /** Get the session-level cumulative agent cost. Survives agent eviction. */
-  getTotalAgentCost(): number {
-    return this.totalAgentCost;
-  }
-
-  /** Cost accumulated by an agent since its last settled accounting point. */
-  getUnaccountedAgentCost(id: string): number {
-    const record = this.agents.get(id);
-    if (!record) return 0;
-    return Math.max(
-      0,
-      record.stats.lifetimeUsage.cost - (this.accountedCosts.get(id) ?? 0),
-    );
-  }
-
-  /**
-   * Build common record-tracking callbacks shared by startAgent.
-   * Updates the record's toolUses, lifetimeUsage, and compactionCount.
-   * When options are provided, also forwards events to the caller.
-   */
-  private createRecordCallbacks(
-    record: AgentRecord,
-    options?: Pick<SpawnOptions, "onToolActivity" | "onAssistantUsage" | "onCompaction">,
-  ): {
-    onToolActivity: (activity: ToolActivity) => void;
-    onAssistantUsage: (usage: AgentUsage) => void;
-    onCompaction: (info: CompactionInfo) => void;
-  } {
+  /** Build runner callbacks that update the record's tool, usage, and compaction stats. */
+  private createRecordCallbacks(record: AgentRecord): Required<Pick<RunCallbacks, "onToolUse" | "onAssistantUsage" | "onCompaction">> {
     return {
-      onToolActivity: (activity) => {
-        if (activity.type === "end") record.stats.toolUses++;
-        options?.onToolActivity?.(activity);
+      onToolUse: () => {
+        record.stats.toolUses++;
       },
       onAssistantUsage: (usage) => {
-        // vLLM doesn't report cache hits, so usage.input is full prompt_tokens.
-        // Estimate new tokens as delta from previous message's input.
-        const deltaEnabled = getStore().agent.deltaInputTokens;
-        const cacheRead = usage.cacheRead;
-        let inputDelta = usage.input;
-        if (deltaEnabled && cacheRead === 0 && record.stats.prevInputTokens != null && usage.input > record.stats.prevInputTokens) {
-          inputDelta = usage.input - record.stats.prevInputTokens;
-        }
-        record.stats.prevInputTokens = usage.input;
-
-        addUsage(record.stats.lifetimeUsage, { ...usage, input: inputDelta });
-        options?.onAssistantUsage?.(usage);
+        addUsage(record.stats.lifetimeUsage, usage);
       },
-      onCompaction: (info) => {
+      onCompaction: () => {
         record.stats.compactionCount++;
-        options?.onCompaction?.(info);
       },
     };
   }
@@ -492,7 +416,6 @@ export class AgentManager {
   async interact(
     id: string,
     message: string,
-    callbacks: RunCallbacks = {},
     images?: ImageContent[],
   ): Promise<boolean> {
     const record = this.agents.get(id);
@@ -526,16 +449,14 @@ export class AgentManager {
     record.lifecycle.resultConsumed = undefined;
     record.error = undefined;
 
-    const trackedCallbacks = this.createRecordCallbacks(record, callbacks);
+    const trackedCallbacks = this.createRecordCallbacks(record);
     const promise = continueAgentSession(session, message, {
       ...trackedCallbacks,
       images,
       maxTurns: record.stats.maxTurns,
       graceTurns: record.execution.graceTurns,
-      onTextDelta: callbacks.onTextDelta,
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = previousTurns + turnCount;
-        callbacks.onTurnEnd?.(turnCount);
       },
     })
       .then(({ responseText, aborted, turnLimited }) => {
@@ -601,12 +522,6 @@ export class AgentManager {
     if (!isTerminalStatus(record.lifecycle.status)) {
       this.stopAgent(record, stoppedBy);
     }
-    // Settle known cost first. A running request may return final usage after clear(),
-    // so retain a snapshot and let the settle callback add only the late delta.
-    this.totalAgentCost += this.getUnaccountedAgentCost(id);
-    if (!record.execution.settled && record.execution.promise) {
-      this.removedCostSnapshots.set(id, record.stats.lifetimeUsage.cost);
-    }
     this.removeRecord(id, record);
     return true;
   }
@@ -671,7 +586,6 @@ export class AgentManager {
     const session = record.execution.session;
     record.execution.session = undefined;
     this.agents.delete(id);
-    this.accountedCosts.delete(id);
     if (session) void this.closeSession(session);
     try { this.onRemove?.(record); } catch { /* ignore */ }
   }
@@ -700,7 +614,6 @@ export class AgentManager {
       if (session) void this.closeSession(session);
     }
     this.agents.clear();
-    this.accountedCosts.clear();
     await Promise.all(this.closing);
   }
 }
