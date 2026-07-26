@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createMockSession, tempDirFixture } from "../fixtures.ts";
 import {
   createOutputFilePath,
@@ -29,15 +30,7 @@ describe("createOutputFilePath", () => {
   it("returns <baseDir>/<agentId>.log", () => {
     const dir = fixture.getDir();
     const result = createOutputFilePath(testAgentId, dir);
-    expect(result).toBe(`${dir}/${testAgentId}.log`);
-  });
-
-  it("creates the directory with 0o700 permissions", () => {
-    const dir = fixture.getDir() + "/sub";
-    createOutputFilePath(testAgentId, dir);
-    expect(existsSync(dir)).toBe(true);
-    expect(statSync(dir).isDirectory()).toBe(true);
-    expect(statSync(dir).mode & 0o077).toBeLessThanOrEqual(0);
+    expect(result).toBe(join(dir, `${testAgentId}.log`));
   });
 
   it("returns consistent path for same agentId", () => {
@@ -46,7 +39,7 @@ describe("createOutputFilePath", () => {
   });
 
   it("defaults to /tmp/pi-agent-outputs when baseDir is omitted", () => {
-    expect(createOutputFilePath("test")).toBe("/tmp/pi-agent-outputs/test.log");
+    expect(createOutputFilePath("test")).toBe(join("/tmp/pi-agent-outputs", "test.log"));
   });
 });
 
@@ -434,13 +427,13 @@ describe("AgentOutputLog", () => {
   it("creates the output file path and writes initial [USER] entry", () => {
     const dir = fixture.getDir();
     const log = new AgentOutputLog(testAgentId, "explore auth", dir);
-    expect(log.path).toBe(`${dir}/${testAgentId}.log`);
+    expect(log.path).toBe(join(dir, `${testAgentId}.log`));
     expect(readFileSync(log.path, "utf-8")).toMatch(/\[USER\]\s+explore auth/);
   });
 
   it("uses default baseDir when omitted", () => {
     const log = new AgentOutputLog(testAgentId, "test prompt");
-    expect(log.path).toBe(`/tmp/pi-agent-outputs/${testAgentId}.log`);
+    expect(log.path).toBe(join("/tmp/pi-agent-outputs", `${testAgentId}.log`));
   });
 
   it("subscribes to session events on attach", () => {
@@ -551,6 +544,6 @@ describe("AgentOutputLog", () => {
   it("exposes the output file path as a readonly property", () => {
     const dir = fixture.getDir();
     const log = new AgentOutputLog(testAgentId, "test", dir);
-    expect(log.path).toBe(`${dir}/${testAgentId}.log`);
+    expect(log.path).toBe(join(dir, `${testAgentId}.log`));
   });
 });

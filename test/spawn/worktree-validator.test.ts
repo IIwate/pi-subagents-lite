@@ -74,6 +74,11 @@ function makeTempDir(prefix = "wt-test"): { dir: string; cleanup: () => void } {
   };
 }
 
+/** 公共返回契约统一使用正斜杠，不能拿宿主原生分隔符直接比较。 */
+function normalizedPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
 // ── tests ────────────────────────────────────────────────────────
 
 describe("validateWorktreePath", () => {
@@ -111,8 +116,8 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(worktreePath);
-    expect(success.worktreeRoot).toBe(worktreePath);
+    expect(success.resolvedPath).toBe(normalizedPath(worktreePath));
+    expect(success.worktreeRoot).toBe(normalizedPath(worktreePath));
     expect(success.label).toBe("feature");
   });
 
@@ -132,7 +137,7 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(mainCheckout);
+    expect(success.resolvedPath).toBe(normalizedPath(mainCheckout));
   });
 
   it("returns worktree root and non-empty label on success", async () => {
@@ -174,7 +179,7 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(absolutePath);
+    expect(success.resolvedPath).toBe(normalizedPath(absolutePath));
   });
 
   it("resolves ./wt/feature style relative path", async () => {
@@ -194,7 +199,7 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(absolutePath);
+    expect(success.resolvedPath).toBe(normalizedPath(absolutePath));
   });
 
   it("resolves parent-relative paths (../wt/feature)", async () => {
@@ -214,7 +219,7 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(absolutePath);
+    expect(success.resolvedPath).toBe(normalizedPath(absolutePath));
   });
 
   // ── label computation ─────────────────────────────────────────
@@ -261,7 +266,7 @@ describe("validateWorktreePath", () => {
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
     expect(success.label).toBe("feature/packages/web");
-    expect(success.worktreeRoot).toBe(worktreeRoot);
+    expect(success.worktreeRoot).toBe(normalizedPath(worktreeRoot));
   });
 
   it("label uses forward slashes even for Windows-style relative paths", async () => {
@@ -465,7 +470,7 @@ describe("validateWorktreePath", () => {
 
     expect(result.ok).toBe(true);
     const success = result as WorktreeValidationSuccess;
-    expect(success.resolvedPath).toBe(realPath);
+    expect(success.resolvedPath).toBe(normalizedPath(realPath));
   });
 
   it("rejects a symlink whose target is in a different repo", async () => {

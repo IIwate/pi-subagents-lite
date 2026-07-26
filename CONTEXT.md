@@ -68,3 +68,10 @@ _Avoid_: Callback, notification
 - A **Worktree path** is the absolute resolved path passed via `worktree_path`
 - A **Worktree label** is derived from a **Worktree path** for compact display
 - The `worktree_path` tool param is taught to the LLM via the **Agent briefing**
+
+## Test boundaries
+
+- `bun run test` is the Windows local fast lane and excludes `test/linux/**`.
+- `bun run test:ci` runs the complete suite; GitHub Actions executes it on Ubuntu.
+- Only assertions that depend on POSIX semantics, such as Unix mode bits, belong in `test/linux/`.
+- Cross-platform contracts, such as normalized path separators, stay in the normal suite; fix their expectations instead of hiding them in the Linux lane.
