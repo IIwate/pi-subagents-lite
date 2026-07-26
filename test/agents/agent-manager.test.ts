@@ -603,7 +603,7 @@ describe("AgentManager", () => {
       expect(manager.getTotalAgentCost()).toBe(0.04);
     });
 
-    it("追问运行中清除代理时不会重复入账已结算成本", async () => {
+    it("清除运行中代理时不重复入账，并补记清除后返回的费用", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
@@ -615,25 +615,30 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       record.stats.lifetimeUsage.cost = 0.05;
       await record.execution.promise;
-      // 第一轮结算：入账 0.05
       expect(manager.getTotalAgentCost()).toBe(0.05);
 
-      // 追问触发第二轮运行（挂起），运行中成本涨到 0.08
       const deferred = makeResolvablePromise();
-      mockModules.mockContinueAgentSession.mockReturnValue(deferred.promise);
+      let onLateUsage: ((usage: any) => void) | undefined;
+      mockModules.mockContinueAgentSession.mockImplementation((_session, _message, options) => {
+        onLateUsage = options.onAssistantUsage;
+        return deferred.promise;
+      });
       await expect(manager.interact(id, "continue")).resolves.toBe(true);
       record.stats.lifetimeUsage.cost = 0.08;
 
-      // 第二轮运行中清除：补记未结算的 0.03，总额应为 0.08
+      // clear() 只补记当前已知的 0.03。
       expect(manager.clear(id, "user")).toBe(true);
       expect(manager.getRecord(id)).toBeUndefined();
       expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
 
-      // 第二轮结算：对已移除记录不得再次入账，也不得留下孤儿条目
+      // 请求结束前才返回最后 0.02 usage；settle 只能补差额，不能重复整笔入账。
+      onLateUsage?.({ input: 0, output: 0, cacheWrite: 0, cost: 0.02, cacheRead: 0 });
       deferred.resolve({ responseText: "", aborted: true, turnLimited: false });
       await new Promise(r => setTimeout(r, 10));
-      expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
+
+      expect(manager.getTotalAgentCost()).toBeCloseTo(0.10);
       expect((manager as any).accountedCosts.has(id)).toBe(false);
+      expect((manager as any).removedCostSnapshots.has(id)).toBe(false);
     });
   });
   // ── Cleanup eviction ──
@@ -770,6 +775,27 @@ describe("AgentManager", () => {
       expect(session.dispose).toHaveBeenCalledTimes(1);
     });
 
+    it("允许较慢但正常的 shutdown handler 在 15 秒预算内完成", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      session.extensionRunner.emit.mockImplementation(
+        () => new Promise<void>(resolve => setTimeout(resolve, 7_000)),
+      );
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      const disposed = manager.dispose();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(session.dispose).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      await disposed;
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    });
+
     /**
      * emit() 串行 await 每个 handler 且不设超时。子扩展的 handler 永久挂起时，
      * 没有超时兜底会让父进程退出流程卡死在 dispose() 上，用户只能强杀。
@@ -792,7 +818,7 @@ describe("AgentManager", () => {
       expect(disposeSettled).toBe(false);
       expect(session.dispose).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.advanceTimersByTimeAsync(15_000);
       await disposed;
 
       expect(disposeSettled).toBe(true);
@@ -806,7 +832,7 @@ describe("AgentManager", () => {
      * 没有幂等守卫就是死锁。
      */
     it("shutdown handler 内递归调用 dispose() 不死锁", async () => {
-      // 用假定时器屏蔽 3s 超时兜底，只考察守卫本身能否解开循环等待
+      // 用假定时器屏蔽 15s 超时兜底，只考察守卫本身能否解开循环等待
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();

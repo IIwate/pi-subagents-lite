@@ -31,7 +31,7 @@ const CLEANUP_INTERVAL_MS = 60_000;
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 
 /** 等待子会话 shutdown handler 的上限，超时后照常 dispose（milliseconds）。 */
-const SESSION_SHUTDOWN_TIMEOUT_MS = 3_000;
+const SESSION_SHUTDOWN_TIMEOUT_MS = 15_000;
 
 /** UUID prefix length for agent IDs stored in the agents map (uniqueness). */
 const AGENT_ID_PREFIX_LENGTH = 17;
@@ -92,6 +92,9 @@ export class AgentManager {
 
   /** Cost already added to the session total for each agent. */
   private accountedCosts = new Map<string, number>();
+
+  /** 已清除运行中代理的成本快照，保留到最终 usage 返回。 */
+  private removedCostSnapshots = new Map<string, number>();
 
   /** Per-model concurrency slots keyed by "provider/modelId". */
   private concurrencySlots = new Map<string, ConcurrencySlot>();
@@ -376,13 +379,16 @@ export class AgentManager {
 
   /** Notify completion callback, ignoring any errors. */
   private safeNotifyComplete(record: AgentRecord): void {
-    // 记录已被 clear() 移除时跳过入账：成本已在移除时结清，
-    // 这里再记会重复累计，且会向 accountedCosts 写入孤儿条目。
-    if (this.agents.has(record.id)) {
-      const previousCost = this.accountedCosts.get(record.id) ?? 0;
+    const retained = this.agents.has(record.id);
+    const removedSnapshot = this.removedCostSnapshots.get(record.id);
+    if (retained || removedSnapshot !== undefined) {
+      const previousCost = retained
+        ? (this.accountedCosts.get(record.id) ?? 0)
+        : (removedSnapshot ?? 0);
       const currentCost = record.stats.lifetimeUsage.cost;
       this.totalAgentCost += Math.max(0, currentCost - previousCost);
-      this.accountedCosts.set(record.id, currentCost);
+      if (retained) this.accountedCosts.set(record.id, currentCost);
+      else this.removedCostSnapshots.delete(record.id);
     }
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
@@ -626,9 +632,12 @@ export class AgentManager {
     if (!isTerminalStatus(record.lifecycle.status)) {
       this.stopAgent(record, stoppedBy);
     }
-    // 移除前把未结算的成本计入会话总额；之后的 settle 回调对
-    // 已移除的记录不再入账（见 safeNotifyComplete），避免重复计费。
+    // 先结算当前已知成本；运行中的请求可能在 clear() 后才返回最终 usage，
+    // 因此保留快照，让 settle 回调只补记迟到的差额。
     this.totalAgentCost += this.getUnaccountedAgentCost(id);
+    if (!record.execution.settled && record.execution.promise) {
+      this.removedCostSnapshots.set(id, record.stats.lifetimeUsage.cost);
+    }
     this.removeRecord(id, record);
     return true;
   }
