@@ -171,6 +171,22 @@ function emptyComponent(): Component {
   };
 }
 
+/**
+ * 列表可视窗口：高度上限约 6 行（避免把聊天区挤出屏幕），围绕焦点行
+ * 滚动。renderSelector 与 estimateListPaintHeight 共用，保证估算精确。
+ */
+function computeListWindow(
+  entryCount: number,
+  focusIndex: number,
+  rows: number,
+): { start: number; end: number; visibleCount: number } {
+  const maxVisible = Math.min(6, Math.max(3, Math.floor(rows / 5)));
+  const visibleCount = Math.min(entryCount, maxVisible);
+  const maxStart = Math.max(0, entryCount - visibleCount);
+  const start = Math.min(maxStart, Math.max(0, focusIndex - Math.floor(visibleCount / 2)));
+  return { start, end: start + visibleCount, visibleCount };
+}
+
 class ForwardingActionMap extends Map<string, () => void> {
   constructor(
     private base: Map<string, () => void>,
@@ -482,6 +498,12 @@ export class AgentNavigator {
         this.confirmingClearId = null;
         this.requestRender();
         return { consume: true };
+      }
+      // Ctrl+C 不吞：取消确认并放行，避免阻断中断/退出链路。
+      if (matchesKey(data, Key.ctrl("c"))) {
+        this.confirmingClearId = null;
+        this.requestRender();
+        return undefined;
       }
       return { consume: true };
     }
@@ -832,19 +854,21 @@ export class AgentNavigator {
   }
 
   /**
-   * Approximate on-screen rows for the selector (matches renderSelector caps).
+   * Exact on-screen rows for the selector（与 renderSelector 共用窗口计算）。
    * Used only to detect shrink so we can force-clear leftover blank lines.
    */
-  private estimateListPaintHeight(agentCount: number): number {
-    const entryCount = agentCount + 1; // Main row
+  private estimateListPaintHeight(): number {
+    const entries = this.navigationEntries();
     const rows = this.selectorTui?.terminal.rows
       ?? this.screenSwap?.tui.terminal.rows
       ?? 40;
-    const maxVisible = Math.min(6, Math.max(3, Math.floor(rows / 5)));
-    const visible = Math.min(entryCount, maxVisible);
-    let height = visible;
+    const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
+    const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
+    const { start, end, visibleCount } = computeListWindow(entries.length, focusIndex, rows);
+    let height = visibleCount;
     if (this.listFocused) height += 1; // focus / confirm hint
-    if (entryCount > maxVisible) height += 2; // ↑/↓ hidden lines (upper bound)
+    if (start > 0) height += 1; // ↑ N hidden
+    if (end < entries.length) height += 1; // ↓ N hidden
     return height;
   }
 
@@ -852,13 +876,7 @@ export class AgentNavigator {
     const entries = this.navigationEntries();
     const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
     const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
-    // Cap list height so chat is not pushed off-screen (was rows/3 ≈ 12–16 on tall terms).
-    // ~6 rows: Main + a handful of agents; overflow via ↑/↓ N hidden + focus scrolling.
-    const maxVisible = Math.min(6, Math.max(3, Math.floor(tui.terminal.rows / 5)));
-    const visibleCount = Math.min(entries.length, maxVisible);
-    const maxStart = Math.max(0, entries.length - visibleCount);
-    const start = Math.min(maxStart, Math.max(0, focusIndex - Math.floor(visibleCount / 2)));
-    const end = start + visibleCount;
+    const { start, end } = computeListWindow(entries.length, focusIndex, tui.terminal.rows);
     const visibleEntries = entries.slice(start, end);
 
     // No permanent header chrome; only show a short focus hint while navigating.
@@ -1111,7 +1129,7 @@ export class AgentNavigator {
     if (sig !== this.lastRenderSig) {
       this.lastRenderSig = sig;
       // Pi differential render leaves blank rows when layout shrinks (list or Working).
-      const paintHeight = this.estimateListPaintHeight(records.length);
+      const paintHeight = this.estimateListPaintHeight();
       const shrink = paintHeight < this.lastListPaintHeight;
       this.lastListPaintHeight = paintHeight;
       const completed = this.consumeTerminalTransitions(records);

@@ -211,6 +211,60 @@ describe("AgentNavigator", () => {
     );
   });
 
+  it("Ctrl+D → Enter 清除非活动子代理并移动高亮", () => {
+    const r1 = makeRecord("agent-11111111");
+    const r2 = makeRecord("agent-22222222");
+    const records = [r1, r2];
+    const ui = makeUI({ value: "" });
+    const manager = makeManager(records) as any;
+    manager.clear = vi.fn((id: string) => {
+      const index = records.findIndex(record => record.id === id);
+      if (index < 0) return false;
+      records.splice(index, 1);
+      return true;
+    });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B"); // 空编辑器 + ↓ 进入列表（Main）
+    navigator.handleTerminalInput("\x1b[B"); // 高亮第一个子代理
+    navigator.handleTerminalInput("\x04");   // Ctrl+D 进入确认态
+    expect(selector.render(120).join("\n")).toContain("Delete?");
+
+    navigator.handleTerminalInput("\r");     // Enter 确认
+    expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
+    const text = selector.render(120).join("\n");
+    expect(text).not.toContain("Delete?");
+  });
+
+  it("清除确认态放行 Ctrl+C 并取消确认", () => {
+    const record = makeRecord("agent-11111111");
+    const secondRecord = makeRecord("agent-22222222");
+    const ui = makeUI({ value: "" });
+    const manager = makeManager([record, secondRecord]) as any;
+    manager.clear = vi.fn(() => true);
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x04");
+    expect(selector.render(120).join("\n")).toContain("Delete?");
+
+    // Ctrl+C：不消费（放行给上层），同时取消确认态
+    const result = navigator.handleTerminalInput("\x03");
+    expect(result?.consume).toBeFalsy();
+    expect(manager.clear).not.toHaveBeenCalled();
+    expect(selector.render(120).join("\n")).not.toContain("Delete?");
+
+    // 其余按键在确认态才被吞；取消后普通键正常返回编辑器
+    expect(selector.render(120).join("\n")).toContain("↑↓ move");
+  });
+
   it("遵循 statsVisibility 的 showCost 开关", () => {
     const record = makeRecord();
     record.stats.lifetimeUsage.cost = 0.05;
