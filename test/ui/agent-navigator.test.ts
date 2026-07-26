@@ -88,6 +88,7 @@ function makeChatContainer(text: string): any {
 }
 
 function makeTui(prefixCount = 1): any {
+  let clearOnShrink = false;
   const originalChat = makeChatContainer("parent chat");
   const originalPending = makeContainer("parent pending");
   const originalStatus = makeContainer("parent status");
@@ -130,6 +131,8 @@ function makeTui(prefixCount = 1): any {
       rows: 40,
       write: vi.fn(),
     },
+    getClearOnShrink: () => clearOnShrink,
+    setClearOnShrink: vi.fn((enabled: boolean) => { clearOnShrink = enabled; }),
     requestRender: vi.fn(),
   };
 }
@@ -237,6 +240,32 @@ describe("AgentNavigator", () => {
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const text = selector.render(120).join("\n");
     expect(text).not.toContain("Delete?");
+  });
+
+  it("uses native shrink clearing while the selector is mounted", () => {
+    const records = [makeRecord("agent-11111111"), makeRecord("agent-22222222")];
+    const ui = makeUI({ value: "" });
+    const tui = makeTui();
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui, tui);
+
+    expect(tui.getClearOnShrink()).toBe(true);
+    tui.requestRender.mockClear();
+
+    records.splice(0, 1);
+    navigator.update();
+
+    // Pi now detects the exact whole-layout shrink during its normal render pass.
+    expect(tui.requestRender).toHaveBeenCalledWith(false);
+    expect(tui.requestRender).not.toHaveBeenCalledWith(true);
+
+    records.length = 0;
+    navigator.update();
+
+    expect(tui.getClearOnShrink()).toBe(false);
+    expect(tui.requestRender).toHaveBeenCalledWith(true);
   });
 
   it("passes through Ctrl+C and cancels clear confirmation", () => {
@@ -632,6 +661,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     tui.terminal.write.mockClear();
+    tui.requestRender.mockClear();
 
     navigator.dispose();
     navigator = undefined;
@@ -639,6 +669,7 @@ describe("AgentNavigator", () => {
     expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
     expect(tui.children[tui.footerIndex]).toBe(tui.originalFooter);
     expect(tui.terminal.write).not.toHaveBeenCalled();
+    expect(tui.requestRender).toHaveBeenCalledWith(true);
   });
 
   it("supports Pi layouts with a loaded-resources container before chat", () => {

@@ -79,7 +79,13 @@ export function ensureManagerAndWidget(): void {
     // ConfigStore synchronizes list stats visibility through the same injection pattern as the widget.
     getStore().setDeps({ navigator: newNavigator });
   }
-  getManager()?.setOnRemove(() => getNavigator()?.update());
+  getManager()?.setOnRemove(() => {
+    // Refresh the status badge before tearing down the selector so footer and list shrink
+    // in one TUI pass. Waiting for the 1 Hz badge poll races powerline/Working redraws and
+    // can briefly duplicate footer rows when the final agent is removed.
+    getWidget()?.update();
+    getNavigator()?.update();
+  });
 }
 
 /**

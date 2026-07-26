@@ -171,10 +171,7 @@ function emptyComponent(): Component {
   };
 }
 
-/**
- * Visible list window: capped near six rows to preserve chat space and scrolled around
- * the focused row. Shared by renderSelector and estimateListPaintHeight for exact estimates.
- */
+/** Visible list window, capped near six rows and scrolled around the focused row. */
 function computeListWindow(
   entryCount: number,
   focusIndex: number,
@@ -370,8 +367,9 @@ export class AgentNavigator {
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Skip requestRender when list content is unchanged between timer ticks. */
   private lastRenderSig = "";
-  /** Last estimated below-editor list height; shrink → force full TUI reflow. */
-  private lastListPaintHeight = 0;
+  /** TUI whose native shrink clearing was enabled for the dynamic selector. */
+  private shrinkClearingTui: TUI | undefined;
+  private previousClearOnShrink: boolean | undefined;
   /** Previous lifecycle status per agent — terminal transition forces reflow. */
   private lastAgentStatus = new Map<string, AgentRecord["lifecycle"]["status"]>();
   private selectorRegistered = false;
@@ -389,6 +387,7 @@ export class AgentNavigator {
   setUICtx(ctx: NavigatorUICtx): void {
     if (ctx === this.uiCtx) return;
     if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+    this.restoreShrinkClearing();
     this.restoreEditor?.();
     this.uiCtx = ctx;
     this.selectorRegistered = false;
@@ -856,25 +855,6 @@ export class AgentNavigator {
     this.requestRender(true);
   }
 
-  /**
-   * Exact on-screen selector rows, using the same window calculation as renderSelector.
-   * Used only to detect shrink so we can force-clear leftover blank lines.
-   */
-  private estimateListPaintHeight(): number {
-    const entries = this.navigationEntries();
-    const rows = this.selectorTui?.terminal.rows
-      ?? this.screenSwap?.tui.terminal.rows
-      ?? 40;
-    const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
-    const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
-    const { start, end, visibleCount } = computeListWindow(entries.length, focusIndex, rows);
-    let height = visibleCount;
-    if (this.listFocused) height += 1; // focus / confirm hint
-    if (start > 0) height += 1; // ↑ N hidden
-    if (end < entries.length) height += 1; // ↓ N hidden
-    return height;
-  }
-
   private renderSelector(tui: TUI, theme: Theme): string[] {
     const entries = this.navigationEntries();
     const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
@@ -1091,7 +1071,6 @@ export class AgentNavigator {
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
       this.unregisterWidgets();
       this.lastRenderSig = "";
-      this.lastListPaintHeight = 0;
       this.lastAgentStatus.clear();
       tui?.requestRender(true);
       if (this.refreshTimer) {
@@ -1115,6 +1094,7 @@ export class AgentNavigator {
     if (!this.selectorRegistered) {
       this.uiCtx.setWidget(SELECTOR_WIDGET_KEY, (tui, theme) => {
         this.selectorTui = tui;
+        this.enableShrinkClearing(tui);
         const selector: Component = {
           render: () => {
             this.captureScreen(tui, selector);
@@ -1131,12 +1111,8 @@ export class AgentNavigator {
     const sig = this.listRenderSignature(records);
     if (sig !== this.lastRenderSig) {
       this.lastRenderSig = sig;
-      // Pi differential render leaves blank rows when layout shrinks (list or Working).
-      const paintHeight = this.estimateListPaintHeight();
-      const shrink = paintHeight < this.lastListPaintHeight;
-      this.lastListPaintHeight = paintHeight;
       const completed = this.consumeTerminalTransitions(records);
-      this.requestRender(shrink || completed);
+      this.requestRender(completed);
     } else {
       // Keep status map warm even when signature throttles (elapsed-only ticks).
       this.syncAgentStatusMap(records);
@@ -1210,12 +1186,34 @@ export class AgentNavigator {
     ].join("#");
   }
 
+  /**
+   * Pi defaults clearOnShrink to off, which leaves a deleted selector row visible until
+   * a later repaint. Use Pi's exact whole-layout shrink detection while this widget is
+   * mounted, then restore the host preference so unrelated UI keeps its redraw policy.
+   */
+  private enableShrinkClearing(tui: TUI): void {
+    if (this.shrinkClearingTui === tui) return;
+    this.restoreShrinkClearing();
+    this.shrinkClearingTui = tui;
+    this.previousClearOnShrink = tui.getClearOnShrink();
+    tui.setClearOnShrink(true);
+  }
+
+  private restoreShrinkClearing(): void {
+    if (this.shrinkClearingTui && this.previousClearOnShrink !== undefined) {
+      this.shrinkClearingTui.setClearOnShrink(this.previousClearOnShrink);
+    }
+    this.shrinkClearingTui = undefined;
+    this.previousClearOnShrink = undefined;
+  }
+
   private unregisterWidgets(): void {
     if (this.selectorRegistered) {
       this.uiCtx?.setWidget(SELECTOR_WIDGET_KEY, undefined);
       this.selectorRegistered = false;
       this.selectorTui = undefined;
     }
+    this.restoreShrinkClearing();
   }
 
   dispose(): void {
@@ -1223,8 +1221,12 @@ export class AgentNavigator {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+    const tui = this.screenSwap?.tui ?? this.selectorTui;
     if (this.restoreMainScreen()) this.requestRender();
     this.unregisterWidgets();
+    // unregisterWidgets restores the host clearOnShrink preference before Pi renders.
+    // Force this final reflow so reload/dispose cannot leave the removed selector rows behind.
+    tui?.requestRender(true);
     this.screenSwap = undefined;
     this.restoreEditor?.();
     this.restoreEditor = undefined;
