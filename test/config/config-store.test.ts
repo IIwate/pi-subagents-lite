@@ -167,6 +167,20 @@ describe("ConfigStore persisted mutations", () => {
     expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
   });
 
+  it("setShowCost 同步统计可见性到 navigator", () => {
+    const { io } = memIO();
+    const navCalls: string[] = [];
+    const navigator = {
+      setStatsVisibility: (v: any) => navCalls.push(`setStatsVisibility:${JSON.stringify(v)}`),
+    };
+    const store = new ConfigStore(io);
+    store.setDeps({ navigator: navigator as any });
+    navCalls.length = 0;
+
+    store.mutate.agent.setShowCost(true);
+    expect(navCalls.some(c => c.includes('"showCost":true'))).toBe(true);
+  });
+
   it("setWidgetMaxLines derives compact when unset and syncs the widget", () => {
     const { io, saves } = memIO();
     const { w, calls } = widgetStub();

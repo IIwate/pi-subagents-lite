@@ -80,10 +80,13 @@ export function ensureManagerAndWidget(): void {
   }
 
   if (!currentNavigator) {
-    setNavigator(new AgentNavigator(
+    const newNavigator = new AgentNavigator(
       getManager()!,
       async (agentId, text) => getCoordinator()?.interact(agentId, text) ?? false,
-    ));
+    );
+    setNavigator(newNavigator);
+    // 列表统计可见性由 ConfigStore 同步（与 widget 同一注入模式）
+    getStore().setDeps({ navigator: newNavigator });
   }
   getManager()?.setOnRemove(() => getNavigator()?.update());
 }

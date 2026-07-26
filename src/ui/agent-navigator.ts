@@ -31,6 +31,7 @@ import {
   STATS_SEP,
   summarizeToolArgs,
   truncateDesc,
+  type StatsVisibility,
 } from "./format.js";
 import { renderAgentFooterStats } from "./agent-footer.js";
 import { SPINNER } from "./agent-widget.js";
@@ -346,6 +347,8 @@ export class AgentNavigator {
   private highlightedAgentId: string | null = null;
   /** Agent id waiting for Ctrl+D → Enter clear confirmation. */
   private confirmingClearId: string | null = null;
+  /** 统计项可见性（含 showCost），由 ConfigStore 同步注入。 */
+  private statsVisibility: StatsVisibility = {};
   private listFocused = false;
   private spinnerFrame = 0;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -401,6 +404,13 @@ export class AgentNavigator {
       this.update();
     }
     return this.selectedAgentId;
+  }
+
+  /** 由 ConfigStore 注入统计可见性；变化时立即重绘列表。 */
+  setStatsVisibility(visible: StatsVisibility): void {
+    this.statsVisibility = visible;
+    this.lastRenderSig = "";
+    this.requestRender();
   }
 
   ensureTimer(): void {
@@ -905,7 +915,7 @@ export class AgentNavigator {
         modelName: record.execution.session?.model?.id ?? record.display.invocation?.modelName,
         thinkingLevel: record.execution.session?.thinkingLevel
           ?? record.display.invocation?.thinkingLevel,
-      }, theme);
+      }, theme, this.statsVisibility);
       const statsLine = statsParts.join(STATS_SEP);
       const label = statsLine
         ? `${name}  ${desc}${STATS_SEP}${statsLine}`

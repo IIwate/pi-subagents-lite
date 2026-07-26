@@ -16,6 +16,7 @@
 import type { SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
 import { resolveModel } from "../models/model-precedence.js";
 import type { AgentWidget } from "../ui/agent-widget.js";
+import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import { CONFIG_AGENT_NON_MODEL_KEYS } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
@@ -83,6 +84,7 @@ export interface ResolvedAgentSettings {
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   widget?: AgentWidget;
+  navigator?: AgentNavigator;
   manager?: AgentManager;
 }
 
@@ -91,6 +93,7 @@ export class ConfigStore {
   private sessionOverrides: SessionModelOverrides = { default: null };
   private sessionShowCost: boolean | undefined;
   private widget?: AgentWidget;
+  private navigator?: AgentNavigator;
   private manager?: AgentManager;
   /** Previous tool-expansion state, for ctrl+o compact sync. */
   private lastToolsExpanded: boolean | undefined;
@@ -409,6 +412,7 @@ export class ConfigStore {
   /** Inject side-effect targets. Re-syncs whatever deps are present (lazy widget/manager). */
   setDeps(deps: ConfigStoreDeps): void {
     if (deps.widget !== undefined) this.widget = deps.widget;
+    if (deps.navigator !== undefined) this.navigator = deps.navigator;
     if (deps.manager !== undefined) this.manager = deps.manager;
     this.syncAllDeps();
   }
@@ -416,6 +420,7 @@ export class ConfigStore {
   /** Drop deps at session_shutdown. The widget/manager are disposed by the composition root. */
   dispose(): void {
     this.widget = undefined;
+    this.navigator = undefined;
     this.manager = undefined;
   }
 
@@ -438,12 +443,11 @@ export class ConfigStore {
     w.setDescLengthCompact(a.widgetDescLengthCompact);
   }
 
-  /** Push stats visibility flags to the widget. */
+  /** 把统计可见性推给 widget 与 navigator（下方代理列表）。 */
   private syncWidgetStatsVisibility(): void {
-    const w = this.widget;
-    if (!w) return;
+    if (!this.widget && !this.navigator) return;
     const a = this.agent;
-    w.setStatsVisibility({
+    const visibility = {
       showTools: a.showTools,
       showTurns: a.showTurns,
       showInput: a.showInput,
@@ -451,7 +455,9 @@ export class ConfigStore {
       showContext: a.showContext,
       showCost: a.showCost,
       showTime: a.showTime,
-    });
+    };
+    this.widget?.setStatsVisibility(visibility);
+    this.navigator?.setStatsVisibility(visibility);
   }
 
   /** Update a widget stats visibility flag: mutate config → persist → sync widget. */
@@ -470,8 +476,8 @@ export class ConfigStore {
     if (this.widget) {
       this.widget.setShowCost(this.agent.showCost);
       this.syncWidgetSettings();
-      this.syncWidgetStatsVisibility();
     }
+    this.syncWidgetStatsVisibility();
     this.applyConcurrency();
   }
 }

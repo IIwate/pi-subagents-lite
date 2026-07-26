@@ -211,6 +211,23 @@ describe("AgentNavigator", () => {
     );
   });
 
+  it("遵循 statsVisibility 的 showCost 开关", () => {
+    const record = makeRecord();
+    record.stats.lifetimeUsage.cost = 0.05;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    // 默认（未注入可见性）：显示成本
+    expect(selector.render(120).join("\n")).toContain("$");
+
+    // 关闭 showCost 后：不再显示成本
+    navigator.setStatsVisibility({ showCost: false });
+    expect(selector.render(120).join("\n")).not.toContain("$");
+  });
+
   it("animates the running status icon on the refresh timer", () => {
     vi.useFakeTimers();
     const record = makeRecord();
