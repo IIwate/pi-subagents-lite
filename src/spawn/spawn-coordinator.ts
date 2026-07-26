@@ -276,7 +276,8 @@ export class SpawnCoordinator {
           customType: "subagent-result",
           content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${formatResultContent(record)}`,
           details,
-          // Silent in TUI — list + toast carry the human signal; LLM still gets the text.
+          // TUI 静默（无结果卡片、无 toast）：人从下方列表的终态图标获知完成；
+          // LLM 仍收到完整结果文本。
           display: false,
         },
         {

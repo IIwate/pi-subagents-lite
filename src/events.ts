@@ -158,7 +158,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
-  // nextTick: let Pi remove Working before we repaint.
+  // setTimeout(0)：先让 Pi 移除 Working 行，下一轮事件循环再重排。
   pi.on("agent_end", (_event, ctx) => {
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
