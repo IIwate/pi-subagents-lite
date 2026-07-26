@@ -370,10 +370,14 @@ export class AgentManager {
 
   /** Notify completion callback, ignoring any errors. */
   private safeNotifyComplete(record: AgentRecord): void {
-    const previousCost = this.accountedCosts.get(record.id) ?? 0;
-    const currentCost = record.stats.lifetimeUsage.cost;
-    this.totalAgentCost += Math.max(0, currentCost - previousCost);
-    this.accountedCosts.set(record.id, currentCost);
+    // 记录已被 clear() 移除时跳过入账：成本已在移除时结清，
+    // 这里再记会重复累计，且会向 accountedCosts 写入孤儿条目。
+    if (this.agents.has(record.id)) {
+      const previousCost = this.accountedCosts.get(record.id) ?? 0;
+      const currentCost = record.stats.lifetimeUsage.cost;
+      this.totalAgentCost += Math.max(0, currentCost - previousCost);
+      this.accountedCosts.set(record.id, currentCost);
+    }
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
 
@@ -616,6 +620,9 @@ export class AgentManager {
     if (!isTerminalStatus(record.lifecycle.status)) {
       this.stopAgent(record, stoppedBy);
     }
+    // 移除前把未结算的成本计入会话总额；之后的 settle 回调对
+    // 已移除的记录不再入账（见 safeNotifyComplete），避免重复计费。
+    this.totalAgentCost += this.getUnaccountedAgentCost(id);
     this.removeRecord(id, record);
     return true;
   }

@@ -601,6 +601,39 @@ describe("AgentManager", () => {
 
       expect(manager.getTotalAgentCost()).toBe(0.04);
     });
+
+    it("追问运行中清除代理时不会重复入账已结算成本", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      record.stats.lifetimeUsage.cost = 0.05;
+      await record.execution.promise;
+      // 第一轮结算：入账 0.05
+      expect(manager.getTotalAgentCost()).toBe(0.05);
+
+      // 追问触发第二轮运行（挂起），运行中成本涨到 0.08
+      const deferred = makeResolvablePromise();
+      mockModules.mockContinueAgentSession.mockReturnValue(deferred.promise);
+      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      record.stats.lifetimeUsage.cost = 0.08;
+
+      // 第二轮运行中清除：补记未结算的 0.03，总额应为 0.08
+      expect(manager.clear(id, "user")).toBe(true);
+      expect(manager.getRecord(id)).toBeUndefined();
+      expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
+
+      // 第二轮结算：对已移除记录不得再次入账，也不得留下孤儿条目
+      deferred.resolve({ responseText: "", aborted: true, turnLimited: false });
+      await new Promise(r => setTimeout(r, 10));
+      expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
+      expect((manager as any).accountedCosts.has(id)).toBe(false);
+    });
   });
   // ── Cleanup eviction ──
 
