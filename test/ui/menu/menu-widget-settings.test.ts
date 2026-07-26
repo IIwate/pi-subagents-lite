@@ -1,8 +1,8 @@
 /**
- * menu-widget-settings.test.ts — Tests for showWidgetSettingsMenu.
+ * menu-widget-settings.test.ts — 显示设置菜单测试。
  *
  * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
- * SettingsList maintains internal cursor state (fixes cursor position reset).
+ * 菜单只含 thinkingBuffer 与 usageStats（widget 树设置已随树状渲染移除）。
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -20,14 +20,6 @@ let settingsListCalls: Array<{
   options?: any;
 }> = [];
 
-let inputInstances: Array<{
-  value: string;
-  onSubmit?: (value: string) => void;
-  onEscape?: () => void;
-  setValue: (v: string) => void;
-  getValue: () => string;
-}> = [];
-
 vi.mock("@earendil-works/pi-tui", () => ({
   SettingsList: class MockSettingsList {
     items: any[];
@@ -36,38 +28,26 @@ vi.mock("@earendil-works/pi-tui", () => ({
       settingsListCalls.push({ items, maxVisible, theme, onChange, onCancel, options });
     }
   },
-  Input: class MockInput {
-    value = "";
-    onSubmit?: (value: string) => void;
-    onEscape?: () => void;
-    setValue(v: string) { this.value = v; }
-    getValue() { return this.value; }
-    constructor() {
-      inputInstances.push(this as any);
-    }
-  },
 }));
 
 // Import AFTER mock setup
 import { showWidgetSettingsMenu } from "../../../src/ui/menu/menu-widget-settings.js";
 
+function resetMocks(): void {
+  mockModules.mockConfig.agent = {
+    default: null, forceBackground: false,
+    showTools: true, showTurns: true, showInput: true, showOutput: true,
+    showContext: true, showCost: false, showTime: true,
+  };
+  mockModules.mockSessionOverrides.default = null;
+  mockModules.mockSessionShowCost = undefined;
+  vi.clearAllMocks();
+  settingsListCalls = [];
+  (getAgentConfig as any).mockImplementation(() => undefined);
+}
+
 describe("showWidgetSettingsMenu — SettingsList integration", () => {
-  beforeEach(() => {
-    mockModules.mockConfig.agent = {
-      default: null, forceBackground: false,
-      widgetMaxLines: 12, widgetMaxLinesCompact: 6, widgetCompact: false,
-      widgetShortcut: false,
-      widgetDescLengthFull: 50, widgetDescLengthCompact: 30,
-      showTools: true, showTurns: true, showInput: true, showOutput: true,
-      showContext: true, showCost: false, showTime: true,
-    };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-    (getAgentConfig as any).mockImplementation(() => undefined);
-  });
+  beforeEach(resetMocks);
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
@@ -76,267 +56,23 @@ describe("showWidgetSettingsMenu — SettingsList integration", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-
-  it("shows 'Force compact mode' with current value", async () => {
-    mockModules.mockConfig.agent.widgetCompact = false;
+  it("不再提供已移除的 widget 树设置项", async () => {
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
-    const compact = settingsListCalls[0].items.find((i: any) => i.id === "compact");
-  });
-
-  it("shows 'Force compact mode · ON' when enabled", async () => {
-    mockModules.mockConfig.agent.widgetCompact = true;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const compact = settingsListCalls[0].items.find((i: any) => i.id === "compact");
-    expect(compact.currentValue).toBe("ON");
-  });
-});
-
-describe("showWidgetSettingsMenu — toggle onChange", () => {
-  beforeEach(() => {
-    mockModules.mockConfig.agent = {
-      default: null, forceBackground: false,
-      widgetMaxLines: 12, widgetMaxLinesCompact: 6, widgetCompact: false,
-      widgetShortcut: false,
-      widgetDescLengthFull: 50, widgetDescLengthCompact: 30,
-      showTools: true, showTurns: true, showInput: true, showOutput: true,
-      showContext: true, showCost: false, showTime: true,
-    };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-    (getAgentConfig as any).mockImplementation(() => undefined);
-  });
-
-  it("toggles compact mode via onChange", async () => {
-    mockModules.mockConfig.agent.widgetCompact = false;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    settingsListCalls[0].onChange("compact", "ON");
-    expect(mockModules.mockConfig.agent.widgetCompact).toBe(true);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("toggles shortcut via onChange", async () => {
-    mockModules.mockConfig.agent.widgetShortcut = false;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    settingsListCalls[0].onChange("shortcut", "ON");
-    expect(mockModules.mockConfig.agent.widgetShortcut).toBe(true);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-});
-
-describe("showWidgetSettingsMenu — numeric submenu", () => {
-  beforeEach(() => {
-    mockModules.mockConfig.agent = {
-      default: null, forceBackground: false,
-      widgetMaxLines: 12, widgetMaxLinesCompact: 6, widgetCompact: false,
-      widgetShortcut: false,
-      widgetDescLengthFull: 50, widgetDescLengthCompact: 30,
-      showTools: true, showTurns: true, showInput: true, showOutput: true,
-      showContext: true, showCost: false, showTime: true,
-    };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-    (getAgentConfig as any).mockImplementation(() => undefined);
-  });
-
-  it("maxLines item has submenu function", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const maxLines = settingsListCalls[0].items.find((i: any) => i.id === "maxLines");
-    expect(maxLines.currentValue).toBe("12");
-    expect(typeof maxLines.submenu).toBe("function");
-  });
-
-  it("maxLinesCompact item has submenu function", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const maxLinesCompact = settingsListCalls[0].items.find((i: any) => i.id === "maxLinesCompact");
-    expect(maxLinesCompact.currentValue).toBe("6");
-    expect(typeof maxLinesCompact.submenu).toBe("function");
-  });
-
-  it("numeric submenu creates Input with initial value and handles submit", async () => {
-    mockModules.mockConfig.agent.widgetMaxLines = 12;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const maxLines = settingsListCalls[0].items.find((i: any) => i.id === "maxLines");
-    const mockDone = vi.fn();
-    maxLines.submenu("12", mockDone);
-
-    // Input was created with initial value
-    expect(inputInstances.length).toBe(1);
-    expect(inputInstances[0].value).toBe("12");
-
-    // Simulate submit with valid value
-    inputInstances[0].onSubmit!("10");
-    expect(mockModules.mockConfig.agent.widgetMaxLines).toBe(10);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-    expect(mockDone).toHaveBeenCalledWith("10");
-  });
-
-  it("numeric submenu rejects value below minimum", async () => {
-    mockModules.mockConfig.agent.widgetMaxLines = 12;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const maxLines = settingsListCalls[0].items.find((i: any) => i.id === "maxLines");
-    const mockDone = vi.fn();
-    maxLines.submenu("12", mockDone);
-
-    inputInstances[0].onSubmit!("1");
-    expect(mockModules.mockConfig.agent.widgetMaxLines).toBe(12);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-    expect(mockDone).not.toHaveBeenCalled();
-  });
-
-  it("numeric submenu handles escape", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const maxLines = settingsListCalls[0].items.find((i: any) => i.id === "maxLines");
-    const mockDone = vi.fn();
-    maxLines.submenu("12", mockDone);
-
-    inputInstances[0].onEscape!();
-    expect(mockDone).toHaveBeenCalled();
-  });
-
-  it("compact max lines submenu rejects value below 1", async () => {
-    mockModules.mockConfig.agent.widgetMaxLinesCompact = 6;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const maxLinesCompact = settingsListCalls[0].items.find((i: any) => i.id === "maxLinesCompact");
-    const mockDone = vi.fn();
-    maxLinesCompact.submenu("6", mockDone);
-
-    inputInstances[0].onSubmit!("0");
-    expect(mockModules.mockConfig.agent.widgetMaxLinesCompact).toBe(6);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-  });
-
-  it("compact max lines submenu accepts valid value", async () => {
-    mockModules.mockConfig.agent.widgetMaxLinesCompact = 6;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const maxLinesCompact = settingsListCalls[0].items.find((i: any) => i.id === "maxLinesCompact");
-    const mockDone = vi.fn();
-    maxLinesCompact.submenu("6", mockDone);
-
-    inputInstances[0].onSubmit!("4");
-    expect(mockModules.mockConfig.agent.widgetMaxLinesCompact).toBe(4);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-    expect(mockDone).toHaveBeenCalledWith("4");
-  });
-
-  it("descLengthFull shows default value 50", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const descLengthFull = settingsListCalls[0].items.find((i: any) => i.id === "descLengthFull");
-    expect(descLengthFull.currentValue).toBe("50");
-    expect(typeof descLengthFull.submenu).toBe("function");
-  });
-
-  it("descLengthFull submenu accepts valid value", async () => {
-    mockModules.mockConfig.agent.widgetDescLengthFull = 50;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const descLengthFull = settingsListCalls[0].items.find((i: any) => i.id === "descLengthFull");
-    const mockDone = vi.fn();
-    descLengthFull.submenu("50", mockDone);
-
-    expect(inputInstances.length).toBe(1);
-    expect(inputInstances[0].value).toBe("50");
-
-    inputInstances[0].onSubmit!("80");
-    expect(mockModules.mockConfig.agent.widgetDescLengthFull).toBe(80);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-    expect(mockDone).toHaveBeenCalledWith("80");
-  });
-
-  it("descLengthFull submenu rejects value below 5", async () => {
-    mockModules.mockConfig.agent.widgetDescLengthFull = 50;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const descLengthFull = settingsListCalls[0].items.find((i: any) => i.id === "descLengthFull");
-    const mockDone = vi.fn();
-    descLengthFull.submenu("50", mockDone);
-
-    inputInstances[0].onSubmit!("3");
-    expect(mockModules.mockConfig.agent.widgetDescLengthFull).toBe(50);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-    expect(mockDone).not.toHaveBeenCalled();
-  });
-
-  it("descLengthCompact shows default value 30", async () => {
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-    const descLengthCompact = settingsListCalls[0].items.find((i: any) => i.id === "descLengthCompact");
-    expect(descLengthCompact.currentValue).toBe("30");
-    expect(typeof descLengthCompact.submenu).toBe("function");
-  });
-
-  it("descLengthCompact submenu accepts valid value", async () => {
-    mockModules.mockConfig.agent.widgetDescLengthCompact = 30;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const descLengthCompact = settingsListCalls[0].items.find((i: any) => i.id === "descLengthCompact");
-    const mockDone = vi.fn();
-    descLengthCompact.submenu("30", mockDone);
-
-    inputInstances[0].onSubmit!("20");
-    expect(mockModules.mockConfig.agent.widgetDescLengthCompact).toBe(20);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-    expect(mockDone).toHaveBeenCalledWith("20");
-  });
-
-  it("descLengthCompact submenu rejects value below 5", async () => {
-    mockModules.mockConfig.agent.widgetDescLengthCompact = 30;
-    const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
-
-    const descLengthCompact = settingsListCalls[0].items.find((i: any) => i.id === "descLengthCompact");
-    const mockDone = vi.fn();
-    descLengthCompact.submenu("30", mockDone);
-
-    inputInstances[0].onSubmit!("4");
-    expect(mockModules.mockConfig.agent.widgetDescLengthCompact).toBe(30);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
-    expect(mockDone).not.toHaveBeenCalled();
+    const ids = settingsListCalls[0].items.map((i: any) => i.id);
+    expect(ids).not.toContain("compact");
+    expect(ids).not.toContain("shortcut");
+    expect(ids).not.toContain("maxLines");
+    expect(ids).not.toContain("maxLinesCompact");
+    expect(ids).not.toContain("descLengthFull");
+    expect(ids).not.toContain("descLengthCompact");
+    expect(ids).toContain("thinkingBuffer");
+    expect(ids).toContain("usageStats");
   });
 });
 
 describe("showWidgetSettingsMenu — Usage stats submenu", () => {
-  beforeEach(() => {
-    mockModules.mockConfig.agent = {
-      default: null, forceBackground: false,
-      widgetMaxLines: 12, widgetMaxLinesCompact: 6, widgetCompact: false,
-      widgetShortcut: false,
-      widgetDescLengthFull: 50, widgetDescLengthCompact: 30,
-      showTools: true, showTurns: true, showInput: true, showOutput: true,
-      showContext: true, showCost: false, showTime: true,
-    };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-    (getAgentConfig as any).mockImplementation(() => undefined);
-  });
+  beforeEach(resetMocks);
 
   it("usageStats item has submenu function", async () => {
     const ctx = createMockCtx();
@@ -344,7 +80,6 @@ describe("showWidgetSettingsMenu — Usage stats submenu", () => {
     const usageStats = settingsListCalls[0].items.find((i: any) => i.id === "usageStats");
     expect(typeof usageStats.submenu).toBe("function");
   });
-
 
   it("stat items have correct ON/OFF values from store", async () => {
     mockModules.mockConfig.agent.showTools = true;
@@ -405,24 +140,10 @@ describe("showWidgetSettingsMenu — Usage stats submenu", () => {
   });
 });
 
-
 describe("showWidgetSettingsMenu — thinking buffer", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = {
-      default: null, forceBackground: false,
-      widgetMaxLines: 12, widgetMaxLinesCompact: 6, widgetCompact: false,
-      widgetShortcut: false,
-      widgetDescLengthFull: 50, widgetDescLengthCompact: 30,
-      showTools: true, showTurns: true, showInput: true, showOutput: true,
-      showContext: true, showCost: false, showTime: true,
-      outputThinkingBufferSize: 0,
-    };
-    mockModules.mockSessionOverrides.default = null;
-    mockModules.mockSessionShowCost = undefined;
-    vi.clearAllMocks();
-    settingsListCalls = [];
-    inputInstances = [];
-    (getAgentConfig as any).mockImplementation(() => undefined);
+    resetMocks();
+    mockModules.mockConfig.agent.outputThinkingBufferSize = 0;
   });
 
   it("has thinkingBuffer item with ring values", async () => {

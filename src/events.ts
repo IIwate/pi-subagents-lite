@@ -59,24 +59,15 @@ export function ensureManagerAndWidget(): void {
       // Delegate completion side-effects to coordinator
       coordinator.onAgentComplete(record);
 
-      // Mark finished and update widget
-      getWidget()?.markFinished(record.id);
+      // 刷新状态栏计数与下方代理列表
       getWidget()?.update();
       getNavigator()?.update();
     });
   }
 
-  // Create widget if missing (uses existing or newly created manager)
+  // Create widget (status-bar badge) if missing
   if (!currentWidget) {
-    const newWidget = new AgentWidget(
-      getManager()!,
-      (id: string) => getCoordinator()?.liveView(id),
-    );
-    setWidget(newWidget);
-    // Sync the widget as a config side-effect target. setDeps re-syncs showCost +
-    // all widget display settings from current config (absorbs the old
-    // newWidget.setShowCost(...) + syncWidgetSettings() calls).
-    getStore().setDeps({ widget: newWidget });
+    setWidget(new AgentWidget(getManager()!));
   }
 
   if (!currentNavigator) {
@@ -162,7 +153,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       ensureManagerAndWidget();
     }
     getWidget()?.setUICtx(ctx.ui as unknown as UICtx);
-    getWidget()?.onTurnStart();
+    getWidget()?.update();
   });
 
   // Main session run ended — Working row is gone; force reflow so Pi's
@@ -176,9 +167,6 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
   // session_start — load config, scan agents, register into registry,
   // then re-register Agent tool with dynamic agent type enum
-  // Listen for ctrl+o keypress to sync compact mode (push-based, no polling)
-  let unregisterTerminalInput: (() => void) | undefined;
-
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
     setSessionCtx(ctx);
     await loadConfigAndRegisterAgents(ctx);
@@ -187,27 +175,6 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }
-    // Register ctrl+o listener
-    if (ctx.hasUI && !unregisterTerminalInput) {
-      unregisterTerminalInput = ctx.ui.onTerminalInput((data: string) => {
-        // ctrl+o = 0x0F (15) — toggles tool expansion
-        if (data === "\u000f") {
-          // Read state after a tick to let the built-in handler process it first
-          setTimeout(() => {
-            const ui = ctx.ui as unknown as { getToolsExpanded?: () => boolean };
-            const expanded = ui.getToolsExpanded?.();
-            if (expanded !== undefined) {
-              // Widget render hint (tool row state), then config-gated compact toggle.
-              getWidget()?.notifyToolsExpansionChanged(expanded);
-              getStore().notifyToolsExpanded(expanded);
-            }
-          }, 0);
-        }
-        return undefined; // Don't consume the input
-      });
-    }
-    // Sync compact mode with initial tool expansion state
-    getStore().notifyToolsExpanded(false);
   });
 
   // session_shutdown — abort all, dispose manager

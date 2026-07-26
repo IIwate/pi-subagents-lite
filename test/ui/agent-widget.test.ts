@@ -1,914 +1,121 @@
 /**
- * agent-widget.test.ts — Tests for widget connector rendering.
+ * agent-widget.test.ts — 状态栏计数徽标测试。
  *
- * Verifies that the widget renders correct tree connectors:
- *   - ├─ for non-last agents
- *   - └─ for the last agent
- *   - │ for activity lines of non-last agents
- *   - spaces for activity lines of the last agent
+ * 树状渲染已移除，AgentWidget 只负责 setStatus 的 "N agents" 徽标：
+ * 覆盖计数文本、清除时机与轮询定时器的启停。
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { AgentManager } from "../../src/agents/agent-manager.js";
-import type { LiveView } from "../../src/spawn/spawn-coordinator.js";
-import { AgentWidget, formatMs } from "../../src/ui/agent-widget.js";
+import { AgentWidget } from "../../src/ui/agent-widget.js";
 
-/* ------------------------------------------------------------------ */
-/*  Mock setup                                                        */
-/* ------------------------------------------------------------------ */
-
-vi.mock("../../src/agents/agent-types.js", () => ({
-  getConfig: (type: string) => ({
-    displayName: type.charAt(0).toUpperCase() + type.slice(1),
-    tools: [],
-    maxTurns: undefined,
-    thinkingLevel: undefined,
-  }),
-}));
-
-vi.mock("@earendil-works/pi-tui", () => ({
-  truncateToWidth: (text: string, width: number) => text,
-}));
-
-function makeMockManager(agents: any[], totalAgentCost = 0): AgentManager {
-  const manager = {
-    listAgents: () => agents,
-    getAgent: () => undefined,
-    setConcurrency: () => {},
-    getTotalAgentCost: () => totalAgentCost,
-    getUnaccountedAgentCost: (id: string) =>
-      manager.listAgents().find(agent => agent.id === id)?.stats.lifetimeUsage.cost ?? 0,
-    // other methods not used by widget
-  };
-  return manager as any as AgentManager;
+function makeMockManager(agents: any[]): AgentManager {
+  return { listAgents: () => agents } as unknown as AgentManager;
 }
 
-function makeMockTheme(): any {
-  const colors: Record<string, string> = {
-    dim: "dim",
-    accent: "accent",
-    success: "success",
-    error: "error",
-    warning: "warning",
-    muted: "muted",
-  };
-  return {
-    fg: (color: string, text: string) => `[${color}:${text}]`,
-    bold: (text: string) => `**${text}**`,
-  };
-}
-
-function makeMockTUI(): any {
-  return { terminal: { columns: 200 } };
-}
-
-function makeRunningAgent(id: string, type: string = "builder"): any {
+function makeAgent(id: string, status: string): any {
   return {
     id,
-    display: {
-      type,
-      description: `Test agent ${id}`,
-    },
-    lifecycle: {
-      status: "running",
-      startedAt: Date.now() - 60000,
-    },
-    execution: {},
-    stats: {
-      toolUses: 5,
-      compactionCount: 0,
-      lifetimeUsage: { input: 1000, output: 500, cacheWrite: 0, cost: 0 },
-      turnCount: 3,
-      maxTurns: 30,
-    },
+    lifecycle: { status, startedAt: Date.now() },
+    stats: { lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 } },
   };
 }
-
-function makeFinishedAgent(id: string, type: string = "builder"): any {
-  return {
-    id,
-    display: {
-      type,
-      description: `Finished agent ${id}`,
-    },
-    lifecycle: {
-      status: "completed",
-      startedAt: Date.now() - 120000,
-      completedAt: Date.now() - 60000,
-    },
-    execution: {},
-    stats: {
-      toolUses: 10,
-      compactionCount: 0,
-      lifetimeUsage: { input: 2000, output: 1000, cacheWrite: 0, cost: 0 },
-      turnCount: 8,
-      maxTurns: 30,
-    },
-  };
-}
-
-function makeActivity(agentId: string): LiveView {
-  return {
-    activeTools: new Map([["read", "reading"]]),
-    responseText: "",
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Tests                                                             */
-/* ------------------------------------------------------------------ */
-
-describe("widget connectors", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  beforeEach(() => {
-    manager = makeMockManager([]);
-    activity = new Map();
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-  });
-
-  describe("last running agent", () => {
-    it("uses └─ for last running agent header", () => {
-      const agent = makeRunningAgent("a1");
-      activity.set("a1", makeActivity("a1"));
-      (manager as any).listAgents = () => [agent];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      expect(lines[1]).toContain("└─");
-      expect(lines[1]).not.toContain("├─");
-    });
-
-    it("uses spaces for last running agent activity line", () => {
-      const agent = makeRunningAgent("a1");
-      activity.set("a1", makeActivity("a1"));
-      (manager as any).listAgents = () => [agent];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // Activity line is the second line (index 2, after heading)
-      expect(lines[2]).not.toContain("│");
-      expect(lines[2]).toContain("└");
-    });
-
-    it("places outputFile line before activity line", () => {
-      const agent = makeRunningAgent("a1");
-      agent.display.outputFile = "/tmp/pi-agent-outputs/test.log";
-      activity.set("a1", makeActivity("a1"));
-      (manager as any).listAgents = () => [agent];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // line[1] = header, line[2] = outputFile, line[3] = activity
-      expect(lines[2]).toContain("tail -f");
-      expect(lines[3]).toContain("└");
-      expect(lines[3]).toContain("reading");
-    });
-
-    it("uses └ not ⎿ for activity indicator", () => {
-      const agent = makeRunningAgent("a1");
-      activity.set("a1", makeActivity("a1"));
-      (manager as any).listAgents = () => [agent];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      expect(lines[2]).toContain("└");
-      expect(lines[2]).not.toContain("⎿");
-    });
-  });
-
-  describe("multiple running agents", () => {
-    it("uses ├─ for first and └─ for last", () => {
-      const a1 = makeRunningAgent("a1");
-      const a2 = makeRunningAgent("a2");
-      activity.set("a1", makeActivity("a1"));
-      activity.set("a2", makeActivity("a2"));
-      (manager as any).listAgents = () => [a1, a2];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // First agent header
-      expect(lines[1]).toContain("├─");
-      // Last agent header (after a1's activity line)
-      expect(lines[3]).toContain("└─");
-      expect(lines[3]).not.toContain("├─");
-    });
-
-    it("uses │ for non-last activity and spaces for last", () => {
-      const a1 = makeRunningAgent("a1");
-      const a2 = makeRunningAgent("a2");
-      activity.set("a1", makeActivity("a1"));
-      activity.set("a2", makeActivity("a2"));
-      (manager as any).listAgents = () => [a1, a2];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // First agent activity line has └ (not ⎿)
-      expect(lines[2]).toContain("└");
-      expect(lines[2]).not.toContain("⎿");
-      // Last agent activity line has no │
-      expect(lines[4]).not.toContain("│");
-      expect(lines[4]).toContain("└");
-    });
-
-    it("places outputFile before activity for each running agent", () => {
-      const a1 = makeRunningAgent("a1");
-      a1.display.outputFile = "/tmp/out1.log";
-      const a2 = makeRunningAgent("a2");
-      a2.display.outputFile = "/tmp/out2.log";
-      activity.set("a1", makeActivity("a1"));
-      activity.set("a2", makeActivity("a2"));
-      (manager as any).listAgents = () => [a1, a2];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // a1: header[1], outputFile[2], activity[3]; a2: header[4], outputFile[5], activity[6]
-      expect(lines[2]).toContain("out1.log");
-      expect(lines[3]).toContain("└");
-      expect(lines[5]).toContain("out2.log");
-      expect(lines[6]).toContain("└");
-    });
-  });
-
-  describe("finished agents", () => {
-    it("uses └─ for last finished agent", () => {
-      const a1 = makeFinishedAgent("a1");
-      const a2 = makeFinishedAgent("a2");
-      widget.markFinished("a1");
-      widget.markFinished("a2");
-      (manager as any).listAgents = () => [a1, a2];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      expect(lines[1]).toContain("├─");
-      expect(lines[2]).toContain("└─");
-    });
-
-    it("uses spaces for tail-f line of last finished agent", () => {
-      const a1 = makeFinishedAgent("a1");
-      a1.display.outputFile = "/tmp/pi-agent-outputs/test.log";
-      widget.markFinished("a1");
-      (manager as any).listAgents = () => [a1];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      expect(lines[1]).toContain("└─");
-      expect(lines[1]).not.toContain("├─");
-      // tail-f line should have no │
-      expect(lines[2]).not.toContain("│");
-      expect(lines[2]).toContain("tail -f");
-    });
-
-    it("outputFile lines use │ for non-last and spaces for last finished agent", () => {
-      const a1 = makeFinishedAgent("a1");
-      a1.display.outputFile = "/tmp/out1.log";
-      const a2 = makeFinishedAgent("a2");
-      a2.display.outputFile = "/tmp/out2.log";
-      widget.markFinished("a1");
-      widget.markFinished("a2");
-      (manager as any).listAgents = () => [a1, a2];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // a1 tail-f line (index 2) has │ connector, a2 tail-f line (index 4) has spaces
-      expect(lines[2]).toContain("│");
-      expect(lines[2]).toContain("out1.log");
-      expect(lines[4]).not.toContain("│");
-      expect(lines[4]).toContain("out2.log");
-    });
-  });
-
-  describe("mixed running and finished", () => {
-    it("uses └─ for last item regardless of type", () => {
-      const running = makeRunningAgent("r1");
-      const finished = makeFinishedAgent("f1");
-      activity.set("r1", makeActivity("r1"));
-      widget.markFinished("f1");
-      (manager as any).listAgents = () => [finished, running];
-
-      const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-      // Finished agent first (├─), running agent last (└─)
-      expect(lines[1]).toContain("├─");
-      expect(lines[2]).toContain("└─");
-    });
-  });
-});
 
 describe("status bar format", () => {
-  // Status is count-only (running+queued) to avoid powerline repaint thrash from live cost.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-  it("shows plural count for multiple running agents without cost", () => {
-    const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
-    const activity = new Map();
-    const manager = makeMockManager([], 0);
-    const widget = new AgentWidget(manager, (id) => activity.get(id));
+  it("多个运行中代理显示复数计数且不含成本", () => {
+    const uiCtx = { setStatus: vi.fn() };
+    const manager = makeMockManager([]);
+    const widget = new AgentWidget(manager);
     widget.setUICtx(uiCtx);
 
-    const a1 = makeRunningAgent("a1");
-    a1.stats.lifetimeUsage.cost = 0.05;
-    const a2 = makeRunningAgent("a2");
-    a2.stats.lifetimeUsage.cost = 0.03;
-    (manager as any).listAgents = () => [a1, a2];
+    (manager as any).listAgents = () => [makeAgent("a1", "running"), makeAgent("a2", "queued")];
     widget.update();
 
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "2 agents");
-    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
+    const text = uiCtx.setStatus.mock.calls.find(c => c[0] === "subagents")?.[1] as string;
     expect(text).not.toContain("$");
   });
 
-  it("does not keep a status badge when only finished agents remain", () => {
-    const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
-    const activity = new Map();
-    const manager = makeMockManager([], 0.01);
-    const widget = new AgentWidget(manager, (id) => activity.get(id));
+  it("单个运行中代理显示单数计数", () => {
+    const uiCtx = { setStatus: vi.fn() };
+    const manager = makeMockManager([makeAgent("a1", "running")]);
+    const widget = new AgentWidget(manager);
+    widget.setUICtx(uiCtx);
+    widget.update();
+
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+  });
+
+  it("仅剩已完成代理时清除徽标", () => {
+    const uiCtx = { setStatus: vi.fn() };
+    const manager = makeMockManager([]);
+    const widget = new AgentWidget(manager);
     widget.setUICtx(uiCtx);
 
-    // Seed a running badge first so we can observe clear-on-finish.
-    const running = makeRunningAgent("r1");
-    (manager as any).listAgents = () => [running];
+    // 先出现运行中徽标，才能观察到清除动作
+    (manager as any).listAgents = () => [makeAgent("r1", "running")];
     widget.update();
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
 
-    const finished = makeFinishedAgent("f1");
-    (manager as any).listAgents = () => [finished];
+    (manager as any).listAgents = () => [makeAgent("f1", "completed")];
     widget.update();
-
-    // Finished-only: no in-flight agents → clear status key (not "agents: $cost").
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", undefined);
   });
 
-  it("shows singular count for one running agent", () => {
-    const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
-    const activity = new Map();
-    const manager = makeMockManager([], 0);
-    const widget = new AgentWidget(manager, (id) => activity.get(id));
+  it("文本未变化时不重复调用 setStatus", () => {
+    const uiCtx = { setStatus: vi.fn() };
+    const manager = makeMockManager([makeAgent("a1", "running")]);
+    const widget = new AgentWidget(manager);
     widget.setUICtx(uiCtx);
 
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 0;
-    (manager as any).listAgents = () => [agent];
+    widget.update();
+    widget.update();
     widget.update();
 
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+    const calls = uiCtx.setStatus.mock.calls.filter(c => c[0] === "subagents");
+    expect(calls).toHaveLength(1);
   });
-});
 
-describe("status bar ignores cost accumulator", () => {
-  it("does not embed session total cost in the status text", () => {
-    const uiCtx = {
-      setStatus: vi.fn(),
-      setWidget: vi.fn(),
-    };
-    const manager = makeMockManager([], 1.23);
-    const widget = new AgentWidget(manager, () => undefined);
+  it("计数归零时停止轮询定时器，ensureTimer 可重启", () => {
+    vi.useFakeTimers();
+    const uiCtx = { setStatus: vi.fn() };
+    let agents = [makeAgent("a1", "running")];
+    const manager = makeMockManager([]);
+    (manager as any).listAgents = () => agents;
+    const widget = new AgentWidget(manager);
     widget.setUICtx(uiCtx);
+    widget.ensureTimer();
 
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 0.05;
-    (manager as any).listAgents = () => [agent];
+    expect(vi.getTimerCount()).toBe(1);
+
+    // 代理全部结束 → 下一次轮询后定时器停止
+    agents = [makeAgent("a1", "completed")];
+    vi.advanceTimersByTime(1000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", undefined);
+
+    // 新代理出现 → ensureTimer 重启轮询
+    agents = [makeAgent("a2", "running")];
+    widget.ensureTimer();
+    expect(vi.getTimerCount()).toBe(1);
+    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
+
+    widget.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("dispose 清除徽标与定时器", () => {
+    const uiCtx = { setStatus: vi.fn() };
+    const manager = makeMockManager([makeAgent("a1", "running")]);
+    const widget = new AgentWidget(manager);
+    widget.setUICtx(uiCtx);
     widget.update();
 
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
-    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
-    expect(text).not.toMatch(/\$/);
-    expect(text).not.toContain("1.28");
-  });
-
-  it("does not embed accumulated cost when running agent cost is zero", () => {
-    const uiCtx = {
-      setStatus: vi.fn(),
-      setWidget: vi.fn(),
-    };
-    const manager = makeMockManager([], 2.50);
-    const widget = new AgentWidget(manager, () => undefined);
-    widget.setUICtx(uiCtx);
-
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 0;
-    (manager as any).listAgents = () => [agent];
-    widget.update();
-
-    expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
-    const text = (uiCtx.setStatus as any).mock.calls.find((c: any[]) => c[0] === "subagents")?.[1] as string;
-    expect(text).not.toContain("2.50");
-    expect(text).not.toContain("$");
-  });
-});
-
-// ------------------------------------------------------------------ */
-/*  Compact mode and max lines tests                                 */
-/* ------------------------------------------------------------------ */
-
-describe("compact mode", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  beforeEach(() => {
-    manager = makeMockManager([]);
-    activity = new Map();
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-  });
-
-  it("defaults to non-compact mode and renders multi-line", () => {
-    const agent = makeRunningAgent("a1");
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Full mode: heading + 1 header + 1 activity continuation = 3 lines
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("compact mode renders running agent as single line (no continuations)", () => {
-    widget.setCompactMode(true);
-    widget.setWidgetShortcut(true);
-    const agent = makeRunningAgent("a1");
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Heading + 1 line for compact agent (no activity continuation line)
-    expect(lines).toHaveLength(2);
-    // The agent line should contain the activity inline
-    expect(lines[1]).toContain("reading");
-  });
-
-  it("full mode renders running agent with continuation lines", () => {
-    widget.setCompactMode(false);
-    const agent = makeRunningAgent("a1");
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Heading + 1 header + 1 activity continuation
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-  });
-});
-
-describe("max lines configuration", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  beforeEach(() => {
-    manager = makeMockManager([]);
-    activity = new Map();
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-  });
-
-  it("setMaxLines updates the full mode max lines", () => {
-    widget.setMaxLines(8);
-    // Create 8 running agents to test overflow
-    const agents = Array.from({ length: 8 }, (_, i) => makeRunningAgent(`a${i}`));
-    for (const a of agents) activity.set(a.id, makeActivity(a.id));
-    (manager as any).listAgents = () => agents;
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Should be capped at 8 lines (1 heading + 7 body max)
-    expect(lines.length).toBeLessThanOrEqual(8);
-  });
-
-  it("setMaxLinesCompact updates compact mode max lines", () => {
-    widget.setCompactMode(true);
-    widget.setWidgetShortcut(true);
-    widget.setMaxLinesCompact(3);
-    // Create 5 running agents
-    const agents = Array.from({ length: 5 }, (_, i) => makeRunningAgent(`a${i}`));
-    for (const a of agents) activity.set(a.id, makeActivity(a.id));
-    (manager as any).listAgents = () => agents;
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Should be capped at 3 lines (1 heading + 2 body max)
-    expect(lines.length).toBeLessThanOrEqual(3);
-  });
-
-  it("shows overflow indicator when agents exceed max lines", () => {
-    widget.setMaxLines(5);
-    const agents = Array.from({ length: 10 }, (_, i) => makeRunningAgent(`a${i}`));
-    for (const a of agents) activity.set(a.id, makeActivity(a.id));
-    (manager as any).listAgents = () => agents;
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // Should have overflow indicator
-    const hasOverflow = lines.some((l: string) => l.includes("more"));
-    expect(hasOverflow).toBe(true);
-  });
-});
-
-describe("description length configuration", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  beforeEach(() => {
-    manager = makeMockManager([]);
-    activity = new Map();
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-  });
-
-  it("compact mode truncates description using descLengthCompact setting", () => {
-    widget.setCompactMode(true);
-    widget.setWidgetShortcut(true);
-    widget.setDescLengthCompact(15);
-    const agent = makeRunningAgent("a1");
-    agent.display.description = "This is a very long description that should be truncated";
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const agentLine = lines[1];
-    // Description should be truncated (contains ...) and full text should be absent
-    expect(agentLine).toContain("...");
-    expect(agentLine).not.toContain("This is a very long description that should be truncated");
-  });
-
-  it("full mode truncates description using descLengthFull setting", () => {
-    widget.setDescLengthFull(20);
-    const agent = makeRunningAgent("a1");
-    agent.display.description = "This is a very long description that should be truncated";
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const agentLine = lines[1];
-    // Description should be truncated (contains ...) and full text should be absent
-    expect(agentLine).toContain("...");
-    expect(agentLine).not.toContain("This is a very long description that should be truncated");
-  });
-
-  it("finished agent truncates description using descLengthFull setting", () => {
-    widget.setDescLengthFull(25);
-    const agent = makeFinishedAgent("a1");
-    agent.display.description = "This is a very long description that should be truncated";
-    widget.markFinished("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const agentLine = lines[1];
-    // Description should be truncated (contains ...) and full text should be absent
-    expect(agentLine).toContain("...");
-    expect(agentLine).not.toContain("This is a very long description that should be truncated");
-  });
-
-  it("compact mode shows full description when shorter than limit", () => {
-    widget.setCompactMode(true);
-    widget.setWidgetShortcut(true);
-    widget.setDescLengthCompact(50);
-    const agent = makeRunningAgent("a1");
-    agent.display.description = "Short desc";
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines[1]).toContain("Short desc");
-    expect(lines[1]).not.toContain("...");
-  });
-
-  it("full mode shows full description when shorter than limit", () => {
-    widget.setDescLengthFull(100);
-    const agent = makeRunningAgent("a1");
-    agent.display.description = "Short desc";
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines[1]).toContain("Short desc");
-  });
-});
-
-describe("formatMs", () => {
-  it("formats hours, minutes, and seconds", () => {
-    expect(formatMs(3661000)).toBe("1h 1m 1s");
-  });
-
-  it("formats minutes and seconds only", () => {
-    expect(formatMs(337500)).toBe("5m 37s");
-  });
-
-  it("formats seconds only", () => {
-    expect(formatMs(10000)).toBe("10s");
-  });
-
-  it("formats exactly zero seconds as <1s", () => {
-    expect(formatMs(0)).toBe("<1s");
-  });
-
-  it("formats values under 1 second as <1s", () => {
-    expect(formatMs(999)).toBe("<1s");
-  });
-
-  it("rounds down seconds (no decimals)", () => {
-    expect(formatMs(1999)).toBe("1s");
-  });
-
-  it("handles exactly 1 hour", () => {
-    expect(formatMs(3600000)).toBe("1h");
-  });
-
-  it("handles hours and seconds, zero minutes", () => {
-    expect(formatMs(3601000)).toBe("1h 1s");
-  });
-
-  it("handles non-finite values as <1s", () => {
-    expect(formatMs(Infinity)).toBe("<1s");
-    expect(formatMs(NaN)).toBe("<1s");
-  });
-
-  it("handles negative values as <1s", () => {
-    expect(formatMs(-1000)).toBe("<1s");
-  });
-
-  it("formats large durations", () => {
-    expect(formatMs(90061000)).toBe("25h 1m 1s");
-  });
-
-  it("formatMs(1000) is exactly 1s, not <1s", () => {
-    expect(formatMs(1000)).toBe("1s");
-  });
-});
-
-describe("getLiveView callback", () => {
-  it("uses getLiveView to show tool activity for running agents", () => {
-    const manager = makeMockManager([]);
-    // Simulate coordinator's liveView map with real activity data
-    const coordinatorViews = new Map<string, LiveView>();
-    coordinatorViews.set("a1", {
-      activeTools: new Map([["read_123", "read"], ["bash_456", "bash"]]),
-      responseText: "",
-    });
-
-    const widget = new AgentWidget(
-      manager,
-      (id: string) => coordinatorViews.get(id),
-    );
-
-    const agent = makeRunningAgent("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    // lines[0] = heading, lines[1] = header (└─), lines[2] = activity continuation
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-    const continuation = lines[2];
-    expect(continuation).toContain("reading");
-    expect(continuation).toContain("running command");
-    expect(continuation).not.toContain("thinking…");
-  });
-
-  it("returns undefined for unknown agent", () => {
-    const manager = makeMockManager([]);
-    const liveViews = new Map<string, LiveView>();
-    // liveViews has no entry for a1
-    const widget = new AgentWidget(
-      manager,
-      (id: string) => liveViews.get(id),
-    );
-
-    const agent = makeRunningAgent("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-    // No activity data → shows thinking
-    expect(lines[2]).toContain("thinking…");
-  });
-
-  it("shows getLiveView data for running agents", () => {
-    const manager = makeMockManager([]);
-    const liveViews = new Map<string, LiveView>();
-    liveViews.set("a1", {
-      activeTools: new Map([["read_1", "read"]]),
-      responseText: "",
-    });
-
-    const widget = new AgentWidget(
-      manager,
-      (id: string) => liveViews.get(id),
-    );
-
-    const agent = makeRunningAgent("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-    // Should show the liveView data
-    expect(lines[2]).toContain("reading");
-  });
-
-  it("shows streaming response text from getLiveView", () => {
-    const manager = makeMockManager([]);
-    const liveViews = new Map<string, LiveView>();
-    liveViews.set("a1", {
-      activeTools: new Map(),
-      responseText: "Here is my response to the user…",
-    });
-
-    const widget = new AgentWidget(
-      manager,
-      (id: string) => liveViews.get(id),
-    );
-
-    const agent = makeRunningAgent("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-    expect(lines[2]).toContain("Here is my response");
-    expect(lines[2]).not.toContain("thinking…");
-  });
-});
-
-describe("renderFinishedLine context percent", () => {
-  it("uses stats.contextPercent for finished agents without execution.session", () => {
-    const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
-    const activity = new Map();
-    const manager = makeMockManager([]);
-    const widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setUICtx(uiCtx);
-
-    const finished = makeFinishedAgent("f1");
-    // Set context percent in stats (what agent-manager writes at completion)
-    finished.stats.contextPercent = 72;
-    // No session on execution — the display code must NOT reach here
-    finished.execution = {};
-    widget.markFinished("f1");
-    (manager as any).listAgents = () => [finished];
-
-    // Track what buildStatsParts receives by mocking getSessionContextPercent
-    // indirectly: the widget should render without needing execution.session
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.some((l: string) => l.includes("Finished agent f1"))).toBe(true);
-  });
-
-  it("prefers record execution.session for running agents context percent", () => {
-    const uiCtx = { setStatus: vi.fn(), setWidget: vi.fn() };
-    const activity = new Map();
-    const manager = makeMockManager([]);
-    const widget = new AgentWidget(manager, (id) => activity.get(id));
-    widget.setUICtx(uiCtx);
-
-    const running = makeRunningAgent("a1");
-    running.stats.contextPercent = 50;
-    running.execution = {
-      session: {
-        getSessionStats: () => ({ contextUsage: { percent: 85 } }),
-      },
-    };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [running];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    expect(lines.length).toBeGreaterThan(0);
-
-    const hasActivity = activity.has("a1");
-    expect(hasActivity).toBe(true);
-  });
-});
-
-// ------------------------------------------------------------------ */
-/*  Stats visibility integration tests                               */
-/* ------------------------------------------------------------------ */
-
-describe("stats visibility integration", () => {
-  let widget: AgentWidget;
-  let manager: AgentManager;
-  let activity: Map<string, LiveView>;
-
-  beforeEach(() => {
-    manager = makeMockManager([]);
-    activity = new Map();
-    widget = new AgentWidget(manager, (id) => activity.get(id));
-  });
-
-  it("hides tools count when showTools is false", () => {
-    widget.setStatsVisibility({ showTools: false });
-    const agent = makeRunningAgent("a1");
-    agent.stats.toolUses = 10;
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).not.toContain("calls");
-  });
-
-  it("hides time when showTime is false", () => {
-    widget.setStatsVisibility({ showTime: false });
-    const agent = makeRunningAgent("a1");
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    // The running agent started 60s ago so would show "1m" — should be absent
-    expect(allText).not.toMatch(/\d+m \d+s|\d+s/);
-  });
-
-  it("hides context percent and compactions when showContext is false", () => {
-    widget.setStatsVisibility({ showContext: false });
-    const agent = makeRunningAgent("a1");
-    agent.stats.compactionCount = 3;
-    agent.execution = {
-      session: {
-        getSessionStats: () => ({ contextUsage: { percent: 75 } }),
-      },
-    };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).not.toContain("%");
-    expect(allText).not.toContain("↻");
-  });
-
-  it("hides cost when showCost is false via statsVisibility", () => {
-    widget.setStatsVisibility({ showCost: false });
-    const agent = makeRunningAgent("a1");
-    agent.stats.lifetimeUsage.cost = 1.50;
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).not.toContain("$");
-  });
-
-  it("hides tools in finished agent stats when showTools is false", () => {
-    widget.setStatsVisibility({ showTools: false });
-    const agent = makeFinishedAgent("a1");
-    agent.stats.toolUses = 15;
-    widget.markFinished("a1");
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).not.toContain("calls");
-  });
-
-  it("shows all stats when visibility flags are all true (default)", () => {
-    // Don't set any visibility flags — defaults should show everything
-    const agent = makeRunningAgent("a1");
-    agent.stats.compactionCount = 1;
-    agent.stats.lifetimeUsage.cost = 0.50;
-    agent.execution = {
-      session: {
-        getSessionStats: () => ({ contextUsage: { percent: 60 } }),
-      },
-    };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).toContain("calls");
-    expect(allText).toContain("⟳");
-    expect(allText).toContain("↑");
-    expect(allText).toContain("$");
-  });
-
-  it("shows model · thinking before calls when invocation is set", () => {
-    const agent = makeRunningAgent("a1");
-    agent.display.invocation = { modelName: "grok-4.5", thinkingLevel: "high" };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).toContain("grok-4.5");
-    expect(allText).toContain("high");
-    expect(allText).toContain("calls");
-    // model · thinking appears before calls
-    expect(allText.indexOf("grok-4.5")).toBeLessThan(allText.indexOf("high"));
-    expect(allText.indexOf("high")).toBeLessThan(allText.indexOf("calls"));
-  });
-
-  it("prefers live session model/thinking over invocation snapshot", () => {
-    const agent = makeRunningAgent("a1");
-    // Invocation may be stale/missing; session reflects the actual run.
-    agent.display.invocation = { modelName: "old-model", thinkingLevel: "high" };
-    agent.execution = {
-      session: {
-        model: { id: "grok-4.5" },
-        thinkingLevel: "low",
-        getSessionStats: () => ({ contextUsage: { percent: 10 } }),
-      },
-    };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).toContain("grok-4.5");
-    expect(allText).toContain("low");
-    expect(allText).not.toContain("old-model");
-    // session low should appear; invocation high should not win
-    expect(allText.indexOf("low")).toBeLessThan(allText.indexOf("calls"));
-  });
-
-  it("uses spaced separator between stats parts", () => {
-    const agent = makeRunningAgent("a1");
-    agent.display.invocation = { modelName: "grok-4.5", thinkingLevel: "high" };
-    activity.set("a1", makeActivity("a1"));
-    (manager as any).listAgents = () => [agent];
-
-    const lines = (widget as any).renderWidget(makeMockTUI(), makeMockTheme());
-    const allText = lines.join(" ");
-    expect(allText).toContain(" · ");
-    // Description is separated from model with · ; theme wraps each stats part in [dim:...].
-    expect(allText).toMatch(/Test agent a1 · \[dim:grok-4\.5\] · \[dim:high\] · \d+ calls · \d+⟳/);
+    widget.dispose();
+    expect(uiCtx.setStatus).toHaveBeenLastCalledWith("subagents", undefined);
   });
 });

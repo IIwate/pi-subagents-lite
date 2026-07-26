@@ -1,13 +1,13 @@
 /**
  * config-store.ts — Deep module owning persisted config + per-session overrides.
  *
- * Absorbs config-io.ts, config-mutator.ts, and the config/widget-sync half of
+ * Absorbs config-io.ts, config-mutator.ts, and the config-sync half of
  * state.ts. See docs/adr/0004-composition-root-over-shared-state.md.
  *
  * - Reads return defaults baked in (no `?? 6` at call sites).
  * - Each persisted mutate method is mutate + persist + its side effect, so a
  *   side effect cannot be forgotten.
- * - Widget/manager are injected after construction (they're created lazily).
+ * - Navigator/manager are injected after construction (they're created lazily).
  *
  * Lifecycle: per-session. `reload()` re-reads disk + resets session overrides
  * at session_start. `dispose()` drops deps at session_shutdown.
@@ -15,7 +15,6 @@
 
 import type { SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
 import { resolveModel } from "../models/model-precedence.js";
-import type { AgentWidget } from "../ui/agent-widget.js";
 import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import { CONFIG_AGENT_NON_MODEL_KEYS } from "./types.js";
@@ -43,12 +42,6 @@ export interface ResolvedAgentSettings {
   readonly forceBackground: boolean;
   readonly showCost: boolean;
   readonly graceTurns: number;
-  readonly widgetMaxLines: number;
-  readonly widgetMaxLinesCompact: number;
-  readonly widgetCompact: boolean;
-  readonly widgetShortcut: boolean;
-  readonly widgetDescLengthFull: number;
-  readonly widgetDescLengthCompact: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
   readonly systemPromptMode: SystemPromptMode;
   /** Whether to include AGENTS.md context files in the subagent system prompt. */
@@ -83,7 +76,6 @@ export interface ResolvedAgentSettings {
 
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
-  widget?: AgentWidget;
   navigator?: AgentNavigator;
   manager?: AgentManager;
 }
@@ -92,11 +84,8 @@ export class ConfigStore {
   private config: SubagentsConfig;
   private sessionOverrides: SessionModelOverrides = { default: null };
   private sessionShowCost: boolean | undefined;
-  private widget?: AgentWidget;
   private navigator?: AgentNavigator;
   private manager?: AgentManager;
-  /** Previous tool-expansion state, for ctrl+o compact sync. */
-  private lastToolsExpanded: boolean | undefined;
 
   constructor(private readonly io: ConfigIO = fileConfigIO) {
     this.config = this.io.load();
@@ -111,20 +100,12 @@ export class ConfigStore {
 
   get agent(): ResolvedAgentSettings {
     const a = this.config.agent;
-    const widgetMaxLines = a.widgetMaxLines!; // guaranteed by loadConfig default merge
-    const widgetMaxLinesCompact = a.widgetMaxLinesCompact ?? Math.floor(widgetMaxLines / 2);
 
     return {
       defaultModel: a.default ?? null,
       forceBackground: a.forceBackground === true,
       showCost: this.sessionShowCost ?? (a.showCost === true),
       graceTurns: a.graceTurns ?? 6,
-      widgetMaxLines,
-      widgetMaxLinesCompact,
-      widgetCompact: a.widgetCompact === true,
-      widgetShortcut: a.widgetShortcut === true,
-      widgetDescLengthFull: a.widgetDescLengthFull ?? 50,
-      widgetDescLengthCompact: a.widgetDescLengthCompact ?? 30,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
       includeContextFiles: a.includeContextFiles ?? true,
       defaultThinking: a.defaultThinking as ThinkingLevel | undefined,
@@ -212,7 +193,6 @@ export class ConfigStore {
         }
         this.config.agent = preserved as SubagentsConfig["agent"];
         this.persist();
-        this.syncWidgetSettings();
       },
       setForceBackground: (enabled: boolean): void => {
         this.config.agent.forceBackground = enabled;
@@ -222,8 +202,7 @@ export class ConfigStore {
         this.config.agent.showCost = enabled;
         this.sessionShowCost = undefined;
         this.persist();
-        this.widget?.setShowCost(enabled);
-        this.syncWidgetStatsVisibility();
+        this.syncStatsVisibility();
       },
       setGraceTurns: (n: number): void => {
         this.config.agent.graceTurns = n;
@@ -280,44 +259,6 @@ export class ConfigStore {
         this.persist();
       },
     },
-    widget: {
-      setCompact: (enabled: boolean): void => {
-        this.config.agent.widgetCompact = enabled;
-        this.persist();
-        this.syncWidgetSettings();
-      },
-      setMaxLines: (lines: number): void => {
-        this.config.agent.widgetMaxLines = lines;
-        if (this.config.agent.widgetMaxLinesCompact === undefined) {
-          this.config.agent.widgetMaxLinesCompact = Math.floor(lines / 2);
-        }
-        this.persist();
-        this.syncWidgetSettings();
-      },
-      setMaxLinesCompact: (lines: number): void => {
-        this.config.agent.widgetMaxLinesCompact = lines;
-        this.persist();
-        this.syncWidgetSettings();
-      },
-      setDescLengthFull: (n: number): void => {
-        this.config.agent.widgetDescLengthFull = n;
-        this.persist();
-        this.syncWidgetSettings();
-      },
-      setDescLengthCompact: (n: number): void => {
-        this.config.agent.widgetDescLengthCompact = n;
-        this.persist();
-        this.syncWidgetSettings();
-      },
-      // Note: persists only. Does NOT syncWidgetSettings — matches the existing
-      // behavior, where toggling the shortcut takes effect on next reload rather
-      // than immediately. Flagged for a follow-up (the other three widget
-      // setters do sync).
-      setShortcut: (enabled: boolean): void => {
-        this.config.agent.widgetShortcut = enabled;
-        this.persist();
-      },
-    },
     concurrency: {
       setDefault: (n: number): void => {
         this.config.concurrency.default = n;
@@ -364,62 +305,35 @@ export class ConfigStore {
       /** Set a session showCost override. Not persisted. */
       setShowCost: (enabled: boolean): void => {
         this.sessionShowCost = enabled;
-        this.widget?.setShowCost(enabled);
-        this.syncWidgetStatsVisibility();
+        this.syncStatsVisibility();
       },
       /** Clear session showCost override, reverting to config value. */
       clearShowCost: (): void => {
         this.sessionShowCost = undefined;
-        this.widget?.setShowCost(this.config.agent.showCost === true);
-        this.syncWidgetStatsVisibility();
+        this.syncStatsVisibility();
       },
     },
   };
 
-  // ── ctrl+o compact sync (absorbs syncCompactFromToolsExpanded) ──
-
-  /**
-   * Toggle widget compact mode when tool expansion changes (ctrl+o), gated on
-   * widgetShortcut. No-op when widgetCompact is forced on. Only acts on actual
-   * state transitions (not every call).
-   */
-  notifyToolsExpanded(expanded: boolean): void {
-    if (this.config.agent.widgetShortcut !== true) {
-      this.lastToolsExpanded = expanded;
-      return;
-    }
-    if (this.config.agent.widgetCompact === true) {
-      this.lastToolsExpanded = expanded;
-      return;
-    }
-    if (this.lastToolsExpanded !== undefined && this.lastToolsExpanded !== expanded) {
-      this.widget?.setCompactMode(!expanded);
-    }
-    this.lastToolsExpanded = expanded;
-  }
-
   // ── Lifecycle ──────────────────────────────────────────────────
 
-  /** Re-read disk, reset session overrides + toggle state, re-sync deps. Called at session_start. */
+  /** Re-read disk, reset session overrides, re-sync deps. Called at session_start. */
   reload(): void {
     this.config = this.io.load();
     this.sessionOverrides = { default: null };
     this.sessionShowCost = undefined;
-    this.lastToolsExpanded = undefined;
     this.syncAllDeps();
   }
 
-  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy widget/manager). */
+  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy navigator/manager). */
   setDeps(deps: ConfigStoreDeps): void {
-    if (deps.widget !== undefined) this.widget = deps.widget;
     if (deps.navigator !== undefined) this.navigator = deps.navigator;
     if (deps.manager !== undefined) this.manager = deps.manager;
     this.syncAllDeps();
   }
 
-  /** Drop deps at session_shutdown. The widget/manager are disposed by the composition root. */
+  /** Drop deps at session_shutdown. The navigator/manager are disposed by the composition root. */
   dispose(): void {
-    this.widget = undefined;
     this.navigator = undefined;
     this.manager = undefined;
   }
@@ -430,24 +344,12 @@ export class ConfigStore {
     this.io.save(this.config);
   }
 
-  /** Push widget display settings (compact, shortcut, max lines) to the widget. */
-  private syncWidgetSettings(): void {
-    const w = this.widget;
-    if (!w) return;
+  /** 把统计可见性推给 navigator（下方代理列表）。 */
+  private syncStatsVisibility(): void {
+    const navigator = this.navigator;
+    if (!navigator) return;
     const a = this.agent;
-    w.setForceCompact(a.widgetCompact);
-    w.setWidgetShortcut(a.widgetShortcut);
-    w.setMaxLines(a.widgetMaxLines);
-    w.setMaxLinesCompact(a.widgetMaxLinesCompact);
-    w.setDescLengthFull(a.widgetDescLengthFull);
-    w.setDescLengthCompact(a.widgetDescLengthCompact);
-  }
-
-  /** 把统计可见性推给 widget 与 navigator（下方代理列表）。 */
-  private syncWidgetStatsVisibility(): void {
-    if (!this.widget && !this.navigator) return;
-    const a = this.agent;
-    const visibility = {
+    navigator.setStatsVisibility({
       showTools: a.showTools,
       showTurns: a.showTurns,
       showInput: a.showInput,
@@ -455,16 +357,14 @@ export class ConfigStore {
       showContext: a.showContext,
       showCost: a.showCost,
       showTime: a.showTime,
-    };
-    this.widget?.setStatsVisibility(visibility);
-    this.navigator?.setStatsVisibility(visibility);
+    });
   }
 
-  /** Update a widget stats visibility flag: mutate config → persist → sync widget. */
+  /** Update a stats visibility flag: mutate config → persist → sync navigator. */
   private setAgentVisibility(key: "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showTime", value: boolean): void {
     this.config.agent[key] = value;
     this.persist();
-    this.syncWidgetStatsVisibility();
+    this.syncStatsVisibility();
   }
 
   private applyConcurrency(): void {
@@ -473,11 +373,7 @@ export class ConfigStore {
 
   /** Full re-sync of all present deps. Used by reload/setDeps. */
   private syncAllDeps(): void {
-    if (this.widget) {
-      this.widget.setShowCost(this.agent.showCost);
-      this.syncWidgetSettings();
-    }
-    this.syncWidgetStatsVisibility();
+    this.syncStatsVisibility();
     this.applyConcurrency();
   }
 }

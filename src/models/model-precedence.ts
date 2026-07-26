@@ -22,10 +22,6 @@ export interface SubagentsConfig {
     forceBackground: boolean;
     graceTurns?: number;
     showCost?: boolean;
-    widgetMaxLines?: number;
-    widgetMaxLinesCompact?: number;
-    widgetCompact?: boolean;
-    widgetShortcut?: boolean;
     /** System prompt mode: replace (default), inherit parent, or custom file. */
     systemPromptMode?: SystemPromptMode;
     /** Whether to include AGENTS.md context files in the subagent system prompt. Default: true. */
@@ -52,10 +48,6 @@ export interface SubagentsConfig {
     showContext?: boolean;
     /** Whether to show elapsed time in widget stats line. Default: true. */
     showTime?: boolean;
-    /** Max description length in widget full mode. Default: 50. */
-    widgetDescLengthFull?: number;
-    /** Max description length in widget compact mode. Default: 30. */
-    widgetDescLengthCompact?: number;
     /** When > 0, thinking deltas stream to output file during message_update events. Default: 0 (disabled). */
     outputThinkingBufferSize?: number;
     [agentType: string]: string | null | undefined | boolean | number;

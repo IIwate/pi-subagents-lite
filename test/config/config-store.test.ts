@@ -1,13 +1,13 @@
 /**
  * config-store.test.ts — Tests the ConfigStore interface directly.
  *
- * Interface is the test surface: in-memory ConfigIO, stub widget/manager.
+ * Interface is the test surface: in-memory ConfigIO, stub navigator/manager.
  * No state.ts / config-io / config-mutator mocking — the store owns its state.
  */
 
 import { describe, it, expect } from "vitest";
 import { ConfigStore, type ConfigIO } from "../../src/config/config-store.ts";
-import type { AgentWidget } from "../../src/ui/agent-widget.ts";
+import type { AgentNavigator } from "../../src/ui/agent-navigator.ts";
 import type { AgentManager } from "../../src/agents/agent-manager.ts";
 import type { SubagentsConfig } from "../../src/models/model-precedence.ts";
 
@@ -18,11 +18,6 @@ function defaultConfig(): SubagentsConfig {
       default: null,
       forceBackground: false,
       graceTurns: 6,
-      widgetMaxLines: 12,
-      widgetDescLengthFull: 50,
-      widgetDescLengthCompact: 30,
-      widgetCompact: false,
-      widgetShortcut: false,
       systemPromptMode: "replace",
       includeContextFiles: true,
       disableDefaultAgents: false,
@@ -60,20 +55,12 @@ function memIO(initial: Partial<SubagentsConfig> = defaultConfig()): { io: Confi
   };
 }
 
-function widgetStub(): { w: AgentWidget; calls: string[] } {
+function navigatorStub(): { nav: AgentNavigator; calls: string[] } {
   const calls: string[] = [];
-  const w = {
-    setShowCost: (e: boolean) => calls.push(`setShowCost:${e}`),
-    setForceCompact: (e: boolean) => calls.push(`setForceCompact:${e}`),
-    setWidgetShortcut: (e: boolean) => calls.push(`setWidgetShortcut:${e}`),
-    setMaxLines: (n: number) => calls.push(`setMaxLines:${n}`),
-    setMaxLinesCompact: (n: number) => calls.push(`setMaxLinesCompact:${n}`),
-    setDescLengthFull: (n: number) => calls.push(`setDescLengthFull:${n}`),
-    setDescLengthCompact: (n: number) => calls.push(`setDescLengthCompact:${n}`),
-    setCompactMode: (c: boolean) => calls.push(`setCompactMode:${c}`),
-    setStatsVisibility: (v: any) => calls.push(`setStatsVisibility:${JSON.stringify(v)}`),
+  const nav = {
+    setStatsVisibility: (v: unknown) => calls.push(`setStatsVisibility:${JSON.stringify(v)}`),
   };
-  return { w: w as unknown as AgentWidget, calls };
+  return { nav: nav as unknown as AgentNavigator, calls };
 }
 
 function managerStub(): { m: AgentManager; concurrencies: unknown[] } {
@@ -93,23 +80,17 @@ describe("ConfigStore reads", () => {
     expect(store.agent.graceTurns).toBe(6);
     expect(store.agent.showCost).toBe(false);
     expect(store.agent.forceBackground).toBe(false);
-    expect(store.agent.widgetMaxLines).toBe(12);
-    expect(store.agent.widgetMaxLinesCompact).toBe(6);
-    expect(store.agent.widgetCompact).toBe(false);
-    expect(store.agent.widgetShortcut).toBe(false);
     expect(store.agent.defaultModel).toBeNull();
   });
 
   it("returns configured values when present", () => {
     const { io } = memIO({
-      agent: { default: "config/default", forceBackground: true, graceTurns: 9, showCost: true, widgetMaxLines: 20, widgetMaxLinesCompact: 7, widgetCompact: true, widgetShortcut: true },
+      agent: { default: "config/default", forceBackground: true, graceTurns: 9, showCost: true },
       concurrency: { default: 2 },
     });
     const store = new ConfigStore(io);
     expect(store.agent.graceTurns).toBe(9);
     expect(store.agent.showCost).toBe(true);
-    expect(store.agent.widgetMaxLines).toBe(20);
-    expect(store.agent.widgetMaxLinesCompact).toBe(7);
     expect(store.concurrency.default).toBe(2);
     expect(store.agent.defaultModel).toBe("config/default");
   });
@@ -151,11 +132,11 @@ describe("ConfigStore model resolution", () => {
 /* ------------------------------------------------------------------ */
 
 describe("ConfigStore persisted mutations", () => {
-  it("setShowCost persists and syncs the widget", () => {
+  it("setShowCost 持久化并同步统计可见性到 navigator", () => {
     const { io, saves } = memIO();
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     saves.length = 0;
 
@@ -163,65 +144,7 @@ describe("ConfigStore persisted mutations", () => {
     expect(store.agent.showCost).toBe(true);
     expect(saves).toHaveLength(1);
     expect(saves[0].agent.showCost).toBe(true);
-    expect(calls).toContain("setShowCost:true");
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
-  });
-
-  it("setShowCost 同步统计可见性到 navigator", () => {
-    const { io } = memIO();
-    const navCalls: string[] = [];
-    const navigator = {
-      setStatsVisibility: (v: any) => navCalls.push(`setStatsVisibility:${JSON.stringify(v)}`),
-    };
-    const store = new ConfigStore(io);
-    store.setDeps({ navigator: navigator as any });
-    navCalls.length = 0;
-
-    store.mutate.agent.setShowCost(true);
-    expect(navCalls.some(c => c.includes('"showCost":true'))).toBe(true);
-  });
-
-  it("setWidgetMaxLines derives compact when unset and syncs the widget", () => {
-    const { io, saves } = memIO();
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-
-    store.mutate.widget.setMaxLines(20);
-    expect(saves[0].agent.widgetMaxLines).toBe(20);
-    expect(saves[0].agent.widgetMaxLinesCompact).toBe(10);
-    expect(calls).toContain("setMaxLines:20");
-    expect(calls).toContain("setMaxLinesCompact:10");
-  });
-
-  it("setMaxLines does not overwrite an explicitly-set compact value", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, widgetMaxLinesCompact: 3 }, concurrency: { default: 4 } });
-    const store = new ConfigStore(io);
-    store.mutate.widget.setMaxLines(20);
-    expect(store.agentConfigSnapshot().widgetMaxLinesCompact).toBe(3);
-  });
-
-  it("setWidgetCompact persists and syncs widget", () => {
-    const { io } = memIO();
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    store.mutate.widget.setCompact(true);
-    expect(store.agent.widgetCompact).toBe(true);
-    expect(calls).toContain("setForceCompact:true");
-  });
-
-  it("setShortcut persists but does not sync widget", () => {
-    const { io, saves } = memIO();
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    store.mutate.widget.setShortcut(true);
-    expect(saves[0].agent.widgetShortcut).toBe(true);
-    expect(calls.some((c) => c.startsWith("setWidgetShortcut"))).toBe(false);
+    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
   it("concurrency setters persist and call manager.setConcurrency", () => {
@@ -278,6 +201,7 @@ describe("ConfigStore model-override clearing", () => {
 
   it("clearAllModelOverrides preserves non-model settings, drops per-type overrides", () => {
     const { io } = memIO({
+      // widgetMaxLines 为存量配置键（功能已移除）——必须保留而非被当作模型覆盖丢弃
       agent: { default: "keep-default", forceBackground: true, graceTurns: 7, showCost: true, widgetMaxLines: 14, Explore: "m1", general: "m2" },
       concurrency: { default: 4 },
     });
@@ -325,30 +249,27 @@ describe("ConfigStore session showCost override", () => {
     expect(store.agent.showCost).toBe(false);
   });
 
-  it("session setShowCost syncs to widget", () => {
+  it("session setShowCost 同步可见性到 navigator", () => {
     const { io } = memIO();
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     store.mutate.session.setShowCost(true);
-    expect(calls).toContain("setShowCost:true");
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
+    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
-  it("session clearShowCost syncs config value to widget", () => {
+  it("session clearShowCost 把配置值同步到 navigator", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     store.mutate.session.setShowCost(false);
-    expect(calls).toContain("setShowCost:false");
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
+    expect(calls.some(c => c.includes('"showCost":false'))).toBe(true);
     calls.length = 0;
     store.mutate.session.clearShowCost();
-    expect(calls).toContain("setShowCost:true");
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
+    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
   it("reload clears session showCost override", () => {
@@ -427,15 +348,9 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.defaultMaxTurns).toBeUndefined();
   });
 
-  it("widgetDescLength defaults: full=50, compact=30", () => {
-    const store = new ConfigStore(memIO().io);
-    expect(store.agent.widgetDescLengthFull).toBe(50);
-    expect(store.agent.widgetDescLengthCompact).toBe(30);
-  });
-
   it("configured values override defaults", () => {
     const { io } = memIO({
-      agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", defaultMaxTurns: 50, widgetDescLengthFull: 80, widgetDescLengthCompact: 20, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
+      agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", defaultMaxTurns: 50, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
@@ -443,8 +358,6 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("high");
     expect(store.agent.defaultMaxTurns).toBe(50);
-    expect(store.agent.widgetDescLengthFull).toBe(80);
-    expect(store.agent.widgetDescLengthCompact).toBe(20);
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
@@ -472,27 +385,6 @@ describe("ConfigStore agent properties", () => {
     expect(saves).toHaveLength(7);
   });
 
-  it("setDescLengthFull/Compact persist and sync widget", () => {
-    const { io, saves } = memIO();
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    saves.length = 0;
-
-    store.mutate.widget.setDescLengthFull(80);
-    expect(store.agent.widgetDescLengthFull).toBe(80);
-    expect(saves).toHaveLength(1);
-    expect(calls).toContain("setDescLengthFull:80");
-
-    calls.length = 0;
-    saves.length = 0;
-    store.mutate.widget.setDescLengthCompact(20);
-    expect(store.agent.widgetDescLengthCompact).toBe(20);
-    expect(saves).toHaveLength(1);
-    expect(calls).toContain("setDescLengthCompact:20");
-  });
-
   it("setDefaultThinking/MaxTurns(undefined) removes the field", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, defaultThinking: "high", defaultMaxTurns: 50 }, concurrency: { default: 4 } });
     const store = new ConfigStore(io);
@@ -506,6 +398,7 @@ describe("ConfigStore agent properties", () => {
 
   it("clearAllModelOverrides preserves all agent properties", () => {
     const { io } = memIO({
+      // widgetDescLength* 为存量配置键（功能已移除）——同样必须保留
       agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", defaultMaxTurns: 25, widgetDescLengthFull: 80, widgetDescLengthCompact: 20, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
       concurrency: { default: 4 },
     });
@@ -523,19 +416,6 @@ describe("ConfigStore agent properties", () => {
     expect(snap.disableDefaultAgents).toBe(true);
     expect(snap.showTools).toBe(false);
     expect(snap.Explore).toBeUndefined();
-  });
-
-  it("reload syncs desc length settings to widget", () => {
-    const { io, current } = memIO();
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    current().agent.widgetDescLengthFull = 100;
-    current().agent.widgetDescLengthCompact = 15;
-    store.reload();
-    expect(calls).toContain("setDescLengthFull:100");
-    expect(calls).toContain("setDescLengthCompact:15");
   });
 });
 
@@ -557,75 +437,32 @@ describe("ConfigStore lifecycle", () => {
     expect(store.sessionModelOverride("Explore")).toBeNull();
   });
 
-  it("reload re-syncs deps", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true, widgetCompact: true }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
+  it("reload 重新同步 navigator 可见性", () => {
+    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     store.reload();
-    expect(calls).toContain("setShowCost:true");
-    expect(calls).toContain("setForceCompact:true");
+    expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
-  it("setDeps re-syncs widget settings from current config", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, widgetMaxLines: 30, showCost: true }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
+  it("setDeps 立即按当前配置同步 navigator", () => {
+    const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    expect(calls).toContain("setMaxLines:30");
-    expect(calls).toContain("setShowCost:true");
+    store.setDeps({ navigator: nav });
+    expect(calls.some(c => c.includes('"showTools":false'))).toBe(true);
   });
 
   it("dispose drops deps so mutations no longer sync", () => {
     const { io } = memIO();
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     store.dispose();
     calls.length = 0;
     store.mutate.agent.setShowCost(true);
-    expect(calls).toHaveLength(0);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  notifyToolsExpanded                                                 */
-/* ------------------------------------------------------------------ */
-
-describe("ConfigStore notifyToolsExpanded", () => {
-  it("toggles widget compact mode only when shortcut is enabled and compact is off", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, widgetShortcut: true, widgetCompact: false }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-
-    store.notifyToolsExpanded(false); // initial transition from undefined -> ignored
-    calls.length = 0;
-    store.notifyToolsExpanded(true); // expanded -> full
-    store.notifyToolsExpanded(false); // collapsed -> compact
-    expect(calls).toContain("setCompactMode:true");
-  });
-
-  it("is a no-op when widgetShortcut is disabled", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, widgetShortcut: false }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    store.notifyToolsExpanded(true);
-    store.notifyToolsExpanded(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  it("is a no-op when widgetCompact is forced on", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, widgetShortcut: true, widgetCompact: true }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
-    const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
-    calls.length = 0;
-    store.notifyToolsExpanded(true);
-    store.notifyToolsExpanded(false);
     expect(calls).toHaveLength(0);
   });
 });
@@ -659,28 +496,28 @@ describe("ConfigStore show* stats visibility", () => {
     expect(store.agent.showTime).toBe(false);
   });
 
-  it("setShowTools persists and syncs to widget", () => {
+  it("setShowTools 持久化并同步到 navigator", () => {
     const { io, saves } = memIO();
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     saves.length = 0;
 
     store.mutate.agent.setShowTools(false);
     expect(store.agent.showTools).toBe(false);
     expect(saves).toHaveLength(1);
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
+    expect(calls.some(c => c.includes('"showTools":false'))).toBe(true);
   });
 
-  it("reload syncs stats visibility to widget", () => {
+  it("reload 把可见性同步到 navigator", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
-    const { w, calls } = widgetStub();
+    const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
-    store.setDeps({ widget: w });
+    store.setDeps({ navigator: nav });
     calls.length = 0;
     store.reload();
-    expect(calls.some(c => c.startsWith("setStatsVisibility:" ))).toBe(true);
+    expect(calls.some(c => c.startsWith("setStatsVisibility:"))).toBe(true);
   });
 });
 

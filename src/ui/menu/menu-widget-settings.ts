@@ -1,13 +1,13 @@
 /**
- * menu-widget-settings.ts — Widget settings menu concern.
+ * menu-widget-settings.ts — 显示设置菜单。
  *
  * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
  * SettingsList maintains internal cursor state, fixing the cursor-position
  * reset bug that occurred with ctx.ui.select.
  *
  * Structure:
- *   Main list: compact, maxLines, descLengthFull, maxLinesCompact, descLengthCompact, shortcut, usageStats
- *   Usage stats submenu: 7 stat visibility toggles
+ *   Main list: thinkingBuffer, usageStats
+ *   Usage stats submenu: 8 个统计可见性开关（作用于下方代理列表）
  *
  * Exports:
  *   - showWidgetSettingsMenu
@@ -16,7 +16,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { buildSettingsListTheme } from "./helpers.js";
-import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { getStore } from "../../shell.js";
 
@@ -46,32 +45,22 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
       return;
     }
 
-    switch (id) {
-      case "compact":
-        store.mutate.widget.setCompact(newValue === "ON");
-        ctx.ui.notify(`Force compact mode ${newValue}`, "info");
-        break;
-      case "shortcut":
-        store.mutate.widget.setShortcut(newValue === "ON");
-        ctx.ui.notify(`Ctrl+o shortcut ${newValue}`, "info");
-        break;
-      case "thinkingBuffer":
-        store.mutate.agent.setOutputThinkingBufferSize(newValue === "OFF" ? 0 : Number(newValue));
-        ctx.ui.notify(`Thinking buffer ${newValue}`, "info");
-        break;
+    if (id === "thinkingBuffer") {
+      store.mutate.agent.setOutputThinkingBufferSize(newValue === "OFF" ? 0 : Number(newValue));
+      ctx.ui.notify(`Thinking buffer ${newValue}`, "info");
     }
   };
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
     const statDescriptions: Record<string, string> = {
-      showTools: "Show tool call count (N calls) in the widget.",
-      showTurns: "Show turn count (⟳ ) in the widget.",
-      showInput: "Show input tokens (↑) in the widget.",
+      showTools: "Show tool call count (N calls) in the agent list.",
+      showTurns: "Show turn count (⟳ ) in the agent list.",
+      showInput: "Show input tokens (↑) in the agent list.",
       deltaInputTokens: "Estimate input token delta for vLLM (no cache reporting).",
-      showOutput: "Show output tokens (↓) in the widget.",
-      showContext: "Show context-fill percent (%) in the widget.",
-      showCost: "Show dollar cost ($) in the widget.",
-      showTime: "Show elapsed time in the widget.",
+      showOutput: "Show output tokens (↓) in the agent list.",
+      showContext: "Show context-fill percent (%) in the agent list.",
+      showCost: "Show dollar cost ($) in the agent list.",
+      showTime: "Show elapsed time in the agent list.",
     };
     const statItems: SettingItem[] = [...statConfig.entries()].map(([id, cfg]) => ({
       id,
@@ -82,60 +71,6 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
     }));
 
     const items: SettingItem[] = [
-      {
-        id: "compact",
-        label: "Force compact mode",
-        currentValue: store.agent.widgetCompact ? "ON" : "OFF",
-        values: ["ON", "OFF"],
-        description: "Force compact widget mode regardless of ctrl+o state.",
-      },
-      {
-        id: "maxLines",
-        label: "Max lines (full)",
-        currentValue: String(store.agent.widgetMaxLines),
-        submenu: createNumericSubmenu(ctx, { min: 2 }, (parsed) => {
-          store.mutate.widget.setMaxLines(parsed);
-          ctx.ui.notify(`Max lines (full) set to ${parsed}`, "info");
-        }),
-        description: "Max body lines in full widget mode (excluding heading).",
-      },
-      {
-        id: "descLengthFull",
-        label: "Description length (full)",
-        currentValue: String(store.agent.widgetDescLengthFull),
-        submenu: createNumericSubmenu(ctx, { min: 5 }, (parsed) => {
-          store.mutate.widget.setDescLengthFull(parsed);
-          ctx.ui.notify(`Description length (full) set to ${parsed}`, "info");
-        }),
-        description: "Max description length shown in full widget mode.",
-      },
-      {
-        id: "maxLinesCompact",
-        label: "Max lines (compact)",
-        currentValue: String(store.agent.widgetMaxLinesCompact),
-        submenu: createNumericSubmenu(ctx, (parsed) => {
-          store.mutate.widget.setMaxLinesCompact(parsed);
-          ctx.ui.notify(`Max lines (compact) set to ${parsed}`, "info");
-        }),
-        description: "Max body lines in compact widget mode.",
-      },
-      {
-        id: "descLengthCompact",
-        label: "Description length (compact)",
-        currentValue: String(store.agent.widgetDescLengthCompact),
-        submenu: createNumericSubmenu(ctx, { min: 5 }, (parsed) => {
-          store.mutate.widget.setDescLengthCompact(parsed);
-          ctx.ui.notify(`Description length (compact) set to ${parsed}`, "info");
-        }),
-        description: "Max description length shown in compact widget mode.",
-      },
-      {
-        id: "shortcut",
-        label: "Ctrl+o shortcut",
-        currentValue: store.agent.widgetShortcut ? "ON" : "OFF",
-        values: ["ON", "OFF"],
-        description: "When ON, ctrl+o toggles compact mode; when OFF, compact is set manually.",
-      },
       {
         id: "thinkingBuffer",
         label: "Log file thinking buffer",
@@ -150,11 +85,11 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
         currentValue: "→",
         submenu: (_currentValue, done2) =>
           new SettingsList(statItems, 7, buildSettingsListTheme(theme), onChange, () => done2()),
-        description: "Toggle which usage stats appear in the widget.",
+        description: "Toggle which usage stats appear in the agent list.",
       },
     ];
 
     const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), onChange, () => done(undefined));
-    return new SettingsListWrapper(settingsList, { title: "Widget Settings", theme, onCancel: () => done(undefined) });
+    return new SettingsListWrapper(settingsList, { title: "Display Settings", theme, onCancel: () => done(undefined) });
   });
 }

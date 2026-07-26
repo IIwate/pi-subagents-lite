@@ -300,7 +300,6 @@ export async function showSpawnAgentMenu(
               });
 
               if (!background) {
-                getWidget()?.markFinished(result.agentId);
                 getWidget()?.update();
               }
             } catch (err) {

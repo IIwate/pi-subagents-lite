@@ -63,7 +63,7 @@ export async function showSettingsMenu(
     { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
     { value: "spawnoptions", label: "Spawn options", description: "Default thinking, max turns, background, grace turns" },
     { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
-    { value: "widget", label: "Widget settings", description: "Configure widget display options" },
+    { value: "widget", label: "Display settings", description: "Stats visibility and log display options" },
   ];
 
   await runSelectMenu(ctx, "Settings", items, async (choice) => {
@@ -83,7 +83,7 @@ export async function showAgentsMainMenu(
 ): Promise<void> {
   const items: SelectItem[] = [
     { value: "spawn", label: "Spawn agent", description: "Manually spawn a new agent" },
-    { value: "settings", label: "Settings", description: "Model, concurrency, and widget settings" },
+    { value: "settings", label: "Settings", description: "Model, concurrency, and display settings" },
     { value: "debug", label: "Debug", description: "Agent types, briefing, diagnostics" },
   ];
 
