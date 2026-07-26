@@ -490,6 +490,49 @@ describe("runAgent — excludeTools (blacklist mode)", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  runAgent — Codex stream disconnect retry                           */
+/* ------------------------------------------------------------------ */
+
+describe("runAgent — Codex stream disconnect retry", () => {
+  beforeEach(() => {
+    resetMocks();
+    fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("extends Pi retry classification without changing existing results", async () => {
+    type RetryMessage = { stopReason?: string; errorMessage?: string };
+    const session = createMockSession() as ReturnType<typeof createMockSession> & {
+      _isRetryableError: (message: RetryMessage) => boolean;
+    };
+    const originalClassifier = vi.fn(function (this: unknown, message: RetryMessage) {
+      return message.errorMessage === "existing retryable error";
+    });
+    session._isRetryableError = originalClassifier;
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
+
+    const classifyRetryableError = session._isRetryableError;
+    for (const errorMessage of [
+      "Codex error: stream disconnected before completion",
+      "Codex error: stream closed before response.completed",
+      "Codex error: invalid SSE data JSON: truncated payload",
+      "existing retryable error",
+    ]) {
+      expect(classifyRetryableError({ stopReason: "error", errorMessage })).toBe(true);
+    }
+    expect(classifyRetryableError({ stopReason: "error", errorMessage: "invalid request" })).toBe(false);
+    expect(classifyRetryableError({
+      stopReason: "stop",
+      errorMessage: "stream disconnected before completion",
+    })).toBe(false);
+    expect(originalClassifier).toHaveBeenCalledTimes(6);
+    expect(originalClassifier.mock.contexts.every((context) => context === session)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  subscribeToSessionEvents — cost extraction                         */
 /* ------------------------------------------------------------------ */
 
