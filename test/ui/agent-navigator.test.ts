@@ -266,6 +266,12 @@ describe("AgentNavigator", () => {
 
     expect(tui.getClearOnShrink()).toBe(false);
     expect(tui.requestRender).toHaveBeenCalledWith(true);
+
+    // The parent Working row disappears after the final list row. The navigator must
+    // retain the host TUI long enough for agent_end to clear stale editor/footer rows.
+    tui.requestRender.mockClear();
+    navigator.forceLayoutReflow();
+    expect(tui.requestRender).toHaveBeenCalledWith(true);
   });
 
   it("passes through Ctrl+C and cancels clear confirmation", () => {

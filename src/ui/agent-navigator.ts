@@ -374,6 +374,11 @@ export class AgentNavigator {
   private lastAgentStatus = new Map<string, AgentRecord["lifecycle"]["status"]>();
   private selectorRegistered = false;
   private selectorTui: TUI | undefined;
+  /**
+   * Retained after the final selector unmount so agent_end can reflow once Pi removes
+   * its Working row. Dropping this with the widget leaves stale editor/footer rows.
+   */
+  private hostTui: TUI | undefined;
   private screenSwap: ScreenSwapState | undefined;
   private layoutWarningShown = false;
   private restoreEditor: (() => void) | undefined;
@@ -389,6 +394,7 @@ export class AgentNavigator {
     if (this.restoreMainScreen()) this.clearScrollbackAndRender();
     this.restoreShrinkClearing();
     this.restoreEditor?.();
+    this.hostTui = undefined;
     this.uiCtx = ctx;
     this.selectorRegistered = false;
     this.selectorTui = undefined;
@@ -835,14 +841,14 @@ export class AgentNavigator {
   }
 
   private clearScrollbackAndRender(): void {
-    const tui = this.screenSwap?.tui ?? this.selectorTui;
+    const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
     if (!tui) return;
     try { tui.terminal.write(CLEAR_SCROLLBACK_SEQUENCE); } catch { /* best effort */ }
     tui.requestRender(true);
   }
 
   private requestRender(force = false): void {
-    const tui = this.screenSwap?.tui ?? this.selectorTui;
+    const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
     tui?.requestRender(force);
   }
 
@@ -1094,6 +1100,7 @@ export class AgentNavigator {
     if (!this.selectorRegistered) {
       this.uiCtx.setWidget(SELECTOR_WIDGET_KEY, (tui, theme) => {
         this.selectorTui = tui;
+        this.hostTui = tui;
         this.enableShrinkClearing(tui);
         const selector: Component = {
           render: () => {
@@ -1221,13 +1228,14 @@ export class AgentNavigator {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    const tui = this.screenSwap?.tui ?? this.selectorTui;
+    const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
     if (this.restoreMainScreen()) this.requestRender();
     this.unregisterWidgets();
     // unregisterWidgets restores the host clearOnShrink preference before Pi renders.
     // Force this final reflow so reload/dispose cannot leave the removed selector rows behind.
     tui?.requestRender(true);
     this.screenSwap = undefined;
+    this.hostTui = undefined;
     this.restoreEditor?.();
     this.restoreEditor = undefined;
     this.uiCtx = undefined;
