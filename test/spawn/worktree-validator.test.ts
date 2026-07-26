@@ -74,7 +74,7 @@ function makeTempDir(prefix = "wt-test"): { dir: string; cleanup: () => void } {
   };
 }
 
-/** 公共返回契约统一使用正斜杠，不能拿宿主原生分隔符直接比较。 */
+/** The public return contract uses forward slashes; never compare it directly with host-native separators. */
 function normalizedPath(value: string): string {
   return value.replace(/\\/g, "/");
 }

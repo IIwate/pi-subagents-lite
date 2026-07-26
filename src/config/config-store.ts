@@ -344,7 +344,7 @@ export class ConfigStore {
     this.io.save(this.config);
   }
 
-  /** 把统计可见性推给 navigator（下方代理列表）。 */
+  /** Push stats visibility into the navigator below the editor. */
   private syncStatsVisibility(): void {
     const navigator = this.navigator;
     if (!navigator) return;

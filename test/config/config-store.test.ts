@@ -132,7 +132,7 @@ describe("ConfigStore model resolution", () => {
 /* ------------------------------------------------------------------ */
 
 describe("ConfigStore persisted mutations", () => {
-  it("setShowCost 持久化并同步统计可见性到 navigator", () => {
+  it("setShowCost persists and syncs stats visibility to the navigator", () => {
     const { io, saves } = memIO();
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -201,7 +201,7 @@ describe("ConfigStore model-override clearing", () => {
 
   it("clearAllModelOverrides preserves non-model settings, drops per-type overrides", () => {
     const { io } = memIO({
-      // widgetMaxLines 为存量配置键（功能已移除）——必须保留而非被当作模型覆盖丢弃
+      // widgetMaxLines is a legacy config key for a removed feature; preserve it instead of treating it as a model override.
       agent: { default: "keep-default", forceBackground: true, graceTurns: 7, showCost: true, widgetMaxLines: 14, Explore: "m1", general: "m2" },
       concurrency: { default: 4 },
     });
@@ -249,7 +249,7 @@ describe("ConfigStore session showCost override", () => {
     expect(store.agent.showCost).toBe(false);
   });
 
-  it("session setShowCost 同步可见性到 navigator", () => {
+  it("session setShowCost syncs visibility to the navigator", () => {
     const { io } = memIO();
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -259,7 +259,7 @@ describe("ConfigStore session showCost override", () => {
     expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
-  it("session clearShowCost 把配置值同步到 navigator", () => {
+  it("session clearShowCost restores configured visibility in the navigator", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -398,7 +398,7 @@ describe("ConfigStore agent properties", () => {
 
   it("clearAllModelOverrides preserves all agent properties", () => {
     const { io } = memIO({
-      // widgetDescLength* 为存量配置键（功能已移除）——同样必须保留
+      // widgetDescLength* are also legacy keys for removed features and must remain preserved.
       agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", defaultMaxTurns: 25, widgetDescLengthFull: 80, widgetDescLengthCompact: 20, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
       concurrency: { default: 4 },
     });
@@ -437,7 +437,7 @@ describe("ConfigStore lifecycle", () => {
     expect(store.sessionModelOverride("Explore")).toBeNull();
   });
 
-  it("reload 重新同步 navigator 可见性", () => {
+  it("reload resynchronizes navigator visibility", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -447,7 +447,7 @@ describe("ConfigStore lifecycle", () => {
     expect(calls.some(c => c.includes('"showCost":true'))).toBe(true);
   });
 
-  it("setDeps 立即按当前配置同步 navigator", () => {
+  it("setDeps immediately syncs the navigator from current config", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -496,7 +496,7 @@ describe("ConfigStore show* stats visibility", () => {
     expect(store.agent.showTime).toBe(false);
   });
 
-  it("setShowTools 持久化并同步到 navigator", () => {
+  it("setShowTools persists and syncs to the navigator", () => {
     const { io, saves } = memIO();
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
@@ -510,7 +510,7 @@ describe("ConfigStore show* stats visibility", () => {
     expect(calls.some(c => c.includes('"showTools":false'))).toBe(true);
   });
 
-  it("reload 把可见性同步到 navigator", () => {
+  it("reload syncs visibility to the navigator", () => {
     const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);

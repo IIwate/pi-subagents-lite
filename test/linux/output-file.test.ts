@@ -1,8 +1,8 @@
 /**
- * output-file.test.ts — POSIX 文件权限验收。
+ * output-file.test.ts — POSIX file-permission acceptance.
  *
- * Windows 不提供可移植的 Unix mode bit 语义，本地默认测试不运行此文件；
- * Linux CI 负责验证 0o700。若以后改为 ACL 或平台专用权限实现，需要重审此边界。
+ * Windows has no portable Unix mode-bit semantics, so the default local suite excludes this file.
+ * Linux CI verifies 0o700. Revisit this boundary if permissions move to ACLs or platform-specific code.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

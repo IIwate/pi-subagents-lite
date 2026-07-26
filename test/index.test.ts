@@ -123,8 +123,8 @@ vi.mock("../src/agents/default-agents.js", () => ({
   DEFAULT_AGENTS: new Map(),
 }));
 
-// 与真实导出面对齐（AgentWidget + SPINNER）。SPINNER 须非空：
-// agent-navigator 以 `% SPINNER.length` 取帧，空数组会得到 NaN 下标。
+// Match the real export surface (AgentWidget + SPINNER). SPINNER must stay non-empty:
+// agent-navigator indexes frames with `% SPINNER.length`, and an empty array produces NaN.
 vi.mock("../src/ui/agent-widget.js", () => ({
   AgentWidget: class {},
   SPINNER: ["⠋"],

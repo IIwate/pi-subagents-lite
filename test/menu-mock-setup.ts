@@ -160,7 +160,7 @@ vi.mock("../src/shell.js", () => {
         clearModelOverride(type: string) { delete mockModules.mockConfig.agent[type]; },
         clearAllModelOverrides() {
           const preserved: Record<string, unknown> = {};
-          // 与生产 clearAllModelOverrides 共用同一份非模型键列表，避免两处漂移
+          // Share the production non-model key list with clearAllModelOverrides to prevent drift.
           for (const key of CONFIG_AGENT_NON_MODEL_KEYS) {
             const val = mockModules.mockConfig.agent[key];
             if (val != null || key === 'default' || key === 'forceBackground') {

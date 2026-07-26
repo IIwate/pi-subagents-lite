@@ -211,7 +211,7 @@ describe("AgentNavigator", () => {
     );
   });
 
-  it("Ctrl+D → Enter 清除非活动子代理并移动高亮", () => {
+  it("Ctrl+D then Enter clears inactive subagents and moves the highlight", () => {
     const r1 = makeRecord("agent-11111111");
     const r2 = makeRecord("agent-22222222");
     const records = [r1, r2];
@@ -228,18 +228,18 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
 
-    navigator.handleTerminalInput("\x1b[B"); // 空编辑器 + ↓ 进入列表（Main）
-    navigator.handleTerminalInput("\x1b[B"); // 高亮第一个子代理
-    navigator.handleTerminalInput("\x04");   // Ctrl+D 进入确认态
+    navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
+    navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
+    navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
     expect(selector.render(120).join("\n")).toContain("Delete?");
 
-    navigator.handleTerminalInput("\r");     // Enter 确认
+    navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const text = selector.render(120).join("\n");
     expect(text).not.toContain("Delete?");
   });
 
-  it("清除确认态放行 Ctrl+C 并取消确认", () => {
+  it("passes through Ctrl+C and cancels clear confirmation", () => {
     const record = makeRecord("agent-11111111");
     const secondRecord = makeRecord("agent-22222222");
     const ui = makeUI({ value: "" });
@@ -255,17 +255,17 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x04");
     expect(selector.render(120).join("\n")).toContain("Delete?");
 
-    // Ctrl+C：不消费（放行给上层），同时取消确认态
+    // Ctrl+C is not consumed; pass it upward while cancelling confirmation.
     const result = navigator.handleTerminalInput("\x03");
     expect(result?.consume).toBeFalsy();
     expect(manager.clear).not.toHaveBeenCalled();
     expect(selector.render(120).join("\n")).not.toContain("Delete?");
 
-    // 其余按键在确认态才被吞；取消后普通键正常返回编辑器
+    // Other keys are consumed only during confirmation; ordinary input returns to the editor after cancellation.
     expect(selector.render(120).join("\n")).toContain("↑↓ move");
   });
 
-  it("遵循 statsVisibility 的 showCost 开关", () => {
+  it("respects the statsVisibility showCost toggle", () => {
     const record = makeRecord();
     record.stats.lifetimeUsage.cost = 0.05;
     const ui = makeUI({ value: "" });
@@ -274,10 +274,10 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
 
-    // 默认（未注入可见性）：显示成本
+    // Default without injected visibility: show cost.
     expect(selector.render(120).join("\n")).toContain("$");
 
-    // 关闭 showCost 后：不再显示成本
+    // Hiding showCost removes cost from the list.
     navigator.setStatsVisibility({ showCost: false });
     expect(selector.render(120).join("\n")).not.toContain("$");
   });

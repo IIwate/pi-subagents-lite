@@ -43,7 +43,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
     execute: executeAgentTool,
 
     // Silent in chat — progress only in the below-editor list.
-    // renderShell:"self" + 空 Container → Pi 的 ToolExecution 组件渲染为零行。
+    // renderShell:"self" plus an empty Container makes Pi's ToolExecution component render zero rows.
     renderShell: "self",
     renderCall: () => new Container(),
     renderResult: () => new Container(),

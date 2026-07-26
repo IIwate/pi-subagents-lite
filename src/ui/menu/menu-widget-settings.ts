@@ -1,5 +1,5 @@
 /**
- * menu-widget-settings.ts — 显示设置菜单。
+ * menu-widget-settings.ts — Display settings menu.
  *
  * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
  * SettingsList maintains internal cursor state, fixing the cursor-position
@@ -7,7 +7,7 @@
  *
  * Structure:
  *   Main list: thinkingBuffer, usageStats
- *   Usage stats submenu: 8 个统计可见性开关（作用于下方代理列表）
+ *   Usage stats submenu: eight visibility toggles for the agent list below the editor
  *
  * Exports:
  *   - showWidgetSettingsMenu

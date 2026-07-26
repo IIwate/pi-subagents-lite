@@ -72,7 +72,7 @@ export async function showSettingsMenu(
       case "concurrency": await showConcurrencySettingsMenu(ctx, modelOptions); break;
       case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
       case "systemprompt": await showSystemPromptMenu(ctx); break;
-      // 函数名/文件名沿用 widget-settings（避免文件改名扰动历史），菜单语义为显示设置
+      // Keep the widget-settings function/file name to avoid a history-only rename; the menu now means display settings.
       case "display": await showWidgetSettingsMenu(ctx); break;
     }
   });

@@ -59,7 +59,7 @@ export function ensureManagerAndWidget(): void {
       // Delegate completion side-effects to coordinator
       coordinator.onAgentComplete(record);
 
-      // 刷新状态栏计数与下方代理列表
+      // Refresh the status count and the agent list below the editor.
       getWidget()?.update();
       getNavigator()?.update();
     });
@@ -76,7 +76,7 @@ export function ensureManagerAndWidget(): void {
       async (agentId, text) => getCoordinator()?.interact(agentId, text) ?? false,
     );
     setNavigator(newNavigator);
-    // 列表统计可见性由 ConfigStore 同步（与 widget 同一注入模式）
+    // ConfigStore synchronizes list stats visibility through the same injection pattern as the widget.
     getStore().setDeps({ navigator: newNavigator });
   }
   getManager()?.setOnRemove(() => getNavigator()?.update());
@@ -158,7 +158,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
-  // setTimeout(0)：先让 Pi 移除 Working 行，下一轮事件循环再重排。
+  // setTimeout(0) lets Pi remove the Working row before relayout on the next event-loop turn.
   pi.on("agent_end", (_event, ctx) => {
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);

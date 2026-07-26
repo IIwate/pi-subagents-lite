@@ -603,7 +603,7 @@ describe("AgentManager", () => {
       expect(manager.getTotalAgentCost()).toBe(0.04);
     });
 
-    it("清除运行中代理时不重复入账，并补记清除后返回的费用", async () => {
+    it("does not double-count cleared running agents and records late cost", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
@@ -626,12 +626,12 @@ describe("AgentManager", () => {
       await expect(manager.interact(id, "continue")).resolves.toBe(true);
       record.stats.lifetimeUsage.cost = 0.08;
 
-      // clear() 只补记当前已知的 0.03。
+      // clear() settles only the currently known 0.03.
       expect(manager.clear(id, "user")).toBe(true);
       expect(manager.getRecord(id)).toBeUndefined();
       expect(manager.getTotalAgentCost()).toBeCloseTo(0.08);
 
-      // 请求结束前才返回最后 0.02 usage；settle 只能补差额，不能重复整笔入账。
+      // The final 0.02 usage arrives only when the request ends; settle must add the delta, not the full amount again.
       onLateUsage?.({ input: 0, output: 0, cacheWrite: 0, cost: 0.02, cacheRead: 0 });
       deferred.resolve({ responseText: "", aborted: true, turnLimited: false });
       await new Promise(r => setTimeout(r, 10));
@@ -775,7 +775,7 @@ describe("AgentManager", () => {
       expect(session.dispose).toHaveBeenCalledTimes(1);
     });
 
-    it("允许较慢但正常的 shutdown handler 在 15 秒预算内完成", async () => {
+    it("allows a slow valid shutdown handler to finish within 15 seconds", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
@@ -797,14 +797,14 @@ describe("AgentManager", () => {
     });
 
     /**
-     * emit() 串行 await 每个 handler 且不设超时。子扩展的 handler 永久挂起时，
-     * 没有超时兜底会让父进程退出流程卡死在 dispose() 上，用户只能强杀。
+     * emit() awaits handlers serially without a timeout. If a child extension handler hangs,
+     * parent shutdown would block forever in dispose() unless the caller bounds the wait.
      */
-    it("挂起的 shutdown handler 超时后仍 dispose 会话并放行 dispose()", async () => {
+    it("disposes the session and releases dispose() after a shutdown handler timeout", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
-      // 永不 resolve 的 handler
+      // Handler that never resolves.
       session.extensionRunner.emit.mockReturnValue(new Promise(() => {}));
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
@@ -826,22 +826,22 @@ describe("AgentManager", () => {
     });
 
     /**
-     * 子会话内的本扩展实例靠 index.ts 的 isInsideSubagentSpawn() 早退才不注册
-     * session_shutdown。该不变量一旦破裂，子实例的 handler 会在 emit 期间递归
-     * 调回父 manager 的 dispose()——而它要 await 的正是这个尚未返回的 emit，
-     * 没有幂等守卫就是死锁。
+     * Extension instances inside child sessions rely on isInsideSubagentSpawn() in index.ts
+     * to skip session_shutdown registration. If that invariant breaks, a child handler can
+     * recurse into the parent manager's dispose() while it is awaiting the same emit,
+     * causing a deadlock without the reentrancy guard.
      */
-    it("shutdown handler 内递归调用 dispose() 不死锁", async () => {
-      // 用假定时器屏蔽 15s 超时兜底，只考察守卫本身能否解开循环等待
+    it("avoids deadlock when a shutdown handler calls dispose() recursively", async () => {
+      // Fake timers suppress the 15-second fallback so this test isolates the reentrancy guard.
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       let reentrantSettled = false;
       session.extensionRunner.emit.mockImplementation(async () => {
-        // 先让出一次，等 closeSession 把自己的 done 放进 closing；
-        // 此后重入的 dispose() 会去 await 这个由 emit 自身驱动的 promise
+        // Yield once so closeSession stores its own done promise in closing; a reentrant
+        // dispose() would then await the promise driven by this same emit.
         await Promise.resolve();
-        // 模拟子会话扩展在 shutdown 期间调回父 manager
+        // Simulate a child extension calling back into the parent manager during shutdown.
         await manager.dispose();
         reentrantSettled = true;
       });

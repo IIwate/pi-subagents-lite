@@ -1,9 +1,9 @@
 # Manual testing for `worktree_path` (wave 1)
 
-> **Fork note (2026-07)**: 本 fork 已移除编辑器上方的树状 widget 与
-> `C-o` 紧凑模式切换；进度改由编辑器下方的代理列表承担。下文测试
-> 步骤已同步更新；文末两节 "Live verification" 是当时的操作记录，
-> 保留原貌（其中的 `C-o` 按键当时触发的是 pi 内建按键说明开关）。
+> **Fork note (2026-07)**: This fork removed the tree widget above the editor and the
+> `C-o` compact-mode toggle. Progress now appears in the agent list below the editor.
+> The test steps below reflect that change. The final two "Live verification" sections
+> remain as historical records; their `C-o` key opened Pi's built-in keybinding help.
 
 Wave 1 ships a new `Agent` tool param. The wave's manual testing section
 (`tasks/worktree-path-param/waves/1-deliver-worktree-path/wave.md`) is

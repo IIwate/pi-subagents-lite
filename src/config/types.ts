@@ -11,8 +11,8 @@ export const CONFIG_AGENT_NON_MODEL_KEYS = [
   "showContext",
   "showTime",
   "deltaInputTokens",
-  // widget* 设置已随树状渲染移除；保留键名以免存量配置文件里的
-  // 这些键被 clearAllModelOverrides 当作按类型模型覆盖处理。
+  // The widget* settings were removed with the tree renderer. Keep their keys so legacy
+  // config entries are not mistaken for per-agent model overrides by clearAllModelOverrides.
   "widgetMaxLines",
   "widgetMaxLinesCompact",
   "widgetDescLengthFull",

@@ -172,8 +172,8 @@ function emptyComponent(): Component {
 }
 
 /**
- * 列表可视窗口：高度上限约 6 行（避免把聊天区挤出屏幕），围绕焦点行
- * 滚动。renderSelector 与 estimateListPaintHeight 共用，保证估算精确。
+ * Visible list window: capped near six rows to preserve chat space and scrolled around
+ * the focused row. Shared by renderSelector and estimateListPaintHeight for exact estimates.
  */
 function computeListWindow(
   entryCount: number,
@@ -363,7 +363,7 @@ export class AgentNavigator {
   private highlightedAgentId: string | null = null;
   /** Agent id waiting for Ctrl+D → Enter clear confirmation. */
   private confirmingClearId: string | null = null;
-  /** 统计项可见性（含 showCost），由 ConfigStore 同步注入。 */
+  /** Stats visibility, including showCost, injected and synchronized by ConfigStore. */
   private statsVisibility: StatsVisibility = {};
   private listFocused = false;
   private spinnerFrame = 0;
@@ -422,7 +422,7 @@ export class AgentNavigator {
     return this.selectedAgentId;
   }
 
-  /** 由 ConfigStore 注入统计可见性；变化时立即重绘列表。 */
+  /** Receive stats visibility from ConfigStore and redraw immediately when it changes. */
   setStatsVisibility(visible: StatsVisibility): void {
     this.statsVisibility = visible;
     this.lastRenderSig = "";
@@ -482,9 +482,9 @@ export class AgentNavigator {
         this.listFocused = true;
         this.confirmingClearId = null;
         this.highlightedAgentId = this.selectedAgentId;
-        // 键盘分支统一走 update()：高度基线（lastListPaintHeight）随每次
-        // 变化更新，收缩时才能触发强制重绘清掉残留空行。update() 内部有
-        // 签名节流，代价可控。
+        // Route keyboard changes through update() so lastListPaintHeight tracks every state.
+        // This lets shrinking lists force a redraw that clears stale rows; update() already
+        // throttles identical signatures.
         this.update();
         return { consume: true };
       }
@@ -502,7 +502,7 @@ export class AgentNavigator {
         this.update();
         return { consume: true };
       }
-      // Ctrl+C 不吞：取消确认并放行，避免阻断中断/退出链路。
+      // Do not consume Ctrl+C: cancel confirmation and pass it upward to preserve interrupt/exit handling.
       if (matchesKey(data, Key.ctrl("c"))) {
         this.confirmingClearId = null;
         this.update();
@@ -857,7 +857,7 @@ export class AgentNavigator {
   }
 
   /**
-   * Exact on-screen rows for the selector（与 renderSelector 共用窗口计算）。
+   * Exact on-screen selector rows, using the same window calculation as renderSelector.
    * Used only to detect shrink so we can force-clear leftover blank lines.
    */
   private estimateListPaintHeight(): number {

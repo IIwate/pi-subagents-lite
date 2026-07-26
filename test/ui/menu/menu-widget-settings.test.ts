@@ -1,8 +1,8 @@
 /**
- * menu-widget-settings.test.ts — 显示设置菜单测试。
+ * menu-widget-settings.test.ts — Display settings menu tests.
  *
  * Uses SettingsList from @earendil-works/pi-tui via ctx.ui.custom.
- * 菜单只含 thinkingBuffer 与 usageStats（widget 树设置已随树状渲染移除）。
+ * The menu contains only thinkingBuffer and usageStats; tree-widget settings were removed with the renderer.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -56,7 +56,7 @@ describe("showWidgetSettingsMenu — SettingsList integration", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("不再提供已移除的 widget 树设置项", async () => {
+  it("does not expose removed tree-widget settings", async () => {
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
     const ids = settingsListCalls[0].items.map((i: any) => i.id);

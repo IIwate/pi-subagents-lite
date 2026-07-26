@@ -30,7 +30,7 @@ const CLEANUP_INTERVAL_MS = 60_000;
 /** Age after which a completed agent record is evicted (milliseconds). */
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 
-/** 等待子会话 shutdown handler 的上限，超时后照常 dispose（milliseconds）。 */
+/** Maximum wait for child shutdown handlers; disposal continues after this timeout (milliseconds). */
 const SESSION_SHUTDOWN_TIMEOUT_MS = 15_000;
 
 /** UUID prefix length for agent IDs stored in the agents map (uniqueness). */
@@ -93,7 +93,7 @@ export class AgentManager {
   /** Cost already added to the session total for each agent. */
   private accountedCosts = new Map<string, number>();
 
-  /** 已清除运行中代理的成本快照，保留到最终 usage 返回。 */
+  /** Cost snapshots for cleared running agents, retained until final usage arrives. */
   private removedCostSnapshots = new Map<string, number>();
 
   /** Per-model concurrency slots keyed by "provider/modelId". */
@@ -111,7 +111,7 @@ export class AgentManager {
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
 
-  /** dispose() 已启动。防止 shutdown 链意外重入时并发修改 closing 集合。 */
+  /** In-flight dispose call, preventing reentrant shutdown chains from mutating closing concurrently. */
   private disposing = false;
 
   constructor(
@@ -632,8 +632,8 @@ export class AgentManager {
     if (!isTerminalStatus(record.lifecycle.status)) {
       this.stopAgent(record, stoppedBy);
     }
-    // 先结算当前已知成本；运行中的请求可能在 clear() 后才返回最终 usage，
-    // 因此保留快照，让 settle 回调只补记迟到的差额。
+    // Settle known cost first. A running request may return final usage after clear(),
+    // so retain a snapshot and let the settle callback add only the late delta.
     this.totalAgentCost += this.getUnaccountedAgentCost(id);
     if (!record.execution.settled && record.execution.promise) {
       this.removedCostSnapshots.set(id, record.stats.lifetimeUsage.cost);
@@ -668,13 +668,13 @@ export class AgentManager {
    * when a subagent is cleared, evicted, or killed with the parent. Subagents run
    * their own extension instances, so the parent's shutdown does not cover them.
    *
-   * emit() 串行 await 每个 handler 且不设超时，任一子扩展的 handler 挂起都会让
-   * 父进程退出流程永久卡死（events.ts 的 session_shutdown → dispose() → 宿主
-   * 的 process.exit 再也跑不到）。因此对 emit 单独限时，超时后仍执行
-   * session.dispose() 释放本地资源。
+   * emit() awaits handlers serially without a timeout. A hung child extension handler would
+   * permanently block parent shutdown (events.ts session_shutdown -> dispose() -> host
+   * process.exit). Bound only the emit phase, then still call session.dispose() to release
+   * local resources.
    *
-   * 依赖 index.ts 的 isInsideSubagentSpawn() 早退：子会话内的本扩展实例不注册
-   * session_shutdown 监听，所以这里的 emit 不会递归回 dispose()。
+   * This relies on the isInsideSubagentSpawn() early return in index.ts: extension instances
+   * inside child sessions do not register session_shutdown, so this emit cannot recurse into dispose().
    */
   private closeSession(session: AgentSession): Promise<void> {
     const done = (async () => {

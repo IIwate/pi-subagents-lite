@@ -18,5 +18,5 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      # 本地 Windows 默认排除 POSIX 权限测试；Linux CI 必须运行完整集合。
+      # Windows local tests exclude POSIX-only assertions; Linux CI must run the complete suite.
       - run: bun run test:ci

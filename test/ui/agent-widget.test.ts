@@ -1,8 +1,8 @@
 /**
- * agent-widget.test.ts — 状态栏计数徽标测试。
+ * agent-widget.test.ts — Status-bar count badge tests.
  *
- * 树状渲染已移除，AgentWidget 只负责 setStatus 的 "N agents" 徽标：
- * 覆盖计数文本、清除时机与轮询定时器的启停。
+ * With the tree renderer removed, AgentWidget only owns the setStatus "N agents" badge.
+ * These tests cover count text, clearing behavior, and polling timer lifecycle.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -26,7 +26,7 @@ describe("status bar format", () => {
     vi.useRealTimers();
   });
 
-  it("多个运行中代理显示复数计数且不含成本", () => {
+  it("shows a plural count without cost for multiple running agents", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([]);
     const widget = new AgentWidget(manager);
@@ -40,7 +40,7 @@ describe("status bar format", () => {
     expect(text).not.toContain("$");
   });
 
-  it("单个运行中代理显示单数计数", () => {
+  it("shows a singular count for one running agent", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([makeAgent("a1", "running")]);
     const widget = new AgentWidget(manager);
@@ -50,13 +50,13 @@ describe("status bar format", () => {
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
   });
 
-  it("仅剩已完成代理时清除徽标", () => {
+  it("clears the badge when only finished agents remain", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([]);
     const widget = new AgentWidget(manager);
     widget.setUICtx(uiCtx);
 
-    // 先出现运行中徽标，才能观察到清除动作
+    // Show a running badge first so the clearing action is observable.
     (manager as any).listAgents = () => [makeAgent("r1", "running")];
     widget.update();
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", "1 agent");
@@ -66,7 +66,7 @@ describe("status bar format", () => {
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", undefined);
   });
 
-  it("文本未变化时不重复调用 setStatus", () => {
+  it("does not call setStatus again when text is unchanged", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([makeAgent("a1", "running")]);
     const widget = new AgentWidget(manager);
@@ -80,7 +80,7 @@ describe("status bar format", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("计数归零时停止轮询定时器，ensureTimer 可重启", () => {
+  it("stops polling at zero and lets ensureTimer restart it", () => {
     vi.useFakeTimers();
     const uiCtx = { setStatus: vi.fn() };
     let agents = [makeAgent("a1", "running")];
@@ -92,13 +92,13 @@ describe("status bar format", () => {
 
     expect(vi.getTimerCount()).toBe(1);
 
-    // 代理全部结束 → 下一次轮询后定时器停止
+    // After all agents finish, the next poll stops the timer.
     agents = [makeAgent("a1", "completed")];
     vi.advanceTimersByTime(1000);
     expect(vi.getTimerCount()).toBe(0);
     expect(uiCtx.setStatus).toHaveBeenCalledWith("subagents", undefined);
 
-    // 新代理出现 → ensureTimer 重启轮询
+    // A new agent lets ensureTimer restart polling.
     agents = [makeAgent("a2", "running")];
     widget.ensureTimer();
     expect(vi.getTimerCount()).toBe(1);
@@ -108,7 +108,7 @@ describe("status bar format", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("dispose 清除徽标与定时器", () => {
+  it("dispose clears the badge and timer", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([makeAgent("a1", "running")]);
     const widget = new AgentWidget(manager);

@@ -1,23 +1,23 @@
 /**
- * agent-widget.ts — 状态栏中的子代理计数徽标。
+ * agent-widget.ts — Subagent count badge in the status bar.
  *
- * 本 fork 已移除编辑器上方的树状渲染（进度列表由 agent-navigator
- * 的下方列表承担），此模块只负责 setStatus 的 "N agents" 徽标：
- * 定时轮询 running/queued 计数，计数归零时清除徽标并停表。
+ * This fork removed the tree above the editor; agent-navigator owns the progress list below it.
+ * This module only maintains the setStatus "N agents" badge, polling running/queued counts and
+ * clearing both the badge and timer when the count reaches zero.
  */
 
 import type { AgentManager } from "../agents/agent-manager.js";
 
-/** Braille spinner frames（agent-navigator 的运行图标复用此帧表）。 */
+/** Braille spinner frames shared with agent-navigator's running icon. */
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /** Status bar key used with setStatus(). */
 const STATUS_KEY = "subagents";
 
-/** 状态栏轮询间隔（毫秒）。 */
+/** Status-bar polling interval in milliseconds. */
 const STATUS_REFRESH_INTERVAL = 1000;
 
-/** 状态栏所需的最小 UI 上下文。 */
+/** Minimal UI context required by the status badge. */
 export type UICtx = {
   setStatus(key: string, text: string | undefined): void;
 };
@@ -25,7 +25,7 @@ export type UICtx = {
 export class AgentWidget {
   private uiCtx: UICtx | undefined;
   private statusInterval: ReturnType<typeof setInterval> | undefined;
-  /** 上次写入的状态文本，避免重复调用 setStatus 触发无谓重绘。 */
+  /** Last status text, used to avoid redundant setStatus redraws. */
   private lastStatusText: string | undefined;
 
   constructor(private manager: AgentManager) {}
@@ -40,8 +40,8 @@ export class AgentWidget {
 
   /** Ensure the status poll timer is running; refresh once immediately. */
   ensureTimer() {
-    // 无 UI 时不建表：update() 会在 uiCtx 缺失时早退，走不到停表分支，
-    // headless 会话里定时器会 1Hz 空转到会话结束。
+    // Do not start a timer without UI. update() returns early without uiCtx and cannot stop it,
+    // which would leave headless sessions polling at 1 Hz until shutdown.
     if (!this.uiCtx) return;
     if (!this.statusInterval) {
       this.statusInterval = setInterval(() => this.update(), STATUS_REFRESH_INTERVAL);
@@ -49,7 +49,7 @@ export class AgentWidget {
     this.update();
   }
 
-  /** 刷新状态栏计数；无 running/queued 代理时清除徽标并停止轮询。 */
+  /** Refresh the count badge; clear it and stop polling when no agent is running or queued. */
   update() {
     if (!this.uiCtx) return;
 
@@ -59,7 +59,7 @@ export class AgentWidget {
       if (status === "running" || status === "queued") total++;
     }
 
-    // 仅显示计数，不附带实时成本（成本每秒变化会迫使 powerline 持续重绘）
+    // Show only the count; live cost would force the powerline to redraw every second.
     const statusText = total > 0 ? `${total} agent${total === 1 ? "" : "s"}` : undefined;
     if (statusText !== this.lastStatusText) {
       this.uiCtx.setStatus(STATUS_KEY, statusText);
