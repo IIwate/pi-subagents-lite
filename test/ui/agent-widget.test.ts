@@ -137,4 +137,22 @@ describe("status bar format", () => {
     widget.dispose();
     expect(uiCtx.setStatus).toHaveBeenLastCalledWith("subagents", undefined);
   });
+
+  it("finishes disposal when the host rejects status clearing", () => {
+    vi.useFakeTimers();
+    const uiCtx = { setStatus: vi.fn(), notify: vi.fn() };
+    const manager = makeMockManager([makeAgent("a1", "running")]);
+    const widget = new AgentWidget(manager);
+    widget.setUICtx(uiCtx);
+    widget.ensureTimer();
+    uiCtx.setStatus.mockImplementation(() => { throw new Error("status host disposed"); });
+
+    expect(() => widget.dispose()).not.toThrow();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(uiCtx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("status host disposed"),
+      "warning",
+    );
+  });
 });

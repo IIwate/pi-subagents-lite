@@ -99,8 +99,13 @@ export class AgentWidget {
       this.statusInterval = undefined;
     }
     if (this.lastStatusText !== undefined) {
-      this.uiCtx?.setStatus(STATUS_KEY, undefined);
-      this.lastStatusText = undefined;
+      try {
+        this.uiCtx?.setStatus(STATUS_KEY, undefined);
+      } catch (error) {
+        this.warnOnce("Agent status disposal failed", error);
+      } finally {
+        this.lastStatusText = undefined;
+      }
     }
     this.uiCtx = undefined;
   }

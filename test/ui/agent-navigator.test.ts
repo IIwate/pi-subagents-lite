@@ -755,6 +755,30 @@ describe("AgentNavigator", () => {
     expect(tui.requestRender).toHaveBeenCalledWith(true);
   });
 
+  it("finishes disposal when a stale host widget rejects removal", () => {
+    vi.useFakeTimers();
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+    ui.ctx.setWidget.mockImplementation((_key: string, content: unknown) => {
+      if (content === undefined) throw new Error("widget host disposed");
+    });
+
+    expect(() => navigator?.dispose()).not.toThrow();
+
+    expect((navigator as any).refreshTimer).toBeUndefined();
+    expect((navigator as any).uiCtx).toBeUndefined();
+    expect(tui.getClearOnShrink()).toBe(false);
+    expect(ui.ctx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("widget host disposed"),
+      "warning",
+    );
+    navigator = undefined;
+  });
+
   it("supports Pi layouts with a loaded-resources container before chat", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

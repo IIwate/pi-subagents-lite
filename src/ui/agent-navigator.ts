@@ -1256,15 +1256,33 @@ export class AgentNavigator {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+
+    let firstError: unknown;
+    const attempt = (action: () => void): void => {
+      try {
+        action();
+      } catch (error) {
+        firstError ??= error;
+      }
+    };
     const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
-    if (this.restoreMainScreen()) this.requestRender();
-    this.unregisterWidgets();
-    tui?.requestRender(true);
-    this.restoreShrinkClearing();
+
+    // Host UI methods are outside our failure boundary. Complete every restoration step
+    // even when one host component was already torn down during reload.
+    attempt(() => { if (this.restoreMainScreen()) this.requestRender(); });
+    attempt(() => this.unregisterWidgets());
+    attempt(() => tui?.requestRender(true));
+    attempt(() => this.restoreShrinkClearing());
     this.screenSwap = undefined;
+    this.selectorRegistered = false;
+    this.selectorTui = undefined;
+    this.shrinkClearingTui = undefined;
+    this.previousClearOnShrink = undefined;
     this.hostTui = undefined;
-    this.restoreEditor?.();
+    attempt(() => this.restoreEditor?.());
     this.restoreEditor = undefined;
+    this.navigationEditor = undefined;
+    if (firstError !== undefined) this.warnOnce("Agent navigator disposal failed", firstError);
     this.uiCtx = undefined;
   }
 }

@@ -182,27 +182,41 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
   // session_shutdown — abort all, dispose manager
   pi.on("session_shutdown", async (_event: unknown, ctx: ExtensionContext) => {
-    // Warn if agents were killed
-    const currentManager = getManager();
-    if (currentManager) {
+    const failures: unknown[] = [];
+    const cleanup = async (action: () => void | Promise<void>): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+
+    await cleanup(() => {
+      const currentManager = getManager();
+      if (!currentManager) return;
       const records = currentManager.listAgents();
       const active = records.filter(r => r.lifecycle.status === "running" || r.lifecycle.status === "queued");
       if (active.length > 0 && ctx.hasUI) {
         ctx.ui.notify(`${active.length} agent(s) killed by reload`, "warning");
       }
-    }
-    // Dispose navigator, coordinator, store, widget, then manager
-    getNavigator()?.dispose();
-    setNavigator(null);
-    getCoordinator()?.dispose();
-    setCoordinator(null);
-    getStore().dispose();
-    getWidget()?.dispose();
-    setWidget(null);
-    const mgr = getManager();
-    if (mgr) {
-      await mgr.dispose();
-      setManager(null);
-    }
+    });
+
+    // Cleanup must reach the child sessions even when a stale host UI component throws.
+    // Rethrow the first failure afterwards so Pi still records the shutdown fault.
+    await cleanup(() => {
+      try { getNavigator()?.dispose(); } finally { setNavigator(null); }
+    });
+    await cleanup(() => {
+      try { getCoordinator()?.dispose(); } finally { setCoordinator(null); }
+    });
+    await cleanup(() => getStore().dispose());
+    await cleanup(() => {
+      try { getWidget()?.dispose(); } finally { setWidget(null); }
+    });
+    await cleanup(async () => {
+      try { await getManager()?.dispose(); } finally { setManager(null); }
+    });
+
+    if (failures.length > 0) throw failures[0];
   });
 }

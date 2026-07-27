@@ -403,6 +403,39 @@ describe("event listener registration", () => {
       true,
     );
   });
+
+  it("continues shutdown cleanup after a display disposer fails", async () => {
+    const shell = await import("../src/shell.js");
+    const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
+    const coordinator = { dispose: vi.fn() };
+    const widget = { dispose: vi.fn() };
+    const manager = { listAgents: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
+    const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
+    shell.setNavigator(navigator as any);
+    shell.setCoordinator(coordinator as any);
+    shell.setWidget(widget as any);
+    shell.setManager(manager as any);
+
+    try {
+      const shutdown = api.listeners.find(listener => listener.event === "session_shutdown")?.handler;
+      await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
+
+      expect(coordinator.dispose).toHaveBeenCalledTimes(1);
+      expect(storeDispose).toHaveBeenCalledTimes(1);
+      expect(widget.dispose).toHaveBeenCalledTimes(1);
+      expect(manager.dispose).toHaveBeenCalledTimes(1);
+      expect(shell.getNavigator()).toBeNull();
+      expect(shell.getCoordinator()).toBeNull();
+      expect(shell.getWidget()).toBeNull();
+      expect(shell.getManager()).toBeNull();
+    } finally {
+      storeDispose.mockRestore();
+      shell.setNavigator(null);
+      shell.setCoordinator(null);
+      shell.setWidget(null);
+      shell.setManager(null);
+    }
+  });
 });
 
 
