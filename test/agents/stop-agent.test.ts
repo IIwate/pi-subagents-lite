@@ -43,7 +43,21 @@ vi.mock("../../src/models/model-scope.js", () => ({
   modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
 }));
 
-import { executeStopAgentTool } from "../../src/agents/tool-execution.js";
+import { executeStopAgentTool, formatResultContent } from "../../src/agents/tool-execution.js";
+
+describe("formatResultContent", () => {
+  it.each([
+    ["completed", undefined, "partial output"],
+    ["aborted", undefined, "partial output (hit the turn limit before completion; output may be incomplete)"],
+    ["turn_limited", undefined, "partial output (wrapped up at the turn limit — output may be partial)"],
+    ["stopped", "user", "partial output (STOPPED BY THE USER before completion — output is partial; the task was NOT finished)"],
+  ])("formats %s results with the status-note contract", (status, stoppedBy, expected) => {
+    expect(formatResultContent({
+      result: "partial output",
+      lifecycle: { status, startedAt: 0, stoppedBy },
+    } as any)).toBe(expected);
+  });
+});
 
 describe("executeStopAgentTool", () => {
   beforeEach(() => {

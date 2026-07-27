@@ -246,7 +246,7 @@ describe("runAgent — tool visibility wiring", () => {
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
   });
 
-  it("applies resolveVisibleTools result via setActiveToolsByName", async () => {
+  it("maps loaded extension tools before applying visibility", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue([
       "read", "bash", "edit", "web_search", "web_extract", "Agent",
@@ -255,12 +255,12 @@ describe("runAgent — tool visibility wiring", () => {
     mockModules.mockGetAgentConfig.mockReturnValue({
       ...defaultAgentConfig,
       extensions: ["tavily"],
-      tools: ["read", "web_search"],
+      tools: ["read", "tavily/*"],
     });
     mockModules.mockGetConfig.mockReturnValue({
       ...defaultConfig,
       extensions: ["tavily"],
-      tools: ["read", "web_search"],
+      tools: ["read", "tavily/*"],
     });
     mockModules.setLoaderExtensions([
       {
@@ -274,8 +274,42 @@ describe("runAgent — tool visibility wiring", () => {
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
-    // Wiring only: policy details are covered by resolveVisibleTools unit tests.
-    expect(session.setActiveToolsByName).toHaveBeenCalledWith(["read", "web_search"]);
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith([
+      "read", "web_search", "web_extract",
+    ]);
+  });
+
+  it("applies an empty tool list when tools are disabled", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      tools: false,
+    });
+
+    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
+
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith([]);
+  });
+
+  it("flushes resolver warnings through the runner notification buffer", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      tools: ["read", "missing-tool"],
+    });
+    const ctx = fakeCtx();
+    ctx.ui = { notify: vi.fn() };
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining('tool "missing-tool" not found in any loaded extension'),
+      "warning",
+    );
   });
 });
 
