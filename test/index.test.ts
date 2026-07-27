@@ -264,6 +264,12 @@ describe("tool registration", () => {
       expect(tool.renderResult?.().children).toEqual([]);
     }
   });
+
+  it("rejects unknown parameters for every subagent tool", () => {
+    for (const tool of api.tools) {
+      expect(tool.parameters.additionalProperties).toBe(false);
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ */

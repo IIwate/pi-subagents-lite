@@ -47,7 +47,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       worktree_path: Type.Optional(Type.String({
         description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",
       })),
-    }),
+    }, { additionalProperties: false }),
     execute: executeAgentTool,
 
     ...SILENT_TOOL_RENDERING,
@@ -70,7 +70,7 @@ export function registerTools(pi: ExtensionAPI): void {
     label: "StopAgent",
     parameters: Type.Object({
       agent_id: Type.String(),
-    }),
+    }, { additionalProperties: false }),
     execute: executeStopAgentTool,
     ...SILENT_TOOL_RENDERING,
   });
@@ -80,7 +80,7 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "AgentStatus",
     label: "AgentStatus",
-    parameters: Type.Object({}),
+    parameters: Type.Object({}, { additionalProperties: false }),
     execute: executeAgentStatusTool,
     ...SILENT_TOOL_RENDERING,
   });
