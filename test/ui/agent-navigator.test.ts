@@ -377,6 +377,30 @@ describe("AgentNavigator", () => {
     expect(tui.terminal.write).toHaveBeenCalledWith("\x1b[3J");
   });
 
+  it("keeps the selected agent focused after confirmation", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const text = selector.render(120).join("\n");
+    // Focus hint only renders while listFocused; retained after Enter so the
+    // next Up still navigates without re-entering from the editor.
+    expect(text).toContain("↑↓ move");
+    expect(text).toContain("› ●");
+    expect(text).toContain("Inspect the project");
+    expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
+    expect(navigator.selectedId()).toBe(record.id);
+    // Highlight moved to Main (○) while the selected agent remains active (●).
+    expect(selector.render(120).join("\n")).toContain("› ○ Main agent");
+  });
+
   it("Escape cancels a highlighted candidate without switching", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

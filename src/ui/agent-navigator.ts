@@ -474,9 +474,9 @@ export class AgentNavigator {
 
   /**
    * Enter the list from an empty editor with Down. Up/Down only moves the
-   * candidate row; Enter confirms the switch. Ctrl+D clears a non-active
-   * subagent (Enter confirms, Esc cancels). Escape or Up above Main returns
-   * input to the editor without changing the active agent.
+   * candidate row; Enter confirms the switch and keeps the active row focused.
+   * Ctrl+D clears a non-active subagent (Enter confirms, Esc cancels). Escape
+   * or Up above Main returns input to the editor without changing the active agent.
    */
   handleTerminalInput(data: string): { consume?: boolean } | undefined {
     const entries = this.navigationEntries();
@@ -530,7 +530,8 @@ export class AgentNavigator {
 
     if (matchesKey(data, Key.enter)) {
       const candidate = this.highlightedAgentId;
-      this.listFocused = false;
+      // Keep list focus so consecutive Up/Down/Enter switches do not require
+      // re-entering the list after every confirmation (upstream 8a7a01f).
       if (!this.activate(candidate)) {
         this.highlightedAgentId = this.selectedAgentId;
       }
