@@ -1094,10 +1094,7 @@ export class AgentNavigator {
       this.lastRenderSig = "";
       this.lastAgentStatus.clear();
       this.requestRender();
-      if (this.refreshTimer) {
-        clearInterval(this.refreshTimer);
-        this.refreshTimer = undefined;
-      }
+      this.stopRefreshTimer();
       return;
     }
 
@@ -1147,13 +1144,21 @@ export class AgentNavigator {
 
     if (!this.selectedAgentId && !records.some(record =>
       record.lifecycle.status === "running" || record.lifecycle.status === "queued"
-    ) && this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
+    )) {
+      this.stopRefreshTimer();
     }
   }
 
+  private stopRefreshTimer(): void {
+    if (!this.refreshTimer) return;
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+  }
+
   private warnOnce(context: string, error: unknown): void {
+    // Spawn and interaction events call ensureTimer() again, so stop permanent failure
+    // loops while retaining a concrete retry path after transient host recovery.
+    this.stopRefreshTimer();
     if (this.errorWarningShown) return;
     this.errorWarningShown = true;
     try {
@@ -1252,10 +1257,7 @@ export class AgentNavigator {
   }
 
   dispose(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
+    this.stopRefreshTimer();
 
     let firstError: unknown;
     const attempt = (action: () => void): void => {

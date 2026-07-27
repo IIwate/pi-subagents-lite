@@ -353,7 +353,7 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).toContain("⠹");
   });
 
-  it("contains repeated refresh failures and warns once", () => {
+  it("stops refresh polling after an update failure and warns once", () => {
     vi.useFakeTimers();
     const record = makeRecord();
     const ui = makeUI({ value: "" });
@@ -365,6 +365,7 @@ describe("AgentNavigator", () => {
 
     expect(() => vi.advanceTimersByTime(1500)).not.toThrow();
 
+    expect(vi.getTimerCount()).toBe(0);
     expect(ui.ctx.notify).toHaveBeenCalledTimes(1);
     expect(ui.ctx.notify).toHaveBeenCalledWith(
       expect.stringContaining("navigator state unavailable"),
@@ -383,6 +384,7 @@ describe("AgentNavigator", () => {
     manager.listAgents = vi.fn(() => { throw new Error("selector state unavailable"); });
 
     expect(selector.render(120)).toEqual([]);
+    expect((navigator as any).refreshTimer).toBeUndefined();
     expect(selector.render(120)).toEqual([]);
 
     expect(ui.ctx.notify).toHaveBeenCalledTimes(1);

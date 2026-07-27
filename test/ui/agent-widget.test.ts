@@ -108,7 +108,7 @@ describe("status bar format", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("contains repeated polling failures and warns once", () => {
+  it("stops polling after a status failure and warns once", () => {
     vi.useFakeTimers();
     const uiCtx = { setStatus: vi.fn(), notify: vi.fn() };
     const manager = makeMockManager([]) as any;
@@ -117,6 +117,7 @@ describe("status bar format", () => {
     widget.setUICtx(uiCtx);
 
     expect(() => widget.ensureTimer()).not.toThrow();
+    expect(vi.getTimerCount()).toBe(0);
     expect(() => vi.advanceTimersByTime(3000)).not.toThrow();
 
     expect(uiCtx.notify).toHaveBeenCalledTimes(1);

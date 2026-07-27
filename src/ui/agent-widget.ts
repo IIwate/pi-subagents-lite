@@ -79,13 +79,19 @@ export class AgentWidget {
       this.lastStatusText = statusText;
     }
 
-    if (total === 0 && this.statusInterval) {
-      clearInterval(this.statusInterval);
-      this.statusInterval = undefined;
-    }
+    if (total === 0) this.stopTimer();
+  }
+
+  private stopTimer(): void {
+    if (!this.statusInterval) return;
+    clearInterval(this.statusInterval);
+    this.statusInterval = undefined;
   }
 
   private warnOnce(context: string, error: unknown): void {
+    // A later spawn calls ensureTimer() again, so stop permanent failure loops without
+    // preventing a real lifecycle event from retrying after transient host recovery.
+    this.stopTimer();
     if (this.errorWarningShown) return;
     this.errorWarningShown = true;
     try {
@@ -94,10 +100,7 @@ export class AgentWidget {
   }
 
   dispose() {
-    if (this.statusInterval) {
-      clearInterval(this.statusInterval);
-      this.statusInterval = undefined;
-    }
+    this.stopTimer();
     if (this.lastStatusText !== undefined) {
       try {
         this.uiCtx?.setStatus(STATUS_KEY, undefined);
