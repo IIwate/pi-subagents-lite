@@ -315,6 +315,8 @@ describe("runAgent — tool visibility wiring", () => {
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
+    const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
+    expect(sessionOptions.tools).toEqual(["read", "web_search", "web_extract"]);
     expect(session.setActiveToolsByName).toHaveBeenCalledWith([
       "read", "web_search", "web_extract",
     ]);

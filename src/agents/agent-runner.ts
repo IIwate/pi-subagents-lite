@@ -19,7 +19,13 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { getAgentConfig, getConfig, getToolNamesForType, resolveVisibleTools } from "./agent-types.js";
+import {
+  getAgentConfig,
+  getConfig,
+  getToolNamesForType,
+  resolveSessionAllowedTools,
+  resolveVisibleTools,
+} from "./agent-types.js";
 import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
@@ -459,6 +465,7 @@ async function initSession(
   type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
+  extToolMap: Map<string, string[]>,
 ) {
   const model = options.model ?? findModelInRegistry(
     agentConfig?.model, ctx.modelRegistry, ctx.model,
@@ -476,7 +483,12 @@ async function initSession(
     sessionManager,
     settingsManager: SettingsManager.create(cwd, agentDir),
     model,
-    tools: getToolNamesForType(type), resourceLoader: loader,
+    tools: resolveSessionAllowedTools({
+      registeredTools: getToolNamesForType(type),
+      tools: agentConfig?.tools,
+      extToolMap,
+    }),
+    resourceLoader: loader,
     ...(scopedModels ? { scopedModels } : {}),
   };
   // Always pass when set — including "off" — so settings default cannot override.
@@ -512,10 +524,10 @@ async function createAndConfigureSession(
   type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
-  extResult: { extensions: Array<{ path: string; tools: Map<string, unknown> }> },
+  extToolMap: Map<string, string[]>,
   notify: (msg: string) => void,
 ): Promise<AgentSession> {
-  const { session } = await initSession(ctx, options, agentConfig, type, cwd, loader);
+  const { session } = await initSession(ctx, options, agentConfig, type, cwd, loader, extToolMap);
   const baseName = agentConfig?.name ?? type;
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
@@ -525,7 +537,7 @@ async function createAndConfigureSession(
     activeTools: session.getActiveToolNames(),
     tools: agentConfig?.tools,
     excludeTools: agentConfig?.excludeTools,
-    extToolMap: buildExtToolMap(extResult.extensions),
+    extToolMap,
     notify,
   });
   if (filteredTools) session.setActiveToolsByName(filteredTools);
@@ -672,9 +684,9 @@ async function runAgentImpl(
     mode, promptExtras,
   );
   const { loader, reloadAndMap } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
-  const { extResult } = await reloadAndMap();
+  const { extToolMap } = await reloadAndMap();
   const session = await createAndConfigureSession(
-    ctx, options, agentConfig, type, effectiveCwd, loader, extResult, bufferNotify,
+    ctx, options, agentConfig, type, effectiveCwd, loader, extToolMap, bufferNotify,
   );
   const { unsubscribe: unsubTurns, getAborted, getTurnLimited } = wireTurnTracking(session, {
     ...options,

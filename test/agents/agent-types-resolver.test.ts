@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Import the module under test
 import {
+  resolveSessionAllowedTools,
   resolveVisibleTools,
   EXCLUDED_TOOL_NAMES,
   BUILTIN_TOOL_NAMES,
@@ -332,6 +333,42 @@ describe("resolveVisibleTools — tools: true/false/undefined", () => {
     expect(result).toContain("bash");
     expect(result).toContain("edit");
     expect(result).not.toContain("write");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Session registry allowlist                                        */
+/* ------------------------------------------------------------------ */
+
+describe("resolveSessionAllowedTools", () => {
+  const extToolMap = new Map([
+    ["tavily", ["web_search", "web_extract"]],
+  ]);
+
+  it("expands extension tools before Pi applies the session registry gate", () => {
+    expect(resolveSessionAllowedTools({
+      registeredTools: ["read", "bash", "edit"],
+      tools: ["read", "tavily/*"],
+      extToolMap,
+    })).toEqual(["read", "web_search", "web_extract"]);
+  });
+
+  it("registers loaded extension tools by default without leaking Agent", () => {
+    expect(resolveSessionAllowedTools({
+      registeredTools: ["read", "bash", "Agent"],
+      extToolMap: new Map([
+        ...extToolMap,
+        ["subagents", ["Agent"]],
+      ]),
+    })).toEqual(["read", "bash", "web_search", "web_extract"]);
+  });
+
+  it("registers no tools when tools are disabled", () => {
+    expect(resolveSessionAllowedTools({
+      registeredTools: ["read", "bash"],
+      tools: false,
+      extToolMap,
+    })).toEqual([]);
   });
 });
 

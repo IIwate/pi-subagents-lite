@@ -267,6 +267,36 @@ export function resolveVisibleTools(opts: {
   return activeTools.filter(t => !EXCLUDED_TOOL_NAMES.includes(t));
 }
 
+/**
+ * Resolve the concrete names that Pi may register for a child session.
+ *
+ * Pi applies createAgentSession({ tools }) before extensions bind, so a builtins-only
+ * list permanently drops extension tools. Seed that registry gate with the resolved
+ * extension tools; resolveVisibleTools still owns the final active-tool policy.
+ */
+export function resolveSessionAllowedTools(opts: {
+  registeredTools: string[];
+  tools?: true | string[] | false;
+  extToolMap?: Map<string, string[]>;
+}): string[] {
+  if (opts.tools === false) return [];
+
+  if (Array.isArray(opts.tools)) {
+    return [...resolveToolEntries(opts.tools, opts.extToolMap)]
+      .filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
+  }
+
+  const allowed = new Set(
+    opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool)),
+  );
+  for (const tools of opts.extToolMap?.values() ?? []) {
+    for (const tool of tools) {
+      if (!EXCLUDED_TOOL_NAMES.includes(tool)) allowed.add(tool);
+    }
+  }
+  return [...allowed];
+}
+
 /** Get built-in tool names for a type (case-insensitive). */
 export function getToolNamesForType(type: string): string[] {
   const config = getAgentConfig(type);
