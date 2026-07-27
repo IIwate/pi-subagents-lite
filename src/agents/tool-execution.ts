@@ -53,6 +53,9 @@ function errorResult(text: string) {
  * Keeping one formatter prevents their completion semantics from drifting.
  */
 export function formatResultContent(record: AgentRecord): string {
+  if (record.lifecycle.status === "error") {
+    return `Agent failed: ${record.error || "unknown error"}`;
+  }
   return (record.result ?? "") + getStatusNote(record.lifecycle);
 }
 
@@ -169,11 +172,8 @@ export async function executeAgentTool(
   }
 
   // Foreground: record.execution.promise is already awaited by coordinator.spawn()
-  if (record.lifecycle.status === "error") {
-    return errorResult(`Agent failed: ${record.error || "unknown error"}`);
-  }
-
-  return successResult(formatResultContent(record));
+  const content = formatResultContent(record);
+  return record.lifecycle.status === "error" ? errorResult(content) : successResult(content);
 }
 
 // ============================================================================

@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
@@ -100,31 +100,39 @@ function enableCodexStreamErrorRetry(session: AgentSession): void {
 }
 
 /**
- * Subscribe to a session and collect the last assistant message text.
- * Returns an object with a `getText()` getter and an `unsubscribe` function.
+ * Capture the final assistant message for the current prompt.
+ *
+ * Pi 0.80.1 can resolve prompt() after converting provider failures into an
+ * empty assistant message with stopReason="error". Keeping the terminal
+ * metadata here prevents that upstream failure from becoming completed+empty.
+ * Revisit when Pi guarantees non-abort run failures reject prompt().
  */
-function collectResponseText(session: AgentSession) {
-  let text = "";
+function collectFinalAssistantMessage(session: AgentSession) {
+  let message: AssistantMessage | undefined;
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "message_start") {
-      text = "";
-    }
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      text += event.assistantMessageEvent.delta;
+    if (event.type === "message_end" && event.message.role === "assistant") {
+      message = event.message as AssistantMessage;
     }
   });
-  return { getText: () => text, unsubscribe };
+  return { getMessage: () => message, unsubscribe };
 }
 
-/** Get the last assistant text from the completed session history. */
-function getLastAssistantText(session: AgentSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const msg = session.messages[i];
-    if (msg.role !== "assistant") continue;
-    const text = extractText(msg.content).trim();
-    if (text) return text;
+function resolveAssistantOutcome(
+  message: AssistantMessage | undefined,
+  aborted: boolean,
+  turnLimited: boolean,
+): { responseText: string; aborted: boolean } {
+  if (message?.stopReason === "error") {
+    throw new Error(message.errorMessage?.trim() || "Subagent failed without an error message");
   }
-  return "";
+
+  const responseText = message ? extractText(message.content).trim() : "";
+  const wasAborted = aborted || message?.stopReason === "aborted";
+  if (!responseText && !wasAborted && !turnLimited) {
+    throw new Error("Subagent completed without final assistant text");
+  }
+
+  return { responseText, aborted: wasAborted };
 }
 
 /**
@@ -564,9 +572,9 @@ async function runTurnLoop(
   prompt: string,
   options: RunOptions,
   unsubTurns: () => void,
-) {
+): Promise<AssistantMessage | undefined> {
   const unsubEvents = subscribeToSessionEvents(session, options);
-  const collector = collectResponseText(session);
+  const collector = collectFinalAssistantMessage(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
   try {
     if (!options.signal?.aborted) {
@@ -578,7 +586,7 @@ async function runTurnLoop(
     collector.unsubscribe();
     cleanupAbort();
   }
-  return collector.getText().trim() || getLastAssistantText(session);
+  return collector.getMessage();
 }
 
 /**
@@ -593,7 +601,7 @@ export async function continueAgentSession(
 ): Promise<ContinueAgentResult> {
   const turnTracking = wireTurnTracking(session, options);
   const unsubscribeEvents = subscribeToSessionEvents(session, options);
-  const collector = collectResponseText(session);
+  const collector = collectFinalAssistantMessage(session);
 
   try {
     const promptOptions = options.images?.length ? { images: options.images } : undefined;
@@ -604,11 +612,13 @@ export async function continueAgentSession(
     collector.unsubscribe();
   }
 
-  return {
-    responseText: collector.getText().trim() || getLastAssistantText(session),
-    aborted: turnTracking.getAborted(),
-    turnLimited: turnTracking.getTurnLimited(),
-  };
+  const turnLimited = turnTracking.getTurnLimited();
+  const outcome = resolveAssistantOutcome(
+    collector.getMessage(),
+    turnTracking.getAborted(),
+    turnLimited,
+  );
+  return { ...outcome, turnLimited };
 }
 
 // ── main entry ─────────────────────────────────────────────────────
@@ -671,7 +681,13 @@ async function runAgentImpl(
     maxTurns: options.maxTurns ?? agentConfig?.maxTurns,
   });
 
-  const responseText = await runTurnLoop(session, prompt, options, unsubTurns);
+  const finalMessage = await runTurnLoop(session, prompt, options, unsubTurns);
+  const turnLimited = getTurnLimited();
+  const outcome = resolveAssistantOutcome(
+    finalMessage,
+    getAborted() || options.signal?.aborted === true,
+    turnLimited,
+  );
 
   // Flush buffered warnings now that tool_result is in the session tree.
   for (const msg of warnings) {
@@ -679,5 +695,5 @@ async function runAgentImpl(
     else console.warn(`[pi-subagents-lite] ${msg}`);
   }
 
-  return { responseText, session, aborted: getAborted(), turnLimited: getTurnLimited() };
+  return { ...outcome, session, turnLimited };
 }

@@ -223,10 +223,11 @@ describe("Agent tool schema — stealth", () => {
     expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
   });
 
-  it("includes worktree_path param (optional, no .description())", () => {
+  it("describes worktree_path as a same-repository worktree", () => {
     expect(hasParam(agentTool()!.parameters, "worktree_path")).toBe(true);
     const wtSchema = agentTool()!.parameters?.properties?.worktree_path;
-    expect(wtSchema?.description).toBeUndefined();
+    expect(wtSchema?.description).toContain("parent repository");
+    expect(wtSchema?.description).toContain("not an arbitrary cwd");
   });
 
 
@@ -414,11 +415,13 @@ describe("Agent tool schema — worktree_path", () => {
     expect(required).not.toContain("worktree_path");
   });
 
-  it("worktree_path is a string type in the schema", () => {
+  it("worktree_path is a described string type in the schema", () => {
     const tool = api.tools.find((t) => t.name === "Agent")!;
     const prop = tool.parameters.properties?.worktree_path;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("string");
+    expect(prop.description).toContain("linked worktree");
+    expect(prop.description).toContain("another repository");
   });
 });
 

@@ -44,7 +44,9 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       // Optional thinking override (off/minimal/low/medium/high/xhigh/max). Taught via agent briefing.
       thinking: Type.Optional(Type.String()),
       run_in_background: Type.Optional(Type.Boolean()),
-      worktree_path: Type.Optional(Type.String()),
+      worktree_path: Type.Optional(Type.String({
+        description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",
+      })),
     }),
     execute: executeAgentTool,
 

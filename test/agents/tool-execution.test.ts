@@ -292,6 +292,26 @@ describe("executeAgentTool — worktree_path validation", () => {
     expect(result.content[0].text).toBe("Agent completed successfully");
   });
 
+  it("returns the recorded failure diagnostic for foreground agents", async () => {
+    mockGetRecord.mockReturnValue({
+      id: "agent-id-123",
+      error: "503 service_unavailable",
+      display: { type: "general-purpose", description: "Test agent" },
+      lifecycle: { status: "error", startedAt: Date.now(), completedAt: Date.now() },
+      execution: { promise: Promise.resolve("") },
+      stats: {
+        lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+        toolUses: 0,
+        compactionCount: 0,
+      },
+    });
+
+    const result = await executeAgentTool("tc-error", makeParams(), undefined, undefined, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe("Agent failed: 503 service_unavailable");
+  });
+
   it("does not crash the parent when validator throws unexpectedly", async () => {
     mockValidateWorktreePath.mockRejectedValue(new Error("Unexpected filesystem error"));
 

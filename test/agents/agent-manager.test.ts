@@ -310,6 +310,42 @@ describe("AgentManager", () => {
     });
   });
 
+  // ── Completion contract ──
+
+  describe("completion contract", () => {
+    it("records provider failures instead of completing with an empty result", async () => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockRejectedValue(new Error("503 service_unavailable"));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      expect(record.lifecycle.status).toBe("error");
+      expect(record.error).toBe("503 service_unavailable");
+      expect(record.result).toBeUndefined();
+    });
+
+    it("rejects a normal completion without final assistant text", async () => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ responseText: "" }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      expect(record.lifecycle.status).toBe("error");
+      expect(record.error).toBe("Subagent completed without final assistant text");
+      expect(record.result).toBeUndefined();
+    });
+  });
+
   // ── Direct interaction ──
 
   describe("interact", () => {

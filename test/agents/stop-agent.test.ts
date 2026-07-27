@@ -57,6 +57,13 @@ describe("formatResultContent", () => {
       lifecycle: { status, startedAt: 0, stoppedBy },
     } as any)).toBe(expected);
   });
+
+  it("formats terminal errors with their diagnostic", () => {
+    expect(formatResultContent({
+      error: "503 service_unavailable",
+      lifecycle: { status: "error", startedAt: 0 },
+    } as any)).toBe("Agent failed: 503 service_unavailable");
+  });
 });
 
 describe("executeStopAgentTool", () => {

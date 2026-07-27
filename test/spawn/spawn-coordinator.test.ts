@@ -34,7 +34,10 @@ vi.mock("../../src/config/config-io.js", () => ({
 
 // Result formatting has its own tests; coordinator only owns delivery and scheduling.
 vi.mock("../../src/agents/tool-execution.js", () => ({
-  formatResultContent: (record: AgentRecord) => record.result ?? "",
+  formatResultContent: (record: AgentRecord) =>
+    record.lifecycle.status === "error"
+      ? `Agent failed: ${record.error || "unknown error"}`
+      : record.result ?? "",
 }));
 
 // Hoist mock pi so shell mock can return it
@@ -98,7 +101,7 @@ describe("SpawnCoordinator", () => {
     vi.useFakeTimers();
     manager = makeMockManager();
     ctx = makeMockCtx();
-    mockPi.sendMessage.mockClear();
+    mockPi.sendMessage.mockReset();
     mockGetPiInstance.mockReturnValue(mockPi);
     const mod = await import("../../src/spawn/spawn-coordinator.js");
     SpawnCoordinator = mod.SpawnCoordinator;
@@ -420,6 +423,26 @@ describe("SpawnCoordinator", () => {
         expect(content).toContain(`[Subagent "builder" ${shortId} ${expected}]`);
       }
     });
+
+    it("delivers the recorded diagnostic for background errors", async () => {
+      const coordinator = new SpawnCoordinator(manager as any);
+      const result = await coordinator.spawn(mockPi, ctx, {
+        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
+      });
+      const record = manager.getRecord(result.agentId);
+      record.lifecycle.status = "error";
+      record.result = undefined;
+      record.error = "503 service_unavailable";
+
+      coordinator.scheduleNudge(result.agentId);
+      vi.advanceTimersByTime(200);
+
+      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+      expect(mockPi.sendMessage.mock.calls[0][0].content).toContain(
+        "Agent failed: 503 service_unavailable",
+      );
+      expect(record.lifecycle.resultConsumed).toBe(true);
+    });
   });
 
   describe("result consumption", () => {
@@ -450,6 +473,21 @@ describe("SpawnCoordinator", () => {
       // sendMessage delivered the full result to the LLM — record is safe to evict.
       expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
       expect(record.lifecycle.resultConsumed).toBe(true);
+    });
+
+    it("does not deliver or consume an empty background result", async () => {
+      const coordinator = new SpawnCoordinator(manager as any);
+      const result = await coordinator.spawn(mockPi, ctx, {
+        type: "builder", prompt: "task", description: "Test bg", graceTurns: 6, runInBackground: true,
+      });
+      const record = manager.getRecord(result.agentId);
+      record.result = "";
+
+      coordinator.scheduleNudge(result.agentId);
+      vi.advanceTimersByTime(200);
+
+      expect(mockPi.sendMessage).not.toHaveBeenCalled();
+      expect(record.lifecycle.resultConsumed).toBeUndefined();
     });
 
     it("does not mark consumed when nudge delivery fails", async () => {

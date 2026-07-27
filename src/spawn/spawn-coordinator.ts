@@ -99,9 +99,10 @@ export class SpawnCoordinator {
       // Foreground: await completion
       await record.execution.promise;
 
-      // Foreground tool handler reads the result inline on return — mark it
-      // consumed so the cleanup timer may evict the record once it ages out.
-      record.lifecycle.resultConsumed = true;
+      // Only a concrete result or diagnostic is safe to treat as delivered.
+      if (formatResultContent(record).trim()) {
+        record.lifecycle.resultConsumed = true;
+      }
     }
 
     return { agentId, record };
@@ -192,10 +193,13 @@ export class SpawnCoordinator {
       const parentIdle = ctx?.isIdle?.() ?? true;
       const deliverAs = parentIdle ? "followUp" : "steer";
 
+      const resultContent = formatResultContent(record);
+      if (!resultContent.trim()) return;
+
       pi.sendMessage(
         {
           customType: "subagent-result",
-          content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${formatResultContent(record)}`,
+          content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${resultContent}`,
           // Keep the TUI silent: users see completion in the list below the editor,
           // while the LLM still receives the full result text.
           display: false,

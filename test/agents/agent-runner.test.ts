@@ -139,7 +139,14 @@ function resetMocks() {
   mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
   mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash", "edit"]);
   mockModules.mockBuildAgentPrompt.mockReturnValue("system prompt");
-  mockModules.mockExtractText.mockReturnValue("");
+  mockModules.mockExtractText.mockImplementation((content: any) => {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .filter((item: any) => item?.type === "text")
+      .map((item: any) => item.text)
+      .join("");
+  });
   mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
   mockModules.mockPreloadSkills.mockReturnValue([]);
@@ -162,7 +169,18 @@ function createMockSession() {
         if (idx >= 0) listeners.splice(idx, 1);
       };
     }),
-    prompt: vi.fn(),
+    prompt: vi.fn(async () => {
+      for (const listener of [...listeners]) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "done" }],
+            stopReason: "stop",
+          },
+        });
+      }
+    }),
     steer: vi.fn(),
     abort: vi.fn(),
     messages: [],
@@ -231,6 +249,29 @@ describe("runAgent — session state inheritance", () => {
 
     expect(session.abort).toHaveBeenCalled();
     expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider failures encoded as empty terminal assistant messages", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    session.prompt.mockImplementation(async () => {
+      for (const listener of [...session._getListeners()]) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            stopReason: "error",
+            errorMessage: "503 service_unavailable",
+          },
+        });
+      }
+    });
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    await expect(runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi }))
+      .rejects.toThrow("503 service_unavailable");
+    expect(session._getListeners()).toHaveLength(0);
   });
 });
 
@@ -526,14 +567,17 @@ describe("continueAgentSession", () => {
     session.prompt.mockImplementation(async () => {
       const listeners = [...session._getListeners()];
       for (const listener of listeners) {
-        listener({
-          type: "message_update",
-          message: { role: "assistant" },
-          assistantMessageEvent: { type: "text_delta", delta: "continued" },
-        });
         listener({ type: "tool_execution_start", toolName: "read" });
         listener({ type: "tool_execution_end", toolName: "read" });
         listener({ type: "turn_end" });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "continued" }],
+            stopReason: "stop",
+          },
+        });
       }
     });
 
@@ -560,6 +604,47 @@ describe("continueAgentSession", () => {
     await continueAgentSession(session as any, "inspect", { images });
 
     expect(session.prompt).toHaveBeenCalledWith("inspect", { images });
+  });
+
+  it("rejects empty successful terminal messages", async () => {
+    const session = createMockSession();
+    session.prompt.mockImplementation(async () => {
+      for (const listener of [...session._getListeners()]) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            stopReason: "stop",
+          },
+        });
+      }
+    });
+
+    await expect(continueAgentSession(session as any, "continue"))
+      .rejects.toThrow("Subagent completed without final assistant text");
+  });
+
+  it("classifies an empty terminal abort without treating it as completion", async () => {
+    const session = createMockSession();
+    session.prompt.mockImplementation(async () => {
+      for (const listener of [...session._getListeners()]) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            stopReason: "aborted",
+          },
+        });
+      }
+    });
+
+    await expect(continueAgentSession(session as any, "continue")).resolves.toEqual({
+      responseText: "",
+      aborted: true,
+      turnLimited: false,
+    });
   });
 
   it("enforces max turns and grace turns on continuation prompts", async () => {
@@ -1299,7 +1384,22 @@ describe("runAgent — notify buffering", () => {
         resolvePrompt = r;
       }),
     );
-    return { session, resolvePrompt: () => resolvePrompt() };
+    return {
+      session,
+      resolvePrompt: () => {
+        for (const listener of [...session._getListeners()]) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "done" }],
+              stopReason: "stop",
+            },
+          });
+        }
+        resolvePrompt();
+      },
+    };
   }
 
   it("does NOT call ctx.ui.notify before runTurnLoop completes", async () => {

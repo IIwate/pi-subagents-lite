@@ -41,6 +41,13 @@ function isTerminalStatus(status: AgentStatus): boolean {
   return status !== "running" && status !== "queued";
 }
 
+/** Defense against future runners reintroducing a silent completed+empty result. */
+function assertCompletionResult(responseText: string, aborted: boolean, turnLimited: boolean): void {
+  if (!aborted && !turnLimited && !responseText.trim()) {
+    throw new Error("Subagent completed without final assistant text");
+  }
+}
+
 /** Configuration for per-model concurrency limits. */
 export interface ConcurrencyConfig {
   /** Default concurrency limit for models not in the models or providers map. */
@@ -298,12 +305,13 @@ export class AgentManager {
       },
     })
       .then(({ responseText, session, aborted, turnLimited }) => {
+        record.execution.session = session;
         // Don't overwrite status if externally stopped via abort()
         if (record.lifecycle.status !== "stopped") {
+          assertCompletionResult(responseText, aborted, turnLimited);
           record.lifecycle.status = aborted ? "aborted" : turnLimited ? "turn_limited" : "completed";
         }
         record.result = responseText;
-        record.execution.session = session;
         record.stats.contextPercent = getSessionContextPercent(session);
         record.lifecycle.completedAt ??= Date.now();
         return responseText;
@@ -313,6 +321,7 @@ export class AgentManager {
         if (record.lifecycle.status !== "stopped") {
           record.lifecycle.status = "error";
         }
+        record.result = undefined;
         record.error = errorMessage(err);
         record.lifecycle.completedAt ??= Date.now();
         return "";
@@ -447,6 +456,7 @@ export class AgentManager {
     record.lifecycle.startedAt = Date.now();
     record.lifecycle.completedAt = undefined;
     record.lifecycle.resultConsumed = undefined;
+    record.result = undefined;
     record.error = undefined;
 
     const trackedCallbacks = this.createRecordCallbacks(record);
@@ -461,6 +471,7 @@ export class AgentManager {
     })
       .then(({ responseText, aborted, turnLimited }) => {
         if (record.lifecycle.status !== "stopped") {
+          assertCompletionResult(responseText, aborted, turnLimited);
           record.lifecycle.status = aborted
             ? "aborted"
             : turnLimited
@@ -477,6 +488,7 @@ export class AgentManager {
         if (record.lifecycle.status !== "stopped") {
           record.lifecycle.status = "error";
         }
+        record.result = undefined;
         record.error = errorMessage(err);
         record.lifecycle.completedAt ??= Date.now();
         record.lifecycle.resultConsumed = true;
