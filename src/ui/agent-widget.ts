@@ -7,6 +7,7 @@
  */
 
 import type { AgentManager } from "../agents/agent-manager.js";
+import { errorMessage } from "../utils.js";
 
 /** Braille spinner frames shared with agent-navigator's running icon. */
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -20,6 +21,7 @@ const STATUS_REFRESH_INTERVAL = 1000;
 /** Minimal UI context required by the status badge. */
 export type UICtx = {
   setStatus(key: string, text: string | undefined): void;
+  notify?(message: string, level: "warning"): void;
 };
 
 export class AgentWidget {
@@ -27,6 +29,7 @@ export class AgentWidget {
   private statusInterval: ReturnType<typeof setInterval> | undefined;
   /** Last status text, used to avoid redundant setStatus redraws. */
   private lastStatusText: string | undefined;
+  private errorWarningShown = false;
 
   constructor(private manager: AgentManager) {}
 
@@ -35,6 +38,7 @@ export class AgentWidget {
     if (ctx !== this.uiCtx) {
       this.uiCtx = ctx;
       this.lastStatusText = undefined;
+      this.errorWarningShown = false;
     }
   }
 
@@ -49,8 +53,17 @@ export class AgentWidget {
     this.update();
   }
 
-  /** Refresh the count badge; clear it and stop polling when no agent is running or queued. */
+  /** Contain host UI failures so a polling callback cannot become an uncaught exception. */
   update() {
+    try {
+      this.updateBadge();
+    } catch (error) {
+      this.warnOnce("Agent status update failed", error);
+    }
+  }
+
+  /** Refresh the count badge; clear it and stop polling when no agent is running or queued. */
+  private updateBadge() {
     if (!this.uiCtx) return;
 
     let total = 0;
@@ -70,6 +83,14 @@ export class AgentWidget {
       clearInterval(this.statusInterval);
       this.statusInterval = undefined;
     }
+  }
+
+  private warnOnce(context: string, error: unknown): void {
+    if (this.errorWarningShown) return;
+    this.errorWarningShown = true;
+    try {
+      this.uiCtx?.notify?.(`[pi-subagents-lite] ${context}: ${errorMessage(error)}`, "warning");
+    } catch { /* Notification failures must not reopen the timer error boundary. */ }
   }
 
   dispose() {

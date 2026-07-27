@@ -34,6 +34,7 @@ import {
   type StatsVisibility,
 } from "./format.js";
 import { renderAgentFooterStats } from "./agent-footer.js";
+import { errorMessage } from "../utils.js";
 import { SPINNER } from "./agent-widget.js";
 import type { Theme } from "./types.js";
 
@@ -381,6 +382,7 @@ export class AgentNavigator {
   private hostTui: TUI | undefined;
   private screenSwap: ScreenSwapState | undefined;
   private layoutWarningShown = false;
+  private errorWarningShown = false;
   private restoreEditor: (() => void) | undefined;
   private navigationEditor: AgentNavigationEditor | undefined;
 
@@ -400,6 +402,7 @@ export class AgentNavigator {
     this.selectorTui = undefined;
     this.screenSwap = undefined;
     this.layoutWarningShown = false;
+    this.errorWarningShown = false;
 
     const previousEditor = ctx.getEditorComponent();
     ctx.setEditorComponent((tui, theme, keybindings) => {
@@ -1066,7 +1069,16 @@ export class AgentNavigator {
     }
   }
 
+  /** Contain host UI failures from event handlers and polling callbacks. */
   update(): void {
+    try {
+      this.updateNavigator();
+    } catch (error) {
+      this.warnOnce("Agent navigator update failed", error);
+    }
+  }
+
+  private updateNavigator(): void {
     if (!this.uiCtx) return;
 
     const records = this.manager.listAgents();
@@ -1107,8 +1119,13 @@ export class AgentNavigator {
         this.enableShrinkClearing(tui);
         const selector: Component = {
           render: () => {
-            this.captureScreen(tui, selector);
-            return this.renderSelector(tui, theme);
+            try {
+              this.captureScreen(tui, selector);
+              return this.renderSelector(tui, theme);
+            } catch (error) {
+              this.warnOnce("Agent navigator render failed", error);
+              return [];
+            }
           },
           invalidate: () => {},
         };
@@ -1134,6 +1151,14 @@ export class AgentNavigator {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+  }
+
+  private warnOnce(context: string, error: unknown): void {
+    if (this.errorWarningShown) return;
+    this.errorWarningShown = true;
+    try {
+      this.uiCtx?.notify(`[pi-subagents-lite] ${context}: ${errorMessage(error)}`, "warning");
+    } catch { /* Notification failures must not reopen the UI error boundary. */ }
   }
 
   private isTerminalStatus(status: AgentRecord["lifecycle"]["status"]): boolean {

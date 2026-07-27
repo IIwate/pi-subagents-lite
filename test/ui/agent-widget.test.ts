@@ -108,6 +108,25 @@ describe("status bar format", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("contains repeated polling failures and warns once", () => {
+    vi.useFakeTimers();
+    const uiCtx = { setStatus: vi.fn(), notify: vi.fn() };
+    const manager = makeMockManager([]) as any;
+    manager.listAgents = vi.fn(() => { throw new Error("status backend unavailable"); });
+    const widget = new AgentWidget(manager);
+    widget.setUICtx(uiCtx);
+
+    expect(() => widget.ensureTimer()).not.toThrow();
+    expect(() => vi.advanceTimersByTime(3000)).not.toThrow();
+
+    expect(uiCtx.notify).toHaveBeenCalledTimes(1);
+    expect(uiCtx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("status backend unavailable"),
+      "warning",
+    );
+    widget.dispose();
+  });
+
   it("dispose clears the badge and timer", () => {
     const uiCtx = { setStatus: vi.fn() };
     const manager = makeMockManager([makeAgent("a1", "running")]);

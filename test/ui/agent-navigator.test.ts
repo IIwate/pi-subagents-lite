@@ -353,6 +353,45 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).toContain("⠹");
   });
 
+  it("contains repeated refresh failures and warns once", () => {
+    vi.useFakeTimers();
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const manager = makeManager([record]) as any;
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    manager.listAgents = vi.fn(() => { throw new Error("navigator state unavailable"); });
+
+    expect(() => vi.advanceTimersByTime(1500)).not.toThrow();
+
+    expect(ui.ctx.notify).toHaveBeenCalledTimes(1);
+    expect(ui.ctx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("navigator state unavailable"),
+      "warning",
+    );
+  });
+
+  it("contains repeated selector render failures and warns once", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const manager = makeManager([record]) as any;
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+    manager.listAgents = vi.fn(() => { throw new Error("selector state unavailable"); });
+
+    expect(selector.render(120)).toEqual([]);
+    expect(selector.render(120)).toEqual([]);
+
+    expect(ui.ctx.notify).toHaveBeenCalledTimes(1);
+    expect(ui.ctx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("selector state unavailable"),
+      "warning",
+    );
+  });
+
   it("requires Enter before changing the active agent", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
