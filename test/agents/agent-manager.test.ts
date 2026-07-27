@@ -136,7 +136,8 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
 
       deferred1.resolve(mockRunResult());
-      await new Promise((r) => setTimeout(r, 10));
+      // finally() drains the queue on the same promise chain — no wall-clock wait.
+      await manager.getRecord(id1)!.execution.promise;
 
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
       expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
@@ -280,7 +281,7 @@ describe("AgentManager", () => {
       deferred.resolve(mockRunResult());
     });
 
-    it("queues foreground agent when limit is reached", () => {
+    it("queues foreground agent when limit is reached", async () => {
       const config: ConcurrencyConfig = { default: 1, models: { "llamacpp/4b": 1 } };
       manager = new AgentManager(onComplete, config);
 
@@ -301,12 +302,11 @@ describe("AgentManager", () => {
       expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(1);
 
       deferred1.resolve(mockRunResult());
+      await manager.getRecord(id1)!.execution.promise;
 
-      return new Promise((r) => setTimeout(r, 10)).then(() => {
-        expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
-        expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
-        deferred2.resolve(mockRunResult());
-      });
+      expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
+      expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
+      deferred2.resolve(mockRunResult());
     });
   });
 

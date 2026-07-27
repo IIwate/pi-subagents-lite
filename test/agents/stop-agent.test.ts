@@ -19,6 +19,30 @@ vi.mock("../../src/shell.js", () => shellMock({
   },
 }));
 
+// StopAgent does not use the spawn/model path. Stub those imports so this focused
+// suite does not pay for tool-execution.ts's unrelated dependency graph.
+vi.mock("../../src/agents/agent-types.js", () => ({
+  resolveType: () => undefined,
+  getAgentConfig: () => undefined,
+  discoverNewAgents: async () => 0,
+}));
+vi.mock("../../src/spawn/worktree-validator.js", () => ({
+  validateWorktreePath: async () => ({ ok: false, error: "unused" }),
+}));
+vi.mock("../../src/utils.js", () => ({
+  findModelInRegistry: () => undefined,
+  parseThinkingLevel: () => undefined,
+  parseModelSpec: () => ({ modelRef: undefined }),
+  resolveExactModel: () => undefined,
+  unknownModelError: () => "unused",
+}));
+vi.mock("../../src/models/model-scope.js", () => ({
+  getActiveScopedModelKeys: () => null,
+  isModelInScope: () => true,
+  outOfScopeModelError: () => "unused",
+  modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
+}));
+
 import { executeStopAgentTool } from "../../src/agents/tool-execution.js";
 
 describe("executeStopAgentTool", () => {

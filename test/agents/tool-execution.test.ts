@@ -45,26 +45,18 @@ vi.mock("../../src/agents/agent-types.js", () => ({
   discoverNewAgents: mockDiscoverNewAgents,
 }));
 
-vi.mock("../../src/models/model-precedence.js", () => ({
-  resolveModel: vi.fn(() => undefined),
+vi.mock("../../src/models/model-scope.js", () => ({
+  // Scope policy itself is covered in model-scope.test.ts; this suite verifies
+  // that executeAgentTool enforces the returned scope and surfaces its error.
+  getActiveScopedModelKeys: mockGetActiveScopedModelKeys,
+  modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
+  isModelInScope: (
+    model: { provider: string; id: string },
+    scopedKeys: ReadonlySet<string> | null,
+  ) => !scopedKeys || scopedKeys.has(`${model.provider}/${model.id}`),
+  outOfScopeModelError: (modelRef: string, scopedKeys: ReadonlySet<string>) =>
+    `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
 }));
-
-vi.mock("../../src/models/model-scope.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/models/model-scope.js")>();
-  return {
-    ...actual,
-    // Default: no active scope so existing spawn tests stay unrestricted.
-    getActiveScopedModelKeys: mockGetActiveScopedModelKeys,
-  };
-});
-
-vi.mock("../../src/utils.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/utils.js")>();
-  return {
-    ...actual,
-    // Keep real parseThinkingLevel / parseModelKey / findModelInRegistry for param tests.
-  };
-});
 
 vi.mock("../../src/shell.js", () => ({
   getStore: () => ({
@@ -115,11 +107,6 @@ vi.mock("../../src/shell.js", () => ({
     onAgentComplete: vi.fn(),
     dispose: vi.fn(),
   }),
-}));
-
-vi.mock("../../src/agents/usage.js", () => ({
-  addUsage: vi.fn(),
-  getSessionContextPercent: vi.fn(() => null),
 }));
 
 // Import after mocks are in place

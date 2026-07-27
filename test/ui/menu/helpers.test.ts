@@ -2,7 +2,14 @@
  * helpers.test.ts — Tests for ui/menu/helpers.ts.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// helpers.ts imports SearchableSelectDialog only for createSearchableSelect;
+// these cases never touch it. Mock the dialog so we don't load DynamicBorder/pi.
+vi.mock("../../../src/ui/searchable-select.js", () => ({
+  SearchableSelectDialog: class {},
+}));
+
 import { validateNumeric, buildSettingsListTheme, buildSelectListTheme } from "../../../src/ui/menu/helpers.js";
 
 const mockTheme = {

@@ -32,6 +32,11 @@ vi.mock("../../src/config/config-io.js", () => ({
   DEFAULT_CONFIG: { agent: { default: null, forceBackground: false }, concurrency: { default: 4 } },
 }));
 
+// Result formatting has its own tests; coordinator only owns delivery and scheduling.
+vi.mock("../../src/agents/tool-execution.js", () => ({
+  formatResultContent: (record: AgentRecord) => record.result ?? "",
+}));
+
 // Hoist mock pi so shell mock can return it
 const { mockPi, mockGetPiInstance } = vi.hoisted(() => ({
   mockPi: { sendMessage: vi.fn(), sendUserMessage: vi.fn(), exec: vi.fn(), registerTool: vi.fn(), registerCommand: vi.fn(), on: vi.fn() } as unknown as ExtensionAPI,

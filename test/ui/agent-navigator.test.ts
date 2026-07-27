@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// CustomEditor is only a fallback here; keep real pi-tui key/width behavior covered.
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  CustomEditor: class {
+    constructor(_tui: unknown, _theme: unknown, _keybindings?: unknown) {}
+  },
+}));
+
 import type { AgentManager } from "../../src/agents/agent-manager.js";
 import { AgentNavigator } from "../../src/ui/agent-navigator.js";
 

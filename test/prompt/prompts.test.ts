@@ -13,20 +13,17 @@ import { describe, it, expect, vi } from "vitest";
 import { buildAgentPrompt } from "../../src/prompt/prompts.ts";
 import type { AgentConfig, EnvInfo } from "../../src/types.ts";
 
-vi.mock("@earendil-works/pi-coding-agent", async () => {
-  const actual = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>("@earendil-works/pi-coding-agent");
-  return {
-    ...actual,
-    // Return only <skill> elements — buildAgentPrompt extracts these with regex
-    // and adds its own intro text and <available_skills> wrapper.
-    formatSkillsForPrompt: vi.fn((skills: any[]) => {
-      return skills
-        .filter((s: any) => !s.disableModelInvocation)
-        .map((s: any) => `<skill><name>${escapeXml(s.name)}</name><description>${escapeXml(s.description)}</description><location>${escapeXml(s.filePath)}</location></skill>`)
-        .join("\n");
-    }),
-  };
-});
+// Stub only formatSkillsForPrompt — do not importActual the full pi package (multi-second tax).
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  // Return only <skill> elements — buildAgentPrompt extracts these with regex
+  // and adds its own intro text and <available_skills> wrapper.
+  formatSkillsForPrompt: vi.fn((skills: any[]) => {
+    return skills
+      .filter((s: any) => !s.disableModelInvocation)
+      .map((s: any) => `<skill><name>${escapeXml(s.name)}</name><description>${escapeXml(s.description)}</description><location>${escapeXml(s.filePath)}</location></skill>`)
+      .join("\n");
+  }),
+}));
 
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
