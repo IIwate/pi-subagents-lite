@@ -401,7 +401,7 @@ function buildExtOverride(
 
 /**
  * Phase 2: Build DefaultResourceLoader with extension filtering.
- * Returns the loader and a function that reloads it and builds the ext→tool map.
+ * Returns the loader and its explicit reload step.
  */
 function createResourceLoader(
   config: ReturnType<typeof getConfig>,
@@ -423,14 +423,7 @@ function createResourceLoader(
     extensionsOverride: buildExtOverride(extensions, agentConfig?.excludeExtensions),
   };
   const loader = new DefaultResourceLoader(loaderOpts);
-  return {
-    loader,
-    reloadAndMap: async () => {
-      await loader.reload();
-      const extResult = loader.getExtensions();
-      return { extResult, extToolMap: buildExtToolMap(extResult.extensions) };
-    },
-  };
+  return { loader, reload: () => loader.reload() };
 }
 
 /**
@@ -465,7 +458,6 @@ async function initSession(
   type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
-  extToolMap: Map<string, string[]>,
 ) {
   const model = options.model ?? findModelInRegistry(
     agentConfig?.model, ctx.modelRegistry, ctx.model,
@@ -485,8 +477,8 @@ async function initSession(
     model,
     tools: resolveSessionAllowedTools({
       registeredTools: getToolNamesForType(type),
+      restrictToRegisteredTools: Boolean(agentConfig?.registeredTools?.length),
       tools: agentConfig?.tools,
-      extToolMap,
     }),
     resourceLoader: loader,
     ...(scopedModels ? { scopedModels } : {}),
@@ -524,17 +516,17 @@ async function createAndConfigureSession(
   type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
-  extToolMap: Map<string, string[]>,
   notify: (msg: string) => void,
 ): Promise<AgentSession> {
-  const { session } = await initSession(ctx, options, agentConfig, type, cwd, loader, extToolMap);
+  const { session } = await initSession(ctx, options, agentConfig, type, cwd, loader);
   const baseName = agentConfig?.name ?? type;
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
   );
   await session.bindExtensions({});
+  const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
   const filteredTools = resolveVisibleTools({
-    activeTools: session.getActiveToolNames(),
+    activeTools: session.getAllTools().map(tool => tool.name),
     tools: agentConfig?.tools,
     excludeTools: agentConfig?.excludeTools,
     extToolMap,
@@ -683,10 +675,10 @@ async function runAgentImpl(
     type, agentConfig, config, effectiveCwd, env,
     mode, promptExtras,
   );
-  const { loader, reloadAndMap } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
-  const { extToolMap } = await reloadAndMap();
+  const { loader, reload } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
+  await reload();
   const session = await createAndConfigureSession(
-    ctx, options, agentConfig, type, effectiveCwd, loader, extToolMap, bufferNotify,
+    ctx, options, agentConfig, type, effectiveCwd, loader, bufferNotify,
   );
   const { unsubscribe: unsubTurns, getAborted, getTurnLimited } = wireTurnTracking(session, {
     ...options,

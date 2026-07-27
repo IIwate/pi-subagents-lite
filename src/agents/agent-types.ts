@@ -268,33 +268,28 @@ export function resolveVisibleTools(opts: {
 }
 
 /**
- * Resolve the concrete names that Pi may register for a child session.
+ * Resolve Pi's immutable child-session registry gate.
  *
- * Pi applies createAgentSession({ tools }) before extensions bind, so a builtins-only
- * list permanently drops extension tools. Seed that registry gate with the resolved
- * extension tools; resolveVisibleTools still owns the final active-tool policy.
+ * Unrestricted agents and extension wildcards must omit the gate because extensions may
+ * register tools during session_start, after createAgentSession has frozen the allowlist.
+ * resolveVisibleTools applies the final policy before the first prompt. Revisit when Pi
+ * exposes a mutable registry allowlist.
  */
 export function resolveSessionAllowedTools(opts: {
   registeredTools: string[];
+  restrictToRegisteredTools?: boolean;
   tools?: true | string[] | false;
-  extToolMap?: Map<string, string[]>;
-}): string[] {
+}): string[] | undefined {
   if (opts.tools === false) return [];
 
   if (Array.isArray(opts.tools)) {
-    return [...resolveToolEntries(opts.tools, opts.extToolMap)]
+    if (opts.tools.some(tool => tool.endsWith("/*"))) return undefined;
+    return [...resolveToolEntries(opts.tools, undefined)]
       .filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
   }
 
-  const allowed = new Set(
-    opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool)),
-  );
-  for (const tools of opts.extToolMap?.values() ?? []) {
-    for (const tool of tools) {
-      if (!EXCLUDED_TOOL_NAMES.includes(tool)) allowed.add(tool);
-    }
-  }
-  return [...allowed];
+  if (!opts.restrictToRegisteredTools) return undefined;
+  return opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
 }
 
 /** Get built-in tool names for a type (case-insensitive). */

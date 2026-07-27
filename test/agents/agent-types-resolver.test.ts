@@ -341,33 +341,37 @@ describe("resolveVisibleTools — tools: true/false/undefined", () => {
 /* ------------------------------------------------------------------ */
 
 describe("resolveSessionAllowedTools", () => {
-  const extToolMap = new Map([
-    ["tavily", ["web_search", "web_extract"]],
-  ]);
-
-  it("expands extension tools before Pi applies the session registry gate", () => {
+  it("leaves wildcard registries open for session_start tool registration", () => {
     expect(resolveSessionAllowedTools({
       registeredTools: ["read", "bash", "edit"],
       tools: ["read", "tavily/*"],
-      extToolMap,
-    })).toEqual(["read", "web_search", "web_extract"]);
+    })).toBeUndefined();
   });
 
-  it("registers loaded extension tools by default without leaking Agent", () => {
+  it("preserves an explicit registeredTools capability boundary", () => {
     expect(resolveSessionAllowedTools({
       registeredTools: ["read", "bash", "Agent"],
-      extToolMap: new Map([
-        ...extToolMap,
-        ["subagents", ["Agent"]],
-      ]),
-    })).toEqual(["read", "bash", "web_search", "web_extract"]);
+      restrictToRegisteredTools: true,
+    })).toEqual(["read", "bash"]);
+  });
+
+  it("leaves unrestricted agent registries open for extension tools", () => {
+    expect(resolveSessionAllowedTools({
+      registeredTools: ["read", "bash", "edit"],
+    })).toBeUndefined();
+  });
+
+  it("keeps concrete extension tool names in the immutable gate", () => {
+    expect(resolveSessionAllowedTools({
+      registeredTools: ["read", "bash"],
+      tools: ["read", "tavily/web_search"],
+    })).toEqual(["read", "web_search"]);
   });
 
   it("registers no tools when tools are disabled", () => {
     expect(resolveSessionAllowedTools({
       registeredTools: ["read", "bash"],
       tools: false,
-      extToolMap,
     })).toEqual([]);
   });
 });

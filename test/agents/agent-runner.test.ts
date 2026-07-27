@@ -160,6 +160,7 @@ function createMockSession() {
   return {
     setSessionName: vi.fn(),
     getActiveToolNames: vi.fn(),
+    getAllTools: vi.fn(() => ["read", "bash", "edit"].map(name => ({ name }))),
     setActiveToolsByName: vi.fn(),
     bindExtensions: vi.fn(),
     subscribe: vi.fn((listener: (event: any) => void) => {
@@ -287,11 +288,15 @@ describe("runAgent — tool visibility wiring", () => {
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
   });
 
-  it("maps loaded extension tools before applying visibility", async () => {
+  it("includes extension tools registered during session_start before applying visibility", async () => {
+    const extensionTools = new Map<string, unknown>([["web_search", {}]]);
     const session = createMockSession();
-    session.getActiveToolNames.mockReturnValue([
-      "read", "bash", "edit", "web_search", "web_extract", "Agent",
-    ]);
+    session.bindExtensions.mockImplementation(async () => {
+      extensionTools.set("web_extract", {});
+      session.getAllTools.mockReturnValue([
+        "read", "bash", "edit", "web_search", "web_extract", "Agent",
+      ].map(name => ({ name })));
+    });
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
     mockModules.mockGetAgentConfig.mockReturnValue({
       ...defaultAgentConfig,
@@ -303,23 +308,39 @@ describe("runAgent — tool visibility wiring", () => {
       extensions: ["tavily"],
       tools: ["read", "tavily/*"],
     });
-    mockModules.setLoaderExtensions([
-      {
-        path: "/home/test/.pi/agent/extensions/tavily/index.ts",
-        tools: new Map([
-          ["web_search", {}],
-          ["web_extract", {}],
-        ]),
-      },
-    ]);
+    mockModules.setLoaderExtensions([{
+      path: "/home/test/.pi/agent/extensions/tavily/index.ts",
+      tools: extensionTools,
+    }]);
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
     const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
-    expect(sessionOptions.tools).toEqual(["read", "web_search", "web_extract"]);
+    expect(sessionOptions.tools).toBeUndefined();
     expect(session.setActiveToolsByName).toHaveBeenCalledWith([
       "read", "web_search", "web_extract",
     ]);
+  });
+
+  it("keeps explicit registeredTools as the session capability boundary", async () => {
+    const session = createMockSession();
+    session.getAllTools.mockReturnValue(["read", "bash"].map(name => ({ name })));
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      registeredTools: ["read", "bash"],
+    });
+    mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash"]);
+    mockModules.setLoaderExtensions([{
+      path: "/home/test/.pi/agent/extensions/tavily/index.ts",
+      tools: new Map([["web_search", {}]]),
+    }]);
+
+    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
+
+    const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
+    expect(sessionOptions.tools).toEqual(["read", "bash"]);
+    expect(sessionOptions.tools).not.toContain("web_search");
   });
 
   it("applies an empty tool list when tools are disabled", async () => {
