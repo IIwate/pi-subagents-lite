@@ -349,13 +349,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
     navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
     navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
-    expect(selector.render(120)[0]).toMatch(/^Delete\?/);
+    expect(selector.render(120)[0]).toBe('Remove “Inspect the project”? · Enter Remove · Esc Cancel');
 
     navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const lines = selector.render(120);
-    expect(lines.join("\n")).not.toContain("Delete?");
-    expect(lines[0]).toMatch(/^↑↓ move/);
+    expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
+    expect(lines[0]).toMatch(/^↑↓ Move/);
   });
 
   it("uses native shrink clearing while the selector is mounted", () => {
@@ -409,16 +409,16 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x04");
-    expect(selector.render(120).join("\n")).toContain("Delete?");
+    expect(selector.render(120).join("\n")).toContain("Remove “Inspect the project”? · Enter Remove · Esc Cancel");
 
     // Ctrl+C is not consumed; pass it upward while cancelling confirmation.
     const result = navigator.handleTerminalInput("\x03");
     expect(result?.consume).toBeFalsy();
     expect(manager.clear).not.toHaveBeenCalled();
-    expect(selector.render(120).join("\n")).not.toContain("Delete?");
+    expect(selector.render(120).join("\n")).not.toContain("Remove “Inspect the project”?");
 
     // Other keys are consumed only during confirmation; ordinary input returns to the editor after cancellation.
-    expect(selector.render(120).join("\n")).toContain("↑↓ move");
+    expect(selector.render(120).join("\n")).toContain("↑↓ Move");
   });
 
   it("respects the statsVisibility showCost toggle", () => {
@@ -543,7 +543,7 @@ describe("AgentNavigator", () => {
     const text = selector.render(120).join("\n");
     // Focus hint only renders while listFocused; retained after Enter so the
     // next Up still navigates without re-entering from the editor.
-    expect(text).toContain("↑↓ move");
+    expect(text).toContain("↑↓ Move");
     expect(text).toContain("› ●");
     expect(text).toContain("Inspect the project");
     expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
@@ -565,7 +565,7 @@ describe("AgentNavigator", () => {
     const focused = selector.render(120).join("\n");
     expect(focused).toMatch(/› ○ \S+/);
     expect(focused).toContain("Inspect the project");
-    expect(focused).toContain("↑↓ move"); // focus hint while list-focused
+    expect(focused).toContain("↑↓ Move"); // focus hint while list-focused
 
     navigator.handleTerminalInput("\x1b");
 

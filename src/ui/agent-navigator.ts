@@ -935,22 +935,25 @@ export class AgentNavigator {
     const visibleEntries = entries.slice(start, end);
     const highlightedRecord = entries.find(entry => entry.id === this.highlightedAgentId)?.record;
 
-    // No permanent header chrome; only show a short focus hint while navigating.
-    // Start in the focus-marker column so hints align with the moving selector below.
+    // No permanent header chrome; show one contextual command bar while navigating.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
     if (this.listFocused) {
       const failureHint = highlightedRecord ? recoverableFailureHint(highlightedRecord) : undefined;
       if (this.confirmingClearId !== null) {
-        lines.push(truncateToWidth(
-          theme.fg("error", "Delete? Enter confirm · Esc cancel"),
-          cols,
-        ));
+        const record = this.manager.getRecord(this.confirmingClearId);
+        const target = truncateToWidth(record?.display.description ?? "agent", 32);
+        const confirmation = [
+          theme.fg("dim", `Remove “${target}”? · Enter `),
+          theme.fg("error", "Remove"),
+          theme.fg("dim", " · Esc Cancel"),
+        ].join("");
+        lines.push(truncateToWidth(confirmation, cols));
       } else if (failureHint) {
         lines.push(truncateToWidth(theme.fg("warning", failureHint), cols));
       } else {
         lines.push(truncateToWidth(
-          theme.fg("dim", "↑↓ move · Enter select · Ctrl+D clear · Esc editor"),
+          theme.fg("dim", "↑↓ Move · Enter Open · Ctrl+D Remove · Esc Editor"),
           cols,
         ));
       }
