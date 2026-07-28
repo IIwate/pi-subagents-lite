@@ -1,41 +1,111 @@
 # @iiwate/pi-subagents-lite
 
-**Sub-agents for [pi](https://pi.dev) — schema-first, list-first.**
-
-Spawn specialized agents with isolated sessions, custom tools, and per-type models at minimal token cost. The chat feed stays silent; all agent progress lives in a compact list below the editor.
+Lightweight subagents for [pi](https://pi.dev), with isolated sessions, per-agent tools and models, background execution, and a keyboard-driven list below the editor. Agent tool calls and completion delivery stay out of the chat UI.
 
 ## Install
 
 ```bash
 pi install npm:@iiwate/pi-subagents-lite
 pi install -l npm:@iiwate/pi-subagents-lite   # project-local
-pi -e npm:@iiwate/pi-subagents-lite           # try without installing
+pi -e npm:@iiwate/pi-subagents-lite           # try for one run
 ```
 
-## Quick Start
+## Usage
 
-The LLM calls `Agent` like any other tool (`StopAgent` stops one, `AgentStatus` lists all). Foreground agents block until done; background agents acknowledge immediately and deliver results to the LLM silently on completion.
+The extension registers three tools for the LLM:
 
-Progress appears only in the below-editor agent list (one row per agent, capped at ~6 rows):
+- `Agent` — start a subagent. Foreground runs wait for completion; `run_in_background: true` returns immediately.
+- `StopAgent` — stop a running or queued agent by ID.
+- `AgentStatus` — list current and completed agents without polling or waiting.
 
-- **Empty editor + `↓`** — focus the list; `↑↓` move, `Enter` switches the visible transcript to that agent, `Esc` returns to the editor.
-- **`Ctrl+D` on a row** — clear that agent from the list (`Enter` confirms, `Esc` cancels). Running agents are stopped first.
-- With a subagent selected, typing in the editor messages that subagent directly; select Main to return.
+Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Each row keeps a fixed status column before the stats:
 
-Model/concurrency settings, stats visibility, and agent-type management live under `/agents`.
+```text
+› ● Main
+  ○ Explore   Inspect the project       Running       4 calls · 25s
+  ○ Security  Audit authentication      Needs input  81 calls · 36m
+```
 
-## Differences from Upstream
+- `›` marks the keyboard-highlighted row.
+- `●` marks the active transcript; `○` marks inactive rows.
+- Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`.
+- With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, and `Esc` to return to the editor.
+- Press `Ctrl+D` on an inactive subagent to clear it; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
+- While a subagent is active, editor input is routed to that session. Activate `Main` to return to the parent transcript.
+- `Needs input` means the run failed after a live child session already existed. Select it and send another prompt to continue the same in-memory session. This is not persisted across `/reload` or process exit, and the parent LLM has no continuation tool. Clear the row when finished, or leave it until the parent session ends.
 
-This package is a fork of [luispater/pi-subagents-lite](https://github.com/luispater/pi-subagents-lite) that diverged after upstream v1.5.0. Compared with the upstream `main` branch, this fork:
+Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.
 
-- uses a single below-editor agent list as the only progress UI (the above-editor tree widget is removed, along with its compact/max-lines settings);
-- keeps the chat feed free of `Agent`, `StopAgent`, and `AgentStatus` tool cards; the list owns visible progress and stats;
-- starts subagents only through the `Agent` tool; `/agents` remains for settings and diagnostics, without a duplicate manual spawn wizard;
-- delivers background completion to the LLM with `display: false` (no purple result card, no toast);
-- caps the list height (~6 rows with hidden-row scrolling), slows list/status refresh, and reports in-flight count only via `setStatus`;
-- supports manual agent clear from the list (`Ctrl+D`, with confirm) and forces TUI reflow when the list shrinks, a subagent finishes, or the main session ends — reducing blank gaps under classic powerline layouts.
+## Built-in Agents
 
-For the shared feature set (custom agent types, model precedence, concurrency limits, and worktrees), see the [upstream README](https://github.com/luispater/pi-subagents-lite#readme).
+- `general-purpose` — general task execution using the configured session tools.
+- `Explore` — read-only codebase exploration.
+
+Built-ins can be overridden by custom agents or disabled from `/agents`.
+
+## Custom Agents
+
+Agent definitions are Markdown files loaded from:
+
+- `~/.pi/agent/agents/*.md` — user-wide agents.
+- `.pi/agents/*.md` — project agents.
+
+Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field.
+
+```markdown
+---
+name: reviewer
+display_name: Reviewer
+description: Review code without modifying it
+tools:
+  - read
+  - grep
+  - find
+model: provider/model-id
+thinking: high
+max_turns: 12
+extensions: false
+skills:
+  - review-guidelines
+---
+
+Review the requested changes. Prioritize correctness, regressions, and missing tests.
+```
+
+Supported frontmatter fields:
+
+- Identity: `name`, `display_name`, `description`, `hidden`.
+- Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
+- Runtime: `model`, `thinking`, `max_turns`, `max_tokens`.
+
+Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents.
+
+## Agent Options
+
+`Agent` accepts:
+
+- `prompt` — required task text.
+- `description` — short list label; defaults to the first prompt line.
+- `agent` — agent type; defaults to `general-purpose`.
+- `model` — `id`, `provider/id`, or either form with a `:thinking` suffix. The model must resolve exactly and remain inside Pi's active model scope.
+- `thinking` — a non-empty provider thinking level; common values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
+- `run_in_background` — return immediately and notify the parent when complete.
+- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
+
+Model selection precedence is: explicit `model` option, session override, persisted override, agent frontmatter, then the parent model.
+
+## Settings
+
+Run `/agents` to configure:
+
+- global and per-type model overrides;
+- default, per-provider, and per-model concurrency limits;
+- background mode, grace turns, and default thinking;
+- system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
+- implicit skill and extension loading, built-in agents, and visible list statistics;
+- agent type inspection and diagnostic briefing.
+
+Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
 
 ## License
 
