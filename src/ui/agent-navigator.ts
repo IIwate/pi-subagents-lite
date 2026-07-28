@@ -47,6 +47,9 @@ const ROOT_REGIONS_AFTER_CHAT = 6;
 const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_WIDTH = 11;
+const STATUS_COLUMN_GAP = 2;
+const STATS_COLUMN_WIDTH = 36;
+const MIN_LEFT_COLUMN_WIDTH = 18;
 
 type NavigatorUICtx = Pick<
   ExtensionUIContext,
@@ -125,13 +128,29 @@ function appendWrapped(lines: string[], text: string, width: number): void {
   }
 }
 
-function alignRight(left: string, right: string, width: number): string {
-  const rightWidth = visibleWidth(right);
-  if (rightWidth === 0 || width <= rightWidth + 1) return truncateToWidth(left, width);
+function padRight(text: string, width: number): string {
+  return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
+}
 
-  const leftText = truncateToWidth(left, width - rightWidth - 1, "…");
-  const padding = Math.max(1, width - visibleWidth(leftText) - rightWidth);
-  return `${leftText}${" ".repeat(padding)}${right}`;
+function renderAgentRow(left: string, status: string, stats: string, width: number): string {
+  const maxStatsWidth = Math.max(
+    0,
+    width - MIN_LEFT_COLUMN_WIDTH - STATUS_COLUMN_WIDTH - STATUS_COLUMN_GAP * 2,
+  );
+  const statsWidth = Math.min(STATS_COLUMN_WIDTH, maxStatsWidth);
+  const leftWidth = Math.max(
+    0,
+    width - STATUS_COLUMN_WIDTH - statsWidth - STATUS_COLUMN_GAP * 2,
+  );
+  const leftText = padRight(truncateToWidth(left, leftWidth, "…"), leftWidth);
+  const statusText = padRight(truncateToWidth(status, STATUS_COLUMN_WIDTH), STATUS_COLUMN_WIDTH);
+  if (statsWidth === 0) return truncateToWidth(
+    `${leftText}${" ".repeat(STATUS_COLUMN_GAP)}${statusText}`,
+    width,
+  );
+
+  const statsText = truncateToWidth(stats, statsWidth, "…");
+  return `${leftText}${" ".repeat(STATUS_COLUMN_GAP)}${statusText}${" ".repeat(STATUS_COLUMN_GAP)}${" ".repeat(statsWidth - visibleWidth(statsText))}${statsText}`;
 }
 
 function renderAgentStatus(record: AgentRecord, theme: Theme): string {
@@ -155,7 +174,7 @@ function renderAgentStatus(record: AgentRecord, theme: Theme): string {
     }
   }
 
-  const status = theme.fg(color, label.padEnd(STATUS_COLUMN_WIDTH));
+  const status = theme.fg(color, label);
   return bold ? theme.bold(status) : status;
 }
 
@@ -963,9 +982,8 @@ export class AgentNavigator {
       }, theme, this.statsVisibility);
       const left = `${focus} ${circle} ${active || highlighted ? theme.bold(name) : name}${description ? `  ${theme.fg("dim", description)}` : ""}`;
       const status = renderAgentStatus(record, theme);
-      const stats = theme.fg("dim", statsParts.join(STATS_SEP));
-      const right = stats ? `${status}${STATS_SEP}${stats}` : status;
-      lines.push(alignRight(left, right, tui.terminal.columns));
+      const stats = statsParts.length > 0 ? theme.fg("dim", statsParts.join(STATS_SEP)) : "";
+      lines.push(renderAgentRow(left, status, stats, tui.terminal.columns));
     }
 
     if (end < entries.length) {

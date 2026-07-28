@@ -223,8 +223,10 @@ describe("AgentNavigator", () => {
 
   it("renders a fixed status column and marks continuable errors as needing input", () => {
     const running = makeRecord("agent-running", "running");
-    running.display.description = "Active task";
     const blocked = makeRecord("agent-blocked", "error");
+    running.stats.toolUses = 1;
+    blocked.stats.toolUses = 81;
+    running.display.description = "Active task";
     blocked.display.description = "Blocked task";
     blocked.execution.settled = true;
     blocked.error = "content was flagged";
@@ -260,6 +262,23 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
 
     expect(selector.render(120).join("\n")).toContain(label);
+  });
+
+  it("keeps Needs input visible when a narrow terminal truncates other columns", () => {
+    const record = makeRecord("agent-blocked", "error");
+    record.execution.settled = true;
+    record.error = "content was flagged";
+    record.display.description = "A very long security audit description";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+    tui.terminal.columns = 42;
+
+    const row = selector.render(42).find((line: string) => line.includes("Needs input"))!;
+    expect(row).toContain("Needs input");
+    expect(row).not.toContain("security audit description");
   });
 
   it("shows the recovery reason while a continuable failure is highlighted", () => {
