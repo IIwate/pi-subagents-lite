@@ -693,6 +693,35 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id)).toBeUndefined();
     });
 
+    it("cancels a fault-bound expiry when the user continues the session", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("debug injected: content was flagged");
+      });
+      const continuation = makeResolvablePromise();
+      mockModules.mockContinueAgentSession.mockReturnValue(continuation.promise);
+      manager.armDebugFault("output_blocked", 10_000);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toBe(true);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(manager.getRecord(id)).toBe(record);
+      expect(record.lifecycle.status).toBe("running");
+
+      continuation.resolve({ responseText: "defensive summary", aborted: false, turnLimited: false });
+      await record.execution.promise;
+      expect(record.lifecycle.status).toBe("completed");
+    });
+
     it("evicts old setup failures without a child session", async () => {
       manager = new AgentManager(onComplete);
       mockModules.mockRunAgent.mockRejectedValue(new Error("model unavailable"));
