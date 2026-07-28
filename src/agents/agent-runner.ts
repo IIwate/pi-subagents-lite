@@ -550,18 +550,37 @@ function wireTurnTracking(
   let softLimitReached = false;
   let aborted = false;
   const graceTurns = options.graceTurns ?? DEFAULT_GRACE_TURNS;
+  // Turns the agent actually gets after the steer. The hard abort fires at the
+  // first turn_end with turnCount >= maxTurns + graceTurns, so graceTurns of
+  // 0 or 1 both leave exactly one turn. Quote the real number, not the config.
+  const remainingTurns = Math.max(1, graceTurns);
 
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
     if (event.type !== "turn_end") return;
     turnCount++;
     options.onTurnEnd?.(turnCount);
     if (maxTurns == null) return;
+    // steer() and abort() both return promises and both fire from inside this
+    // subscribe callback, so an unhandled rejection escapes the run instead of
+    // failing it. Rejection is realistic here — both target a session that may
+    // already be tearing down.
     if (!softLimitReached && turnCount >= maxTurns) {
       softLimitReached = true;
-      session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
+      // Quantify the deadline. "Wrap up immediately" carries no budget, and the
+      // models that overrun the grace window are the small local ones that need
+      // the number most — an agent that ignores this gets hard-aborted with no
+      // final text, which reaches the parent as a bare status note.
+      // A rejected steer only costs the graceful wrap-up; the abort still fires.
+      void session
+        .steer(
+          `You have reached your turn limit of ${maxTurns}. You have ${remainingTurns} turn(s) left before you are terminated. Stop calling tools and write your final answer now — if the task is unfinished, report what you completed and what remains.`,
+        )
+        .catch(() => {});
     } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
       aborted = true;
-      session.abort();
+      // `aborted` is already set, so a rejected abort() cannot change the
+      // reported outcome — only swallow the rejection.
+      void session.abort().catch(() => {});
     }
   });
 

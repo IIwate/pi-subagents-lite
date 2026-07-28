@@ -46,16 +46,26 @@ vi.mock("../../src/models/model-scope.js", () => ({
 import { executeStopAgentTool, formatResultContent } from "../../src/agents/tool-execution.js";
 
 describe("formatResultContent", () => {
+  // Only the composition contract lives here: result text, then the note as a
+  // parenthetical suffix. The note wording is owned by status-note.test.ts —
+  // pinning full sentences in both files meant one reword broke two suites.
   it.each([
-    ["completed", undefined, "partial output"],
-    ["aborted", undefined, "partial output (hit the turn limit before completion; output may be incomplete)"],
-    ["turn_limited", undefined, "partial output (wrapped up at the turn limit — output may be partial)"],
-    ["stopped", "user", "partial output (STOPPED BY THE USER before completion — output is partial; the task was NOT finished)"],
-  ])("formats %s results with the status-note contract", (status, stoppedBy, expected) => {
-    expect(formatResultContent({
+    ["completed", undefined, ""],
+    ["aborted", undefined, "HARD-STOPPED"],
+    ["turn_limited", undefined, "wrapped up at the turn limit"],
+    ["stopped", "user", "STOPPED BY THE USER"],
+  ])("formats %s results with the status-note contract", (status, stoppedBy, noteFragment) => {
+    const content = formatResultContent({
       result: "partial output",
       lifecycle: { status, startedAt: 0, stoppedBy },
-    } as any)).toBe(expected);
+    } as any);
+
+    if (!noteFragment) {
+      expect(content).toBe("partial output");
+      return;
+    }
+    expect(content).toMatch(/^partial output \(.+\)$/);
+    expect(content).toContain(noteFragment);
   });
 
   it("formats terminal errors with their diagnostic", () => {

@@ -182,8 +182,11 @@ function createMockSession() {
         });
       }
     }),
-    steer: vi.fn(),
-    abort: vi.fn(),
+    // Must resolve: the real AgentSession returns Promise<void> for both. A
+    // bare vi.fn() returning undefined let wireTurnTracking's missing rejection
+    // handling pass unnoticed — keep these promise-shaped.
+    steer: vi.fn(async () => {}),
+    abort: vi.fn(async () => {}),
     messages: [],
     _getListeners: () => listeners,
   };
@@ -685,9 +688,12 @@ describe("continueAgentSession", () => {
       graceTurns: 0,
     });
 
-    expect(session.steer).toHaveBeenCalledWith(
-      "You have reached your turn limit. Wrap up immediately — provide your final answer now.",
-    );
+    // Assert the contract, not the sentence: the steer must quantify both the
+    // limit that fired and the budget left, so the model can act on it. Pinning
+    // the literal text just breaks on every wording change.
+    const steerMessage = session.steer.mock.calls[0][0] as string;
+    expect(steerMessage).toContain("turn limit of 1");
+    expect(steerMessage).toContain("1 turn(s) left");
     expect(session.abort).toHaveBeenCalled();
     expect(result.aborted).toBe(true);
     expect(result.turnLimited).toBe(true);
@@ -1002,6 +1008,102 @@ describe("runAgent — grace turns", () => {
 
     resolvePrompt();
     const result = await promise;
+    expect(result.aborted).toBe(true);
+  });
+
+  it("quantifies the turn budget in the steer message", async () => {
+    const { session, resolvePrompt } = createPendingPromptSession();
+    session.getActiveToolNames.mockReturnValue(["read"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    const promise = runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      maxTurns: 4,
+      graceTurns: 3,
+    });
+    await vi.waitFor(() => { expect(session.prompt).toHaveBeenCalled(); });
+
+    for (let i = 0; i < 4; i++) {
+      session._getListeners().forEach((fn: any) => fn({ type: "turn_end" }));
+    }
+
+    const message = session.steer.mock.calls[0][0] as string;
+    expect(message).toContain("turn limit of 4");
+    expect(message).toContain("3 turn(s) left");
+
+    resolvePrompt();
+    await promise;
+  });
+
+  it("reports one remaining turn when graceTurns is 0", async () => {
+    const { session, resolvePrompt } = createPendingPromptSession();
+    session.getActiveToolNames.mockReturnValue(["read"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    // graceTurns 0 and 1 both leave exactly one usable turn (see the
+    // graceTurns=0 case above) — the steer must not promise zero.
+    const promise = runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      maxTurns: 2,
+      graceTurns: 0,
+    });
+    await vi.waitFor(() => { expect(session.prompt).toHaveBeenCalled(); });
+
+    for (let i = 0; i < 2; i++) {
+      session._getListeners().forEach((fn: any) => fn({ type: "turn_end" }));
+    }
+
+    expect(session.steer.mock.calls[0][0] as string).toContain("1 turn(s) left");
+
+    resolvePrompt();
+    await promise;
+  });
+
+  it("attaches rejection handlers to steer and abort", async () => {
+    const { session, resolvePrompt } = createPendingPromptSession();
+    session.getActiveToolNames.mockReturnValue(["read"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    // Both calls fire from inside a subscribe callback, so a rejected promise
+    // escapes the run entirely instead of failing it — under
+    // --unhandled-rejections=throw that takes down the host process. Rejection
+    // is realistic here: steer/abort target a session already tearing down.
+    //
+    // Asserted via a .catch spy rather than process.on("unhandledRejection"):
+    // vitest's runner intercepts unhandled rejections, so the leak version of
+    // this test passed and reported nothing. That couples the test to `.catch`
+    // specifically — rewriting the guard as try/await/catch would need this
+    // updated.
+    const steerPromise = Promise.reject(new Error("session closing"));
+    const abortPromise = Promise.reject(new Error("already aborting"));
+    // Mark handled before spying: the guard only attaches its handler a few
+    // ticks later, and the gap would otherwise make the test itself leak.
+    // spyOn installs an own `catch` afterwards, so the guard still hits the spy.
+    steerPromise.catch(() => {});
+    abortPromise.catch(() => {});
+    const steerCatch = vi.spyOn(steerPromise, "catch");
+    const abortCatch = vi.spyOn(abortPromise, "catch");
+    session.steer = vi.fn(() => steerPromise);
+    session.abort = vi.fn(() => abortPromise);
+
+    const promise = runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      maxTurns: 1,
+      graceTurns: 1,
+    });
+    await vi.waitFor(() => { expect(session.prompt).toHaveBeenCalled(); });
+
+    // Turn 1 steers, turn 2 hard-aborts.
+    for (let i = 0; i < 2; i++) {
+      session._getListeners().forEach((fn: any) => fn({ type: "turn_end" }));
+    }
+
+    expect(steerCatch).toHaveBeenCalled();
+    expect(abortCatch).toHaveBeenCalled();
+
+    resolvePrompt();
+    const result = await promise;
+    // A rejected abort() must not change the reported outcome.
     expect(result.aborted).toBe(true);
   });
 
