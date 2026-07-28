@@ -41,6 +41,17 @@ function isTerminalStatus(status: AgentStatus): boolean {
   return status !== "running" && status !== "queued";
 }
 
+/**
+ * A failed run can still accept user input while its in-memory session survives.
+ * This is live-session continuation only: reload, shutdown, or manual clear destroys it.
+ */
+export function needsUserInput(record: AgentRecord): boolean {
+  return record.lifecycle.status === "error"
+    && record.execution.settled === true
+    && record.execution.session !== undefined
+    && record.execution.session.isStreaming !== true;
+}
+
 /** Defense against future runners reintroducing a silent completed+empty result. */
 function assertCompletionResult(responseText: string, aborted: boolean, turnLimited: boolean): void {
   if (!aborted && !turnLimited && !responseText.trim()) {
@@ -614,6 +625,9 @@ export class AgentManager {
       // background nudge). Otherwise a completed background agent can be wiped
       // before its nudge is emitted.
       if (!record.lifecycle.resultConsumed) continue;
+      // Keep failed live sessions available for the existing list interaction flow.
+      // Users must explicitly clear them; parent shutdown still disposes every session.
+      if (needsUserInput(record)) continue;
       this.removeRecord(id, record);
     }
   }

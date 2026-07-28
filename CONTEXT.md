@@ -67,6 +67,8 @@ _Avoid_: Callback, notification
 ## Product boundaries
 
 - The `Agent` tool is the only spawn entry point. `/agents` owns settings and diagnostics, not a second user-driven spawn flow. Revisit only if users need to start agents without involving the parent LLM.
+- A failed subagent with a settled in-memory session remains available for the existing list-driven user interaction flow until manual clear or parent shutdown. This is not persisted resume, and the parent LLM does not receive a continuation tool.
+- Recoverable-failure presentation is local-only. External transports such as webhooks, Telegram, and email are deferred until a concrete consumer exists; future notifications must not include prompts, transcripts, source code, or findings by default.
 - Input usage accumulates provider-reported values without a vLLM-specific delta heuristic. Revisit only when a supported backend demonstrably reports cumulative prompt tokens without usable cache accounting.
 
 ## Test boundaries

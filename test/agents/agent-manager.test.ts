@@ -563,6 +563,48 @@ describe("AgentManager", () => {
       expect(onRemove).toHaveBeenCalledWith(record);
     });
 
+    it("retains failed sessions that can still accept user input", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("content was flagged");
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+      record.lifecycle.resultConsumed = true;
+      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
+
+      (manager as any).cleanup();
+
+      expect(manager.getRecord(id)).toBe(record);
+      expect(record.lifecycle.status).toBe("error");
+      expect(record.execution.session).toBe(session);
+    });
+
+    it("evicts old setup failures without a child session", async () => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockRejectedValue(new Error("model unavailable"));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+      record.lifecycle.resultConsumed = true;
+      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
+
+      (manager as any).cleanup();
+
+      expect(manager.getRecord(id)).toBeUndefined();
+    });
+
     it("does not evict records younger than the cutoff", async () => {
       manager = new AgentManager(onComplete);
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
