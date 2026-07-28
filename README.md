@@ -22,8 +22,8 @@ Progress appears in the below-editor list, capped at six visible entries and scr
 
 ```text
 › ● Main
-  ○ Explore   Inspect the project       Running       4 calls · 25s
-  ○ Security  Audit authentication      Needs input  81 calls · 36m
+  ○ Explore   Inspect the project              Running        4 calls · 25s
+  ○ Security  Audit authentication             Needs input    81 calls · 36m
 ```
 
 - `›` marks the keyboard-highlighted row.
