@@ -118,6 +118,8 @@ export interface AgentExecutionState {
   modelKey?: string;
   /** Grace turns retained for direct follow-up prompts. */
   graceTurns?: number;
+  /** One-shot Debug recovery window for a fault-injected failure. */
+  recoveryTtlMs?: number;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
 }

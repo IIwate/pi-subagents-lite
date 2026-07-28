@@ -37,6 +37,7 @@ import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } fr
 import type { SubagentType, SystemPromptMode } from "./types.js";
 import { getStore, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
+import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
 function normalizeMaxTurns(n: number | undefined): number | undefined {
@@ -54,6 +55,8 @@ interface RunOptions extends RunTunables, RunCallbacks {
   cwd?: string;
   /** Parent abort signal — when aborted, the subagent is also stopped. */
   signal?: AbortSignal;
+  /** Debug-only one-shot failure injected after a real session is configured. */
+  debugFault?: DebugFaultKind;
 }
 
 interface RunResult {
@@ -702,6 +705,9 @@ async function runAgentImpl(
   const session = await createAndConfigureSession(
     ctx, options, agentConfig, type, effectiveCwd, loader, bufferNotify,
   );
+  if (options.debugFault) {
+    throw new Error(debugFaultMessage(options.debugFault));
+  }
   const { unsubscribe: unsubTurns, getAborted, getTurnLimited } = wireTurnTracking(session, {
     ...options,
     maxTurns: options.maxTurns ?? agentConfig?.maxTurns,

@@ -644,6 +644,55 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id)).toBeUndefined();
     });
 
+    it("consumes a Debug fault on the next agent start only", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      const runOptions: any[] = [];
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        runOptions.push(options);
+        options.onSessionCreated(session);
+        return mockRunResult({ session });
+      });
+
+      manager.armDebugFault("output_blocked", 10_000);
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(firstId)!.execution.promise;
+      const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(secondId)!.execution.promise;
+
+      expect(runOptions[0].debugFault).toBe("output_blocked");
+      expect(runOptions[1].debugFault).toBeUndefined();
+      expect(manager.debugDiagnostics().armedFault).toBeUndefined();
+    });
+
+    it("expires a fault-injected recoverable session at its bound TTL", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("debug injected: content was flagged");
+      });
+      manager.armDebugFault("output_blocked", 10_000);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(id)!.execution.promise;
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(manager.getRecord(id)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(manager.getRecord(id)).toBeUndefined();
+    });
+
     it("evicts old setup failures without a child session", async () => {
       manager = new AgentManager(onComplete);
       mockModules.mockRunAgent.mockRejectedValue(new Error("model unavailable"));

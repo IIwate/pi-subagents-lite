@@ -19,6 +19,7 @@ import type { SubagentType } from "./types.js";
 import { addUsage, getSessionContextPercent } from "./usage.js";
 import { errorMessage } from "../utils.js";
 import { needsUserInput } from "./failure-state.js";
+import type { ArmedDebugFault, DebugFaultKind } from "./debug-fault.js";
 
 /** How often to check for expired agent records (milliseconds). */
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -60,6 +61,23 @@ export interface ConcurrencyConfig {
   providers?: Record<string, number>;
   /** Per-model concurrency limits keyed by "provider/modelId". */
   models?: Record<string, number>;
+}
+
+export interface DebugAgentDiagnostic {
+  id: string;
+  type: string;
+  status: AgentStatus;
+  session: "live" | "none";
+  settled: boolean;
+  resultConsumed: boolean;
+  recoverable: boolean;
+  recoveryRemainingMs?: number;
+  error?: string;
+}
+
+export interface DebugDiagnostics {
+  armedFault?: ArmedDebugFault;
+  agents: DebugAgentDiagnostic[];
 }
 
 type OnAgentComplete = (record: AgentRecord) => void;
@@ -104,6 +122,11 @@ export class AgentManager {
 
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
+
+  /** One-shot fault used by the session-local Debug menu. */
+  private armedDebugFault?: ArmedDebugFault;
+  /** Exact expiry timers for recoverable failures. */
+  private recoveryExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** In-flight dispose call, preventing reentrant shutdown chains from mutating closing concurrently. */
   private disposing = false;
@@ -150,6 +173,40 @@ export class AgentManager {
 
     // Start queued agents if the new limits allow
     this.drainQueue();
+  }
+
+  /** Arm a one-shot Debug failure for the next agent that actually starts. */
+  armDebugFault(kind: DebugFaultKind, recoveryTtlMs: number): void {
+    this.armedDebugFault = { kind, recoveryTtlMs };
+  }
+
+  clearDebugFault(): void {
+    this.armedDebugFault = undefined;
+  }
+
+  debugDiagnostics(): DebugDiagnostics {
+    const now = Date.now();
+    return {
+      armedFault: this.armedDebugFault,
+      agents: this.listAgents().map((record) => {
+        const recoverable = needsUserInput(record);
+        const ttl = this.recoveryWindowMs(record);
+        const completedAt = record.lifecycle.completedAt;
+        return {
+          id: record.id,
+          type: record.display.type,
+          status: record.lifecycle.status,
+          session: record.execution.session ? "live" : "none",
+          settled: record.execution.settled === true,
+          resultConsumed: record.lifecycle.resultConsumed === true,
+          recoverable,
+          recoveryRemainingMs: recoverable && completedAt != null
+            ? Math.max(0, completedAt + ttl - now)
+            : undefined,
+          error: record.error,
+        };
+      }),
+    };
   }
 
   /**
@@ -267,6 +324,9 @@ export class AgentManager {
   ) {
     if (concurrencySlot) concurrencySlot.running++;
 
+    const debugFault = this.armedDebugFault;
+    this.armedDebugFault = undefined;
+    record.execution.recoveryTtlMs = debugFault?.recoveryTtlMs;
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
@@ -285,6 +345,7 @@ export class AgentManager {
       cwd: options.worktreePath,
       graceTurns: options.graceTurns,
       signal: record.execution.abortController!.signal,
+      debugFault: debugFault?.kind,
       ...this.createRecordCallbacks(record),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
@@ -335,6 +396,7 @@ export class AgentManager {
         if (concurrencySlot) concurrencySlot.running--;
 
         record.execution.settled = true;
+        this.scheduleRecoveryExpiry(record);
         this.safeNotifyComplete(record);
         this.drainQueue();
       });
@@ -441,6 +503,11 @@ export class AgentManager {
     const session = record.execution.session;
     if (!session || !record.execution.settled || session.isStreaming) return false;
 
+    this.clearRecoveryExpiry(id);
+    // A successful manual continuation starts a new real run; it must not inherit
+    // the short TTL from a one-shot Debug fault on the original run.
+    record.execution.recoveryTtlMs = undefined;
+
     let concurrencySlot: ConcurrencySlot | undefined;
     if (record.execution.modelKey) {
       const slot = this.getSlot(record.execution.modelKey);
@@ -505,6 +572,7 @@ export class AgentManager {
         abortController.signal.removeEventListener("abort", abortSession);
         if (concurrencySlot) concurrencySlot.running--;
         record.execution.settled = true;
+        this.scheduleRecoveryExpiry(record);
         this.safeNotifyComplete(record);
         this.drainQueue();
       });
@@ -563,6 +631,36 @@ export class AgentManager {
     return true;
   }
 
+  private recoveryWindowMs(record: AgentRecord): number {
+    return record.execution.recoveryTtlMs ?? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS;
+  }
+
+  private clearRecoveryExpiry(id: string): void {
+    const timer = this.recoveryExpiryTimers.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.recoveryExpiryTimers.delete(id);
+  }
+
+  /** Schedule exact expiry so Debug's 10-second scenario is not delayed by cleanup polling. */
+  private scheduleRecoveryExpiry(record: AgentRecord): void {
+    this.clearRecoveryExpiry(record.id);
+    if (!needsUserInput(record)) return;
+
+    const expiresAt = (record.lifecycle.completedAt ?? Date.now()) + this.recoveryWindowMs(record);
+    const timer = setTimeout(() => {
+      this.recoveryExpiryTimers.delete(record.id);
+      if (this.agents.get(record.id) !== record || !needsUserInput(record)) return;
+      if (Date.now() < expiresAt) {
+        this.scheduleRecoveryExpiry(record);
+        return;
+      }
+      this.removeRecord(record.id, record);
+    }, Math.max(0, expiresAt - Date.now()));
+    timer.unref?.();
+    this.recoveryExpiryTimers.set(record.id, timer);
+  }
+
   /**
    * Emit session_shutdown to a child session's extensions, then dispose it.
    *
@@ -602,6 +700,7 @@ export class AgentManager {
 
   /** Shut down and dispose a record's session, then remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
+    this.clearRecoveryExpiry(id);
     const session = record.execution.session;
     record.execution.session = undefined;
     this.agents.delete(id);
@@ -620,7 +719,7 @@ export class AgentManager {
       // Failed live sessions get a longer recovery window so users can continue
       // the existing list interaction flow. This is not permanent retention.
       const ageCutoff = waitingForInput
-        ? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS
+        ? this.recoveryWindowMs(record)
         : CLEANUP_AGE_CUTOFF_MS;
       if ((record.lifecycle.completedAt ?? 0) >= now - ageCutoff) continue;
       this.removeRecord(id, record);
@@ -631,6 +730,7 @@ export class AgentManager {
     if (this.disposing) return;
     this.disposing = true;
     clearInterval(this.cleanupInterval);
+    for (const id of [...this.recoveryExpiryTimers.keys()]) this.clearRecoveryExpiry(id);
     this.queue = [];
     for (const record of this.agents.values()) {
       const session = record.execution.session;

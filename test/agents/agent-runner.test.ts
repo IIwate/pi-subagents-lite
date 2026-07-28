@@ -267,6 +267,22 @@ describe("runAgent — session state inheritance", () => {
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
+  it("injects a Debug failure after session setup without prompting the provider", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const onSessionCreated = vi.fn();
+
+    await expect(runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      debugFault: "output_blocked",
+      onSessionCreated,
+    })).rejects.toThrow("content was flagged");
+
+    expect(onSessionCreated).toHaveBeenCalledWith(session);
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
   it("rejects provider failures encoded as empty terminal assistant messages", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
