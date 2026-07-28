@@ -48,7 +48,6 @@ const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecut
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_WIDTH = 11;
 const STATUS_COLUMN_GAP = 2;
-const STATS_COLUMN_WIDTH = 36;
 const MIN_LEFT_COLUMN_WIDTH = 18;
 
 type NavigatorUICtx = Pick<
@@ -63,6 +62,9 @@ type NavigatorUICtx = Pick<
 >;
 
 type NavigationEntry = { id: string | null; record?: AgentRecord };
+
+/** UI-only preview values exposed through /agents → Debug. */
+export type DebugStatusPreview = AgentRecord["lifecycle"]["status"] | "needs_input";
 
 type MessageLike = {
   role: string;
@@ -133,37 +135,40 @@ function padRight(text: string, width: number): string {
 }
 
 function renderAgentRow(left: string, status: string, stats: string, width: number): string {
-  const maxStatsWidth = Math.max(
+  const statusWidth = Math.min(STATUS_COLUMN_WIDTH, width);
+  const statusText = padRight(truncateToWidth(status, statusWidth), statusWidth);
+  // Keep status adjacent to stats on wide terminals. When space runs out, stats
+  // shrink before the descriptive left column can hide a recovery-required state.
+  const statsWidth = Math.max(
     0,
-    width - MIN_LEFT_COLUMN_WIDTH - STATUS_COLUMN_WIDTH - STATUS_COLUMN_GAP * 2,
+    width - MIN_LEFT_COLUMN_WIDTH - statusWidth - STATUS_COLUMN_GAP * 2,
   );
-  const statsWidth = Math.min(STATS_COLUMN_WIDTH, maxStatsWidth);
-  const leftWidth = Math.max(
-    0,
-    width - STATUS_COLUMN_WIDTH - statsWidth - STATUS_COLUMN_GAP * 2,
-  );
-  const leftText = padRight(truncateToWidth(left, leftWidth, "…"), leftWidth);
-  const statusText = padRight(truncateToWidth(status, STATUS_COLUMN_WIDTH), STATUS_COLUMN_WIDTH);
-  if (statsWidth === 0) return truncateToWidth(
-    `${leftText}${" ".repeat(STATUS_COLUMN_GAP)}${statusText}`,
-    width,
-  );
-
-  const statsText = truncateToWidth(stats, statsWidth, "…");
-  return `${leftText}${" ".repeat(STATUS_COLUMN_GAP)}${statusText}${" ".repeat(STATUS_COLUMN_GAP)}${" ".repeat(statsWidth - visibleWidth(statsText))}${statsText}`;
+  const statsText = statsWidth > 0 ? truncateToWidth(stats, statsWidth, "…") : "";
+  const right = statsText
+    ? `${statusText}${" ".repeat(STATUS_COLUMN_GAP)}${statsText}`
+    : statusText;
+  const leftWidth = Math.max(0, width - visibleWidth(right) - STATUS_COLUMN_GAP);
+  const leftText = truncateToWidth(left, leftWidth, "…");
+  const padding = Math.max(0, width - visibleWidth(leftText) - visibleWidth(right));
+  return `${leftText}${" ".repeat(padding)}${right}`;
 }
 
-function renderAgentStatus(record: AgentRecord, theme: Theme): string {
+function renderAgentStatus(
+  record: AgentRecord,
+  theme: Theme,
+  preview?: DebugStatusPreview,
+): string {
   let label: string;
   let color: string;
   let bold = false;
+  const statusValue = preview ?? (needsUserInput(record) ? "needs_input" : record.lifecycle.status);
 
-  if (needsUserInput(record)) {
+  if (statusValue === "needs_input") {
     label = "Needs input";
     color = "warning";
     bold = true;
   } else {
-    switch (record.lifecycle.status) {
+    switch (statusValue) {
       case "queued": label = "Queued"; color = "dim"; break;
       case "running": label = "Running"; color = "accent"; break;
       case "completed": label = "Done"; color = "success"; break;
@@ -174,8 +179,8 @@ function renderAgentStatus(record: AgentRecord, theme: Theme): string {
     }
   }
 
-  const status = theme.fg(color, label);
-  return bold ? theme.bold(status) : status;
+  const renderedStatus = theme.fg(color, label);
+  return bold ? theme.bold(renderedStatus) : renderedStatus;
 }
 
 function recoverableFailureHint(record: AgentRecord): string | undefined {
@@ -415,6 +420,8 @@ export class AgentNavigator {
   private confirmingClearId: string | null = null;
   /** Stats visibility, including showCost, injected and synchronized by ConfigStore. */
   private statsVisibility: StatsVisibility = {};
+  /** Debug-only display override; never changes agent lifecycle or session state. */
+  private debugStatusPreview: DebugStatusPreview | undefined;
   private listFocused = false;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Skip requestRender when list content is unchanged between timer ticks. */
@@ -479,6 +486,13 @@ export class AgentNavigator {
       this.update();
     }
     return this.selectedAgentId;
+  }
+
+  /** Apply or clear a UI-only status preview from /agents → Debug. */
+  setDebugStatusPreview(status: DebugStatusPreview | undefined): void {
+    this.debugStatusPreview = status;
+    this.lastRenderSig = "";
+    this.requestRender(true);
   }
 
   /** Receive stats visibility from ConfigStore and redraw immediately when it changes. */
@@ -981,7 +995,7 @@ export class AgentNavigator {
         durationMs,
       }, theme, this.statsVisibility);
       const left = `${focus} ${circle} ${active || highlighted ? theme.bold(name) : name}${description ? `  ${theme.fg("dim", description)}` : ""}`;
-      const status = renderAgentStatus(record, theme);
+      const status = renderAgentStatus(record, theme, this.debugStatusPreview);
       const stats = statsParts.length > 0 ? theme.fg("dim", statsParts.join(STATS_SEP)) : "";
       lines.push(renderAgentRow(left, status, stats, tui.terminal.columns));
     }

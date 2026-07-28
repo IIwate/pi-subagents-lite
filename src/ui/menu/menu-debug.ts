@@ -2,11 +2,11 @@
  * menu-debug.ts — Debug menu concern.
  *
  * Uses SelectList from @earendil-works/pi-tui via ctx.ui.custom.
- * Items: Agent types (notify), Agent briefing (send to LLM).
+ * Items: Agent types, agent briefing, and UI-only status previews.
  * Actions execute on select; Escape closes the menu.
  *
  * Exports:
- *   - showDebugMenu: agent types listing, agent briefing
+ *   - showDebugMenu: agent types, briefing, and status preview
  *
  * Private helpers (single-consumer, co-located):
  *   - showAgentTypes: list available agent types and their configs
@@ -18,7 +18,25 @@ import { SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { getAgentConfig, getAvailableTypes, getAllTypes } from "../../agents/agent-types.js";
 import { buildSelectListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import { getPiInstance } from "../../shell.js";
+import { getPiInstance, getNavigator } from "../../shell.js";
+import type { DebugStatusPreview } from "../agent-navigator.js";
+
+const STATUS_PREVIEW_ITEMS: Array<{
+  value: string;
+  label: string;
+  description: string;
+  preview?: DebugStatusPreview;
+}> = [
+  { value: "preview-clear", label: "Preview: Clear", description: "Restore actual lifecycle status labels" },
+  { value: "preview-queued", label: "Preview: Queued", description: "Render all subagent rows as queued", preview: "queued" },
+  { value: "preview-running", label: "Preview: Running", description: "Render all subagent rows as running", preview: "running" },
+  { value: "preview-done", label: "Preview: Done", description: "Render all subagent rows as done", preview: "completed" },
+  { value: "preview-turn-limit", label: "Preview: Turn limit", description: "Render all subagent rows at the turn limit", preview: "turn_limited" },
+  { value: "preview-aborted", label: "Preview: Aborted", description: "Render all subagent rows as aborted", preview: "aborted" },
+  { value: "preview-stopped", label: "Preview: Stopped", description: "Render all subagent rows as stopped", preview: "stopped" },
+  { value: "preview-error", label: "Preview: Error", description: "Render all subagent rows as errors", preview: "error" },
+  { value: "preview-needs-input", label: "Preview: Needs input", description: "Render all subagent rows as needing input", preview: "needs_input" },
+];
 
 async function showAgentTypes(ctx: ExtensionCommandContext): Promise<void> {
   const types = getAllTypes();
@@ -112,6 +130,7 @@ export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void>
     const items: SelectItem[] = [
       { value: "agent-types", label: "Agent types", description: "List available agent types and their configs" },
       { value: "agent-briefing", label: "Agent briefing", description: "Send agent types/capabilities info to LLM (Optional, if having issues)" },
+      ...STATUS_PREVIEW_ITEMS,
     ];
 
     const selectList = new SelectList(items, 10, buildSelectListTheme(theme));
@@ -120,6 +139,19 @@ export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void>
         await showAgentTypes(ctx);
       } else if (item.value === "agent-briefing") {
         await handleAgentBriefing(ctx);
+      } else {
+        const preview = STATUS_PREVIEW_ITEMS.find(option => option.value === item.value);
+        if (!preview) return;
+        const navigator = getNavigator();
+        if (!navigator) {
+          ctx.ui.notify("Agent list is not available in this session", "info");
+          return;
+        }
+        navigator.setDebugStatusPreview(preview.preview);
+        ctx.ui.notify(
+          preview.preview ? `Status preview set to ${preview.label.slice("Preview: ".length)}` : "Status preview cleared",
+          "info",
+        );
       }
     };
     return new SettingsListWrapper(selectList, { title: "Debug", theme, onCancel: () => done(undefined) });

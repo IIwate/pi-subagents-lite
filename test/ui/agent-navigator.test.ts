@@ -221,7 +221,7 @@ describe("AgentNavigator", () => {
     );
   });
 
-  it("renders a fixed status column and marks continuable errors as needing input", () => {
+  it("keeps continuable status adjacent to its stats", () => {
     const running = makeRecord("agent-running", "running");
     const blocked = makeRecord("agent-blocked", "error");
     running.stats.toolUses = 1;
@@ -239,9 +239,24 @@ describe("AgentNavigator", () => {
     const lines = selector.render(120);
     const runningRow = lines.find((line: string) => line.includes("Active task"))!;
     const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
-    expect(runningRow).toContain("Running");
-    expect(blockedRow).toContain("Needs input");
-    expect(runningRow.indexOf("Running")).toBe(blockedRow.indexOf("Needs input"));
+    expect(runningRow).toMatch(/Running\s+1 calls/);
+    expect(blockedRow).toMatch(/Needs input\s+81 calls/);
+  });
+
+  it("renders a debug status preview without mutating agent lifecycle", () => {
+    const record = makeRecord("agent-running", "running");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.setDebugStatusPreview("needs_input");
+    expect(selector.render(120).join("\n")).toContain("Needs input");
+    expect(record.lifecycle.status).toBe("running");
+
+    navigator.setDebugStatusPreview(undefined);
+    expect(selector.render(120).join("\n")).toContain("Running");
   });
 
   it.each([

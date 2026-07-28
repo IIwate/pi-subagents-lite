@@ -18,6 +18,7 @@ export const mockModules = {
   },
   mockSessionOverrides: { default: null } as Record<string, any>,
   mockPiInstance: null as any,
+  mockNavigator: { setDebugStatusPreview: vi.fn() },
 };
 
 // Set up the Pi instance mock
@@ -181,5 +182,6 @@ vi.mock("../src/shell.js", () => {
   return {
     getStore: () => mockStore,
     getPiInstance: () => mockModules.mockPiInstance,
+    getNavigator: () => mockModules.mockNavigator,
   };
 });

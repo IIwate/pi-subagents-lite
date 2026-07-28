@@ -81,13 +81,31 @@ describe("showDebugMenu — SelectList migration", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("creates a SelectList with 2 items", async () => {
+  it("creates a SelectList with diagnostics and status previews", async () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
     expect(selectListCalls.length).toBe(1);
-    expect(selectListCalls[0].items).toHaveLength(2);
+    expect(selectListCalls[0].items).toHaveLength(11);
     expect(selectListCalls[0].items[0].value).toBe("agent-types");
     expect(selectListCalls[0].items[1].value).toBe("agent-briefing");
+    expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
+      value: "preview-needs-input",
+      label: "Preview: Needs input",
+    }));
+  });
+
+
+  it("applies and clears UI-only status previews", async () => {
+    const ctx = createMockCtx();
+    await showDebugMenu(ctx);
+
+    await selectListCalls[0].onSelect!({ value: "preview-needs-input" });
+    expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith("needs_input");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview set to Needs input", "info");
+
+    await selectListCalls[0].onSelect!({ value: "preview-clear" });
+    expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith(undefined);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview cleared", "info");
   });
 
   it("wraps SelectList in SettingsListWrapper with title 'Debug'", async () => {
