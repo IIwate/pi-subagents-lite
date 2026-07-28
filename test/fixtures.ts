@@ -50,7 +50,10 @@ export interface ShellMockFns {
  */
 export function shellMock(fns: ShellMockFns = {}) {
   const manager = fns.manager ?? {
-    abort: vi.fn(),
+    // AgentManager.abort returns boolean ("was it stopped"), not void — be
+    // explicit so the default fallback states the contract instead of
+    // returning undefined and happening to be falsy.
+    abort: vi.fn(() => false),
     getRecord: vi.fn(),
     listAgents: vi.fn(() => []),
     spawn: vi.fn(),

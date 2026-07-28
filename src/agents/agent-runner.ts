@@ -147,7 +147,10 @@ function resolveAssistantOutcome(
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
   if (!signal) return () => {};
-  const onAbort = () => { void session.abort(); };
+  // Same guard as wireTurnTracking: abort() returns a promise and this fires
+  // from an event listener, so a rejection escapes the run rather than failing
+  // it. The parent is already going down when this runs.
+  const onAbort = () => { void session.abort().catch(() => {}); };
   if (signal.aborted) {
     onAbort();
     return () => {};

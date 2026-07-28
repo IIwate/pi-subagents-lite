@@ -427,6 +427,35 @@ describe("AgentManager", () => {
       );
     });
 
+    it("handles abort rejection while stopping a resumed session", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+      const continuation = makeResolvablePromise();
+      mockModules.mockContinueAgentSession.mockReturnValue(continuation.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      const abortPromise = Promise.reject(new Error("already aborting"));
+      abortPromise.catch(() => {});
+      const abortCatch = vi.spyOn(abortPromise, "catch");
+      session.abort = vi.fn(() => abortPromise);
+
+      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      expect(manager.abort(id, "user")).toBe(true);
+      expect(session.abort).toHaveBeenCalled();
+      expect(abortCatch).toHaveBeenCalled();
+
+      continuation.resolve({ responseText: "", aborted: true, turnLimited: false });
+      await record.execution.promise;
+      expect(record.lifecycle.status).toBe("stopped");
+    });
+
     it("rejects a stopped agent until its previous execution settles", async () => {
       manager = new AgentManager(onComplete);
       const deferred = makeResolvablePromise();

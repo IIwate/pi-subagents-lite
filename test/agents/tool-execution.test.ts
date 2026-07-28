@@ -31,7 +31,7 @@ const {
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
   mockGetRecord: vi.fn(),
-  mockDiscoverNewAgents: vi.fn(),
+  mockDiscoverNewAgents: vi.fn(async () => 0),
   mockGetActiveScopedModelKeys: vi.fn(() => null),
 }));
 

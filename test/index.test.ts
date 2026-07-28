@@ -123,11 +123,8 @@ vi.mock("../src/agents/default-agents.js", () => ({
   DEFAULT_AGENTS: new Map(),
 }));
 
-// Match the real export surface (AgentWidget + SPINNER). SPINNER must stay non-empty:
-// agent-navigator indexes frames with `% SPINNER.length`, and an empty array produces NaN.
 vi.mock("../src/ui/agent-widget.js", () => ({
   AgentWidget: class {},
-  SPINNER: ["⠋"],
 }));
 
 /* ------------------------------------------------------------------ */

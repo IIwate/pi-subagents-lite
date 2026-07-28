@@ -447,7 +447,10 @@ export class AgentManager {
 
     const previousTurns = record.stats.turnCount ?? 0;
     const abortController = new AbortController();
-    const abortSession = () => { void session.abort(); };
+    // abort() returns a promise and this runs from an event listener, so an
+    // unhandled rejection would escape the run. The session is by definition
+    // being torn down here, which is exactly when abort() can reject.
+    const abortSession = () => { void session.abort().catch(() => {}); };
     abortController.signal.addEventListener("abort", abortSession, { once: true });
 
     record.execution.abortController = abortController;

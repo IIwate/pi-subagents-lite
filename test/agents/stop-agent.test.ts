@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { shellMock } from "../fixtures.ts";
 
 const { mockAbort, mockGetRecord, mockListAgents } = vi.hoisted(() => ({
-  mockAbort: vi.fn(),
+  mockAbort: vi.fn(() => false),
   mockGetRecord: vi.fn(),
   mockListAgents: vi.fn(),
 }));

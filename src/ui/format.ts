@@ -11,11 +11,6 @@ import type { SubagentType } from "../agents/types.js";
 import type { Theme } from "./types.js";
 import { formatTokens, formatCost } from "../agents/usage.js";
 
-/** Truncate a description string to `maxLen` characters, appending "..." if truncated. */
-export function truncateDesc(text: string, maxLen: number): string {
-  return text.length > maxLen ? text.slice(0, maxLen - 3) + "..." : text;
-}
-
 /** Max length for a truncated command in tool arg summaries. */
 const MAX_COMMAND_DISPLAY_LENGTH = 100;
 

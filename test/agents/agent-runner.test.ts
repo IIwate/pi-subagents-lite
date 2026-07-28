@@ -162,7 +162,10 @@ function createMockSession() {
     getActiveToolNames: vi.fn(),
     getAllTools: vi.fn(() => ["read", "bash", "edit"].map(name => ({ name }))),
     setActiveToolsByName: vi.fn(),
-    bindExtensions: vi.fn(),
+    // Promise-shaped like the real AgentSession. runAgent only awaits this
+    // today, but a bare vi.fn() is the same contract lie that hid the missing
+    // steer/abort rejection handling below.
+    bindExtensions: vi.fn(async () => {}),
     subscribe: vi.fn((listener: (event: any) => void) => {
       listeners.push(listener);
       return () => {
@@ -246,12 +249,21 @@ describe("runAgent — session state inheritance", () => {
     const controller = new AbortController();
     controller.abort();
 
+    // forwardAbortSignal fires abort() from a signal listener, so a rejection
+    // escapes the run. See "attaches rejection handlers to steer and abort"
+    // for why this is a .catch spy and not an unhandledRejection assertion.
+    const abortPromise = Promise.reject(new Error("already aborting"));
+    abortPromise.catch(() => {});
+    const abortCatch = vi.spyOn(abortPromise, "catch");
+    session.abort = vi.fn(() => abortPromise);
+
     await runAgent(fakeCtx(), "test-agent", "do something", {
       pi: fakePi,
       signal: controller.signal,
     });
 
     expect(session.abort).toHaveBeenCalled();
+    expect(abortCatch).toHaveBeenCalled();
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
