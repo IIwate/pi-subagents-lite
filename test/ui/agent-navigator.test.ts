@@ -210,11 +210,10 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
     const text = selector.render(120).join("\n");
 
-    // Row format: ○/● + spinner/status + display name + description (+ stats).
-    expect(text).toContain("Main agent");
-    expect(text).toContain("Inspect the project");
-    expect(text).toMatch(/[○●]/);
-    expect(text).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/); // running spinner glyph
+    // Claude-style rows use a filled active circle, lowercase main, and no spinner column.
+    expect(text).toContain("● main");
+    expect(text).toMatch(/○ \S+  Inspect the project/);
+    expect(text).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
       "agent-navigator-selector",
       expect.any(Function),
@@ -330,27 +329,29 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).not.toContain("$");
   });
 
-  it("animates the running status icon on the refresh timer", () => {
+  it("right-aligns elapsed time and refreshes it once per second", () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const record = makeRecord();
+    record.lifecycle.startedAt = Date.now() - 15_000;
+    record.stats.toolUses = 0;
+    record.stats.turnCount = 0;
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
 
-    const frame0 = selector.render(120).join("\n");
-    expect(frame0).toContain("⠋");
-    expect(frame0).toContain("Inspect the project");
+    const row0 = selector.render(120)[1];
+    expect(row0).toMatch(/○ \S+  Inspect the project/);
+    expect(row0).toHaveLength(120);
+    expect(row0).toMatch(/15s$/);
 
-    // REFRESH_INTERVAL_MS is 500 (was 80) — only advance one interval per frame.
-    vi.advanceTimersByTime(500);
-    const frame1 = selector.render(120).join("\n");
-    expect(frame1).toContain("⠙");
+    vi.advanceTimersByTime(1000);
+    const row1 = selector.render(120)[1];
+    expect(row1).toHaveLength(120);
+    expect(row1).toMatch(/16s$/);
     expect(tui.requestRender).toHaveBeenCalled();
-
-    vi.advanceTimersByTime(500);
-    expect(selector.render(120).join("\n")).toContain("⠹");
   });
 
   it("stops refresh polling after an update failure and warns once", () => {
@@ -439,7 +440,7 @@ describe("AgentNavigator", () => {
     expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
     expect(navigator.selectedId()).toBe(record.id);
     // Highlight moved to Main (○) while the selected agent remains active (●).
-    expect(selector.render(120).join("\n")).toContain("› ○ Main agent");
+    expect(selector.render(120).join("\n")).toContain("› ○ main");
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {
@@ -453,7 +454,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     const focused = selector.render(120).join("\n");
-    expect(focused).toContain("› ○ ⠋");
+    expect(focused).toMatch(/› ○ \S+/);
     expect(focused).toContain("Inspect the project");
     expect(focused).toContain("↑↓ move"); // focus hint while list-focused
 

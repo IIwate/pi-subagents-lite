@@ -15,6 +15,7 @@ import {
   Key,
   matchesKey,
   truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
   type AutocompleteProvider,
   type Component,
@@ -30,17 +31,14 @@ import {
   getDisplayName,
   STATS_SEP,
   summarizeToolArgs,
-  truncateDesc,
   type StatsVisibility,
 } from "./format.js";
 import { renderAgentFooterStats } from "./agent-footer.js";
 import { errorMessage } from "../utils.js";
-import { SPINNER } from "./agent-widget.js";
 import type { Theme } from "./types.js";
 
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
-// 80ms was smooth but forced full TUI repaints (powerline classic ghost lines / IME flicker).
-const REFRESH_INTERVAL_MS = 500;
+const REFRESH_INTERVAL_MS = 1000;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
 const PI_0801_ROOT_CHILDREN = 8;
 const PI_08010_ROOT_CHILDREN = 9;
@@ -125,16 +123,13 @@ function appendWrapped(lines: string[], text: string, width: number): void {
   }
 }
 
-function statusIcon(record: AgentRecord, spinnerFrame: string): string {
-  switch (record.lifecycle.status) {
-    case "running": return spinnerFrame;
-    case "queued": return "◦";
-    case "completed": return "✓";
-    case "turn_limited": return "✓";
-    case "stopped": return "■";
-    case "error": return "✗";
-    case "aborted": return "✗";
-  }
+function alignRight(left: string, right: string, width: number): string {
+  const rightWidth = visibleWidth(right);
+  if (rightWidth === 0 || width <= rightWidth + 1) return truncateToWidth(left, width);
+
+  const leftText = truncateToWidth(left, width - rightWidth - 1, "…");
+  const padding = Math.max(1, width - visibleWidth(leftText) - rightWidth);
+  return `${leftText}${" ".repeat(padding)}${right}`;
 }
 
 function isComponent(value: unknown): value is Component {
@@ -364,7 +359,6 @@ export class AgentNavigator {
   /** Stats visibility, including showCost, injected and synchronized by ConfigStore. */
   private statsVisibility: StatsVisibility = {};
   private listFocused = false;
-  private spinnerFrame = 0;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Skip requestRender when list content is unchanged between timer ticks. */
   private lastRenderSig = "";
@@ -440,10 +434,7 @@ export class AgentNavigator {
   ensureTimer(): void {
     if (!this.uiCtx) return;
     if (!this.refreshTimer) {
-      this.refreshTimer = setInterval(() => {
-        this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
-        this.update();
-      }, REFRESH_INTERVAL_MS);
+      this.refreshTimer = setInterval(() => this.update(), REFRESH_INTERVAL_MS);
     }
     this.update();
   }
@@ -894,8 +885,6 @@ export class AgentNavigator {
         ));
       }
     }
-    const spinnerFrame = SPINNER[this.spinnerFrame];
-
     if (start > 0) {
       lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
     }
@@ -906,19 +895,20 @@ export class AgentNavigator {
       const circle = active ? theme.fg("accent", "●") : theme.fg("dim", "○");
       const focus = highlighted ? theme.fg("accent", "›") : " ";
       if (!entry.record) {
-        const label = highlighted ? theme.bold("Main agent") : "Main agent";
+        const label = active || highlighted ? theme.bold("main") : "main";
         lines.push(truncateToWidth(`${focus} ${circle} ${label}`, tui.terminal.columns));
         continue;
       }
 
       const record = entry.record;
-      const icon = statusIcon(record, spinnerFrame);
       const name = getDisplayName(record.display.type);
-      const desc = truncateDesc(record.display.description, 50);
+      const description = record.display.description;
       const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
       const statsParts = buildStatsParts({
         toolUses: record.stats.toolUses,
-        turnCount: record.stats.turnCount,
+        turnCount: record.stats.turnCount != null && record.stats.turnCount > 0
+          ? record.stats.turnCount
+          : undefined,
         maxTurns: record.stats.maxTurns,
         input: record.stats.lifetimeUsage.input,
         output: record.stats.lifetimeUsage.output,
@@ -928,20 +918,10 @@ export class AgentNavigator {
         compactions: record.stats.compactionCount,
         cost: record.stats.lifetimeUsage.cost,
         durationMs,
-        modelName: record.execution.session?.model?.id ?? record.display.invocation?.modelName,
-        thinkingLevel: record.execution.session?.thinkingLevel
-          ?? record.display.invocation?.thinkingLevel,
       }, theme, this.statsVisibility);
-      const statsLine = statsParts.join(STATS_SEP);
-      const label = statsLine
-        ? `${name}  ${desc}${STATS_SEP}${statsLine}`
-        : `${name}  ${desc}`;
-      const text = highlighted ? theme.bold(label) : label;
-      const iconColor = record.lifecycle.status === "running" ? "accent" : "dim";
-      lines.push(truncateToWidth(
-        `${focus} ${circle} ${theme.fg(iconColor, icon)} ${text}`,
-        tui.terminal.columns,
-      ));
+      const left = `${focus} ${circle} ${active || highlighted ? theme.bold(name) : name}${description ? `  ${theme.fg("dim", description)}` : ""}`;
+      const right = theme.fg("dim", statsParts.join(STATS_SEP));
+      lines.push(alignRight(left, right, tui.terminal.columns));
     }
 
     if (end < entries.length) {
@@ -1218,7 +1198,6 @@ export class AgentNavigator {
     });
     return [
       parts.join("|"),
-      this.spinnerFrame,
       this.selectedAgentId ?? "",
       this.highlightedAgentId ?? "",
       this.listFocused ? "1" : "0",

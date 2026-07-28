@@ -9,9 +9,6 @@
 import type { AgentManager } from "../agents/agent-manager.js";
 import { errorMessage } from "../utils.js";
 
-/** Braille spinner frames shared with agent-navigator's running icon. */
-export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 /** Status bar key used with setStatus(). */
 const STATUS_KEY = "subagents";
 
