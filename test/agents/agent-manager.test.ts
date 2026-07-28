@@ -613,7 +613,6 @@ describe("AgentManager", () => {
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
-      record.lifecycle.resultConsumed = true;
       // Past the normal 10-minute cutoff, still inside the 30-minute recovery window.
       record.lifecycle.completedAt = Date.now() - 20 * 60_000;
 
@@ -638,7 +637,6 @@ describe("AgentManager", () => {
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
-      record.lifecycle.resultConsumed = true;
       record.lifecycle.completedAt = Date.now() - 31 * 60_000;
 
       (manager as any).cleanup();

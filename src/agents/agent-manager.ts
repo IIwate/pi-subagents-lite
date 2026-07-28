@@ -613,13 +613,13 @@ export class AgentManager {
     const now = Date.now();
     for (const [id, record] of this.agents) {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
-      // Keep the record until the LLM has read the result (foreground return or
-      // background nudge). Otherwise a completed background agent can be wiped
-      // before its nudge is emitted.
-      if (!record.lifecycle.resultConsumed) continue;
+      const waitingForInput = needsUserInput(record);
+      // Ordinary terminal results stay until the LLM has read them. A failed live
+      // session has a finite recovery deadline instead, even if its nudge failed.
+      if (!waitingForInput && !record.lifecycle.resultConsumed) continue;
       // Failed live sessions get a longer recovery window so users can continue
       // the existing list interaction flow. This is not permanent retention.
-      const ageCutoff = needsUserInput(record)
+      const ageCutoff = waitingForInput
         ? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS
         : CLEANUP_AGE_CUTOFF_MS;
       if ((record.lifecycle.completedAt ?? 0) >= now - ageCutoff) continue;
