@@ -18,6 +18,7 @@ import {
 import type { SubagentType } from "./types.js";
 import { addUsage, getSessionContextPercent } from "./usage.js";
 import { errorMessage } from "../utils.js";
+import { needsUserInput } from "./failure-state.js";
 
 /** How often to check for expired agent records (milliseconds). */
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -39,17 +40,6 @@ const DEFAULT_CONCURRENCY_LIMIT = 4;
 /** Whether the agent status is terminal (no longer running or queued). */
 function isTerminalStatus(status: AgentStatus): boolean {
   return status !== "running" && status !== "queued";
-}
-
-/**
- * A failed run can still accept user input while its in-memory session survives.
- * This is live-session continuation only: reload, shutdown, or manual clear destroys it.
- */
-export function needsUserInput(record: AgentRecord): boolean {
-  return record.lifecycle.status === "error"
-    && record.execution.settled === true
-    && record.execution.session !== undefined
-    && record.execution.session.isStreaming !== true;
 }
 
 /** Defense against future runners reintroducing a silent completed+empty result. */

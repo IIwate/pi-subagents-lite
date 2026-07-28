@@ -24,6 +24,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agents/agent-manager.js";
+import { needsUserInput, recoverableFailureKind } from "../agents/failure-state.js";
 import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
 import {
@@ -45,6 +46,7 @@ const PI_08010_ROOT_CHILDREN = 9;
 const ROOT_REGIONS_AFTER_CHAT = 6;
 const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
+const STATUS_COLUMN_WIDTH = 11;
 
 type NavigatorUICtx = Pick<
   ExtensionUIContext,
@@ -130,6 +132,42 @@ function alignRight(left: string, right: string, width: number): string {
   const leftText = truncateToWidth(left, width - rightWidth - 1, "…");
   const padding = Math.max(1, width - visibleWidth(leftText) - rightWidth);
   return `${leftText}${" ".repeat(padding)}${right}`;
+}
+
+function renderAgentStatus(record: AgentRecord, theme: Theme): string {
+  let label: string;
+  let color: string;
+  let bold = false;
+
+  if (needsUserInput(record)) {
+    label = "Needs input";
+    color = "warning";
+    bold = true;
+  } else {
+    switch (record.lifecycle.status) {
+      case "queued": label = "Queued"; color = "dim"; break;
+      case "running": label = "Running"; color = "accent"; break;
+      case "completed": label = "Done"; color = "success"; break;
+      case "turn_limited": label = "Turn limit"; color = "warning"; break;
+      case "aborted": label = "Aborted"; color = "warning"; break;
+      case "stopped": label = "Stopped"; color = "dim"; break;
+      case "error": label = "Error"; color = "error"; break;
+    }
+  }
+
+  const status = theme.fg(color, label.padEnd(STATUS_COLUMN_WIDTH));
+  return bold ? theme.bold(status) : status;
+}
+
+function recoverableFailureHint(record: AgentRecord): string | undefined {
+  const kind = recoverableFailureKind(record);
+  if (kind === "output_blocked") {
+    return "Output blocked by provider · Enter open · type a safer prompt";
+  }
+  if (kind === "provider_error") {
+    return "Session failed after start · Enter open · type another prompt";
+  }
+  return undefined;
 }
 
 function isComponent(value: unknown): value is Component {
@@ -867,17 +905,21 @@ export class AgentNavigator {
     const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
     const { start, end } = computeListWindow(entries.length, focusIndex, tui.terminal.rows);
     const visibleEntries = entries.slice(start, end);
+    const highlightedRecord = entries.find(entry => entry.id === this.highlightedAgentId)?.record;
 
     // No permanent header chrome; only show a short focus hint while navigating.
     // Start in the focus-marker column so hints align with the moving selector below.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
     if (this.listFocused) {
+      const failureHint = highlightedRecord ? recoverableFailureHint(highlightedRecord) : undefined;
       if (this.confirmingClearId !== null) {
         lines.push(truncateToWidth(
           theme.fg("error", "Delete? Enter confirm · Esc cancel"),
           cols,
         ));
+      } else if (failureHint) {
+        lines.push(truncateToWidth(theme.fg("warning", failureHint), cols));
       } else {
         lines.push(truncateToWidth(
           theme.fg("dim", "↑↓ move · Enter select · Ctrl+D clear · Esc editor"),
@@ -920,7 +962,9 @@ export class AgentNavigator {
         durationMs,
       }, theme, this.statsVisibility);
       const left = `${focus} ${circle} ${active || highlighted ? theme.bold(name) : name}${description ? `  ${theme.fg("dim", description)}` : ""}`;
-      const right = theme.fg("dim", statsParts.join(STATS_SEP));
+      const status = renderAgentStatus(record, theme);
+      const stats = theme.fg("dim", statsParts.join(STATS_SEP));
+      const right = stats ? `${status}${STATS_SEP}${stats}` : status;
       lines.push(alignRight(left, right, tui.terminal.columns));
     }
 

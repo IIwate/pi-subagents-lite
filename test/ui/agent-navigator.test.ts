@@ -221,6 +221,80 @@ describe("AgentNavigator", () => {
     );
   });
 
+  it("renders a fixed status column and marks continuable errors as needing input", () => {
+    const running = makeRecord("agent-running", "running");
+    running.display.description = "Active task";
+    const blocked = makeRecord("agent-blocked", "error");
+    blocked.display.description = "Blocked task";
+    blocked.execution.settled = true;
+    blocked.error = "content was flagged";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([running, blocked]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const lines = selector.render(120);
+    const runningRow = lines.find((line: string) => line.includes("Active task"))!;
+    const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
+    expect(runningRow).toContain("Running");
+    expect(blockedRow).toContain("Needs input");
+    expect(runningRow.indexOf("Running")).toBe(blockedRow.indexOf("Needs input"));
+  });
+
+  it.each([
+    ["queued", "Queued"],
+    ["running", "Running"],
+    ["completed", "Done"],
+    ["turn_limited", "Turn limit"],
+    ["aborted", "Aborted"],
+    ["stopped", "Stopped"],
+    ["error", "Error"],
+  ])("renders %s agents with the %s status", (status, label) => {
+    const record = makeRecord(`agent-${status}`, status);
+    if (status === "error") record.execution = { settled: true };
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120).join("\n")).toContain(label);
+  });
+
+  it("shows the recovery reason while a continuable failure is highlighted", () => {
+    const record = makeRecord("agent-blocked", "error");
+    record.execution.settled = true;
+    record.error = "Provider finish_reason: content_filter";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+
+    expect(selector.render(120)[0]).toContain("Output blocked by provider");
+    record.error = "provider internal error";
+    expect(selector.render(120)[0]).toContain("Session failed after start");
+  });
+
+  it("shows non-continuable setup failures as errors", () => {
+    const record = makeRecord("agent-error", "error");
+    record.execution = { settled: true };
+    record.error = "model unavailable";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const row = selector.render(120).find((line: string) => line.includes("Inspect the project"))!;
+    expect(row).toContain("Error");
+    expect(row).not.toContain("Needs input");
+  });
+
   it("Ctrl+D then Enter clears inactive subagents and moves the highlight", () => {
     const r1 = makeRecord("agent-11111111");
     const r2 = makeRecord("agent-22222222");
