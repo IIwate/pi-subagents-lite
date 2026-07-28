@@ -869,18 +869,18 @@ export class AgentNavigator {
     const visibleEntries = entries.slice(start, end);
 
     // No permanent header chrome; only show a short focus hint while navigating.
-    // Leading space matches powerline/Pi editor pad (" > ") so hints sit under the input, not flush-left.
+    // Start in the focus-marker column so hints align with the moving selector below.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
     if (this.listFocused) {
       if (this.confirmingClearId !== null) {
         lines.push(truncateToWidth(
-          ` ${theme.fg("error", "Delete? Enter confirm · Esc cancel")}`,
+          theme.fg("error", "Delete? Enter confirm · Esc cancel"),
           cols,
         ));
       } else {
         lines.push(truncateToWidth(
-          ` ${theme.fg("dim", "↑↓ move · Enter select · Ctrl+D clear · Esc editor")}`,
+          theme.fg("dim", "↑↓ move · Enter select · Ctrl+D clear · Esc editor"),
           cols,
         ));
       }
@@ -895,7 +895,7 @@ export class AgentNavigator {
       const circle = active ? theme.fg("accent", "●") : theme.fg("dim", "○");
       const focus = highlighted ? theme.fg("accent", "›") : " ";
       if (!entry.record) {
-        const label = active || highlighted ? theme.bold("main") : "main";
+        const label = active || highlighted ? theme.bold("Main") : "Main";
         lines.push(truncateToWidth(`${focus} ${circle} ${label}`, tui.terminal.columns));
         continue;
       }

@@ -200,7 +200,7 @@ describe("AgentNavigator", () => {
     vi.useRealTimers();
   });
 
-  it("registers a below-editor selector containing main and subagents", () => {
+  it("registers a below-editor selector containing Main and subagents", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -210,8 +210,8 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
     const text = selector.render(120).join("\n");
 
-    // Claude-style rows use a filled active circle, lowercase main, and no spinner column.
-    expect(text).toContain("● main");
+    // Claude-style rows use a filled active circle and no spinner column.
+    expect(text).toContain("● Main");
     expect(text).toMatch(/○ \S+  Inspect the project/);
     expect(text).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
@@ -241,12 +241,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
     navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
     navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
-    expect(selector.render(120).join("\n")).toContain("Delete?");
+    expect(selector.render(120)[0]).toMatch(/^Delete\?/);
 
     navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
-    const text = selector.render(120).join("\n");
-    expect(text).not.toContain("Delete?");
+    const lines = selector.render(120);
+    expect(lines.join("\n")).not.toContain("Delete?");
+    expect(lines[0]).toMatch(/^↑↓ move/);
   });
 
   it("uses native shrink clearing while the selector is mounted", () => {
@@ -440,7 +441,7 @@ describe("AgentNavigator", () => {
     expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
     expect(navigator.selectedId()).toBe(record.id);
     // Highlight moved to Main (○) while the selected agent remains active (●).
-    expect(selector.render(120).join("\n")).toContain("› ○ main");
+    expect(selector.render(120).join("\n")).toContain("› ○ Main");
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {
