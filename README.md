@@ -32,7 +32,7 @@ Progress appears in the below-editor list, capped at six visible entries and scr
 - With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, and `Esc` to return to the editor.
 - Press `Ctrl+D` on an inactive subagent to clear it; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
 - While a subagent is active, editor input is routed to that session. Activate `Main` to return to the parent transcript.
-- `Needs input` means the run failed after a live child session already existed. Select it and send another prompt to continue the same in-memory session. This is not persisted across `/reload` or process exit, and the parent LLM has no continuation tool. Clear the row when finished, or leave it until the parent session ends.
+- `Needs input` means the run failed after a live child session already existed. Select it and send another prompt to continue the same in-memory session. The recovery window is 30 minutes; after that the row can be cleaned up. This is not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.
 

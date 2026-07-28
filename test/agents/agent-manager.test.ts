@@ -563,7 +563,7 @@ describe("AgentManager", () => {
       expect(onRemove).toHaveBeenCalledWith(record);
     });
 
-    it("retains failed sessions that can still accept user input", async () => {
+    it("retains failed live sessions within the 30-minute recovery window", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -578,6 +578,7 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       record.lifecycle.resultConsumed = true;
+      // Past the normal 10-minute cutoff, still inside the 30-minute recovery window.
       record.lifecycle.completedAt = Date.now() - 20 * 60_000;
 
       (manager as any).cleanup();
@@ -585,6 +586,28 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id)).toBe(record);
       expect(record.lifecycle.status).toBe("error");
       expect(record.execution.session).toBe(session);
+    });
+
+    it("evicts failed live sessions after the 30-minute recovery window", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("content was flagged");
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+      record.lifecycle.resultConsumed = true;
+      record.lifecycle.completedAt = Date.now() - 31 * 60_000;
+
+      (manager as any).cleanup();
+
+      expect(manager.getRecord(id)).toBeUndefined();
     });
 
     it("evicts old setup failures without a child session", async () => {

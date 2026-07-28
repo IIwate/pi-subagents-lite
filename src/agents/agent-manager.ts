@@ -26,6 +26,9 @@ const CLEANUP_INTERVAL_MS = 60_000;
 /** Age after which a completed agent record is evicted (milliseconds). */
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 
+/** Longer retention for failed live sessions still available for user input. */
+const CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS = 30 * 60_000;
+
 /** Maximum wait for child shutdown handlers; disposal continues after this timeout (milliseconds). */
 const SESSION_SHUTDOWN_TIMEOUT_MS = 15_000;
 
@@ -607,17 +610,19 @@ export class AgentManager {
   }
 
   private cleanup() {
-    const cutoff = Date.now() - CLEANUP_AGE_CUTOFF_MS;
+    const now = Date.now();
     for (const [id, record] of this.agents) {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
-      if ((record.lifecycle.completedAt ?? 0) >= cutoff) continue;
       // Keep the record until the LLM has read the result (foreground return or
       // background nudge). Otherwise a completed background agent can be wiped
       // before its nudge is emitted.
       if (!record.lifecycle.resultConsumed) continue;
-      // Keep failed live sessions available for the existing list interaction flow.
-      // Users must explicitly clear them; parent shutdown still disposes every session.
-      if (needsUserInput(record)) continue;
+      // Failed live sessions get a longer recovery window so users can continue
+      // the existing list interaction flow. This is not permanent retention.
+      const ageCutoff = needsUserInput(record)
+        ? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS
+        : CLEANUP_AGE_CUTOFF_MS;
+      if ((record.lifecycle.completedAt ?? 0) >= now - ageCutoff) continue;
       this.removeRecord(id, record);
     }
   }
