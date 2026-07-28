@@ -349,13 +349,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
     navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
     navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
-    expect(selector.render(120)[0]).toBe('Remove “Inspect the project”? · Enter Remove · Esc Cancel');
+    expect(selector.render(120)[0]).toBe('  Remove “Inspect the project”? · Enter Remove · Esc Cancel');
 
     navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const lines = selector.render(120);
     expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
-    expect(lines[0]).toMatch(/^↑↓ Move/);
+    expect(lines[0]).toMatch(/^  ↑↓ Move/);
   });
 
   it("uses native shrink clearing while the selector is mounted", () => {

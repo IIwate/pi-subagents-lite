@@ -936,8 +936,10 @@ export class AgentNavigator {
     const highlightedRecord = entries.find(entry => entry.id === this.highlightedAgentId)?.record;
 
     // No permanent header chrome; show one contextual command bar while navigating.
+    // The two-column prefix aligns it with the row circles, not the focus marker.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
+    const commandWidth = Math.max(1, cols - 2);
     if (this.listFocused) {
       const failureHint = highlightedRecord ? recoverableFailureHint(highlightedRecord) : undefined;
       if (this.confirmingClearId !== null) {
@@ -948,14 +950,14 @@ export class AgentNavigator {
           theme.fg("error", "Remove"),
           theme.fg("dim", " · Esc Cancel"),
         ].join("");
-        lines.push(truncateToWidth(confirmation, cols));
+        lines.push(`  ${truncateToWidth(confirmation, commandWidth)}`);
       } else if (failureHint) {
-        lines.push(truncateToWidth(theme.fg("warning", failureHint), cols));
+        lines.push(`  ${truncateToWidth(theme.fg("warning", failureHint), commandWidth)}`);
       } else {
-        lines.push(truncateToWidth(
+        lines.push(`  ${truncateToWidth(
           theme.fg("dim", "↑↓ Move · Enter Open · Ctrl+D Remove · Esc Editor"),
-          cols,
-        ));
+          commandWidth,
+        )}`);
       }
     }
     if (start > 0) {
