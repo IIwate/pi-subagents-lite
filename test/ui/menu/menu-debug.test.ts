@@ -81,16 +81,20 @@ describe("showDebugMenu — SelectList migration", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("creates a SelectList with diagnostics and status previews", async () => {
+  it("creates a SelectList with diagnostics, previews, and recovery tests", async () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
     expect(selectListCalls.length).toBe(1);
-    expect(selectListCalls[0].items).toHaveLength(11);
+    expect(selectListCalls[0].items).toHaveLength(17);
     expect(selectListCalls[0].items[0].value).toBe("agent-types");
     expect(selectListCalls[0].items[1].value).toBe("agent-briefing");
     expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
       value: "preview-needs-input",
       label: "Preview: Needs input",
+    }));
+    expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
+      value: "arm-blocked-10s",
+      label: "Arm: blocked · 10s",
     }));
   });
 
@@ -106,6 +110,42 @@ describe("showDebugMenu — SelectList migration", () => {
     await selectListCalls[0].onSelect!({ value: "preview-clear" });
     expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith(undefined);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview cleared", "info");
+  });
+
+  it("arms and clears a one-shot recovery test", async () => {
+    const ctx = createMockCtx();
+    await showDebugMenu(ctx);
+
+    await selectListCalls[0].onSelect!({ value: "arm-blocked-10s" });
+    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked", 10_000);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Armed output_blocked for the next agent", "info");
+
+    await selectListCalls[0].onSelect!({ value: "arm-clear" });
+    expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
+  });
+
+  it("prints runtime diagnostics", async () => {
+    mockModules.mockManager.debugDiagnostics.mockReturnValue({
+      armedFault: { kind: "output_blocked", recoveryTtlMs: 10_000 },
+      agents: [{
+        id: "agent-12345678",
+        type: "Explore",
+        status: "error",
+        session: "live",
+        settled: true,
+        resultConsumed: false,
+        recoverable: true,
+        recoveryRemainingMs: 8_000,
+        error: "content was flagged",
+      }],
+    });
+    const ctx = createMockCtx();
+    await showDebugMenu(ctx);
+
+    await selectListCalls[0].onSelect!({ value: "runtime-diagnostics" });
+    const text = ctx.ui.notify.mock.calls.at(-1)?.[0];
+    expect(text).toContain("Armed fault: output_blocked · 10s");
+    expect(text).toContain("Recovery: Needs input · 8s remaining");
   });
 
   it("wraps SelectList in SettingsListWrapper with title 'Debug'", async () => {
