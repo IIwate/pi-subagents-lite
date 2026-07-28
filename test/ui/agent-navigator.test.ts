@@ -239,8 +239,8 @@ describe("AgentNavigator", () => {
     const lines = selector.render(120);
     const runningRow = lines.find((line: string) => line.includes("Active task"))!;
     const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
-    expect(runningRow).toMatch(/Running\s+1 calls/);
-    expect(blockedRow).toMatch(/Needs input\s+81 calls/);
+    expect(runningRow).toMatch(/Running {2}1 calls/);
+    expect(blockedRow).toMatch(/Needs input {2}81 calls/);
   });
 
   it("renders a debug status preview without mutating agent lifecycle", () => {

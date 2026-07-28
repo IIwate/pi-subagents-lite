@@ -46,7 +46,6 @@ const PI_08010_ROOT_CHILDREN = 9;
 const ROOT_REGIONS_AFTER_CHAT = 6;
 const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
-const STATUS_COLUMN_WIDTH = 11;
 const STATUS_COLUMN_GAP = 2;
 const MIN_LEFT_COLUMN_WIDTH = 18;
 
@@ -130,18 +129,14 @@ function appendWrapped(lines: string[], text: string, width: number): void {
   }
 }
 
-function padRight(text: string, width: number): string {
-  return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
-}
-
 function renderAgentRow(left: string, status: string, stats: string, width: number): string {
-  const statusWidth = Math.min(STATUS_COLUMN_WIDTH, width);
-  const statusText = padRight(truncateToWidth(status, statusWidth), statusWidth);
-  // Keep status adjacent to stats on wide terminals. When space runs out, stats
-  // shrink before the descriptive left column can hide a recovery-required state.
+  // Reserve only the separator and minimum description width. A fixed status
+  // column makes short labels float away from stats, especially on wide rows.
+  const statusMaxWidth = Math.max(1, width - MIN_LEFT_COLUMN_WIDTH - STATUS_COLUMN_GAP * 2);
+  const statusText = truncateToWidth(status, statusMaxWidth);
   const statsWidth = Math.max(
     0,
-    width - MIN_LEFT_COLUMN_WIDTH - statusWidth - STATUS_COLUMN_GAP * 2,
+    width - MIN_LEFT_COLUMN_WIDTH - visibleWidth(statusText) - STATUS_COLUMN_GAP * 2,
   );
   const statsText = statsWidth > 0 ? truncateToWidth(stats, statsWidth, "…") : "";
   const right = statsText
