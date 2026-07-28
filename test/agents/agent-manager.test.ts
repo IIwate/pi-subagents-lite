@@ -456,6 +456,42 @@ describe("AgentManager", () => {
       expect(record.lifecycle.status).toBe("stopped");
     });
 
+    it("continues a failed live session through the existing interaction path", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("content was flagged");
+      });
+      const continuation = makeResolvablePromise();
+      mockModules.mockContinueAgentSession.mockReturnValue(continuation.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      expect(record.lifecycle.status).toBe("error");
+      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toBe(true);
+      expect(record.lifecycle.status).toBe("running");
+      expect(mockModules.mockContinueAgentSession).toHaveBeenCalledWith(
+        session,
+        "Provide a defensive-only summary",
+        expect.objectContaining({
+          maxTurns: record.stats.maxTurns,
+          graceTurns: record.execution.graceTurns,
+        }),
+      );
+
+      continuation.resolve({ responseText: "defensive summary", aborted: false, turnLimited: false });
+      await record.execution.promise;
+
+      expect(record.lifecycle.status).toBe("completed");
+      expect(record.result).toBe("defensive summary");
+    });
+
     it("rejects a stopped agent until its previous execution settles", async () => {
       manager = new AgentManager(onComplete);
       const deferred = makeResolvablePromise();
