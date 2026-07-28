@@ -18,12 +18,12 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list current and completed agents without polling or waiting.
 
-Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Each row keeps a fixed status column before the stats:
+Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Status stays immediately left of the row stats; on narrow terminals, stats and descriptions truncate before a `Needs input` status:
 
 ```text
 › ● Main
-  ○ Explore   Inspect the project              Running        4 calls · 25s
-  ○ Security  Audit authentication             Needs input    81 calls · 36m
+  ○ Explore   Inspect the project                          Running  4 calls · 25s
+  ○ Security  Audit authentication                         Needs input  81 calls · 36m
 ```
 
 - `›` marks the keyboard-highlighted row.
@@ -103,7 +103,7 @@ Run `/agents` to configure:
 - background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;
-- agent type inspection and diagnostic briefing.
+- agent type inspection, diagnostic briefing, and UI-only status previews for list-layout testing. Previews apply to all visible subagent rows, are not persisted, and never alter real agent lifecycle.
 
 Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
 
