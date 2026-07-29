@@ -261,6 +261,20 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).toContain("Running");
   });
 
+  it("marks records created by Debug fault injection", () => {
+    const record = makeRecord("agent-debug", "error");
+    record.execution.settled = true;
+    record.execution.debugFaultKind = "output_blocked";
+    record.error = "debug injected: content was flagged";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120).join("\n")).toContain("Needs input (Debug)");
+  });
+
   it.each([
     ["queued", "Queued"],
     ["running", "Running"],
@@ -284,6 +298,7 @@ describe("AgentNavigator", () => {
   it("keeps Needs input visible when a narrow terminal truncates other columns", () => {
     const record = makeRecord("agent-blocked", "error");
     record.execution.settled = true;
+    record.execution.debugFaultKind = "output_blocked";
     record.error = "content was flagged";
     record.display.description = "A very long security audit description";
     const ui = makeUI({ value: "" });

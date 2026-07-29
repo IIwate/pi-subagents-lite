@@ -96,6 +96,35 @@ describe("AgentStatus tool execute behavior", () => {
     expect(text).toContain("Don't poll");
   });
 
+  it("does not expose Debug diagnostics to the parent LLM", async () => {
+    mockListAgents.mockReturnValue([{
+      id: "abc123def456ghi",
+      display: { type: "builder" },
+      lifecycle: { status: "error" },
+      execution: {
+        debugFaultKind: "output_blocked",
+        recoveryTtlMs: 10_000,
+        recoveryExpiryPausedRemainingMs: 8_000,
+      },
+    }]);
+
+    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
+    const result = await executeAgentStatusTool(
+      "call_debug",
+      {},
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const text = result.content[0].text;
+    const lowerText = text.toLowerCase();
+    expect(text).toContain("abc123de (builder) error");
+    expect(lowerText).not.toContain("debug");
+    expect(lowerText).not.toContain("output_blocked");
+    expect(lowerText).not.toContain("recovery");
+  });
+
   it("renders all status types in the output", async () => {
     mockListAgents.mockReturnValue([
       { id: "id1", display: { type: "a" }, lifecycle: { status: "running" } },

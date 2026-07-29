@@ -267,7 +267,10 @@ describe("runAgent — session state inheritance", () => {
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
-  it("injects a Debug failure after session setup without prompting the provider", async () => {
+  it.each([
+    ["output_blocked", "content was flagged"],
+    ["provider_error", "provider error after session setup"],
+  ] as const)("injects %s after session setup without prompting the provider", async (debugFault, message) => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
@@ -275,9 +278,9 @@ describe("runAgent — session state inheritance", () => {
 
     await expect(runAgent(fakeCtx(), "test-agent", "do something", {
       pi: fakePi,
-      debugFault: "output_blocked",
+      debugFault,
       onSessionCreated,
-    })).rejects.toThrow("content was flagged");
+    })).rejects.toThrow(message);
 
     expect(onSessionCreated).toHaveBeenCalledWith(session);
     expect(session.prompt).not.toHaveBeenCalled();

@@ -551,7 +551,7 @@ describe("AgentManager", () => {
         options.onSessionCreated(failedSession);
         throw new Error("debug injected: content was flagged");
       });
-      manager.armDebugFault("output_blocked", 10_000);
+      manager.armDebugFault("output_blocked");
 
       const failedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "failed", {
         description: "failed",
@@ -692,7 +692,7 @@ describe("AgentManager", () => {
         return mockRunResult({ session });
       });
 
-      manager.armDebugFault("output_blocked", 10_000);
+      manager.armDebugFault("output_blocked");
       const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
         modelKey: "test/model",
@@ -706,23 +706,133 @@ describe("AgentManager", () => {
 
       expect(runOptions[0].debugFault).toBe("output_blocked");
       expect(runOptions[1].debugFault).toBeUndefined();
+      expect(manager.getRecord(firstId)!.execution).toMatchObject({
+        debugFaultKind: "output_blocked",
+        recoveryTtlMs: 10_000,
+      });
       expect(manager.debugDiagnostics().armedFault).toBeUndefined();
     });
 
-    it("expires a fault-injected recoverable session at its bound TTL", async () => {
-      vi.useFakeTimers();
-      manager = new AgentManager(onComplete);
-      const session = mockAgentSession();
-      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
-        options.onSessionCreated(session);
-        throw new Error("debug injected: content was flagged");
+    it("keeps a fault armed while agents are queued and consumes it once at start", async () => {
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/model": 1 },
       });
-      manager.armDebugFault("output_blocked", 10_000);
+      const blocker = makeResolvablePromise();
+      const runOptions: any[] = [];
+      mockModules.mockRunAgent.mockImplementation((_ctx, _type, _prompt, options) => {
+        runOptions.push(options);
+        if (runOptions.length === 1) return blocker.promise;
+        const session = mockAgentSession();
+        options.onSessionCreated(session);
+        return Promise.resolve(mockRunResult({ session }));
+      });
+
+      const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+        description: "blocker",
+        modelKey: "test/model",
+      });
+      manager.armDebugFault("output_blocked");
+      const firstQueuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first queued", {
+        description: "first queued",
+        modelKey: "test/model",
+      });
+      const secondQueuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second queued", {
+        description: "second queued",
+        modelKey: "test/model",
+      });
+
+      expect(manager.getRecord(firstQueuedId)!.lifecycle.status).toBe("queued");
+      expect(manager.getRecord(secondQueuedId)!.lifecycle.status).toBe("queued");
+      expect(manager.debugDiagnostics().armedFault?.kind).toBe("output_blocked");
+
+      blocker.resolve(mockRunResult());
+      await manager.getRecord(blockerId)!.execution.promise;
+      await manager.getRecord(firstQueuedId)!.execution.promise;
+      await manager.getRecord(secondQueuedId)!.execution.promise;
+
+      expect(runOptions.map(options => options.debugFault)).toEqual([
+        undefined,
+        "output_blocked",
+        undefined,
+      ]);
+      expect(manager.getRecord(firstQueuedId)!.execution.debugFaultKind).toBe("output_blocked");
+      expect(manager.getRecord(secondQueuedId)!.execution.debugFaultKind).toBeUndefined();
+      expect(manager.debugDiagnostics().armedFault).toBeUndefined();
+    });
+
+    it("clears an armed fault before a queued agent starts", async () => {
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/model": 1 },
+      });
+      const blocker = makeResolvablePromise();
+      const runOptions: any[] = [];
+      mockModules.mockRunAgent.mockImplementation((_ctx, _type, _prompt, options) => {
+        runOptions.push(options);
+        if (runOptions.length === 1) return blocker.promise;
+        const session = mockAgentSession();
+        options.onSessionCreated(session);
+        return Promise.resolve(mockRunResult({ session }));
+      });
+
+      const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+        description: "blocker",
+        modelKey: "test/model",
+      });
+      manager.armDebugFault("provider_error");
+      const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
+        description: "queued",
+        modelKey: "test/model",
+      });
+      manager.clearDebugFault();
+
+      blocker.resolve(mockRunResult());
+      await manager.getRecord(blockerId)!.execution.promise;
+      await manager.getRecord(queuedId)!.execution.promise;
+
+      expect(runOptions[1].debugFault).toBeUndefined();
+      expect(manager.getRecord(queuedId)!.execution.debugFaultKind).toBeUndefined();
+    });
+
+    it("does not mark setup failures as injected Debug faults", async () => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockRejectedValue(new Error("model unavailable"));
+      manager.armDebugFault("provider_error");
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
         modelKey: "test/model",
       });
+      await manager.getRecord(id)!.execution.promise;
+
+      expect(manager.getRecord(id)!.execution.debugFaultKind).toBeUndefined();
+      expect(manager.getRecord(id)!.execution.recoveryTtlMs).toBeUndefined();
+      expect(manager.debugDiagnostics().armedFault).toBeUndefined();
+    });
+
+    it("starts a fault-injected recovery TTL when the failure completes", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      let rejectRun!: (error: Error) => void;
+      mockModules.mockRunAgent.mockImplementation((_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        return new Promise((_resolve, reject) => {
+          rejectRun = reject;
+        });
+      });
+      manager.armDebugFault("output_blocked");
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(record.lifecycle.status).toBe("running");
+      rejectRun(new Error("debug injected: content was flagged"));
       await manager.getRecord(id)!.execution.promise;
 
       await vi.advanceTimersByTimeAsync(9_999);
@@ -739,7 +849,7 @@ describe("AgentManager", () => {
         options.onSessionCreated(session);
         throw new Error("debug injected: content was flagged");
       });
-      manager.armDebugFault("output_blocked", 10_000);
+      manager.armDebugFault("output_blocked");
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
@@ -749,12 +859,17 @@ describe("AgentManager", () => {
       await vi.advanceTimersByTimeAsync(4_000);
 
       expect(manager.pauseRecoveryExpiry(id)).toBe(true);
-      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
+      expect(manager.debugDiagnostics().agents[0]).toMatchObject({
+        debugFaultKind: "output_blocked",
+        recoveryPaused: true,
+        recoveryRemainingMs: 6_000,
+      });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(manager.getRecord(id)).toBeDefined();
       expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
 
       expect(manager.resumeRecoveryExpiry(id)).toBe(true);
+      expect(manager.debugDiagnostics().agents[0].recoveryPaused).toBe(false);
       await vi.advanceTimersByTimeAsync(5_999);
       expect(manager.getRecord(id)).toBeDefined();
       await vi.advanceTimersByTimeAsync(1);
@@ -771,7 +886,7 @@ describe("AgentManager", () => {
       });
       const continuation = makeResolvablePromise();
       mockModules.mockContinueAgentSession.mockReturnValue(continuation.promise);
-      manager.armDebugFault("output_blocked", 10_000);
+      manager.armDebugFault("output_blocked");
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
@@ -780,6 +895,8 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toBe(true);
+      expect(record.execution.recoveryTtlMs).toBeUndefined();
+      expect(record.execution.debugFaultKind).toBe("output_blocked");
 
       await vi.advanceTimersByTimeAsync(10_000);
       expect(manager.getRecord(id)).toBe(record);
@@ -788,6 +905,36 @@ describe("AgentManager", () => {
       continuation.resolve({ responseText: "defensive summary", aborted: false, turnLimited: false });
       await record.execution.promise;
       expect(record.lifecycle.status).toBe("completed");
+    });
+
+    it("uses the normal recovery window for a real failure after continuation", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("debug injected: content was flagged");
+      });
+      mockModules.mockContinueAgentSession.mockRejectedValue(new Error("provider internal error"));
+      manager.armDebugFault("output_blocked");
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      await record.execution.promise;
+      expect(record.lifecycle.status).toBe("error");
+      expect(record.execution.debugFaultKind).toBe("output_blocked");
+      expect(record.execution.recoveryTtlMs).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(30 * 60_000 - 1);
+      expect(manager.getRecord(id)).toBe(record);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(manager.getRecord(id)).toBeUndefined();
     });
 
     it("evicts old setup failures without a child session", async () => {

@@ -20,7 +20,10 @@ import { getAgentConfig, getAvailableTypes, getAllTypes } from "../../agents/age
 import { buildSelectListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { getPiInstance, getManager, getNavigator } from "../../shell.js";
-import { DEBUG_RECOVERY_WINDOWS, type ArmedDebugFault } from "../../agents/debug-fault.js";
+import {
+  DEBUG_RECOVERY_TTL_MS,
+  type DebugFaultKind,
+} from "../../agents/debug-fault.js";
 import type { DebugStatusPreview } from "../agent-navigator.js";
 
 const STATUS_PREVIEW_ITEMS: Array<{
@@ -44,34 +47,35 @@ const RECOVERY_TEST_ITEMS: Array<{
   value: string;
   label: string;
   description: string;
-  fault?: ArmedDebugFault;
+  fault?: DebugFaultKind;
 }> = [
   {
     value: "arm-blocked-10s",
     label: "Arm: blocked · 10s",
     description: "Fail the next real child session after setup, then expire in 10 seconds",
-    fault: { kind: "output_blocked", recoveryTtlMs: DEBUG_RECOVERY_WINDOWS[0].ms },
+    fault: "output_blocked",
   },
   {
     value: "arm-provider-10s",
     label: "Arm: provider error · 10s",
     description: "Fail the next real child session after setup, then expire in 10 seconds",
-    fault: { kind: "provider_error", recoveryTtlMs: DEBUG_RECOVERY_WINDOWS[0].ms },
-  },
-  {
-    value: "arm-blocked-30m",
-    label: "Arm: blocked · 30m",
-    description: "Fail the next real child session after setup with the normal recovery window",
-    fault: { kind: "output_blocked", recoveryTtlMs: DEBUG_RECOVERY_WINDOWS[1].ms },
-  },
-  {
-    value: "arm-provider-30m",
-    label: "Arm: provider error · 30m",
-    description: "Fail the next real child session after setup with the normal recovery window",
-    fault: { kind: "provider_error", recoveryTtlMs: DEBUG_RECOVERY_WINDOWS[1].ms },
+    fault: "provider_error",
   },
   { value: "arm-clear", label: "Arm: Clear", description: "Clear the pending one-shot recovery test" },
 ];
+
+function buildDebugMenuItems(armedKind?: DebugFaultKind): SelectItem[] {
+  return [
+    { value: "agent-types", label: "Agent types", description: "List available agent types and their configs" },
+    { value: "agent-briefing", label: "Agent briefing", description: "Send agent types/capabilities info to LLM (Optional, if having issues)" },
+    { value: "runtime-diagnostics", label: "Runtime diagnostics", description: "Inspect live sessions, errors, recovery windows, and armed faults" },
+    ...STATUS_PREVIEW_ITEMS,
+    ...RECOVERY_TEST_ITEMS.map((item) => ({
+      ...item,
+      label: item.fault === armedKind ? `${item.label} (armed)` : item.label,
+    })),
+  ];
+}
 
 function showRuntimeDiagnostics(ctx: ExtensionCommandContext): void {
   const diagnostics = getManager()?.debugDiagnostics();
@@ -82,7 +86,7 @@ function showRuntimeDiagnostics(ctx: ExtensionCommandContext): void {
 
   const lines = ["Subagent runtime diagnostics:\n"];
   if (diagnostics.armedFault) {
-    lines.push(`Armed fault: ${diagnostics.armedFault.kind} · ${Math.ceil(diagnostics.armedFault.recoveryTtlMs / 1000)}s`);
+    lines.push(`Armed fault: ${diagnostics.armedFault.kind} · next started Agent · ${Math.ceil(DEBUG_RECOVERY_TTL_MS / 1000)}s recovery`);
     lines.push("");
   }
   if (diagnostics.agents.length === 0) {
@@ -91,8 +95,12 @@ function showRuntimeDiagnostics(ctx: ExtensionCommandContext): void {
   for (const agent of diagnostics.agents) {
     lines.push(`${agent.id.slice(0, 8)} (${agent.type}) ${agent.status}`);
     lines.push(`  Session: ${agent.session} · Settled: ${agent.settled ? "yes" : "no"} · Result delivered: ${agent.resultConsumed ? "yes" : "no"}`);
+    if (agent.debugFaultKind) {
+      lines.push(`  Debug fault: ${agent.debugFaultKind}`);
+    }
     if (agent.recoverable) {
-      lines.push(`  Recovery: Needs input · ${Math.ceil((agent.recoveryRemainingMs ?? 0) / 1000)}s remaining`);
+      const countdown = agent.recoveryPaused ? "paused" : "active";
+      lines.push(`  Recovery: Needs input · ${countdown} · ${Math.ceil((agent.recoveryRemainingMs ?? 0) / 1000)}s remaining`);
     }
     if (agent.error) lines.push(`  Error: ${agent.error}`);
     lines.push("");
@@ -188,55 +196,52 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
 }
 
 export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void> {
-  await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const items: SelectItem[] = [
-      { value: "agent-types", label: "Agent types", description: "List available agent types and their configs" },
-      { value: "agent-briefing", label: "Agent briefing", description: "Send agent types/capabilities info to LLM (Optional, if having issues)" },
-      { value: "runtime-diagnostics", label: "Runtime diagnostics", description: "Inspect live sessions, errors, recovery windows, and armed faults" },
-      ...STATUS_PREVIEW_ITEMS,
-      ...RECOVERY_TEST_ITEMS,
-    ];
-
-    const selectList = new SelectList(items, 10, buildSelectListTheme(theme));
-    selectList.onSelect = async (item) => {
-      if (item.value === "agent-types") {
-        await showAgentTypes(ctx);
-      } else if (item.value === "agent-briefing") {
-        await handleAgentBriefing(ctx);
-      } else if (item.value === "runtime-diagnostics") {
-        showRuntimeDiagnostics(ctx);
-      } else {
-        const preview = STATUS_PREVIEW_ITEMS.find(option => option.value === item.value);
-        if (preview) {
-          const navigator = getNavigator();
-          if (!navigator) {
-            ctx.ui.notify("Agent list is not available in this session", "info");
+  let result: unknown = "refresh";
+  while (result === "refresh") {
+    result = await ctx.ui.custom((_tui, theme, _kb, done) => {
+      const armedKind = getManager()?.debugDiagnostics().armedFault?.kind;
+      const selectList = new SelectList(buildDebugMenuItems(armedKind), 10, buildSelectListTheme(theme));
+      selectList.onSelect = async (item) => {
+        if (item.value === "agent-types") {
+          await showAgentTypes(ctx);
+        } else if (item.value === "agent-briefing") {
+          await handleAgentBriefing(ctx);
+        } else if (item.value === "runtime-diagnostics") {
+          showRuntimeDiagnostics(ctx);
+        } else {
+          const preview = STATUS_PREVIEW_ITEMS.find(option => option.value === item.value);
+          if (preview) {
+            const navigator = getNavigator();
+            if (!navigator) {
+              ctx.ui.notify("Agent list is not available in this session", "info");
+              return;
+            }
+            navigator.setDebugStatusPreview(preview.preview);
+            ctx.ui.notify(
+              preview.preview ? `Status preview set to ${preview.label.slice("Preview: ".length)}` : "Status preview cleared",
+              "info",
+            );
             return;
           }
-          navigator.setDebugStatusPreview(preview.preview);
-          ctx.ui.notify(
-            preview.preview ? `Status preview set to ${preview.label.slice("Preview: ".length)}` : "Status preview cleared",
-            "info",
-          );
-          return;
-        }
 
-        const recoveryTest = RECOVERY_TEST_ITEMS.find(option => option.value === item.value);
-        if (!recoveryTest) return;
-        const manager = getManager();
-        if (!manager) {
-          ctx.ui.notify("Agent manager is not available in this session", "info");
-          return;
+          const recoveryTest = RECOVERY_TEST_ITEMS.find(option => option.value === item.value);
+          if (!recoveryTest) return;
+          const manager = getManager();
+          if (!manager) {
+            ctx.ui.notify("Agent manager is not available in this session", "info");
+            return;
+          }
+          if (recoveryTest.fault) {
+            manager.armDebugFault(recoveryTest.fault);
+            ctx.ui.notify(`Armed ${recoveryTest.fault} for the next agent`, "info");
+          } else {
+            manager.clearDebugFault();
+            ctx.ui.notify("Cleared armed recovery test", "info");
+          }
+          done("refresh");
         }
-        if (recoveryTest.fault) {
-          manager.armDebugFault(recoveryTest.fault.kind, recoveryTest.fault.recoveryTtlMs);
-          ctx.ui.notify(`Armed ${recoveryTest.fault.kind} for the next agent`, "info");
-        } else {
-          manager.clearDebugFault();
-          ctx.ui.notify("Cleared armed recovery test", "info");
-        }
-      }
-    };
-    return new SettingsListWrapper(selectList, { title: "Debug", theme, onCancel: () => done(undefined) });
-  });
+      };
+      return new SettingsListWrapper(selectList, { title: "Debug", theme, onCancel: () => done(undefined) });
+    });
+  }
 }

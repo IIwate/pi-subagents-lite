@@ -4,6 +4,7 @@
 
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
 import type { SubagentType, AgentInvocation } from "./agents/types.js";
 
@@ -118,6 +119,8 @@ export interface AgentExecutionState {
   modelKey?: string;
   /** Grace turns retained for direct follow-up prompts. */
   graceTurns?: number;
+  /** Debug fault assigned after the real child session is configured. */
+  debugFaultKind?: DebugFaultKind;
   /** One-shot Debug recovery window for a fault-injected failure. */
   recoveryTtlMs?: number;
   /** Absolute expiry for an active recovery window; kept separate from failure time. */
@@ -149,5 +152,4 @@ export interface AgentAccumulatedStats {
   /** Last-known context usage percentage (0–100), captured at completion. */
   contextPercent?: number | null;
 }
-
 

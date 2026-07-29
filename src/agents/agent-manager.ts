@@ -19,7 +19,11 @@ import type { SubagentType } from "./types.js";
 import { addUsage, getSessionContextPercent } from "./usage.js";
 import { errorMessage } from "../utils.js";
 import { needsUserInput } from "./failure-state.js";
-import type { ArmedDebugFault, DebugFaultKind } from "./debug-fault.js";
+import {
+  DEBUG_RECOVERY_TTL_MS,
+  type ArmedDebugFault,
+  type DebugFaultKind,
+} from "./debug-fault.js";
 
 /** How often to check for expired agent records (milliseconds). */
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -27,8 +31,8 @@ const CLEANUP_INTERVAL_MS = 60_000;
 /** Age after which a completed agent record is evicted (milliseconds). */
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 
-/** Longer retention for failed live sessions still available for user input. */
-const CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS = 30 * 60_000;
+/** Recovery window for ordinary failed live sessions still available for user input. */
+const NORMAL_RECOVERY_TTL_MS = 30 * 60_000;
 
 /** Maximum wait for child shutdown handlers; disposal continues after this timeout (milliseconds). */
 const SESSION_SHUTDOWN_TIMEOUT_MS = 15_000;
@@ -71,6 +75,8 @@ export interface DebugAgentDiagnostic {
   settled: boolean;
   resultConsumed: boolean;
   recoverable: boolean;
+  debugFaultKind?: DebugFaultKind;
+  recoveryPaused: boolean;
   recoveryRemainingMs?: number;
   error?: string;
 }
@@ -176,8 +182,8 @@ export class AgentManager {
   }
 
   /** Arm a one-shot Debug failure for the next agent that actually starts. */
-  armDebugFault(kind: DebugFaultKind, recoveryTtlMs: number): void {
-    this.armedDebugFault = { kind, recoveryTtlMs };
+  armDebugFault(kind: DebugFaultKind): void {
+    this.armedDebugFault = { kind };
   }
 
   clearDebugFault(): void {
@@ -220,6 +226,9 @@ export class AgentManager {
           settled: record.execution.settled === true,
           resultConsumed: record.lifecycle.resultConsumed === true,
           recoverable,
+          debugFaultKind: record.execution.debugFaultKind,
+          recoveryPaused: recoverable
+            && record.execution.recoveryExpiryPausedRemainingMs != null,
           recoveryRemainingMs: recoverable
             ? this.recoveryRemainingMs(record, now)
             : undefined,
@@ -346,7 +355,6 @@ export class AgentManager {
 
     const debugFault = this.armedDebugFault;
     this.armedDebugFault = undefined;
-    record.execution.recoveryTtlMs = debugFault?.recoveryTtlMs;
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
@@ -372,6 +380,10 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         record.execution.session = session;
+        if (debugFault) {
+          record.execution.debugFaultKind = debugFault.kind;
+          record.execution.recoveryTtlMs = DEBUG_RECOVERY_TTL_MS;
+        }
         // Snapshot effective model/thinking for widget display (session may inherit settings defaults).
         const inv = record.display.invocation ?? {};
         if (!inv.modelName && session.model?.id) inv.modelName = session.model.id;
@@ -654,7 +666,7 @@ export class AgentManager {
   }
 
   private recoveryWindowMs(record: AgentRecord): number {
-    return record.execution.recoveryTtlMs ?? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS;
+    return record.execution.recoveryTtlMs ?? NORMAL_RECOVERY_TTL_MS;
   }
 
   private recoveryExpiresAt(record: AgentRecord): number {

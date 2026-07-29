@@ -72,6 +72,7 @@ describe("showDebugMenu — SelectList migration", () => {
     (getAllTypes as any).mockReturnValue([]);
     (getAvailableTypes as any).mockReturnValue([]);
     (getAgentConfig as any).mockImplementation(() => undefined);
+    mockModules.mockManager.debugDiagnostics.mockReset().mockReturnValue({ agents: [] });
   });
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
@@ -85,7 +86,7 @@ describe("showDebugMenu — SelectList migration", () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
     expect(selectListCalls.length).toBe(1);
-    expect(selectListCalls[0].items).toHaveLength(17);
+    expect(selectListCalls[0].items).toHaveLength(15);
     expect(selectListCalls[0].items[0].value).toBe("agent-types");
     expect(selectListCalls[0].items[1].value).toBe("agent-briefing");
     expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
@@ -96,6 +97,9 @@ describe("showDebugMenu — SelectList migration", () => {
       value: "arm-blocked-10s",
       label: "Arm: blocked · 10s",
     }));
+    expect(selectListCalls[0].items.map(item => item.value)).not.toContain("arm-blocked-30m");
+    expect(selectListCalls[0].items.map(item => item.value)).not.toContain("arm-provider-30m");
+    expect(selectListCalls[0].items.map(item => item.value)).not.toContain("__sep__");
   });
 
 
@@ -117,16 +121,59 @@ describe("showDebugMenu — SelectList migration", () => {
     await showDebugMenu(ctx);
 
     await selectListCalls[0].onSelect!({ value: "arm-blocked-10s" });
-    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked", 10_000);
+    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Armed output_blocked for the next agent", "info");
 
     await selectListCalls[0].onSelect!({ value: "arm-clear" });
     expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
   });
 
+  it("rebuilds recovery controls from manager state after arm and clear", async () => {
+    mockModules.mockManager.debugDiagnostics
+      .mockReset()
+      .mockReturnValueOnce({ agents: [] })
+      .mockReturnValueOnce({ armedFault: { kind: "output_blocked" }, agents: [] })
+      .mockReturnValueOnce({ agents: [] });
+    const ctx = createMockCtx();
+    let round = 0;
+    ctx.ui.custom = vi.fn(async (factory: any) => {
+      let completion: unknown;
+      factory(
+        { terminal: { rows: 40, columns: 120 } },
+        {
+          fg: (_color: string, text: string) => text,
+          bold: (text: string) => text,
+          italic: (text: string) => text,
+        },
+        null,
+        (value: unknown) => { completion = value; },
+      );
+      const selectList = selectListCalls.at(-1)!;
+      if (round === 0) {
+        await selectList.onSelect!(selectList.items.find(item => item.value === "arm-blocked-10s"));
+      } else if (round === 1) {
+        await selectList.onSelect!(selectList.items.find(item => item.value === "arm-clear"));
+      }
+      round++;
+      return completion;
+    });
+
+    await showDebugMenu(ctx);
+
+    expect(selectListCalls).toHaveLength(3);
+    expect(selectListCalls[0].items.find(item => item.value === "arm-blocked-10s")!.label)
+      .toBe("Arm: blocked · 10s");
+    expect(selectListCalls[1].items.find(item => item.value === "arm-blocked-10s")!.label)
+      .toBe("Arm: blocked · 10s (armed)");
+    expect(selectListCalls[2].items.find(item => item.value === "arm-blocked-10s")!.label)
+      .toBe("Arm: blocked · 10s");
+    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
+    expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
+  });
+
   it("prints runtime diagnostics", async () => {
     mockModules.mockManager.debugDiagnostics.mockReturnValue({
-      armedFault: { kind: "output_blocked", recoveryTtlMs: 10_000 },
+      armedFault: { kind: "output_blocked" },
       agents: [{
         id: "agent-12345678",
         type: "Explore",
@@ -135,6 +182,8 @@ describe("showDebugMenu — SelectList migration", () => {
         settled: true,
         resultConsumed: false,
         recoverable: true,
+        debugFaultKind: "output_blocked",
+        recoveryPaused: true,
         recoveryRemainingMs: 8_000,
         error: "content was flagged",
       }],
@@ -144,8 +193,9 @@ describe("showDebugMenu — SelectList migration", () => {
 
     await selectListCalls[0].onSelect!({ value: "runtime-diagnostics" });
     const text = ctx.ui.notify.mock.calls.at(-1)?.[0];
-    expect(text).toContain("Armed fault: output_blocked · 10s");
-    expect(text).toContain("Recovery: Needs input · 8s remaining");
+    expect(text).toContain("Armed fault: output_blocked · next started Agent · 10s recovery");
+    expect(text).toContain("Debug fault: output_blocked");
+    expect(text).toContain("Recovery: Needs input · paused · 8s remaining");
   });
 
   it("wraps SelectList in SettingsListWrapper with title 'Debug'", async () => {

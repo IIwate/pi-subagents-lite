@@ -3,13 +3,10 @@ export type DebugFaultKind = "output_blocked" | "provider_error";
 /** One-shot, session-local fault armed from /agents → Debug. */
 export interface ArmedDebugFault {
   kind: DebugFaultKind;
-  recoveryTtlMs: number;
 }
 
-export const DEBUG_RECOVERY_WINDOWS = [
-  { label: "10s", ms: 10_000 },
-  { label: "30m", ms: 30 * 60_000 },
-] as const;
+/** Fixed recovery window for a fault injected from the Debug menu. */
+export const DEBUG_RECOVERY_TTL_MS = 10_000;
 
 export function debugFaultMessage(kind: DebugFaultKind): string {
   return kind === "output_blocked"

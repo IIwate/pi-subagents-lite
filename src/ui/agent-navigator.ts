@@ -175,7 +175,10 @@ function renderAgentStatus(
   }
 
   const renderedStatus = theme.fg(color, label);
-  return bold ? theme.bold(renderedStatus) : renderedStatus;
+  const baseStatus = bold ? theme.bold(renderedStatus) : renderedStatus;
+  return record.execution.debugFaultKind
+    ? `${baseStatus}${theme.fg("dim", " (Debug)")}`
+    : baseStatus;
 }
 
 function recoverableFailureHint(record: AgentRecord): string | undefined {

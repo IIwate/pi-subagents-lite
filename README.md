@@ -104,7 +104,7 @@ Run `/agents` to configure:
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;
 - agent type inspection, diagnostic briefing, runtime diagnostics, and UI-only status previews for list-layout testing;
-- one-shot recovery tests that inject a failure after the next real child session is configured. They are session-local, not exposed to the parent LLM, and can bind that test record to a 10-second or 30-minute recovery window.
+- one-shot recovery tests that inject a failure after the next real child session is configured. The controls and runtime diagnostics are session-local and UI-only; injected failures use a fixed 10-second recovery window, while ordinary recoverable failures keep the normal 30-minute window. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
 Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
 
