@@ -503,11 +503,6 @@ export class AgentManager {
     const session = record.execution.session;
     if (!session || !record.execution.settled || session.isStreaming) return false;
 
-    this.clearRecoveryExpiry(id);
-    // A successful manual continuation starts a new real run; it must not inherit
-    // the short TTL from a one-shot Debug fault on the original run.
-    record.execution.recoveryTtlMs = undefined;
-
     let concurrencySlot: ConcurrencySlot | undefined;
     if (record.execution.modelKey) {
       const slot = this.getSlot(record.execution.modelKey);
@@ -515,6 +510,11 @@ export class AgentManager {
       slot.running++;
       concurrencySlot = slot;
     }
+
+    // Do not alter a fault-bound recovery deadline until this continuation is
+    // guaranteed to start. A full model slot must leave the exact expiry timer intact.
+    this.clearRecoveryExpiry(id);
+    record.execution.recoveryTtlMs = undefined;
 
     const previousTurns = record.stats.turnCount ?? 0;
     const abortController = new AbortController();

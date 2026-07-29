@@ -540,6 +540,42 @@ describe("AgentManager", () => {
       secondDeferred.resolve(mockRunResult({ session: secondSession }));
     });
 
+    it("keeps a fault-bound expiry when a full model slot rejects continuation", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/model": 1 },
+      });
+      const failedSession = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementationOnce(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(failedSession);
+        throw new Error("debug injected: content was flagged");
+      });
+      manager.armDebugFault("output_blocked", 10_000);
+
+      const failedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "failed", {
+        description: "failed",
+        modelKey: "test/model",
+      });
+      const failedRecord = manager.getRecord(failedId)!;
+      await failedRecord.execution.promise;
+
+      const blocker = makeResolvablePromise();
+      mockModules.mockRunAgent.mockReturnValueOnce(blocker.promise);
+      const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+        description: "blocker",
+        modelKey: "test/model",
+      });
+
+      await expect(manager.interact(failedId, "continue")).resolves.toBe(false);
+      expect(failedRecord.execution.recoveryTtlMs).toBe(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(manager.getRecord(failedId)).toBeUndefined();
+
+      blocker.resolve(mockRunResult());
+      await manager.getRecord(blockerId)!.execution.promise;
+    });
+
     it("rejects interaction for queued agents", async () => {
       manager = new AgentManager(onComplete, {
         default: 1,
