@@ -697,15 +697,19 @@ export class AgentNavigator {
     if (id === this.selectedAgentId) return true;
     if (id && !this.manager.getRecord(id)) return false;
 
+    const previousId = this.selectedAgentId;
     if (id) {
       if (!this.swapToSubagentScreen()) {
         this.warnUnsupportedLayout();
         return false;
       }
       this.selectedAgentId = id;
+      if (previousId) this.manager.resumeRecoveryExpiry(previousId);
+      this.manager.pauseRecoveryExpiry(id);
     } else {
       this.selectedAgentId = null;
       this.restoreMainScreen();
+      if (previousId) this.manager.resumeRecoveryExpiry(previousId);
     }
 
     this.highlightedAgentId = this.selectedAgentId;

@@ -184,14 +184,34 @@ export class AgentManager {
     this.armedDebugFault = undefined;
   }
 
+  /** Freeze a recoverable record's countdown while its child view is active. */
+  pauseRecoveryExpiry(id: string): boolean {
+    const record = this.agents.get(id);
+    if (!record || !needsUserInput(record)) return false;
+    const expiresAt = this.recoveryExpiresAt(record);
+    record.execution.recoveryExpiryPausedRemainingMs = Math.max(0, expiresAt - Date.now());
+    record.execution.recoveryExpiresAt = undefined;
+    this.clearRecoveryExpiry(id);
+    return true;
+  }
+
+  /** Resume a paused countdown without granting a fresh recovery window. */
+  resumeRecoveryExpiry(id: string): boolean {
+    const record = this.agents.get(id);
+    const remaining = record?.execution.recoveryExpiryPausedRemainingMs;
+    if (!record || remaining == null || !needsUserInput(record)) return false;
+    record.execution.recoveryExpiryPausedRemainingMs = undefined;
+    record.execution.recoveryExpiresAt = Date.now() + remaining;
+    this.scheduleRecoveryExpiry(record);
+    return true;
+  }
+
   debugDiagnostics(): DebugDiagnostics {
     const now = Date.now();
     return {
       armedFault: this.armedDebugFault,
       agents: this.listAgents().map((record) => {
         const recoverable = needsUserInput(record);
-        const ttl = this.recoveryWindowMs(record);
-        const completedAt = record.lifecycle.completedAt;
         return {
           id: record.id,
           type: record.display.type,
@@ -200,8 +220,8 @@ export class AgentManager {
           settled: record.execution.settled === true,
           resultConsumed: record.lifecycle.resultConsumed === true,
           recoverable,
-          recoveryRemainingMs: recoverable && completedAt != null
-            ? Math.max(0, completedAt + ttl - now)
+          recoveryRemainingMs: recoverable
+            ? this.recoveryRemainingMs(record, now)
             : undefined,
           error: record.error,
         };
@@ -515,6 +535,8 @@ export class AgentManager {
     // guaranteed to start. A full model slot must leave the exact expiry timer intact.
     this.clearRecoveryExpiry(id);
     record.execution.recoveryTtlMs = undefined;
+    record.execution.recoveryExpiresAt = undefined;
+    record.execution.recoveryExpiryPausedRemainingMs = undefined;
 
     const previousTurns = record.stats.turnCount ?? 0;
     const abortController = new AbortController();
@@ -635,6 +657,16 @@ export class AgentManager {
     return record.execution.recoveryTtlMs ?? CLEANUP_NEEDS_INPUT_AGE_CUTOFF_MS;
   }
 
+  private recoveryExpiresAt(record: AgentRecord): number {
+    return record.execution.recoveryExpiresAt
+      ?? (record.lifecycle.completedAt ?? Date.now()) + this.recoveryWindowMs(record);
+  }
+
+  private recoveryRemainingMs(record: AgentRecord, now = Date.now()): number {
+    return record.execution.recoveryExpiryPausedRemainingMs
+      ?? Math.max(0, this.recoveryExpiresAt(record) - now);
+  }
+
   private clearRecoveryExpiry(id: string): void {
     const timer = this.recoveryExpiryTimers.get(id);
     if (!timer) return;
@@ -645,12 +677,14 @@ export class AgentManager {
   /** Schedule exact expiry so Debug's 10-second scenario is not delayed by cleanup polling. */
   private scheduleRecoveryExpiry(record: AgentRecord): void {
     this.clearRecoveryExpiry(record.id);
-    if (!needsUserInput(record)) return;
+    if (!needsUserInput(record) || record.execution.recoveryExpiryPausedRemainingMs != null) return;
 
-    const expiresAt = (record.lifecycle.completedAt ?? Date.now()) + this.recoveryWindowMs(record);
+    const expiresAt = this.recoveryExpiresAt(record);
+    record.execution.recoveryExpiresAt = expiresAt;
     const timer = setTimeout(() => {
       this.recoveryExpiryTimers.delete(record.id);
       if (this.agents.get(record.id) !== record || !needsUserInput(record)) return;
+      if (record.execution.recoveryExpiryPausedRemainingMs != null) return;
       if (Date.now() < expiresAt) {
         this.scheduleRecoveryExpiry(record);
         return;
@@ -716,12 +750,13 @@ export class AgentManager {
       // Ordinary terminal results stay until the LLM has read them. A failed live
       // session has a finite recovery deadline instead, even if its nudge failed.
       if (!waitingForInput && !record.lifecycle.resultConsumed) continue;
-      // Failed live sessions get a longer recovery window so users can continue
-      // the existing list interaction flow. This is not permanent retention.
-      const ageCutoff = waitingForInput
-        ? this.recoveryWindowMs(record)
-        : CLEANUP_AGE_CUTOFF_MS;
-      if ((record.lifecycle.completedAt ?? 0) >= now - ageCutoff) continue;
+      if (waitingForInput) {
+        // An active child view intentionally freezes its remaining recovery time.
+        if (record.execution.recoveryExpiryPausedRemainingMs != null) continue;
+        if (this.recoveryExpiresAt(record) >= now) continue;
+      } else if ((record.lifecycle.completedAt ?? 0) >= now - CLEANUP_AGE_CUTOFF_MS) {
+        continue;
+      }
       this.removeRecord(id, record);
     }
   }

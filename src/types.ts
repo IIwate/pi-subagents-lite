@@ -120,6 +120,10 @@ export interface AgentExecutionState {
   graceTurns?: number;
   /** One-shot Debug recovery window for a fault-injected failure. */
   recoveryTtlMs?: number;
+  /** Absolute expiry for an active recovery window; kept separate from failure time. */
+  recoveryExpiresAt?: number;
+  /** Frozen remaining recovery time while the user is viewing the failed child session. */
+  recoveryExpiryPausedRemainingMs?: number;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
 }

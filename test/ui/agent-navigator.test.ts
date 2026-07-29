@@ -56,6 +56,8 @@ function makeManager(records: any[]): AgentManager {
   return {
     listAgents: () => records,
     getRecord: (id: string) => records.find(record => record.id === id),
+    pauseRecoveryExpiry: vi.fn(),
+    resumeRecoveryExpiry: vi.fn(),
   } as unknown as AgentManager;
 }
 
@@ -550,6 +552,28 @@ describe("AgentNavigator", () => {
     expect(navigator.selectedId()).toBe(record.id);
     // Highlight moved to Main (○) while the selected agent remains active (●).
     expect(selector.render(120).join("\n")).toContain("› ○ Main");
+  });
+
+  it("pauses recovery while a child view is active and resumes it on Main", () => {
+    const record = makeRecord("agent-recovery", "error");
+    record.execution.settled = true;
+    record.error = "content was flagged";
+    const manager = makeManager([record]) as any;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(manager.pauseRecoveryExpiry).toHaveBeenCalledWith(record.id);
+
+    navigator.handleTerminalInput("\x1b[A");
+    navigator.handleTerminalInput("\r");
+    expect(manager.resumeRecoveryExpiry).toHaveBeenCalledWith(record.id);
+    expect(navigator.selectedId()).toBeNull();
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {

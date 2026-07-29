@@ -651,6 +651,7 @@ describe("AgentManager", () => {
       await record.execution.promise;
       // Past the normal 10-minute cutoff, still inside the 30-minute recovery window.
       record.lifecycle.completedAt = Date.now() - 20 * 60_000;
+      record.execution.recoveryExpiresAt = undefined;
 
       (manager as any).cleanup();
 
@@ -674,6 +675,7 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       record.lifecycle.completedAt = Date.now() - 31 * 60_000;
+      record.execution.recoveryExpiresAt = undefined;
 
       (manager as any).cleanup();
 
@@ -724,6 +726,36 @@ describe("AgentManager", () => {
       await manager.getRecord(id)!.execution.promise;
 
       await vi.advanceTimersByTimeAsync(9_999);
+      expect(manager.getRecord(id)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(manager.getRecord(id)).toBeUndefined();
+    });
+
+    it("pauses a recoverable expiry while its child view is active", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("debug injected: content was flagged");
+      });
+      manager.armDebugFault("output_blocked", 10_000);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(id)!.execution.promise;
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      expect(manager.pauseRecoveryExpiry(id)).toBe(true);
+      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(manager.getRecord(id)).toBeDefined();
+      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
+
+      expect(manager.resumeRecoveryExpiry(id)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_999);
       expect(manager.getRecord(id)).toBeDefined();
       await vi.advanceTimersByTimeAsync(1);
       expect(manager.getRecord(id)).toBeUndefined();
