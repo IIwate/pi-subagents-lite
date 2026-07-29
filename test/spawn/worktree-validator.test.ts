@@ -114,6 +114,23 @@ describe("validateWorktreePath", () => {
     expect(success.resolvedPath).toBe(normalizedPath(mainCheckout));
   });
 
+  it("accepts equivalent Windows git-common-dir paths with mixed separators and casing", async () => {
+    const parentCwd = join(tmpDir, "parent");
+    const worktreePath = join(tmpDir, "feature");
+    mkdirSync(parentCwd, { recursive: true });
+    mkdirSync(worktreePath, { recursive: true });
+
+    const gitResults = new Map<string, string | null>([
+      [parentCwd, "E:\\Projects\\Manager\\.git"],
+      [worktreePath, "e:/projects/manager/.git"],
+    ]);
+
+    const result = await validateWorktreePath(makePi(gitResults), worktreePath, parentCwd);
+
+    expect(result.ok).toBe(true);
+    expect((result as WorktreeValidationSuccess).resolvedPath).toBe(normalizedPath(worktreePath));
+  });
+
   // ── relative path resolution ──────────────────────────────────
 
   it("resolves a relative path against parent cwd", async () => {
