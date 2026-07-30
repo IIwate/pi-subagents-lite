@@ -21,10 +21,11 @@ import {
   unknownModelError,
 } from "../utils.js";
 import {
-  getActiveScopedModelKeys,
+  scopedModelKeys,
   isModelInScope,
   outOfScopeModelError,
   modelKey,
+  scopedThinkingLevel,
 } from "../models/model-scope.js";
 import {
   getPiInstance,
@@ -109,6 +110,7 @@ export async function executeAgentTool(
   const description = (params.description as string | undefined) || prompt.split("\n")[0].slice(0, 80) || prompt.slice(0, 80);
   const runInBackground = params.run_in_background as boolean | undefined;
   const maxTurns = getAgentConfig(resolvedType)?.maxTurns;
+  const scopedModels = [...ctx.scopedModels];
 
   // model may be "id", "provider/id", or "id:thinking" / "provider/id:thinking".
   const { modelRef, thinkingFromModel } = parseModelSpec(params.model as string | undefined);
@@ -128,7 +130,7 @@ export async function executeAgentTool(
 
   // Reject models outside the active Model scope (--models / enabledModels).
   if (model) {
-    const scopedKeys = getActiveScopedModelKeys(ctx.modelRegistry, ctx.cwd);
+    const scopedKeys = scopedModelKeys(scopedModels);
     if (!isModelInScope(model, scopedKeys)) {
       return errorResult(outOfScopeModelError(modelKey(model), scopedKeys!));
     }
@@ -139,10 +141,12 @@ export async function executeAgentTool(
   // Determine modelName for invocation (always capture for display)
   const modelName = model?.id;
 
-  // Resolve thinking:
-  //   explicit thinking param > model "id:thinking" suffix > agent config > package default
+  // Only explicit choices are fixed at enqueue time. Scope pins are resolved
+  // again by the runner so queued agents use the scope active when they start.
   const thinkingLevel = parseThinkingLevel(params.thinking as string | undefined)
-    ?? thinkingFromModel
+    ?? thinkingFromModel;
+  const displayThinkingLevel = thinkingLevel
+    ?? scopedThinkingLevel(scopedModels, model)
     ?? getAgentConfig(resolvedType)?.thinkingLevel
     ?? getStore().agent.defaultThinking;
 
@@ -158,7 +162,7 @@ export async function executeAgentTool(
     thinkingLevel,
     graceTurns: getStore().agent.graceTurns,
     worktreePath: validatedWorktreePath,
-    invocation: { modelName, thinkingLevel },
+    invocation: { modelName, thinkingLevel: displayThinkingLevel },
     runInBackground: runInBackground || getStore().agent.forceBackground,
   });
 
@@ -278,13 +282,4 @@ export async function toolCallListener(
     }
   }
 
-  // Inject thinking when not explicitly passed: agent config > package default.
-  // Explicit LLM `thinking` param (or model-suffix thinking above) always wins.
-  if (input.thinking === undefined) {
-    const fallback =
-      agentConfig?.thinkingLevel ?? getStore().agent.defaultThinking;
-    if (fallback !== undefined) {
-      input.thinking = fallback;
-    }
-  }
 }

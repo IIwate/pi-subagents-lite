@@ -41,10 +41,8 @@ import type { Theme } from "./types.js";
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
 const REFRESH_INTERVAL_MS = 1000;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
-const PI_0801_ROOT_CHILDREN = 8;
-const PI_08010_ROOT_CHILDREN = 9;
+const PI_ROOT_CHILDREN = 9;
 const ROOT_REGIONS_AFTER_CHAT = 6;
-const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_GAP = 2;
 const MIN_LEFT_COLUMN_WIDTH = 18;
@@ -208,14 +206,6 @@ function containsComponent(root: Component & { children: Component[] }, target: 
   for (const child of root.children) {
     if (child === target) return true;
     if (isContainerLike(child) && containsComponent(child, target)) return true;
-  }
-  return false;
-}
-
-function containsMainChatComponent(root: Component & { children: Component[] }): boolean {
-  for (const child of root.children) {
-    if (MAIN_CHAT_COMPONENT_PATTERN.test(child.constructor?.name ?? "")) return true;
-    if (isContainerLike(child) && containsMainChatComponent(child)) return true;
   }
   return false;
 }
@@ -730,8 +720,7 @@ export class AgentNavigator {
       .map((child, index) => ({ child, index }))
       .filter(({ child }) => isContainerLike(child) && containsComponent(child, selector));
     const widgetBelowIndex = belowMatches[0]?.index ?? -1;
-    const knownRootLength = rootChildren.length === PI_0801_ROOT_CHILDREN
-      || rootChildren.length === PI_08010_ROOT_CHILDREN;
+    const knownRootLength = rootChildren.length === PI_ROOT_CHILDREN;
     const chatIndex = rootChildren.length - ROOT_REGIONS_AFTER_CHAT - 1;
     const pendingIndex = chatIndex + 1;
     const statusIndex = chatIndex + 2;
@@ -745,19 +734,11 @@ export class AgentNavigator {
     const widgetBelow = rootChildren[widgetBelowIndex];
     const footerIndex = widgetBelowIndex + 1;
     const originalFooter = rootChildren[footerIndex];
-    // In 0.80.10 this slot is loaded resources. A main-message component here
-    // instead identifies an older layout shifted by an unknown middle region.
-    const shiftedChatCandidate = rootChildren.length === PI_08010_ROOT_CHILDREN
-      ? rootChildren[chatIndex - 1]
-      : undefined;
-    const looksLikeShifted0801Layout = isContainerLike(shiftedChatCandidate)
-      && containsMainChatComponent(shiftedChatCandidate);
     if (
       !knownRootLength
       || belowMatches.length !== 1
       || widgetBelowIndex !== rootChildren.length - 2
       || chatIndex < 1
-      || looksLikeShifted0801Layout
       || !isContainerLike(originalChat)
       || !isContainerLike(originalPending)
       || !isContainerLike(originalStatus)

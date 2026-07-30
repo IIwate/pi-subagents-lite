@@ -83,21 +83,15 @@ function makeContainer(text: string): any {
   };
 }
 
-function makeNamedComponent(text: string, name: string): any {
-  const component = makeComponent(text);
-  Object.defineProperty(component, "constructor", { value: { name } });
-  return component;
-}
-
 function makeChatContainer(text: string): any {
   return {
-    children: [makeNamedComponent(text, "UserMessageComponent")],
+    children: [makeComponent(text)],
     render: () => [text],
     invalidate: vi.fn(),
   };
 }
 
-function makeTui(prefixCount = 1): any {
+function makeTui(prefixCount = 2): any {
   let clearOnShrink = false;
   const originalChat = makeChatContainer("parent chat");
   const originalPending = makeContainer("parent pending");
@@ -734,7 +728,7 @@ describe("AgentNavigator", () => {
       },
       thinkingLevel: "high",
       autoCompactionEnabled: true,
-      modelRegistry: { isUsingOAuth: () => false },
+      modelRuntime: { isUsingOAuth: () => false },
       getSessionStats: () => ({
         tokens: {
           input: 12_000,
@@ -930,7 +924,7 @@ describe("AgentNavigator", () => {
     navigator = undefined;
   });
 
-  it("supports Pi layouts with a loaded-resources container before chat", () => {
+  it("supports the Pi 0.83 root layout", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -962,10 +956,7 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    const tui = makeTui(1);
-    tui.originalChat.children = [
-      makeNamedComponent("skill invocation", "SkillInvocationMessageComponent"),
-    ];
+    const tui = makeTui();
     tui.children.splice(tui.statusIndex + 1, 0, makeContainer("unknown region"));
     tui.editorIndex += 1;
     tui.belowIndex += 1;

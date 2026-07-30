@@ -1,92 +1,48 @@
 /**
- * model-scope.test.ts — Active Model scope helpers for subagent model constraints.
+ * model-scope.test.ts — Pi 0.83 resolved Model scope helpers.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  modelKey,
-  parseCliModelPatterns,
   isModelInScope,
+  listModelOptionsForMenus,
+  modelKey,
   outOfScopeModelError,
-  resolveScopedModelKeysFromPatterns,
-  patternMatchesModel,
-  stripThinkingSuffix,
+  scopedModelKeys,
+  scopedThinkingLevel,
 } from "../../src/models/model-scope.ts";
 
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-  getAgentDir: () => "/tmp/agent-dir",
-  SettingsManager: {
-    create: () => ({
-      getEnabledModels: () => undefined,
-    }),
-  },
-}));
+const grok = { provider: "cpa-responses", id: "grok-4.5" } as any;
+const gemini = { provider: "cpa-gemini", id: "gemini-3.5-flash" } as any;
 
 describe("modelKey", () => {
   it("formats provider/id", () => {
-    expect(modelKey({ provider: "cpa-responses", id: "grok-4.5" })).toBe(
-      "cpa-responses/grok-4.5",
-    );
+    expect(modelKey(grok)).toBe("cpa-responses/grok-4.5");
   });
 });
 
-describe("parseCliModelPatterns", () => {
-  it("returns undefined when --models is absent", () => {
-    expect(parseCliModelPatterns(["node", "pi"])).toBeUndefined();
+describe("scopedModelKeys", () => {
+  it("treats an empty Pi scope as unrestricted", () => {
+    expect(scopedModelKeys([])).toBeNull();
   });
 
-  it("parses comma-separated patterns after --models", () => {
-    expect(
-      parseCliModelPatterns(["node", "pi", "--models", "a/b, c/d ,e/f"]),
-    ).toEqual(["a/b", "c/d", "e/f"]);
-  });
-
-  it("returns undefined for empty --models value", () => {
-    expect(parseCliModelPatterns(["node", "pi", "--models", "  ,  "])).toBeUndefined();
-  });
-
-  it("returns undefined when --models has no following arg", () => {
-    expect(parseCliModelPatterns(["node", "pi", "--models"])).toBeUndefined();
+  it("uses Pi's resolved models without re-parsing patterns", () => {
+    expect(scopedModelKeys([
+      { model: grok, thinkingLevel: "high" },
+      { model: gemini },
+    ])).toEqual(new Set([
+      "cpa-responses/grok-4.5",
+      "cpa-gemini/gemini-3.5-flash",
+    ]));
   });
 });
 
-describe("stripThinkingSuffix", () => {
-  it("strips known thinking levels", () => {
-    expect(stripThinkingSuffix("cpa-responses/grok-4.5:high")).toBe(
-      "cpa-responses/grok-4.5",
-    );
-    expect(stripThinkingSuffix("cpa-responses/grok-4.5:max")).toBe(
-      "cpa-responses/grok-4.5",
-    );
-  });
-
-  it("keeps colons that are not thinking suffixes", () => {
-    expect(stripThinkingSuffix("openrouter/model:exacto")).toBe(
-      "openrouter/model:exacto",
-    );
-  });
-});
-
-describe("patternMatchesModel", () => {
-  const grok = { provider: "cpa-responses", id: "grok-4.5" };
-
-  it("matches exact provider/id", () => {
-    expect(patternMatchesModel("cpa-responses/grok-4.5", grok)).toBe(true);
-  });
-
-  it("matches bare model id", () => {
-    expect(patternMatchesModel("grok-4.5", grok)).toBe(true);
-  });
-
-  it("matches glob patterns", () => {
-    expect(patternMatchesModel("cpa-responses/*", grok)).toBe(true);
-    expect(patternMatchesModel("*grok*", grok)).toBe(true);
-    expect(patternMatchesModel("cpa-gemini/*", grok)).toBe(false);
-  });
-
-  it("ignores thinking suffix on patterns", () => {
-    expect(patternMatchesModel("cpa-responses/grok-4.5:high", grok)).toBe(true);
-    expect(patternMatchesModel("cpa-responses/grok-4.5:max", grok)).toBe(true);
+describe("scopedThinkingLevel", () => {
+  it("returns the thinking level pinned to the selected model", () => {
+    expect(scopedThinkingLevel([
+      { model: grok, thinkingLevel: "high" },
+      { model: gemini, thinkingLevel: "low" },
+    ], gemini)).toBe("low");
   });
 });
 
@@ -95,14 +51,10 @@ describe("isModelInScope", () => {
     expect(isModelInScope({ provider: "x", id: "y" }, null)).toBe(true);
   });
 
-  it("allows models present in the scope set", () => {
+  it("accepts only models present in the scope set", () => {
     const scope = new Set(["cpa-responses/grok-4.5"]);
-    expect(isModelInScope({ provider: "cpa-responses", id: "grok-4.5" }, scope)).toBe(true);
-  });
-
-  it("rejects models outside the scope set", () => {
-    const scope = new Set(["cpa-responses/grok-4.5"]);
-    expect(isModelInScope({ provider: "other", id: "model" }, scope)).toBe(false);
+    expect(isModelInScope(grok, scope)).toBe(true);
+    expect(isModelInScope(gemini, scope)).toBe(false);
   });
 });
 
@@ -128,32 +80,27 @@ describe("outOfScopeModelError", () => {
   });
 });
 
-describe("resolveScopedModelKeysFromPatterns", () => {
-  const available = [
-    { provider: "cpa-responses", id: "grok-4.5" },
-    { provider: "cpa-gemini", id: "gemini-3.5-flash" },
-    { provider: "test", id: "parent-model" },
-  ];
+describe("listModelOptionsForMenus", () => {
+  it("uses Pi's session scope when present", () => {
+    const getAvailable = vi.fn(() => [gemini]);
+    const result = listModelOptionsForMenus({
+      scopedModels: [{ model: grok, thinkingLevel: "high" }],
+      modelRegistry: { getAvailable } as any,
+    });
 
-  it("returns null when patterns are empty/undefined", () => {
-    expect(resolveScopedModelKeysFromPatterns(undefined, available)).toBeNull();
-    expect(resolveScopedModelKeysFromPatterns([], available)).toBeNull();
+    expect(result).toEqual(["cpa-responses/grok-4.5"]);
+    expect(getAvailable).not.toHaveBeenCalled();
   });
 
-  it("returns null when patterns match no models", () => {
-    expect(resolveScopedModelKeysFromPatterns(["nope"], available)).toBeNull();
-  });
+  it("falls back to all available models when unrestricted", () => {
+    const result = listModelOptionsForMenus({
+      scopedModels: [],
+      modelRegistry: { getAvailable: () => [grok, gemini] } as any,
+    });
 
-  it("returns a set of provider/id keys for matched models", () => {
-    const keys = resolveScopedModelKeysFromPatterns(
-      ["cpa-responses/grok-4.5", "cpa-gemini/*"],
-      available,
-    );
-    expect(keys).toEqual(
-      new Set([
-        "cpa-responses/grok-4.5",
-        "cpa-gemini/gemini-3.5-flash",
-      ]),
-    );
+    expect(result).toEqual([
+      "cpa-responses/grok-4.5",
+      "cpa-gemini/gemini-3.5-flash",
+    ]);
   });
 });

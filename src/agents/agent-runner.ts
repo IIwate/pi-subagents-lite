@@ -29,7 +29,13 @@ import {
 import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
-import { getActiveScopedModels } from "../models/model-scope.js";
+import {
+  isModelInScope,
+  modelKey,
+  outOfScopeModelError,
+  scopedModelKeys,
+  scopedThinkingLevel,
+} from "../models/model-scope.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
@@ -111,10 +117,9 @@ function enableCodexStreamErrorRetry(session: AgentSession): void {
 /**
  * Capture the final assistant message for the current prompt.
  *
- * Pi 0.80.1 can resolve prompt() after converting provider failures into an
- * empty assistant message with stopReason="error". Keeping the terminal
- * metadata here prevents that upstream failure from becoming completed+empty.
- * Revisit when Pi guarantees non-abort run failures reject prompt().
+ * Pi reports provider failures as terminal assistant messages instead of
+ * rejecting prompt(). Keeping that metadata prevents failures from becoming
+ * completed runs with empty output.
  */
 function collectFinalAssistantMessage(session: AgentSession) {
   let message: AssistantMessage | undefined;
@@ -162,13 +167,8 @@ function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => 
   return () => signal.removeEventListener("abort", onAbort);
 }
 
-/**
- * Extract a LifetimeUsage from a runtime assistant message_end event.
- * pi-ai attaches `usage: { input, output, cacheWrite, cost: { total } }` to
- * assistant messages at runtime, but this shape isn't reflected in the
- * AgentSessionEvent public types.
- */
-function usageFromAssistantMessage(msg: Record<string, unknown>): LifetimeUsage | undefined {
+/** Extract a LifetimeUsage from an assistant, tool, or compaction result. */
+function usageFromResult(msg: Record<string, unknown>): LifetimeUsage | undefined {
   const usage = msg.usage as Record<string, unknown> | undefined;
   if (!usage) return undefined;
   return {
@@ -194,14 +194,16 @@ export function subscribeToSessionEvents(
     if (event.type === "tool_execution_end") {
       options.onToolUse?.();
     }
-    if (event.type === "message_end" && event.message.role === "assistant") {
-      const msg = event.message as unknown as Record<string, unknown>;
-      const usage = usageFromAssistantMessage(msg);
-      if (usage) {
-        options.onAssistantUsage?.(usage);
-      }
+    if (
+      event.type === "message_end"
+      && (event.message.role === "assistant" || event.message.role === "toolResult")
+    ) {
+      const usage = usageFromResult(event.message as unknown as Record<string, unknown>);
+      if (usage) options.onAssistantUsage?.(usage);
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
+      const usage = usageFromResult(event.result as unknown as Record<string, unknown>);
+      if (usage) options.onAssistantUsage?.(usage);
       options.onCompaction?.();
     }
   });
@@ -468,14 +470,22 @@ async function initSession(
   const model = options.model ?? findModelInRegistry(
     agentConfig?.model, ctx.modelRegistry, ctx.model,
   );
-  // Prefer spawn-time override, then agent frontmatter. When still unset,
-  // createAgentSession falls back to settings defaultThinkingLevel.
-  const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinkingLevel;
+  // Queue waits may outlive scope edits. Re-read and validate immediately before
+  // session creation so the initial model and child scope cannot disagree.
+  const scopedModels = [...ctx.scopedModels];
+  const scopedKeys = scopedModelKeys(scopedModels);
+  if (model && scopedKeys && !isModelInScope(model, scopedKeys)) {
+    throw new Error(outOfScopeModelError(modelKey(model), scopedKeys));
+  }
+  // Explicit spawn override wins; otherwise mirror Pi's scope-pinned thinking
+  // before falling back to agent/package defaults.
+  const thinkingLevel = options.thinkingLevel
+    ?? scopedThinkingLevel(scopedModels, model)
+    ?? agentConfig?.thinkingLevel
+    ?? getStore().agent.defaultThinking;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
-  // Inherit parent Model scope so subagent sessions cannot cycle outside it.
-  const scopedModels = getActiveScopedModels(ctx.modelRegistry, ctx.cwd);
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd, agentDir,
     sessionManager,
@@ -487,7 +497,8 @@ async function initSession(
       tools: agentConfig?.tools,
     }),
     resourceLoader: loader,
-    ...(scopedModels ? { scopedModels } : {}),
+    // Use the exact scope snapshot validated against the initial model above.
+    scopedModels,
   };
   // Always pass when set — including "off" — so settings default cannot override.
   // Free-form thinking strings are allowed; cast for pi's narrower ThinkingLevel type.

@@ -384,10 +384,10 @@ export class AgentManager {
           record.execution.debugFaultKind = debugFault.kind;
           record.execution.recoveryTtlMs = DEBUG_RECOVERY_TTL_MS;
         }
-        // Snapshot effective model/thinking for widget display (session may inherit settings defaults).
+        // Replace queued predictions with the session's actual model/thinking.
         const inv = record.display.invocation ?? {};
-        if (!inv.modelName && session.model?.id) inv.modelName = session.model.id;
-        if (!inv.thinkingLevel && session.thinkingLevel) inv.thinkingLevel = session.thinkingLevel;
+        if (session.model?.id) inv.modelName = session.model.id;
+        if (session.thinkingLevel) inv.thinkingLevel = session.thinkingLevel;
         record.display.invocation = inv;
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {

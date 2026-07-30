@@ -137,8 +137,8 @@ export interface AgentExecutionState {
  */
 export interface AgentAccumulatedStats {
   /**
-   * Lifetime usage breakdown, accumulated via `message_end` events. Survives
-   * compaction. Total = input + output + cacheWrite + cost (cacheRead deliberately
+   * Lifetime usage breakdown, accumulated from assistant/tool events and
+   * compactions. Total = input + output + cacheWrite + cost (cacheRead deliberately
    * excluded — see issue #38). Initialized to zeros at spawn.
    */
   lifetimeUsage: LifetimeUsage;

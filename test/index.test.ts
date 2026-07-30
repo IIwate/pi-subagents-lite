@@ -19,7 +19,7 @@ import {
 } from "./fixtures";
 
 // Mock external dependencies before any imports
-vi.mock("@sinclair/typebox", () => {
+vi.mock("typebox", () => {
   const createType = (type: string) => (opts?: any) => ({
     type,
     ...(opts || {}),

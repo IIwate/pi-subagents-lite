@@ -282,6 +282,7 @@ export function fakeCtx(): any {
     sessionManager: { getBranch: () => [] },
     modelRegistry: { find: vi.fn() },
     model: { provider: "test", id: "model" },
+    scopedModels: [],
     getSystemPrompt: vi.fn(),
   };
 }

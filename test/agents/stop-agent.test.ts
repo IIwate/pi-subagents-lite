@@ -37,7 +37,7 @@ vi.mock("../../src/utils.js", () => ({
   unknownModelError: () => "unused",
 }));
 vi.mock("../../src/models/model-scope.js", () => ({
-  getActiveScopedModelKeys: () => null,
+  scopedModelKeys: () => null,
   isModelInScope: () => true,
   outOfScopeModelError: () => "unused",
   modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,

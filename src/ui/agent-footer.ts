@@ -26,70 +26,35 @@ function formatFooterTokens(count: number): string {
   return `${Math.round(count / 1_000_000)}M`;
 }
 
-function readCostTotal(cost: unknown): number {
-  if (typeof cost === "number") return cost;
-  if (typeof cost === "object" && cost !== null) {
-    const total = (cost as { total?: unknown }).total;
-    if (typeof total === "number") return total;
-  }
-  return 0;
-}
-
-function readEntryUsage(
+function readLatestCacheHitRate(
   session: NonNullable<AgentRecord["execution"]["session"]>,
-): FooterUsage | undefined {
+): number | undefined {
   try {
-    const total: FooterUsage = {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      cost: 0,
-    };
-    let found = false;
     const entries = session.sessionManager.getEntries() as Array<{
       type?: string;
       message?: {
         role?: string;
-        usage?: {
-          input?: number;
-          output?: number;
-          cacheRead?: number;
-          cacheWrite?: number;
-          cost?: unknown;
-        };
+        usage?: { input?: number; cacheRead?: number; cacheWrite?: number };
       };
     }>;
-    for (const entry of entries) {
-      const usage = entry.type === "message" && entry.message?.role === "assistant"
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      const usage = entry?.type === "message" && entry.message?.role === "assistant"
         ? entry.message.usage
         : undefined;
       if (!usage) continue;
-      found = true;
-      const input = usage.input ?? 0;
-      const cacheRead = usage.cacheRead ?? 0;
-      const cacheWrite = usage.cacheWrite ?? 0;
-      total.input += input;
-      total.output += usage.output ?? 0;
-      total.cacheRead += cacheRead;
-      total.cacheWrite += cacheWrite;
-      total.cost += readCostTotal(usage.cost);
-      const promptTokens = input + cacheRead + cacheWrite;
-      total.latestCacheHitRate = promptTokens > 0
-        ? (cacheRead / promptTokens) * 100
-        : undefined;
+      const promptTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+      return promptTokens > 0 ? ((usage.cacheRead ?? 0) / promptTokens) * 100 : undefined;
     }
-    return found ? total : undefined;
   } catch {
-    return undefined;
+    // Session stats remain usable when entry inspection fails.
   }
+  return undefined;
 }
 
 function readUsage(record: AgentRecord): FooterUsage {
   const session = record.execution.session;
   if (session) {
-    const entryUsage = readEntryUsage(session);
-    if (entryUsage) return entryUsage;
     try {
       const stats = session.getSessionStats();
       return {
@@ -98,6 +63,7 @@ function readUsage(record: AgentRecord): FooterUsage {
         cacheRead: stats.tokens.cacheRead,
         cacheWrite: stats.tokens.cacheWrite,
         cost: stats.cost,
+        latestCacheHitRate: readLatestCacheHitRate(session),
       };
     } catch {
       // Fall back to the manager's lifetime accumulator.
@@ -137,14 +103,8 @@ function usesSubscription(record: AgentRecord): boolean {
   const session = record.execution.session;
   const model = session?.model;
   if (!session || !model) return false;
-  const runtimes = session as unknown as {
-    modelRuntime?: { isUsingOAuth(providerId: string): boolean };
-    modelRegistry?: { isUsingOAuth(currentModel: typeof model): boolean };
-  };
   try {
-    if (runtimes.modelRuntime) return runtimes.modelRuntime.isUsingOAuth(model.provider);
-    if (runtimes.modelRegistry) return runtimes.modelRegistry.isUsingOAuth(model);
-    return false;
+    return session.modelRuntime.isUsingOAuth(model.provider);
   } catch {
     return false;
   }

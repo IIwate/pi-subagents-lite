@@ -96,13 +96,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   loadProjectContextFiles: mockModules.mockLoadProjectContextFiles,
 }));
 
-vi.mock("../../src/models/model-scope.js", () => ({
-  getActiveScopedModels: vi.fn(() => undefined),
-  getActiveScopedModelKeys: vi.fn(() => null),
-  isModelInScope: vi.fn(() => true),
-  modelKey: (m: { provider: string; id: string }) => `${m.provider}/${m.id}`,
-}));
-
 // --- Import the module under test ---
 
 import { continueAgentSession, runAgent, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";
@@ -377,6 +370,35 @@ describe("runAgent — tool visibility wiring", () => {
     expect(sessionOptions.tools).not.toContain("web_search");
   });
 
+  it("uses Pi's current scope and pinned thinking for the initial model", async () => {
+    const session = createMockSession();
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const model = { provider: "anthropic", id: "claude-opus-5" };
+    const ctx = fakeCtx();
+    ctx.scopedModels = [{ model, thinkingLevel: "high" }];
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
+
+    const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
+    expect(sessionOptions.scopedModels).toEqual(ctx.scopedModels);
+    expect(sessionOptions.thinkingLevel).toBe("high");
+  });
+
+  it("rejects a queued model removed from the current scope before session creation", async () => {
+    const requestedModel = { provider: "anthropic", id: "claude-opus-5" };
+    const ctx = fakeCtx();
+    ctx.scopedModels = [{
+      model: { provider: "openai", id: "gpt-5.4" },
+      thinkingLevel: "medium",
+    }];
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: requestedModel,
+    })).rejects.toThrow('Model "anthropic/claude-opus-5" is not in the active model scope');
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
   it("applies an empty tool list when tools are disabled", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
@@ -455,10 +477,10 @@ describe("runAgent — Codex stream disconnect retry", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  subscribeToSessionEvents — cost extraction                         */
+/*  subscribeToSessionEvents — usage extraction                        */
 /* ------------------------------------------------------------------ */
 
-describe("subscribeToSessionEvents — cost extraction", () => {
+describe("subscribeToSessionEvents — usage extraction", () => {
   it("extracts u.cost?.total from assistant message_end events", () => {
     const onAssistantUsage = vi.fn();
     const session = createMockSession();
@@ -485,6 +507,52 @@ describe("subscribeToSessionEvents — cost extraction", () => {
       cost: 2.5,
     });
 
+    unsub();
+  });
+
+  it("includes nested usage reported by tool results", () => {
+    const onAssistantUsage = vi.fn();
+    const session = createMockSession();
+    const unsub = subscribeToSessionEvents(session, { onAssistantUsage });
+
+    session._getListeners()[0]({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        usage: { input: 20, output: 10, cacheWrite: 5, cost: { total: 0.75 } },
+      },
+    });
+
+    expect(onAssistantUsage).toHaveBeenCalledWith({
+      input: 20,
+      output: 10,
+      cacheWrite: 5,
+      cost: 0.75,
+    });
+    unsub();
+  });
+
+  it("includes usage from successful compactions", () => {
+    const onAssistantUsage = vi.fn();
+    const onCompaction = vi.fn();
+    const session = createMockSession();
+    const unsub = subscribeToSessionEvents(session, { onAssistantUsage, onCompaction });
+
+    session._getListeners()[0]({
+      type: "compaction_end",
+      aborted: false,
+      result: {
+        usage: { input: 30, output: 15, cacheWrite: 0, cost: { total: 1.25 } },
+      },
+    });
+
+    expect(onAssistantUsage).toHaveBeenCalledWith({
+      input: 30,
+      output: 15,
+      cacheWrite: 0,
+      cost: 1.25,
+    });
+    expect(onCompaction).toHaveBeenCalledTimes(1);
     unsub();
   });
 

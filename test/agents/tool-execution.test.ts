@@ -26,13 +26,13 @@ const {
   mockSpawn,
   mockGetRecord,
   mockDiscoverNewAgents,
-  mockGetActiveScopedModelKeys,
+  mockScopedModelKeys,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
   mockGetRecord: vi.fn(),
   mockDiscoverNewAgents: vi.fn(async () => 0),
-  mockGetActiveScopedModelKeys: vi.fn(() => null),
+  mockScopedModelKeys: vi.fn(() => null),
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -48,12 +48,18 @@ vi.mock("../../src/agents/agent-types.js", () => ({
 vi.mock("../../src/models/model-scope.js", () => ({
   // Scope policy itself is covered in model-scope.test.ts; this suite verifies
   // that executeAgentTool enforces the returned scope and surfaces its error.
-  getActiveScopedModelKeys: mockGetActiveScopedModelKeys,
+  scopedModelKeys: mockScopedModelKeys,
   modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
   isModelInScope: (
     model: { provider: string; id: string },
     scopedKeys: ReadonlySet<string> | null,
   ) => !scopedKeys || scopedKeys.has(`${model.provider}/${model.id}`),
+  scopedThinkingLevel: (
+    scopedModels: Array<{ model: { provider: string; id: string }; thinkingLevel?: string }>,
+    model: { provider: string; id: string } | undefined,
+  ) => scopedModels.find(({ model: scopedModel }) =>
+    model && scopedModel.provider === model.provider && scopedModel.id === model.id,
+  )?.thinkingLevel,
   outOfScopeModelError: (modelRef: string, scopedKeys: ReadonlySet<string>) =>
     `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
 }));
@@ -96,6 +102,7 @@ vi.mock("../../src/shell.js", () => ({
         modelKey: intent.modelKey,
         graceTurns: intent.graceTurns,
         worktreePath: intent.worktreePath,
+        invocation: intent.invocation,
       });
       const record = mockGetRecord(id);
       if (!intent.runInBackground && record?.execution?.promise) {
@@ -110,7 +117,7 @@ vi.mock("../../src/shell.js", () => ({
 }));
 
 // Import after mocks are in place
-import { executeAgentTool } from "../../src/agents/tool-execution.js";
+import { executeAgentTool, toolCallListener } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
 
 /* ------------------------------------------------------------------ */
@@ -549,6 +556,54 @@ describe("executeAgentTool — model param", () => {
     expect(spawnOptions.modelKey).toBe("cpa-responses/grok-4.5");
   });
 
+  it("keeps scope-pinned thinking through the listener and execute chain", async () => {
+    vi.mocked(agentTypes.getAgentConfig)
+      .mockReturnValueOnce({ maxTurns: 25, thinkingLevel: "low" } as any)
+      .mockReturnValueOnce({ maxTurns: 25, thinkingLevel: "low" } as any);
+    ctx.scopedModels = [{
+      model: { provider: "cpa-responses", id: "grok-4.5" },
+      thinkingLevel: "high",
+    }];
+    const event = {
+      toolName: "Agent",
+      toolCallId: "tc-model-scope-thinking",
+      input: makeParams({ model: "grok-4.5" }),
+    };
+
+    await toolCallListener(event as any, ctx);
+    expect(event.input.thinking).toBeUndefined();
+    await executeAgentTool(
+      event.toolCallId,
+      event.input,
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.thinkingLevel).toBeUndefined();
+    expect(spawnOptions.invocation.thinkingLevel).toBe("high");
+  });
+
+  it("applies the selected model's scope-pinned thinking level", async () => {
+    ctx.scopedModels = [{
+      model: { provider: "cpa-responses", id: "grok-4.5" },
+      thinkingLevel: "high",
+    }];
+
+    await executeAgentTool(
+      "tc-model-scope-thinking",
+      makeParams({ model: "grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.thinkingLevel).toBeUndefined();
+    expect(spawnOptions.invocation.thinkingLevel).toBe("high");
+  });
+
   it("parses model:thinking shorthand and applies thinking", async () => {
     await executeAgentTool(
       "tc-model-think",
@@ -594,7 +649,7 @@ describe("executeAgentTool — model param", () => {
   });
 
   it("returns error when model is outside the active Model scope", async () => {
-    mockGetActiveScopedModelKeys.mockReturnValueOnce(
+    mockScopedModelKeys.mockReturnValueOnce(
       new Set(["test/parent-model"]),
     );
 
@@ -614,7 +669,7 @@ describe("executeAgentTool — model param", () => {
   });
 
   it("allows models that are inside the active Model scope", async () => {
-    mockGetActiveScopedModelKeys.mockReturnValueOnce(
+    mockScopedModelKeys.mockReturnValueOnce(
       new Set(["cpa-responses/grok-4.5", "test/parent-model"]),
     );
 

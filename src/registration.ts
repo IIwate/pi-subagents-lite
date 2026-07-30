@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAvailableTypes } from "./agents/agent-types.js";
 import { Container } from "@earendil-works/pi-tui";
@@ -90,7 +90,7 @@ export function registerTools(pi: ExtensionAPI): void {
     description: "Manage subagents: model settings, concurrency, briefing, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       // Restrict menu picks to the active Model scope when one is set.
-      const modelOptions = listModelOptionsForMenus(ctx.modelRegistry, ctx.cwd);
+      const modelOptions = listModelOptionsForMenus(ctx);
       await showAgentsMainMenu(ctx, modelOptions);
     },
   });

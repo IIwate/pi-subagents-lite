@@ -1,9 +1,9 @@
 /** usage.ts — Token usage: shapes, accumulator operators, session-stats readers. */
 
 /**
- * Lifetime usage components, accumulated via `message_end` events. Survives
- * compaction (which replaces session.state.messages and would reset any
- * stats-derived sum). cacheRead is excluded because each turn's cacheRead is
+ * Lifetime usage components, accumulated from assistant/tool `message_end`
+ * events and successful compactions. Survives compaction (which replaces
+ * session.state.messages and would reset any stats-derived sum). cacheRead is
  * the cumulative cached prefix re-read on that one call — summing across
  * turns counts the prefix N times. See issue #38.
  */

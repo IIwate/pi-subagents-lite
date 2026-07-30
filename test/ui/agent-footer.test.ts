@@ -28,16 +28,15 @@ function makeRecord(): any {
         thinkingLevel: "xhigh",
         autoCompactionEnabled: true,
         modelRuntime: { isUsingOAuth: vi.fn(() => true) },
-        modelRegistry: { isUsingOAuth: vi.fn(() => true) },
         getSessionStats: () => ({
           tokens: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            total: 2,
+            input: 1_600_000,
+            output: 120_000,
+            cacheRead: 40_000_000,
+            cacheWrite: 3_000,
+            total: 41_723_000,
           },
-          cost: 9,
+          cost: 0.25,
         }),
         getContextUsage: () => ({ percent: 27.2, contextWindow: 372_000 }),
         sessionManager: {
@@ -84,28 +83,17 @@ describe("renderAgentFooterStats", () => {
     const record = makeRecord();
     const line = renderAgentFooterStats(record, makeTheme(), 160);
 
-    expect(line).toContain("↑1.5M");
-    expect(line).toContain("↓118k");
+    expect(line).toContain("↑1.6M");
+    expect(line).toContain("↓120k");
     expect(line).toContain("R40M");
-    expect(line).toContain("W2.5k");
+    expect(line).toContain("W3.0k");
     expect(line).toContain("CH98.9%");
-    expect(line).toContain("$0.000 (sub)");
+    expect(line).toContain("$0.250 (sub)");
     expect(line).toContain("27.2%/372k (auto)");
     expect(line).toContain("gpt-5.6-sol • xhigh");
     expect(line).not.toContain("stale-model");
     expect(record.execution.session.modelRuntime.isUsingOAuth)
       .toHaveBeenCalledWith("openai-codex");
-  });
-
-  it("supports the Pi 0.80.1 model registry OAuth API", () => {
-    const record = makeRecord();
-    delete record.execution.session.modelRuntime;
-
-    const line = renderAgentFooterStats(record, makeTheme(), 160);
-
-    expect(line).toContain("$0.000 (sub)");
-    expect(record.execution.session.modelRegistry.isUsingOAuth)
-      .toHaveBeenCalledWith(record.execution.session.model);
   });
 
   it("omits thinking for a current model that does not support reasoning", () => {
