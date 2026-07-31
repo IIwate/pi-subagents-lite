@@ -46,7 +46,9 @@ export interface AgentConfig {
 }
 
 export interface AgentInvocation {
-  /** Short display name, e.g. "haiku" — only set when different from parent. */
+  /** Model id shown in the TUI. */
   modelName?: string;
+  /** Provider id shown immediately after the model. */
+  providerName?: string;
   thinkingLevel?: ThinkingLevel;
 }

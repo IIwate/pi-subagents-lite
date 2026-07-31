@@ -46,6 +46,7 @@ const ROOT_REGIONS_AFTER_CHAT = 6;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_GAP = 2;
 const MIN_LEFT_COLUMN_WIDTH = 18;
+const MIN_STATS_COLUMN_WIDTH = 12;
 
 type NavigatorUICtx = Pick<
   ExtensionUIContext,
@@ -127,23 +128,51 @@ function appendWrapped(lines: string[], text: string, width: number): void {
   }
 }
 
-function renderAgentRow(left: string, status: string, stats: string, width: number): string {
-  // Reserve only the separator and minimum description width. A fixed status
-  // column makes short labels float away from stats, especially on wide rows.
-  const statusMaxWidth = Math.max(1, width - MIN_LEFT_COLUMN_WIDTH - STATUS_COLUMN_GAP * 2);
-  const statusText = truncateToWidth(status, statusMaxWidth);
-  const statsWidth = Math.max(
-    0,
-    width - MIN_LEFT_COLUMN_WIDTH - visibleWidth(statusText) - STATUS_COLUMN_GAP * 2,
-  );
+function renderAgentRow(
+  leftPrefix: string,
+  description: string,
+  stats: string,
+  width: number,
+  prefixWidth: number,
+  theme: Theme,
+): string {
+  const statsWidth = Math.max(0, width - Math.max(MIN_LEFT_COLUMN_WIDTH, prefixWidth) - STATUS_COLUMN_GAP);
   const statsText = statsWidth > 0 ? truncateToWidth(stats, statsWidth, "…") : "";
-  const right = statsText
-    ? `${statusText}${" ".repeat(STATUS_COLUMN_GAP)}${statsText}`
-    : statusText;
-  const leftWidth = Math.max(0, width - visibleWidth(right) - STATUS_COLUMN_GAP);
-  const leftText = truncateToWidth(left, leftWidth, "…");
-  const padding = Math.max(0, width - visibleWidth(leftText) - visibleWidth(right));
-  return `${leftText}${" ".repeat(padding)}${right}`;
+  const leftWidth = statsText
+    ? Math.max(0, width - visibleWidth(statsText) - STATUS_COLUMN_GAP)
+    : width;
+  if (leftWidth < prefixWidth) return truncateToWidth(leftPrefix, leftWidth, "…");
+
+  const descriptionWidth = Math.max(0, leftWidth - prefixWidth - STATUS_COLUMN_GAP);
+  const renderedDescription = descriptionWidth > 0 && description
+    ? `  ${theme.fg("dim", truncateToWidth(description, descriptionWidth, "…"))}`
+    : "";
+  const leftText = `${leftPrefix}${renderedDescription}`;
+  if (!statsText) return leftText;
+  const padding = Math.max(0, width - visibleWidth(leftText) - visibleWidth(statsText));
+  return `${leftText}${" ".repeat(padding)}${statsText}`;
+}
+
+function agentStatusValue(record: AgentRecord, preview?: DebugStatusPreview): DebugStatusPreview {
+  return preview ?? (needsUserInput(record) ? "needs_input" : record.lifecycle.status);
+}
+
+function agentStatusLabel(status: DebugStatusPreview): string {
+  switch (status) {
+    case "needs_input": return "Needs input";
+    case "queued": return "Queued";
+    case "running": return "Running";
+    case "completed": return "Done";
+    case "turn_limited": return "Turn limit";
+    case "aborted": return "Aborted";
+    case "stopped": return "Stopped";
+    case "error": return "Error";
+  }
+}
+
+function plainAgentStatus(record: AgentRecord, preview?: DebugStatusPreview): string {
+  const label = agentStatusLabel(agentStatusValue(record, preview));
+  return record.execution.debugFaultKind ? `${label} (Debug)` : label;
 }
 
 function renderAgentStatus(
@@ -151,29 +180,18 @@ function renderAgentStatus(
   theme: Theme,
   preview?: DebugStatusPreview,
 ): string {
-  let label: string;
-  let color: string;
-  let bold = false;
-  const statusValue = preview ?? (needsUserInput(record) ? "needs_input" : record.lifecycle.status);
-
-  if (statusValue === "needs_input") {
-    label = "Needs input";
-    color = "warning";
-    bold = true;
-  } else {
-    switch (statusValue) {
-      case "queued": label = "Queued"; color = "dim"; break;
-      case "running": label = "Running"; color = "accent"; break;
-      case "completed": label = "Done"; color = "success"; break;
-      case "turn_limited": label = "Turn limit"; color = "warning"; break;
-      case "aborted": label = "Aborted"; color = "warning"; break;
-      case "stopped": label = "Stopped"; color = "dim"; break;
-      case "error": label = "Error"; color = "error"; break;
-    }
-  }
-
-  const renderedStatus = theme.fg(color, label);
-  const baseStatus = bold ? theme.bold(renderedStatus) : renderedStatus;
+  const statusValue = agentStatusValue(record, preview);
+  const color = statusValue === "needs_input" || statusValue === "turn_limited" || statusValue === "aborted"
+    ? "warning"
+    : statusValue === "running"
+      ? "accent"
+      : statusValue === "completed"
+        ? "success"
+        : statusValue === "error"
+          ? "error"
+          : "dim";
+  const renderedStatus = theme.fg(color, agentStatusLabel(statusValue));
+  const baseStatus = statusValue === "needs_input" ? theme.bold(renderedStatus) : renderedStatus;
   return record.execution.debugFaultKind
     ? `${baseStatus}${theme.fg("dim", " (Debug)")}`
     : baseStatus;
@@ -680,10 +698,14 @@ export class AgentNavigator {
   }
 
   private navigationEntries(): NavigationEntry[] {
-    return [
-      { id: null },
-      ...this.manager.listAgents().map(record => ({ id: record.id, record })),
-    ];
+    const agents = this.manager.listAgents()
+      .map(record => ({ id: record.id, record }))
+      .sort((a, b) => {
+        const priority = (entry: { record: AgentRecord }) =>
+          needsUserInput(entry.record) ? 0 : entry.record.lifecycle.status === "completed" ? 2 : 1;
+        return priority(a) - priority(b);
+      });
+    return [{ id: null }, ...agents];
   }
 
   private activate(id: string | null): boolean {
@@ -967,7 +989,14 @@ export class AgentNavigator {
       const name = getDisplayName(record.display.type);
       const description = record.display.description;
       const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
+      const sessionModel = record.execution.session?.model;
+      const invocation = record.display.invocation;
+      const modelName = sessionModel?.id ?? invocation?.modelName;
+      const providerName = sessionModel?.provider ?? invocation?.providerName;
       const statsParts = buildStatsParts({
+        modelName,
+        providerName,
+        thinkingLevel: record.execution.session?.thinkingLevel ?? invocation?.thinkingLevel,
         toolUses: record.stats.toolUses,
         turnCount: record.stats.turnCount != null && record.stats.turnCount > 0
           ? record.stats.turnCount
@@ -982,10 +1011,36 @@ export class AgentNavigator {
         cost: record.stats.lifetimeUsage.cost,
         durationMs,
       }, theme, this.statsVisibility);
-      const left = `${focus} ${circle} ${active || highlighted ? theme.bold(name) : name}${description ? `  ${theme.fg("dim", description)}` : ""}`;
+      const plainStatus = plainAgentStatus(record, this.debugStatusPreview);
       const status = renderAgentStatus(record, theme, this.debugStatusPreview);
+      const fixedPrefix = `${focus} ${circle} `;
+      const statusSuffix = ` (${status})`;
+      const plainStatusSuffix = ` (${plainStatus})`;
+      const identityStats = [modelName, providerName].filter(Boolean).join(STATS_SEP);
+      const reservedStatsWidth = Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStats));
+      const maxNameWidth = Math.max(
+        1,
+        tui.terminal.columns
+          - visibleWidth(fixedPrefix)
+          - visibleWidth(plainStatusSuffix)
+          - STATUS_COLUMN_GAP
+          - reservedStatsWidth,
+      );
+      const visibleNameText = truncateToWidth(name, maxNameWidth, "…");
+      const visibleName = active || highlighted ? theme.bold(visibleNameText) : visibleNameText;
+      const leftPrefix = `${fixedPrefix}${visibleName}${statusSuffix}`;
+      const prefixWidth = visibleWidth(fixedPrefix)
+        + visibleWidth(visibleNameText)
+        + visibleWidth(plainStatusSuffix);
       const stats = statsParts.length > 0 ? theme.fg("dim", statsParts.join(STATS_SEP)) : "";
-      lines.push(renderAgentRow(left, status, stats, tui.terminal.columns));
+      lines.push(renderAgentRow(
+        leftPrefix,
+        description,
+        stats,
+        tui.terminal.columns,
+        prefixWidth,
+        theme,
+      ));
     }
 
     if (end < entries.length) {
@@ -1024,15 +1079,19 @@ export class AgentNavigator {
 
   private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
     const shortId = record.id.slice(0, 8);
-    const status = record.lifecycle.status;
+    const status = plainAgentStatus(record);
     const lines: string[] = [
-      theme.fg("accent", theme.bold(`${record.display.type} · ${shortId} · ${status}`)),
+      theme.fg("accent", theme.bold(`${getDisplayName(record.display.type)} (${status}) · ${shortId}`)),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
     ];
 
     const session = record.execution.session;
     if (!session) {
-      lines.push(theme.fg("dim", status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
+      if (record.error) {
+        lines.push(theme.fg("error", `Error: ${record.error}`));
+      } else {
+        lines.push(theme.fg("dim", record.lifecycle.status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
+      }
       return lines;
     }
 
@@ -1247,17 +1306,37 @@ export class AgentNavigator {
   /** Cheap signature so timer ticks without real list changes do not repaint. */
   private listRenderSignature(records: AgentRecord[]): string {
     const parts = records.map((record) => {
+      const session = record.execution.session;
+      const invocation = record.display.invocation;
+      const usage = record.stats.lifetimeUsage;
+      const contextPercent = session
+        ? getSessionContextPercent(session)
+        : record.stats.contextPercent ?? null;
       const elapsedSec = Math.floor(
         ((record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt) / 1000,
       );
       return [
         record.id,
+        record.display.type,
+        record.display.description,
+        getDisplayName(record.display.type),
         record.lifecycle.status,
+        record.lifecycle.completedAt ?? "",
+        record.execution.settled ? "1" : "0",
+        record.execution.debugFaultKind ?? "",
+        record.error ?? "",
+        session?.model?.id ?? invocation?.modelName ?? "",
+        session?.model?.provider ?? invocation?.providerName ?? "",
+        session?.thinkingLevel ?? invocation?.thinkingLevel ?? "",
         record.stats.toolUses,
         record.stats.turnCount,
+        record.stats.maxTurns ?? "",
         elapsedSec,
-        record.stats.lifetimeUsage.input,
-        record.stats.lifetimeUsage.output,
+        usage.input,
+        usage.output,
+        usage.cost,
+        contextPercent ?? "",
+        record.stats.compactionCount,
       ].join(":");
     });
     return [

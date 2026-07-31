@@ -25,7 +25,7 @@ _Avoid_: Hidden tool, minimal tool
 ### Configuration
 
 **Model override**:
-A user-configured model preference (per-type or global) that takes precedence over any built-in or frontmatter default. Set via `/agents` > Model settings.
+A user-configured model preference (per-type or global). It is applied automatically only when Allow cross-provider is enabled; otherwise subagents inherit the exact parent model and models from other providers are rejected. Set via `/agents` > Model settings.
 _Avoid_: Model injection, model preference
 
 **Model scope**:

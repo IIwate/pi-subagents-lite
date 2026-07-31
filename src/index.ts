@@ -7,7 +7,7 @@
  *   - All tools register at extension init (not runtime)
  *   - No description, no promptSnippet, no promptGuidelines
  *   - Parameters without .description()
- *   - Model parameter removed from schema — injected via tool_call listener
+ *   - Optional model selection is resolved inside Agent execution
  *
  * Config:
  *   - Loaded from ~/.pi/agent/subagents-lite.json at session_start
@@ -18,7 +18,6 @@
  *   - /agents: Management menu (model settings, concurrency, debug)
  *
  * Events:
- *   - tool_call: Inject model into Agent tool calls
  *   - session_start: Load config, register agents, initialise manager
  *   - session_shutdown: Abort all, dispose manager
  */

@@ -18,6 +18,8 @@ export type ThinkingLevel = string;
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
   model?: Model<any>;
+  /** How the model was chosen, retained across queue waits for permission rechecks. */
+  modelSource?: "explicit" | "automatic" | "parent";
   maxTurns?: number;
   thinkingLevel?: ThinkingLevel;
   graceTurns?: number;
@@ -52,6 +54,13 @@ export interface RunCallbacks {
   onCompaction?: () => void;
 }
 
+/** Model and concurrency identity selected immediately before a queued start. */
+export interface QueuedModelSelection {
+  model: Model<any>;
+  modelKey: string;
+  thinkingLevel?: ThinkingLevel;
+}
+
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
  * The resolved run params that both the manager and coordinator agree on;
@@ -60,6 +69,10 @@ export interface RunCallbacks {
 export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
+  /** Re-resolve automatic model choices immediately before a queued start. */
+  resolveModelAtStart?: () => QueuedModelSelection;
+  /** Distinguish explicit thinking from automatic model-derived thinking. */
+  thinkingSource?: "explicit" | "automatic" | "inherited";
   worktreePath?: string;
   invocation?: AgentInvocation;
 }

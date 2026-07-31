@@ -97,7 +97,7 @@ export interface StatsVisibility {
 }
 
 /**
- * Build common stats parts: model · thinking · calls · turns · tokens · cost · time.
+ * Build common stats parts: model · provider · thinking · calls · turns · tokens · cost · time.
  * Shared by AgentWidget and index.ts for consistent stats display.
  *
  * @param visible - Optional visibility flags. All default to true for backward compatibility.
@@ -116,15 +116,17 @@ export function buildStatsParts(
     durationMs?: number;
     /** Model id, e.g. "grok-4.5". Shown before calls. */
     modelName?: string;
-    /** Thinking level, e.g. "high". Shown as its own part after model. */
+    /** Provider id, e.g. "cpa-responses". Shown immediately after model. */
+    providerName?: string;
+    /** Thinking level, e.g. "high". Shown after provider. */
     thinkingLevel?: string;
   },
   theme: Theme,
   visible?: StatsVisibility,
 ): string[] {
   const parts: string[] = [];
-  // Model and thinking are separate parts so join(STATS_SEP) yields "grok-4.5 · low".
   if (args.modelName) parts.push(theme.fg("dim", args.modelName));
+  if (args.providerName) parts.push(theme.fg("dim", args.providerName));
   if (args.thinkingLevel) parts.push(theme.fg("dim", args.thinkingLevel));
   if (visible?.showTools !== false && args.toolUses > 0) parts.push(`${args.toolUses} calls`);
   if (visible?.showTurns !== false && args.turnCount != null) parts.push(formatTurns(args.turnCount, args.maxTurns, theme));

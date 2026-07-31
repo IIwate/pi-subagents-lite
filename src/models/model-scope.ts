@@ -41,6 +41,32 @@ export function scopedThinkingLevel(
   return scopedModels.find(({ model: scopedModel }) => modelKey(scopedModel) === key)?.thinkingLevel;
 }
 
+/** Build a clear error when provider authorization cannot be anchored to a parent model. */
+export function missingParentModelError(): string {
+  return "Cannot start an agent because the parent session has no active model. Select a parent model first.";
+}
+
+/** Build a clear error when no model can be resolved even though overrides are authorized. */
+export function missingSubagentModelError(): string {
+  return "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.";
+}
+
+/** Build a clear error when an automatic override is no longer authorized. */
+export function automaticModelOverrideError(modelRef: string): string {
+  return (
+    `Automatic model override "${modelRef}" is no longer authorized. `
+    + "Enable /agents > Model settings > Allow cross-provider to use configured overrides."
+  );
+}
+
+/** Build a clear error when another provider is not authorized. */
+export function crossProviderModelError(modelRef: string, parentProvider: string): string {
+  return (
+    `Model "${modelRef}" uses a different provider than the parent (${parentProvider}). `
+    + "Enable /agents > Model settings > Allow cross-provider to authorize it."
+  );
+}
+
 /** Build a clear LLM/user-facing error for an out-of-scope model. */
 export function outOfScopeModelError(
   modelRef: string,

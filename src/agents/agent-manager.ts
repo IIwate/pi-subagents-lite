@@ -125,6 +125,8 @@ export class AgentManager {
 
   /** Queue of agents waiting to start, keyed by modelKey. */
   private queue: { id: string; modelKey: string; args: SpawnArgs }[] = [];
+  /** Resolvers for foreground callers waiting on queued records to start and settle. */
+  private queuedResolvers = new Map<string, (result: string) => void>();
 
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
@@ -295,10 +297,15 @@ export class AgentManager {
       const slot = this.getSlot(options.modelKey);
       if (slot.running >= slot.limit) {
         queued = true;
-        this.queue.push({ id, modelKey: options.modelKey, args });
       } else {
         concurrencySlot = slot;
       }
+    }
+
+    let queuedPromise: Promise<string> | undefined;
+    if (queued) {
+      queuedPromise = new Promise(resolve => this.queuedResolvers.set(id, resolve));
+      this.queue.push({ id, modelKey: options.modelKey!, args });
     }
 
     const record: AgentRecord = {
@@ -314,6 +321,7 @@ export class AgentManager {
       },
       execution: {
         abortController,
+        promise: queuedPromise,
         settled: false,
         modelKey: options.modelKey,
         graceTurns: options.graceTurns,
@@ -368,6 +376,7 @@ export class AgentManager {
       pi,
       agentId: id,
       model: options.model,
+      modelSource: options.modelSource,
       maxTurns: options.maxTurns,
       thinkingLevel: options.thinkingLevel,
       cwd: options.worktreePath,
@@ -387,6 +396,7 @@ export class AgentManager {
         // Replace queued predictions with the session's actual model/thinking.
         const inv = record.display.invocation ?? {};
         if (session.model?.id) inv.modelName = session.model.id;
+        if (session.model?.provider) inv.providerName = session.model.provider;
         if (session.thinkingLevel) inv.thinkingLevel = session.thinkingLevel;
         record.display.invocation = inv;
         // Flush any steers that arrived before the session was ready
@@ -433,7 +443,21 @@ export class AgentManager {
         this.drainQueue();
       });
 
-    record.execution.promise = promise;
+    const resolveQueued = this.queuedResolvers.get(id);
+    if (resolveQueued) {
+      this.queuedResolvers.delete(id);
+      promise.then(resolveQueued, () => resolveQueued(""));
+    } else {
+      record.execution.promise = promise;
+    }
+  }
+
+  /** Resolve a foreground wait that was cancelled or failed before start. */
+  private settleQueued(id: string): void {
+    const resolve = this.queuedResolvers.get(id);
+    if (!resolve) return;
+    this.queuedResolvers.delete(id);
+    resolve("");
   }
 
   /** Notify completion callback, ignoring any errors. */
@@ -471,6 +495,28 @@ export class AgentManager {
       const record = this.agents.get(entry.id);
       if (!record || record.lifecycle.status !== "queued") continue;
 
+      if (entry.args.options.modelSource === "automatic" && entry.args.options.resolveModelAtStart) {
+        try {
+          const resolved = entry.args.options.resolveModelAtStart();
+          entry.modelKey = resolved.modelKey;
+          entry.args.options.model = resolved.model;
+          entry.args.options.modelKey = resolved.modelKey;
+          if (entry.args.options.thinkingSource !== "explicit") {
+            entry.args.options.thinkingLevel = resolved.thinkingLevel;
+          }
+          record.execution.modelKey = resolved.modelKey;
+        } catch (err) {
+          record.lifecycle.status = "error";
+          record.error = errorMessage(err);
+          record.lifecycle.completedAt = Date.now();
+          record.execution.settled = true;
+          started.add(entry.id);
+          this.settleQueued(entry.id);
+          this.safeNotifyComplete(record);
+          continue;
+        }
+      }
+
       const slot = this.getSlot(entry.modelKey);
       if (slot.running >= slot.limit) continue;
 
@@ -482,7 +528,9 @@ export class AgentManager {
         record.lifecycle.status = "error";
         record.error = errorMessage(err);
         record.lifecycle.completedAt = Date.now();
+        record.execution.settled = true;
         started.add(entry.id);
+        this.settleQueued(entry.id);
         this.safeNotifyComplete(record);
       }
     }
@@ -652,7 +700,8 @@ export class AgentManager {
    * Returns true if the agent was stopped, false if it wasn't running/queued.
    */
   private stopAgent(record: AgentRecord, stoppedBy?: StopInitiator): boolean {
-    if (record.lifecycle.status === "queued") {
+    const wasQueued = record.lifecycle.status === "queued";
+    if (wasQueued) {
       this.queue = this.queue.filter(q => q.id !== record.id);
     } else if (record.lifecycle.status !== "running") {
       return false;
@@ -662,6 +711,11 @@ export class AgentManager {
     record.lifecycle.status = "stopped";
     record.lifecycle.stoppedBy = stoppedBy;
     record.lifecycle.completedAt = Date.now();
+    if (wasQueued) {
+      record.execution.settled = true;
+      this.settleQueued(record.id);
+      this.safeNotifyComplete(record);
+    }
     return true;
   }
 
@@ -778,6 +832,14 @@ export class AgentManager {
     this.disposing = true;
     clearInterval(this.cleanupInterval);
     for (const id of [...this.recoveryExpiryTimers.keys()]) this.clearRecoveryExpiry(id);
+    for (const record of this.agents.values()) {
+      if (record.lifecycle.status !== "queued") continue;
+      record.lifecycle.status = "error";
+      record.error = "Agent manager disposed before the queued agent could start.";
+      record.lifecycle.completedAt = Date.now();
+      record.execution.settled = true;
+    }
+    for (const id of this.queuedResolvers.keys()) this.settleQueued(id);
     this.queue = [];
     for (const record of this.agents.values()) {
       const session = record.execution.session;

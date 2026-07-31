@@ -20,7 +20,7 @@ function makeRecord(): any {
     display: {
       type: "general-purpose",
       description: "Implement feature",
-      invocation: { modelName: "stale-model", thinkingLevel: "low" },
+      invocation: { modelName: "stale-model", providerName: "stale-provider", thinkingLevel: "low" },
     },
     execution: {
       session: {
@@ -90,7 +90,7 @@ describe("renderAgentFooterStats", () => {
     expect(line).toContain("CH98.9%");
     expect(line).toContain("$0.250 (sub)");
     expect(line).toContain("27.2%/372k (auto)");
-    expect(line).toContain("gpt-5.6-sol • xhigh");
+    expect(line).toContain("gpt-5.6-sol • openai-codex • xhigh");
     expect(line).not.toContain("stale-model");
     expect(record.execution.session.modelRuntime.isUsingOAuth)
       .toHaveBeenCalledWith("openai-codex");
@@ -114,7 +114,11 @@ describe("renderAgentFooterStats", () => {
   it("falls back to captured invocation data before a session exists", () => {
     const record = makeRecord();
     record.execution.session = undefined;
-    record.display.invocation = { modelName: "queued-model", thinkingLevel: "high" };
+    record.display.invocation = {
+      modelName: "queued-model",
+      providerName: "queued-provider",
+      thinkingLevel: "high",
+    };
     record.stats.lifetimeUsage = { input: 1_500, output: 250, cacheWrite: 0, cost: 0.125 };
     record.stats.contextPercent = null;
 
@@ -123,6 +127,6 @@ describe("renderAgentFooterStats", () => {
     expect(line).toContain("↑1.5k");
     expect(line).toContain("↓250");
     expect(line).toContain("$0.125");
-    expect(line).toContain("queued-model • high");
+    expect(line).toContain("queued-model • queued-provider • high");
   });
 });

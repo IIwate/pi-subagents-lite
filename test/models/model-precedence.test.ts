@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveModel } from "../../src/models/model-precedence.ts";
+import { resolveModel, resolveModelSelection } from "../../src/models/model-precedence.ts";
 import type { SubagentsConfig } from "../../src/models/model-precedence.ts";
 
 const baseConfig: SubagentsConfig = {
@@ -78,6 +78,16 @@ describe("model resolution precedence chain", () => {
       parentModelId: "parent",
     });
     expect(r).toBe("frontmatter");
+  });
+
+  it("preserves automatic provenance when an override equals the parent string", () => {
+    const selection = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: { model: "provider/model" },
+      config: baseConfig,
+      parentModelId: "provider/model",
+    });
+    expect(selection).toEqual({ model: "provider/model", source: "automatic" });
   });
 
   it("6 — parent model as final fallback", () => {

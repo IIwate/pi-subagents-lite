@@ -20,12 +20,12 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list current and completed agents without polling or waiting.
 
-Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Status stays immediately left of the row stats; on narrow terminals, stats and descriptions truncate before a `Needs input` status:
+Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Status follows the agent name in parentheses; model, provider, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
 › ● Main
-  ○ Explore   Inspect the project                          Running  4 calls · 25s
-  ○ Security  Audit authentication                         Needs input  81 calls · 36m
+  ○ Security (Needs input)  Audit authentication       claude-sonnet-4 · anthropic · high · 81 calls · 36m
+  ○ Explore (Running)  Inspect the project              gpt-5.4 · openai-codex · high · 4 calls · 25s
 ```
 
 - `›` marks the keyboard-highlighted row.
@@ -94,13 +94,13 @@ Frontmatter supports flat values and lists, not nested YAML objects. Extension t
 - `run_in_background` — return immediately and notify the parent when complete.
 - `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
 
-Model selection precedence is: explicit `model` option, session override, persisted override, agent frontmatter, then the parent model.
+By default, subagents inherit the parent provider and exact parent model. Explicit models from the same provider are allowed. Enable **Allow cross-provider** in `/agents` > Model settings to authorize other providers and apply session overrides, persisted overrides, and agent frontmatter automatically before falling back to the parent model.
 
 ## Settings
 
 Run `/agents` to configure:
 
-- global and per-type model overrides;
+- parent-model inheritance, automatic cross-provider selection, and global/per-type model overrides;
 - default, per-provider, and per-model concurrency limits;
 - background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;

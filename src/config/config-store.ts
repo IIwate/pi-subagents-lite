@@ -13,8 +13,8 @@
  * at session_start. `dispose()` drops deps at session_shutdown.
  */
 
-import type { SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
-import { resolveModel } from "../models/model-precedence.js";
+import type { ResolvedModelSelection, SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
+import { resolveModelSelection } from "../models/model-precedence.js";
 import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import { CONFIG_AGENT_NON_MODEL_KEYS } from "./types.js";
@@ -40,6 +40,8 @@ export interface ResolvedAgentSettings {
   /** null = inherit parent. Kept nullable to preserve resolveModel's null-skip. */
   readonly defaultModel: string | null;
   readonly forceBackground: boolean;
+  /** Whether subagents may use another provider and configured model overrides. */
+  readonly allowCrossProvider: boolean;
   readonly showCost: boolean;
   readonly graceTurns: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
@@ -92,6 +94,7 @@ export class ConfigStore {
     return {
       defaultModel: a.default ?? null,
       forceBackground: a.forceBackground === true,
+      allowCrossProvider: this.config.allowCrossProvider === true,
       showCost: a.showCost === true,
       graceTurns: a.graceTurns ?? 6,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
@@ -140,7 +143,15 @@ export class ConfigStore {
    * → config default → agentConfig (frontmatter) → parentModelId.
    */
   modelFor(type: string, parentModelId: string, agentConfig?: { model?: string }): string {
-    return resolveModel({
+    return this.modelSelectionFor(type, parentModelId, agentConfig).model;
+  }
+
+  modelSelectionFor(
+    type: string,
+    parentModelId: string,
+    agentConfig?: { model?: string },
+  ): ResolvedModelSelection {
+    return resolveModelSelection({
       subagentType: type,
       agentConfig,
       config: this.config,
@@ -177,6 +188,10 @@ export class ConfigStore {
       },
       setForceBackground: (enabled: boolean): void => {
         this.config.agent.forceBackground = enabled;
+        this.persist();
+      },
+      setAllowCrossProvider: (enabled: boolean): void => {
+        this.config.allowCrossProvider = enabled;
         this.persist();
       },
       setShowCost: (enabled: boolean): void => {

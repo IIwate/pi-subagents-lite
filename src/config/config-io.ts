@@ -54,6 +54,7 @@ export function loadConfig(): SubagentsConfig {
   // @ts-expect-error TS2783: spread may override 'default', which is intentional (loaded value wins)
   const concurrency = { default: 4, ...(raw.concurrency ?? {}) } as SubagentsConfig["concurrency"];
   return {
+    allowCrossProvider: raw.allowCrossProvider === true,
     agent: { ...DEFAULT_AGENT, ...raw.agent },
     concurrency,
   };

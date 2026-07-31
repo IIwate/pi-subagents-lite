@@ -78,6 +78,7 @@ vi.mock("../../../src/ui/searchable-select.js", () => ({
 import { showModelSettingsMenu } from "../../../src/ui/menu/menu-model-settings.js";
 
 function resetAgentState(): void {
+  mockModules.mockConfig.allowCrossProvider = false;
   mockModules.mockConfig.agent = { default: null, forceBackground: false };
   mockModules.mockSessionOverrides = { default: null };
 }
@@ -97,6 +98,16 @@ describe("showModelSettingsMenu — SettingsList migration", () => {
     await showModelSettingsMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("defaults cross-provider permission to OFF", async () => {
+    const ctx = createMockCtx();
+    await showModelSettingsMenu(ctx, []);
+    const item = settingsListCalls[0].items.find((i: any) => i.id === "allowCrossProvider");
+    expect(item.currentValue).toBe("OFF");
+
+    settingsListCalls[0].onChange("allowCrossProvider", "ON");
+    expect(mockModules.mockConfig.allowCrossProvider).toBe(true);
   });
 
   it("creates a SettingsList with global default model item", async () => {
@@ -227,6 +238,20 @@ describe("showModelSettingsMenu — clear all overrides", () => {
     await showModelSettingsMenu(ctx, []);
     const ids = settingsListCalls[0].items.map((i: any) => i.id);
     expect(ids).toContain("clearAll");
+  });
+
+  it("clear all overrides clears session-only overrides", async () => {
+    mockModules.mockSessionOverrides.Explore = "openai/gpt-4o";
+    const ctx = createMockCtx();
+    await showModelSettingsMenu(ctx, []);
+    const item = settingsListCalls[0].items.find((i: any) => i.id === "clearAll");
+    const done = vi.fn();
+    item.submenu("", done);
+    const confirmList = selectListInstances[selectListInstances.length - 1];
+    confirmList.onSelect!({ value: "Yes" });
+
+    expect(mockModules.mockSessionOverrides).toEqual({ default: null });
+    expect(ctx.ui.notify).toHaveBeenCalledWith("All model overrides cleared", "info");
   });
 
   it("clear all overrides clears config overrides", async () => {

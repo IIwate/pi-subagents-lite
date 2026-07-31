@@ -1,9 +1,9 @@
 # Stealth tool registration
 
 The Agent tool is registered at extension init time with a minimal schema: `description: "."`,
-no `promptSnippet`, no `promptGuidelines`, parameters without `.description()`.
-The model parameter is removed from the schema entirely — injected via the `tool_call` event listener.
-The LLM learns about agent types and tool usage from a user message sent by `/agents` — not from the tool schema.
+no `promptSnippet`, no `promptGuidelines`, and mostly undescribed parameters. The optional model
+parameter is resolved inside tool execution so its source remains available across queue waits.
+The LLM learns detailed usage from the `/agents` briefing rather than verbose tool descriptions.
 
 ## Why
 
@@ -15,9 +15,9 @@ the token sequence and invalidates the KV cache prefix match.
 Registering at init time freezes the tool set from turn 1. No mid-session tool changes,
 no system prompt rebuilds, no cache invalidation.
 
-Injecting the model via `tool_call` listener keeps the schema lean and lets the
-`resolveModel()` precedence chain (per-type override → global default → frontmatter → parent)
-run at call time with full context.
+Resolving the model inside tool execution keeps the schema lean while preserving whether the
+choice was explicit, automatic, or inherited. That provenance lets queued starts recheck a
+revoked cross-provider permission without confusing an automatic override with a user choice.
 
 ## Trade-off
 

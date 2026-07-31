@@ -59,6 +59,14 @@ export async function showModelSettingsMenu(
         );
       };
 
+    items.push({
+      id: "allowCrossProvider",
+      label: "Allow cross-provider",
+      currentValue: store.agent.allowCrossProvider ? "ON" : "OFF",
+      values: ["ON", "OFF"],
+      description: "OFF ignores automatic overrides and blocks other providers; explicit models from the parent provider remain allowed. ON enables configured and cross-provider models.",
+    });
+
     // Global default model
     const sessionDefault = store.sessionDefaultModel;
     const hasSessionGlobal = sessionDefault != null;
@@ -72,7 +80,7 @@ export async function showModelSettingsMenu(
       id: "defaultModel",
       label: "Global default model",
       currentValue: globalDisplayValue,
-      description: "Model used when no per-type override or frontmatter model applies.",
+      description: "Automatic default used only when Allow cross-provider is ON.",
       submenu: createModelSelectSubmenu({
         modelOptions,
         showClear: false,
@@ -107,7 +115,7 @@ export async function showModelSettingsMenu(
         id: `type:${typeName}`,
         label: typeName,
         currentValue: `${frontmatterHint}${displayModel}`,
-        description: `Per-type model override for the ${typeName} agent type.`,
+        description: `Automatic model override for ${typeName}; requires Allow cross-provider.`,
         submenu: createModelSelectSubmenu({
           modelOptions,
           showClear: hasPerm,
@@ -124,7 +132,7 @@ export async function showModelSettingsMenu(
         id: "overrideType",
         label: "Override another type...",
         currentValue: "",
-        description: "Add a model override for an agent type that currently inherits.",
+        description: "Add an automatic model override; requires Allow cross-provider.",
         submenu: (_currentValue, subDone) =>
           createSearchableSelect(
             nonOverridden.map(e => ({ value: e.typeName, label: e.typeName })),
@@ -182,11 +190,12 @@ export async function showModelSettingsMenu(
           const hasOverrides = Object.entries(agentConfig).some(
             ([k, v]) => !CONFIG_AGENT_NON_MODEL_KEYS.includes(k) && v != null,
           );
-          if (!hasOverrides && store.agent.defaultModel === null) {
+          if (!hasOverrides && store.agent.defaultModel === null && !hasSessionOverrides) {
             ctx.ui.notify("No overrides to clear", "info");
             return;
           }
           store.mutate.agent.clearAllModelOverrides();
+          store.mutate.session.clearAll();
           ctx.ui.notify("All model overrides cleared", "info");
         },
       }),
@@ -201,8 +210,13 @@ export async function showModelSettingsMenu(
     const store = getStore();
     const items = buildItems(store, theme);
 
-    
-    const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), (_id, _v) => rebuild?.(buildItems(getStore(), theme)), () => done(undefined));
+    const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), (id, value) => {
+      if (id === "allowCrossProvider") {
+        store.mutate.agent.setAllowCrossProvider(value === "ON");
+        ctx.ui.notify(`Allow cross-provider set to ${value}`, "info");
+      }
+      rebuild?.(buildItems(getStore(), theme));
+    }, () => done(undefined));
     return new SettingsListWrapper(settingsList, {
       title: "Model Settings",
       theme,

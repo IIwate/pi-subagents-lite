@@ -307,7 +307,67 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
       expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
       deferred2.resolve(mockRunResult());
+      await manager.getRecord(id2)!.execution.promise;
+      expect(manager.getRecord(id2)?.lifecycle.status).toBe("completed");
     });
+  });
+
+  it("returns a shutdown error when a queued foreground agent is disposed", async () => {
+    manager = new AgentManager(onComplete, {
+      default: 1,
+      models: { "test/model": 1 },
+    });
+    const blocker = makeResolvablePromise();
+    mockModules.mockRunAgent.mockReturnValueOnce(blocker.promise);
+
+    const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+      description: "blocker",
+      modelKey: "test/model",
+    });
+    const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
+      description: "queued",
+      modelKey: "test/model",
+    });
+    const queuedRecord = manager.getRecord(queuedId)!;
+    const queuedWait = queuedRecord.execution.promise!;
+
+    await manager.dispose();
+    await queuedWait;
+
+    expect(queuedRecord.lifecycle.status).toBe("error");
+    expect(queuedRecord.error).toContain("manager disposed");
+    blocker.resolve(mockRunResult());
+    await manager.getRecord(blockerId)?.execution.promise;
+  });
+
+  it("settles a foreground wait when a queued agent is stopped", async () => {
+    manager = new AgentManager(onComplete, {
+      default: 1,
+      models: { "test/model": 1 },
+    });
+    const blocker = makeResolvablePromise();
+    mockModules.mockRunAgent.mockReturnValueOnce(blocker.promise);
+
+    const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+      description: "blocker",
+      modelKey: "test/model",
+    });
+    const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
+      description: "queued",
+      modelKey: "test/model",
+    });
+    const queuedWait = manager.getRecord(queuedId)!.execution.promise!;
+
+    expect(manager.abort(queuedId, "user")).toBe(true);
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({
+      id: queuedId,
+      lifecycle: expect.objectContaining({ status: "stopped" }),
+    }));
+    await queuedWait;
+
+    expect(manager.getRecord(queuedId)?.lifecycle.status).toBe("stopped");
+    blocker.resolve(mockRunResult());
+    await manager.getRecord(blockerId)!.execution.promise;
   });
 
   // ── Completion contract ──

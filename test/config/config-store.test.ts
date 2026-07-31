@@ -14,6 +14,7 @@ import type { SubagentsConfig } from "../../src/models/model-precedence.ts";
 function defaultConfig(): SubagentsConfig {
   // Matches the defaults merged by loadConfig when no config file exists
   return {
+    allowCrossProvider: false,
     agent: {
       default: null,
       forceBackground: false,
@@ -37,6 +38,7 @@ function defaultConfig(): SubagentsConfig {
 function memIO(initial: Partial<SubagentsConfig> = defaultConfig()): { io: ConfigIO; saves: SubagentsConfig[]; current: () => SubagentsConfig } {
   // Merge with defaults like loadConfig does
   const merged: SubagentsConfig = {
+    allowCrossProvider: initial.allowCrossProvider === true,
     agent: { ...(defaultConfig().agent), ...(initial.agent ?? {}) },
     concurrency: { default: 4, ...(initial.concurrency ?? {}) },
   };
@@ -80,6 +82,7 @@ describe("ConfigStore reads", () => {
     expect(store.agent.graceTurns).toBe(6);
     expect(store.agent.showCost).toBe(false);
     expect(store.agent.forceBackground).toBe(false);
+    expect(store.agent.allowCrossProvider).toBe(false);
     expect(store.agent.defaultModel).toBeNull();
   });
 
@@ -260,6 +263,7 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.loadSkillsImplicitly).toBe(true);
     expect(store.agent.loadExtensionsImplicitly).toBe(true);
     expect(store.agent.disableDefaultAgents).toBe(false);
+    expect(store.agent.allowCrossProvider).toBe(false);
   });
 
   it("string property defaults to 'replace'", () => {
@@ -274,11 +278,13 @@ describe("ConfigStore agent properties", () => {
 
   it("configured values override defaults", () => {
     const { io } = memIO({
+      allowCrossProvider: true,
       agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
     expect(store.agent.includeContextFiles).toBe(false);
+    expect(store.agent.allowCrossProvider).toBe(true);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("high");
     expect(store.agent.loadSkillsImplicitly).toBe(false);
@@ -291,6 +297,7 @@ describe("ConfigStore agent properties", () => {
     const store = new ConfigStore(io);
 
     store.mutate.agent.setIncludeContextFiles(false);
+    store.mutate.agent.setAllowCrossProvider(true);
     store.mutate.agent.setSystemPromptMode("custom");
     store.mutate.agent.setDefaultThinking("medium");
     store.mutate.agent.setLoadSkillsImplicitly(false);
@@ -298,12 +305,27 @@ describe("ConfigStore agent properties", () => {
     store.mutate.agent.setDisableDefaultAgents(true);
 
     expect(store.agent.includeContextFiles).toBe(false);
+    expect(store.agent.allowCrossProvider).toBe(true);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("medium");
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
-    expect(saves).toHaveLength(6);
+    expect(saves).toHaveLength(7);
+  });
+
+  it("keeps an agent type named allowCrossProvider separate from the permission", () => {
+    const { io } = memIO({
+      allowCrossProvider: false,
+      agent: { default: null, forceBackground: false, allowCrossProvider: "provider/model" },
+      concurrency: { default: 4 },
+    });
+    const store = new ConfigStore(io);
+
+    store.mutate.agent.setAllowCrossProvider(true);
+
+    expect(store.agent.allowCrossProvider).toBe(true);
+    expect(store.agentConfigSnapshot().allowCrossProvider).toBe("provider/model");
   });
 
   it("setDefaultThinking(undefined) removes the field", () => {
@@ -316,6 +338,7 @@ describe("ConfigStore agent properties", () => {
 
   it("clearAllModelOverrides preserves all active agent properties", () => {
     const { io } = memIO({
+      allowCrossProvider: true,
       agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", widgetDescLengthFull: 80, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
       concurrency: { default: 4 },
     });
@@ -323,6 +346,7 @@ describe("ConfigStore agent properties", () => {
     store.mutate.agent.clearAllModelOverrides();
     const snap = store.agentConfigSnapshot();
     expect(snap.includeContextFiles).toBe(false);
+    expect(store.agent.allowCrossProvider).toBe(true);
     expect(snap.systemPromptMode).toBe("custom");
     expect(snap.defaultThinking).toBe("low");
     expect(snap.widgetDescLengthFull).toBeUndefined();

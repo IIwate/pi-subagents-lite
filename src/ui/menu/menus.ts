@@ -54,7 +54,7 @@ export async function showSettingsMenu(
   modelOptions: string[],
 ): Promise<void> {
   const items: SelectItem[] = [
-    { value: "model", label: "Model settings", description: "Set global default and per-type model overrides" },
+    { value: "model", label: "Model settings", description: "Parent inheritance, cross-provider, and model overrides" },
     { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
     { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
     { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },

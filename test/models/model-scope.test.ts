@@ -4,8 +4,12 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  automaticModelOverrideError,
+  crossProviderModelError,
   isModelInScope,
   listModelOptionsForMenus,
+  missingParentModelError,
+  missingSubagentModelError,
   modelKey,
   outOfScopeModelError,
   scopedModelKeys,
@@ -14,6 +18,30 @@ import {
 
 const grok = { provider: "cpa-responses", id: "grok-4.5" } as any;
 const gemini = { provider: "cpa-gemini", id: "gemini-3.5-flash" } as any;
+
+describe("missing model errors", () => {
+  it("distinguishes a missing parent from an unresolved authorized override", () => {
+    expect(missingParentModelError()).toContain("parent session has no active model");
+    expect(missingSubagentModelError()).toContain("no subagent model could be resolved");
+  });
+});
+
+describe("automaticModelOverrideError", () => {
+  it("explains that queued automatic selection lost authorization", () => {
+    const message = automaticModelOverrideError("same-provider/worker");
+    expect(message).toContain("same-provider/worker");
+    expect(message).toContain("no longer authorized");
+    expect(message).toContain("Allow cross-provider");
+  });
+});
+
+describe("crossProviderModelError", () => {
+  it("points users to the cross-provider permission", () => {
+    const message = crossProviderModelError("other/model", "parent");
+    expect(message).toContain("other/model");
+    expect(message).toContain("Allow cross-provider");
+  });
+});
 
 describe("modelKey", () => {
   it("formats provider/id", () => {

@@ -27,12 +27,14 @@ const {
   mockGetRecord,
   mockDiscoverNewAgents,
   mockScopedModelKeys,
+  mockAgentSettings,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
   mockGetRecord: vi.fn(),
   mockDiscoverNewAgents: vi.fn(async () => 0),
   mockScopedModelKeys: vi.fn(() => null),
+  mockAgentSettings: { allowCrossProvider: false },
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -60,6 +62,12 @@ vi.mock("../../src/models/model-scope.js", () => ({
   ) => scopedModels.find(({ model: scopedModel }) =>
     model && scopedModel.provider === model.provider && scopedModel.id === model.id,
   )?.thinkingLevel,
+  missingParentModelError: () =>
+    "Cannot start an agent because the parent session has no active model. Select a parent model first.",
+  missingSubagentModelError: () =>
+    "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.",
+  crossProviderModelError: (modelRef: string, parentProvider: string) =>
+    `Model "${modelRef}" uses a different provider than the parent (${parentProvider}).`,
   outOfScopeModelError: (modelRef: string, scopedKeys: ReadonlySet<string>) =>
     `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
 }));
@@ -67,12 +75,20 @@ vi.mock("../../src/models/model-scope.js", () => ({
 vi.mock("../../src/shell.js", () => ({
   getStore: () => ({
     get agent() {
-      return { graceTurns: 5, forceBackground: false };
+      return {
+        graceTurns: 5,
+        forceBackground: false,
+        allowCrossProvider: mockAgentSettings.allowCrossProvider,
+      };
     },
     modelFor(type: string, parentModelId: string, agentConfig?: any) {
-      // Simplified model resolution for testing
       if (agentConfig?.model) return agentConfig.model;
       return parentModelId;
+    },
+    modelSelectionFor(type: string, parentModelId: string, agentConfig?: any) {
+      return agentConfig?.model
+        ? { model: agentConfig.model, source: "automatic" }
+        : { model: parentModelId, source: "parent" };
     },
   }),
   getPiInstance: () => ({ sendMessage: vi.fn(), exec: vi.fn() }),
@@ -97,6 +113,7 @@ vi.mock("../../src/shell.js", () => ({
       const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
         description: intent.description,
         model: intent.model,
+        modelSource: intent.modelSource,
         maxTurns: intent.maxTurns,
         thinkingLevel: intent.thinkingLevel,
         modelKey: intent.modelKey,
@@ -117,8 +134,12 @@ vi.mock("../../src/shell.js", () => ({
 }));
 
 // Import after mocks are in place
-import { executeAgentTool, toolCallListener } from "../../src/agents/tool-execution.js";
+import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
+
+beforeEach(() => {
+  mockAgentSettings.allowCrossProvider = false;
+});
 
 /* ------------------------------------------------------------------ */
 /*  Factories                                                         */
@@ -504,6 +525,7 @@ describe("executeAgentTool — model param", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAgentSettings.allowCrossProvider = true;
     ctx = fakeCtx();
     ctx.model = { provider: "test", id: "parent-model" };
     ctx.modelRegistry = {
@@ -525,6 +547,58 @@ describe("executeAgentTool — model param", () => {
       execution: { promise: Promise.resolve("done") },
       stats: { toolUses: 0, turnCount: 1, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, compactionCount: 0 },
     });
+  });
+
+  it.each([
+    ["an inherited model", undefined],
+    ["an explicit model", "cpa-responses/grok-4.5"],
+  ])("rejects %s when the parent has no active model and permission is off", async (_label, model) => {
+    mockAgentSettings.allowCrossProvider = false;
+    ctx.model = undefined;
+
+    const result = await executeAgentTool(
+      "tc-model-no-parent",
+      makeParams({ model }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("parent session has no active model");
+  });
+
+  it("rejects when permission is on but no model can be resolved", async () => {
+    ctx.model = undefined;
+
+    const result = await executeAgentTool(
+      "tc-model-unresolved",
+      makeParams({ model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("no subagent model could be resolved");
+  });
+
+  it("blocks another provider until the user enables it", async () => {
+    mockAgentSettings.allowCrossProvider = false;
+
+    const result = await executeAgentTool(
+      "tc-model-provider-blocked",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("different provider");
   });
 
   it("forwards explicit provider/model-id to spawn", async () => {
@@ -556,25 +630,16 @@ describe("executeAgentTool — model param", () => {
     expect(spawnOptions.modelKey).toBe("cpa-responses/grok-4.5");
   });
 
-  it("keeps scope-pinned thinking through the listener and execute chain", async () => {
+  it("keeps scope-pinned thinking above agent defaults", async () => {
     vi.mocked(agentTypes.getAgentConfig)
-      .mockReturnValueOnce({ maxTurns: 25, thinkingLevel: "low" } as any)
       .mockReturnValueOnce({ maxTurns: 25, thinkingLevel: "low" } as any);
     ctx.scopedModels = [{
       model: { provider: "cpa-responses", id: "grok-4.5" },
       thinkingLevel: "high",
     }];
-    const event = {
-      toolName: "Agent",
-      toolCallId: "tc-model-scope-thinking",
-      input: makeParams({ model: "grok-4.5" }),
-    };
-
-    await toolCallListener(event as any, ctx);
-    expect(event.input.thinking).toBeUndefined();
     await executeAgentTool(
-      event.toolCallId,
-      event.input,
+      "tc-model-scope-thinking",
+      makeParams({ model: "grok-4.5" }),
       undefined,
       undefined,
       ctx,
@@ -684,5 +749,76 @@ describe("executeAgentTool — model param", () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
     const spawnOptions = mockSpawn.mock.calls[0][4];
     expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+  });
+});
+
+describe("executeAgentTool — automatic model selection", () => {
+  let ctx: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = fakeCtx();
+    ctx.model = { provider: "parent", id: "main-model" };
+    ctx.modelRegistry = {
+      find: vi.fn((provider: string, id: string) => ({ provider, id })),
+      getAvailable: vi.fn(() => []),
+    };
+    mockGetRecord.mockReturnValue({
+      id: "agent-id-123",
+      display: { type: "Explore", description: "inspect" },
+      lifecycle: { status: "running", startedAt: Date.now() },
+      execution: { promise: Promise.resolve("done") },
+      stats: { toolUses: 0, turnCount: 1, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, compactionCount: 0 },
+    });
+  });
+
+  it("inherits the exact parent model by default", async () => {
+    vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
+
+    await executeAgentTool(
+      "tc-parent-model",
+      makeParams({ agent: "Explore", model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.model).toEqual({ provider: "parent", id: "main-model" });
+    expect(options.modelSource).toBe("parent");
+  });
+
+  it("keeps automatic provenance when the configured model equals the parent", async () => {
+    mockAgentSettings.allowCrossProvider = true;
+    vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "parent/main-model" } as any);
+
+    await executeAgentTool(
+      "tc-equal-parent-override",
+      makeParams({ agent: "Explore", model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.model).toEqual({ provider: "parent", id: "main-model" });
+    expect(options.modelSource).toBe("automatic");
+  });
+
+  it("marks configured models as automatic when permission is enabled", async () => {
+    mockAgentSettings.allowCrossProvider = true;
+    vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
+
+    await executeAgentTool(
+      "tc-cross-provider",
+      makeParams({ agent: "Explore", model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.model).toEqual({ provider: "other", id: "provider-model" });
+    expect(options.modelSource).toBe("automatic");
   });
 });

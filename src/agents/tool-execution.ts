@@ -6,7 +6,7 @@ import { getStatusNote } from "../status-note.js";
  * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
  */
 
-import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
@@ -23,9 +23,12 @@ import {
 import {
   scopedModelKeys,
   isModelInScope,
+  missingParentModelError,
+  missingSubagentModelError,
   outOfScopeModelError,
   modelKey,
   scopedThinkingLevel,
+  crossProviderModelError,
 } from "../models/model-scope.js";
 import {
   getPiInstance,
@@ -109,23 +112,46 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || prompt.split("\n")[0].slice(0, 80) || prompt.slice(0, 80);
   const runInBackground = params.run_in_background as boolean | undefined;
-  const maxTurns = getAgentConfig(resolvedType)?.maxTurns;
+  const agentConfig = getAgentConfig(resolvedType);
+  const maxTurns = agentConfig?.maxTurns;
   const scopedModels = [...ctx.scopedModels];
+  const store = getStore();
+  if (!ctx.model && !store.agent.allowCrossProvider) {
+    return errorResult(missingParentModelError());
+  }
 
-  // model may be "id", "provider/id", or "id:thinking" / "provider/id:thinking".
-  const { modelRef, thinkingFromModel } = parseModelSpec(params.model as string | undefined);
-  let model = modelRef
-    ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
-    : undefined;
+  // Resolve here rather than mutating tool input in a listener, preserving
+  // whether a queued model was explicit, automatic, or inherited.
+  const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
+  const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
+  const automaticSelection = store.agent.allowCrossProvider
+    ? store.modelSelectionFor(resolvedType, parentModelRef, agentConfig)
+    : { model: parentModelRef, source: "parent" as const };
+  const selectedModelSpec = explicitModel
+    ? params.model as string
+    : automaticSelection.model;
+  const modelSource = explicitModel ? "explicit" : automaticSelection.source;
+  const { modelRef, thinkingFromModel } = parseModelSpec(selectedModelSpec);
+  const model = modelSource === "parent"
+    ? findModelInRegistry(undefined, ctx.modelRegistry, ctx.model)
+    : modelRef
+      ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
+      : findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
 
-  // Explicit model was requested but could not be matched exactly → error (no silent parent fallback).
   if (modelRef && !model) {
     return errorResult(unknownModelError(modelRef));
   }
+  if (!model) {
+    return errorResult(missingSubagentModelError());
+  }
 
-  // No explicit model → inherit injected/config/parent model (toolCallListener may have set params.model).
-  if (!modelRef) {
-    model = findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
+  if (
+    model
+    && ctx.model
+    && model.provider !== ctx.model.provider
+    && !store.agent.allowCrossProvider
+  ) {
+    return errorResult(crossProviderModelError(modelKey(model), ctx.model.provider));
   }
 
   // Reject models outside the active Model scope (--models / enabledModels).
@@ -137,18 +163,48 @@ export async function executeAgentTool(
   }
 
   const resolvedModelKey = model ? modelKey(model) : undefined;
+  const resolveModelAtStart = modelSource === "automatic"
+    ? () => {
+      const currentStore = getStore();
+      // A revoked permission must fail at runner validation rather than silently
+      // changing an already-authorized automatic request into parent inheritance.
+      if (!currentStore.agent.allowCrossProvider) {
+        return { model, modelKey: resolvedModelKey! };
+      }
+      const currentParentRef = ctx.model ? modelKey(ctx.model) : "";
+      const selection = currentStore.modelSelectionFor(resolvedType, currentParentRef, agentConfig);
+      const currentSpec = parseModelSpec(selection.model);
+      const currentModel = currentSpec.modelRef
+        ? resolveExactModel(currentSpec.modelRef, ctx.modelRegistry, ctx.model?.provider)
+        : findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
+      if (!currentModel) {
+        throw new Error(currentSpec.modelRef ? unknownModelError(currentSpec.modelRef) : missingSubagentModelError());
+      }
+      return {
+        model: currentModel,
+        modelKey: modelKey(currentModel),
+        thinkingLevel: currentSpec.thinkingFromModel,
+      };
+    }
+    : undefined;
 
-  // Determine modelName for invocation (always capture for display)
+  // Capture the predicted model/provider for queued-agent display.
   const modelName = model?.id;
+  const providerName = model?.provider;
 
   // Only explicit choices are fixed at enqueue time. Scope pins are resolved
   // again by the runner so queued agents use the scope active when they start.
-  const thinkingLevel = parseThinkingLevel(params.thinking as string | undefined)
-    ?? thinkingFromModel;
+  const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
+  const thinkingLevel = explicitThinkingLevel ?? thinkingFromModel;
+  const thinkingSource = explicitThinkingLevel !== undefined
+    ? "explicit"
+    : thinkingFromModel !== undefined
+      ? "automatic"
+      : "inherited";
   const displayThinkingLevel = thinkingLevel
     ?? scopedThinkingLevel(scopedModels, model)
-    ?? getAgentConfig(resolvedType)?.thinkingLevel
-    ?? getStore().agent.defaultThinking;
+    ?? agentConfig?.thinkingLevel
+    ?? store.agent.defaultThinking;
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;
@@ -157,18 +213,21 @@ export async function executeAgentTool(
     prompt,
     description,
     model,
+    modelSource,
     modelKey: resolvedModelKey,
+    resolveModelAtStart,
+    thinkingSource,
     maxTurns,
     thinkingLevel,
-    graceTurns: getStore().agent.graceTurns,
+    graceTurns: store.agent.graceTurns,
     worktreePath: validatedWorktreePath,
-    invocation: { modelName, thinkingLevel: displayThinkingLevel },
-    runInBackground: runInBackground || getStore().agent.forceBackground,
+    invocation: { modelName, providerName, thinkingLevel: displayThinkingLevel },
+    runInBackground: runInBackground || store.agent.forceBackground,
   });
 
   const { agentId, record } = result;
 
-  if (runInBackground || getStore().agent.forceBackground) {
+  if (runInBackground || store.agent.forceBackground) {
     // Background: return immediately
     const suffix = `A notification will arrive when done — do NOT poll, sleep, timeout, check status, or redo the delegated work. The parent task advances automatically when the subagent completes.\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
@@ -239,47 +298,4 @@ export async function executeStopAgentTool(
   }
 
   return errorResult(`Failed to stop agent ${agentId}`);
-}
-
-// ============================================================================
-// Tool_call listener — inject model into Agent tool calls
-// =============================================================================
-
-export async function toolCallListener(
-  event: ToolCallEvent,
-  ctx: ExtensionContext,
-): Promise<void> {
-  if (event.toolName !== "Agent") return;
-
-  const input = event.input;
-  const subagentType = input.agent as string | undefined;
-  const agentConfig = subagentType ? getAgentConfig(subagentType) : undefined;
-
-  // Normalize "model:thinking" shorthand before other injection logic.
-  if (typeof input.model === "string" && input.model.length > 0) {
-    const { modelRef, thinkingFromModel } = parseModelSpec(input.model);
-    if (modelRef !== undefined) {
-      input.model = modelRef;
-    }
-    // Promote thinking from model suffix only when thinking was not set explicitly.
-    if (thinkingFromModel !== undefined && input.thinking === undefined) {
-      input.thinking = thinkingFromModel;
-    }
-  }
-
-  // Inject model only when the LLM did not pass one explicitly.
-  // Explicit tool `model` always wins over config/parent defaults.
-  if (input.model === undefined || input.model === null || input.model === "") {
-    const parentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "";
-    const effectiveModel = getStore().modelFor(
-      subagentType ?? "general-purpose",
-      parentModelId,
-      agentConfig,
-    );
-
-    if (effectiveModel) {
-      input.model = effectiveModel;
-    }
-  }
-
 }

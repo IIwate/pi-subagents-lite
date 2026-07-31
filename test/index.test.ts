@@ -3,8 +3,8 @@
  *
  * Tests focus on:
  *   - Tool schema shapes (stealth schemas with description: ".", no promptSnippet/promptGuidelines)
- *   - Listener guards (only mutates event.input.model for Agent tool)
- *   - Schema field exclusion (no model, inherit_context, schedule, isolation params)
+ *   - Agent model/thinking schema fields
+ *   - Schema field exclusion (inherit_context, schedule, isolation params)
  *
  * These tests mock ExtensionAPI and verify registration behavior.
  * Full integration testing is manual via pi TUI.
@@ -270,88 +270,6 @@ describe("tool registration", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Listener Guards                                                   */
-/* ------------------------------------------------------------------ */
-
-describe("tool_call listener — guards", () => {
-  let api: MockExtensionAPI;
-
-  beforeAll(async () => {
-    api = createMockExtensionAPI();
-    await loadExtension(api.api);
-  });
-
-  const toolCallHandler = () =>
-    api.listeners.find((l) => l.event === "tool_call")?.handler;
-
-  it("does not mutate event.input.model for non-Agent tools", async () => {
-    expect(toolCallHandler()).toBeDefined();
-    const event = {
-      toolName: "bash",
-      toolCallId: "call_123",
-      input: { command: "echo hello" },
-    };
-    const result = await toolCallHandler()!(event, {});
-
-    expect(event.input.model).toBeUndefined();
-    expect(result).toBeUndefined();
-  });
-
-  it("sets event.input.model for Agent tool calls when model is omitted", async () => {
-    const ctx = {
-      model: { provider: "test", id: "parent-model" },
-      modelRegistry: {
-        find: vi.fn((p: string, i: string) => ({ provider: p, id: i })),
-        getAvailable: vi.fn(() => []),
-      },
-    };
-
-    const event = {
-      toolName: "Agent",
-      toolCallId: "call_789",
-      input: {
-        prompt: "do something",
-        description: "test",
-        agent: "Explore",
-      },
-    };
-
-    const result = await toolCallHandler()!(event, ctx);
-
-    expect(event.input.model).toBeDefined();
-    expect(typeof event.input.model).toBe("string");
-    expect(result).toBeUndefined();
-  });
-
-  it("does not overwrite explicit model on Agent tool calls", async () => {
-    const ctx = {
-      model: { provider: "test", id: "parent-model" },
-      modelRegistry: {
-        find: vi.fn((p: string, i: string) => ({ provider: p, id: i })),
-        getAvailable: vi.fn(() => [
-          { provider: "cpa-responses", id: "grok-4.5" },
-        ]),
-      },
-    };
-
-    const event = {
-      toolName: "Agent",
-      toolCallId: "call_explicit_model",
-      input: {
-        prompt: "do something",
-        description: "test",
-        agent: "general-purpose",
-        model: "cpa-responses/grok-4.5",
-      },
-    };
-
-    await toolCallHandler()!(event, ctx);
-
-    expect(event.input.model).toBe("cpa-responses/grok-4.5");
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /*  Command Registration                                              */
 /* ------------------------------------------------------------------ */
 
@@ -385,10 +303,6 @@ describe("event listener registration", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
-
-  it("registers tool_call listener", () => {
-    expect(api.listeners.some((l) => l.event === "tool_call")).toBe(true);
   });
 
   it("registers session_start listener", () => {

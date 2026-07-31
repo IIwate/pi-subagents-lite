@@ -7,7 +7,6 @@ import { AgentManager } from "./agents/agent-manager.js";
 import { AgentWidget, type UICtx } from "./ui/agent-widget.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
-import { toolCallListener } from "./agents/tool-execution.js";
 import { registerAgentTool } from "./registration.js";
 import {
   getManager,
@@ -126,8 +125,6 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
-  pi.on("tool_call", toolCallListener);
-
   pi.on("input", async (event, ctx) => {
     if (event.source !== "interactive") return;
     const selectedAgentId = getNavigator()?.selectedId();

@@ -13,6 +13,7 @@ import { CONFIG_AGENT_NON_MODEL_KEYS } from "../src/config/types.js";
 // Create the mock modules object
 export const mockModules = {
   mockConfig: {
+    allowCrossProvider: false,
     agent: { default: null, forceBackground: false } as Record<string, any>,
     concurrency: { default: 4 } as Record<string, any>,
   },
@@ -83,6 +84,7 @@ vi.mock("../src/shell.js", () => {
       return {
         defaultModel: a.default ?? null,
         forceBackground: a.forceBackground === true,
+        allowCrossProvider: mockModules.mockConfig.allowCrossProvider === true,
         showCost: a.showCost === true,
         graceTurns: a.graceTurns ?? 6,
         systemPromptMode: a.systemPromptMode ?? "replace",
@@ -142,6 +144,7 @@ vi.mock("../src/shell.js", () => {
           mockModules.mockConfig.agent = preserved as any;
         },
         setForceBackground(enabled: boolean) { mockModules.mockConfig.agent.forceBackground = enabled; },
+        setAllowCrossProvider(enabled: boolean) { mockModules.mockConfig.allowCrossProvider = enabled; },
         setShowCost(enabled: boolean) { mockModules.mockConfig.agent.showCost = enabled; },
         setGraceTurns(n: number) { mockModules.mockConfig.agent.graceTurns = n; },
         setSystemPromptMode(mode: string) { mockModules.mockConfig.agent.systemPromptMode = mode; },

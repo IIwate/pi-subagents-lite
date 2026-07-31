@@ -41,6 +41,7 @@ const mockModules = vi.hoisted(() => ({
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
   mockIncludeContextFiles: true as boolean,
   mockSystemPromptMode: "replace" as string,
+  mockAllowCrossProvider: false as boolean,
   getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
@@ -79,6 +80,7 @@ vi.mock("../../src/shell.js", () => ({
       systemPromptMode: mockModules.mockSystemPromptMode,
       graceTurns: 6,
       forceBackground: false,
+      allowCrossProvider: mockModules.mockAllowCrossProvider,
       showCost: false,
       defaultModel: null,
     },
@@ -126,6 +128,7 @@ function resetMocks() {
   mockModules.clearLoaderExtensions();
   mockModules.mockIncludeContextFiles = true;
   mockModules.mockSystemPromptMode = "replace";
+  mockModules.mockAllowCrossProvider = false;
   mockModules.mockLoadProjectContextFiles.mockReturnValue([]);
 
   mockModules.mockGetConfig.mockReturnValue({ ...defaultConfig });
@@ -370,11 +373,74 @@ describe("runAgent — tool visibility wiring", () => {
     expect(sessionOptions.tools).not.toContain("web_search");
   });
 
+  it("rechecks cross-provider permission before session creation", async () => {
+    mockModules.mockAllowCrossProvider = false;
+    const ctx = fakeCtx();
+    ctx.model = { provider: "parent", id: "main-model" };
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "other", id: "worker-model" },
+    })).rejects.toThrow("uses a different provider than the parent");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects starts without a parent model while provider authorization is off", async () => {
+    const ctx = fakeCtx();
+    ctx.model = undefined;
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "test", id: "worker-model" },
+      modelSource: "explicit",
+    })).rejects.toThrow("parent session has no active model");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects starts when permission is on but no model can be resolved", async () => {
+    mockModules.mockAllowCrossProvider = true;
+    const ctx = fakeCtx();
+    ctx.model = undefined;
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+    })).rejects.toThrow("no subagent model could be resolved");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a queued automatic override after permission is disabled", async () => {
+    const ctx = fakeCtx();
+    ctx.model = { provider: "test", id: "parent-model" };
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "test", id: "worker-model" },
+      modelSource: "automatic",
+    })).rejects.toThrow("Automatic model override");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("ignores frontmatter model fallback while automatic overrides are disabled", async () => {
+    const session = createMockSession();
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      model: "other/worker-model",
+    });
+    const ctx = fakeCtx();
+    ctx.model = { provider: "test", id: "parent-model" };
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
+
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].model).toEqual(ctx.model);
+  });
+
   it("uses Pi's current scope and pinned thinking for the initial model", async () => {
     const session = createMockSession();
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
     const model = { provider: "anthropic", id: "claude-opus-5" };
     const ctx = fakeCtx();
+    ctx.model = model;
     ctx.scopedModels = [{ model, thinkingLevel: "high" }];
 
     await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
@@ -387,6 +453,7 @@ describe("runAgent — tool visibility wiring", () => {
   it("rejects a queued model removed from the current scope before session creation", async () => {
     const requestedModel = { provider: "anthropic", id: "claude-opus-5" };
     const ctx = fakeCtx();
+    ctx.model = requestedModel;
     ctx.scopedModels = [{
       model: { provider: "openai", id: "gpt-5.4" },
       thinkingLevel: "medium",
@@ -1284,7 +1351,9 @@ describe("runAgent — maxTokens: front matter to provider payload", () => {
       compat: { maxTokensField: "max_tokens" },
     });
 
-    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi, model });
+    const ctx = fakeCtx();
+    ctx.model = model;
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
 
     const rawPayload = {
       model: "llama-3.1-8b",
@@ -1305,8 +1374,10 @@ describe("runAgent — maxTokens: front matter to provider payload", () => {
     });
 
     const model = makeMockModel({ compat: { maxTokensField: "max_completion_tokens" } });
+    const ctx = fakeCtx();
+    ctx.model = model;
 
-    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi, model });
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
 
     const finalPayload = await session.agent.onPayload(
       { model: "some-model", messages: [{ role: "user", content: "do something" }] },
@@ -1319,8 +1390,11 @@ describe("runAgent — maxTokens: front matter to provider payload", () => {
 
   it("no max_tokens injected when agent config omits it", async () => {
     mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
+    const model = makeMockModel();
+    const ctx = fakeCtx();
+    ctx.model = model;
 
-    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi, model: makeMockModel() });
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
 
     expect(session.agent.onPayload).toBeUndefined();
   });

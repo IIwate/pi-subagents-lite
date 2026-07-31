@@ -154,15 +154,17 @@ export function renderAgentFooterStats(record: AgentRecord, theme: Theme, width:
 
   const model = session?.model;
   const modelName = model?.id ?? record.display.invocation?.modelName ?? "no-model";
+  const providerName = model?.provider ?? record.display.invocation?.providerName;
+  const modelLabel = providerName ? `${modelName} • ${providerName}` : modelName;
   const thinkingLevel = session?.thinkingLevel ?? record.display.invocation?.thinkingLevel;
   const showsThinking = model
     ? model.reasoning === true
     : record.display.invocation?.thinkingLevel !== undefined;
   const rightSide = showsThinking
     ? thinkingLevel === "off"
-      ? `${modelName} • thinking off`
-      : `${modelName} • ${thinkingLevel ?? "off"}`
-    : modelName;
+      ? `${modelLabel} • thinking off`
+      : `${modelLabel} • ${thinkingLevel ?? "off"}`
+    : modelLabel;
   const rightWidth = visibleWidth(rightSide);
   const minPadding = 2;
 

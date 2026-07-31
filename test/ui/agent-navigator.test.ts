@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // CustomEditor is only a fallback here; keep real pi-tui key/width behavior covered.
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -8,6 +8,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }));
 
 import type { AgentManager } from "../../src/agents/agent-manager.js";
+import { registerAgents } from "../../src/agents/agent-types.js";
 import { AgentNavigator } from "../../src/ui/agent-navigator.js";
 
 function makeRecord(id = "agent-12345678", status = "running"): any {
@@ -23,6 +24,8 @@ function makeRecord(id = "agent-12345678", status = "running"): any {
     },
     execution: {
       session: {
+        model: { id: "gpt-test", provider: "openai-test", reasoning: true },
+        thinkingLevel: "high",
         messages: [
           { role: "user", content: [{ type: "text", text: "Inspect the project" }] },
           {
@@ -191,8 +194,13 @@ function mountSelector(ui: ReturnType<typeof makeUI>, tui = makeTui()): any {
 describe("AgentNavigator", () => {
   let navigator: AgentNavigator | undefined;
 
+  beforeEach(() => {
+    registerAgents(new Map());
+  });
+
   afterEach(() => {
     navigator?.dispose();
+    registerAgents(new Map());
     vi.useRealTimers();
   });
 
@@ -208,7 +216,8 @@ describe("AgentNavigator", () => {
 
     // Claude-style rows use a filled active circle and no spinner column.
     expect(text).toContain("● Main");
-    expect(text).toMatch(/○ \S+  Inspect the project/);
+    expect(text).toMatch(/○ \S+ \(Running\)  Inspect the project/);
+    expect(text).toContain("gpt-test · openai-test · high");
     expect(text).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
       "agent-navigator-selector",
@@ -235,8 +244,32 @@ describe("AgentNavigator", () => {
     const lines = selector.render(120);
     const runningRow = lines.find((line: string) => line.includes("Active task"))!;
     const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
-    expect(runningRow).toMatch(/Running {2}1 calls/);
-    expect(blockedRow).toMatch(/Needs input {2}81 calls/);
+    expect(runningRow).toMatch(/Explore \(Running\) {2}Active task/);
+    expect(blockedRow).toMatch(/Explore \(Needs input\) {2}Blocked task/);
+    expect(runningRow).toMatch(/gpt-test · openai-test · high/);
+  });
+
+  it("orders Needs input first and Done last without moving Main", () => {
+    const done = makeRecord("agent-done", "completed");
+    const running = makeRecord("agent-running", "running");
+    const blocked = makeRecord("agent-blocked", "error");
+    done.display.description = "Done task";
+    running.display.description = "Running task";
+    blocked.display.description = "Blocked task";
+    blocked.execution.settled = true;
+    blocked.error = "content was flagged";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([done, running, blocked]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const lines = selector.render(120);
+    expect(lines[0]).toContain("Main");
+    expect(lines.findIndex((line: string) => line.includes("Blocked task")))
+      .toBeLessThan(lines.findIndex((line: string) => line.includes("Running task")));
+    expect(lines.findIndex((line: string) => line.includes("Running task")))
+      .toBeLessThan(lines.findIndex((line: string) => line.includes("Done task")));
   });
 
   it("renders a debug status preview without mutating agent lifecycle", () => {
@@ -307,6 +340,31 @@ describe("AgentNavigator", () => {
     expect(row).not.toContain("security audit description");
   });
 
+  it("preserves status and model space for a long custom display name", () => {
+    registerAgents(new Map([[
+      "long-agent",
+      {
+        name: "long-agent",
+        displayName: "Extremely Long Custom Agent Display Name",
+        description: "Long name test",
+        systemPrompt: "Review the project.",
+      } as any,
+    ]]));
+    const record = makeRecord("agent-long", "running");
+    record.display.type = "long-agent";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+    tui.terminal.columns = 42;
+
+    const rows = selector.render(42);
+    expect(rows.join("\n")).toContain("(Running)");
+    expect(rows.join("\n")).toContain("gpt-test");
+    expect(rows.join("\n")).toContain("openai-tes");
+  });
+
   it("shows the recovery reason while a continuable failure is highlighted", () => {
     const record = makeRecord("agent-blocked", "error");
     record.execution.settled = true;
@@ -367,6 +425,39 @@ describe("AgentNavigator", () => {
     const lines = selector.render(120);
     expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
     expect(lines[0]).toMatch(/^  ↑↓ Move/);
+  });
+
+  it("requests a redraw when the displayed model changes", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const tui = makeTui();
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui, tui);
+    tui.requestRender.mockClear();
+
+    record.execution.session.model.id = "gpt-updated";
+    navigator.update();
+
+    expect(tui.requestRender).toHaveBeenCalledWith(false);
+  });
+
+  it("requests a redraw when displayed usage changes", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const tui = makeTui();
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui, tui);
+    tui.requestRender.mockClear();
+
+    record.stats.compactionCount = 1;
+    record.stats.lifetimeUsage.cost = 0.25;
+    navigator.update();
+
+    expect(tui.requestRender).toHaveBeenCalledWith(false);
   });
 
   it("uses native shrink clearing while the selector is mounted", () => {
@@ -463,7 +554,7 @@ describe("AgentNavigator", () => {
     const { tui, selector } = mountSelector(ui);
 
     const row0 = selector.render(120)[1];
-    expect(row0).toMatch(/○ \S+  Inspect the project/);
+    expect(row0).toMatch(/○ \S+ \(Running\)  Inspect the project/);
     expect(row0).toHaveLength(120);
     expect(row0).toMatch(/15s$/);
 
@@ -694,8 +785,53 @@ describe("AgentNavigator", () => {
     expect(navigator.selectedId()).toBeNull();
   });
 
-  it("renders the selected subagent conversation as the root chat", () => {
+  it("shows queue waiting text before the child session exists", () => {
     const record = makeRecord();
+    record.lifecycle.status = "queued";
+    record.execution.session = undefined;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const text = tui.children[tui.chatIndex].render(120).join("\n");
+    expect(text).toContain("Explore (Queued) · agent-12");
+    expect(text).toContain("Waiting in queue…");
+    expect(text).not.toContain("Starting agent session…");
+  });
+
+  it("shows queued start failures when no child session was created", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "error";
+    record.execution.session = undefined;
+    record.execution.settled = true;
+    record.error = "Automatic model override is no longer authorized";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const text = tui.children[tui.chatIndex].render(120).join("\n");
+    expect(text).toContain("Explore (Error) · agent-12");
+    expect(text).toContain("Error: Automatic model override is no longer authorized");
+    expect(text).not.toContain("Starting agent session…");
+  });
+
+  it("uses the same Needs input label in the selected subagent conversation", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "error";
+    record.execution.settled = true;
+    record.error = "503 service unavailable";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
@@ -708,7 +844,7 @@ describe("AgentNavigator", () => {
 
     const lines = tui.children[tui.chatIndex].render(120);
     const text = lines.join("\n");
-    expect(text).toContain("Explore · agent-12 · running");
+    expect(text).toContain("Explore (Needs input) · agent-12");
     expect(text).toContain("Inspect the project");
     expect(text).toContain("I should inspect files.");
     expect(text).toContain("read");
@@ -758,7 +894,7 @@ describe("AgentNavigator", () => {
     expect(footerLines[0]).toBe("parent cwd");
     expect(footerLines[1]).toContain("↑12k");
     expect(footerLines[1]).toContain("25.0%/128k (auto)");
-    expect(footerLines[1]).toContain("child-model • high");
+    expect(footerLines[1]).toContain("child-model • test • high");
     expect(footerLines[1]).not.toContain("parent stats");
   });
 

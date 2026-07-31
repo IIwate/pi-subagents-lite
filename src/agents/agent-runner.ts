@@ -30,7 +30,11 @@ import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 import {
+  automaticModelOverrideError,
+  crossProviderModelError,
   isModelInScope,
+  missingParentModelError,
+  missingSubagentModelError,
   modelKey,
   outOfScopeModelError,
   scopedModelKeys,
@@ -467,12 +471,32 @@ async function initSession(
   cwd: string,
   loader: DefaultResourceLoader,
 ) {
+  const store = getStore();
+  if (!ctx.model && !store.agent.allowCrossProvider) {
+    throw new Error(missingParentModelError());
+  }
   const model = options.model ?? findModelInRegistry(
-    agentConfig?.model, ctx.modelRegistry, ctx.model,
+    store.agent.allowCrossProvider ? agentConfig?.model : undefined,
+    ctx.modelRegistry,
+    ctx.model,
   );
-  // Queue waits may outlive scope edits. Re-read and validate immediately before
-  // session creation so the initial model and child scope cannot disagree.
+  if (!model) {
+    throw new Error(missingSubagentModelError());
+  }
+  // Queue waits may outlive permission or scope edits. Re-read both immediately
+  // before session creation so stale automatic choices cannot start.
   const scopedModels = [...ctx.scopedModels];
+  if (model && options.modelSource === "automatic" && !store.agent.allowCrossProvider) {
+    throw new Error(automaticModelOverrideError(modelKey(model)));
+  }
+  if (
+    model
+    && ctx.model
+    && model.provider !== ctx.model.provider
+    && !store.agent.allowCrossProvider
+  ) {
+    throw new Error(crossProviderModelError(modelKey(model), ctx.model.provider));
+  }
   const scopedKeys = scopedModelKeys(scopedModels);
   if (model && scopedKeys && !isModelInScope(model, scopedKeys)) {
     throw new Error(outOfScopeModelError(modelKey(model), scopedKeys));
@@ -482,7 +506,7 @@ async function initSession(
   const thinkingLevel = options.thinkingLevel
     ?? scopedThinkingLevel(scopedModels, model)
     ?? agentConfig?.thinkingLevel
-    ?? getStore().agent.defaultThinking;
+    ?? store.agent.defaultThinking;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);

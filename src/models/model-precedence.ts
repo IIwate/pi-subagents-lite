@@ -15,8 +15,15 @@
 import type { ThinkingLevel } from "../types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 
+export interface ResolvedModelSelection {
+  model: string;
+  source: "automatic" | "parent";
+}
+
 /** Shape of the subagents-lite.json config file. */
 export interface SubagentsConfig {
+  /** Allow subagents to use another provider and configured model overrides. */
+  allowCrossProvider?: boolean;
   agent: {
     default: string | null;
     forceBackground: boolean;
@@ -86,19 +93,26 @@ export interface ResolveModelOptions {
  * from the precedence chain. If all are empty/null, returns parentModelId.
  */
 export function resolveModel(options: ResolveModelOptions): string {
+  return resolveModelSelection(options).model;
+}
+
+/** Resolve both the model and whether it came from an automatic override. */
+export function resolveModelSelection(options: ResolveModelOptions): ResolvedModelSelection {
   const { subagentType, agentConfig, config, parentModelId, sessionOverrides } = options;
 
-  // Precedence chain: session > config > frontmatter > parent
-  // Cast agent values: index signature includes number (graceTurns), but models are always strings
-  const candidates: Array<string | boolean | null | undefined> = [
+  // Precedence chain: session > config > frontmatter. Parent is a distinct
+  // fallback so provenance does not depend on equivalent string spellings.
+  const automaticCandidates: Array<string | boolean | null | undefined> = [
     sessionOverrides?.[subagentType],
     sessionOverrides?.["default"],
     config.agent[subagentType] as string | null | undefined,
     config.agent["default"],
     agentConfig?.model,
-    parentModelId, // final fallback (always a valid string)
   ];
-  return candidates.find(isValidValue) ?? parentModelId;
+  const automaticModel = automaticCandidates.find(isValidValue);
+  return automaticModel
+    ? { model: automaticModel, source: "automatic" }
+    : { model: parentModelId, source: "parent" };
 }
 
 /**
