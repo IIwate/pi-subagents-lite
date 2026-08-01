@@ -67,7 +67,7 @@ export function setAgentScanDirs(userDir: string, projectDir: string): void {
 }
 
 /** Scan user and project agent directories, merge with defaults. Returns the merged Map. */
-async function scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promise<Map<string, AgentConfig>> {
+export async function scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promise<Map<string, AgentConfig>> {
   const [userAgents, projectAgents] = await Promise.all([
     scanAgentFilesInDir(userAgentDir, "user"),
     scanAgentFilesInDir(projectAgentDir, "project"),
@@ -83,10 +83,9 @@ async function scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promi
  *   When set, agents from this directory are also scanned and added to the registry.
  *   Worktree-local types use "project" source attribution and follow the same
  *   parsing and name-uniqueness rules as the parent's project scan.
- * @param options - Optional settings. disableDefaultAgents skips DEFAULT_AGENTS in the merge.
  */
-export async function discoverNewAgents(worktreeDir?: string, options?: { disableDefaultAgents?: boolean }): Promise<number> {
-  const merged = await scanAndMerge(options);
+export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
+  const merged = await scanAndMerge();
 
   let count = 0;
   for (const [name, config] of merged) {
@@ -357,9 +356,10 @@ export function getConfig(
 
   // Absolute fallback — no config found at all
   const defaults = applyGlobalDefaults(undefined, undefined, loadSkillsImplicitly, loadExtensionsImplicitly);
+  const generalPurpose = DEFAULT_AGENTS.get("general-purpose")!;
   return {
-    displayName: "Agent",
-    description: "General-purpose agent for complex, multi-step tasks",
+    displayName: generalPurpose.displayName ?? generalPurpose.name,
+    description: generalPurpose.description,
     registeredTools: BUILTIN_TOOL_NAMES,
     ...defaults,
   };

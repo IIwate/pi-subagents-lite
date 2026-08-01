@@ -2,7 +2,7 @@
  * index.test.ts — Tests for the extension entry point.
  *
  * Tests focus on:
- *   - Tool schema shapes (stealth schemas with description: ".", no promptSnippet/promptGuidelines)
+ *   - Tool schema shapes (stealth schemas with no description, no promptSnippet/promptGuidelines)
  *   - Agent model/thinking schema fields
  *   - Schema field exclusion (inherit_context, schedule, isolation params)
  *
@@ -97,7 +97,7 @@ vi.mock("../src/ui/searchable-select.js", () => ({
 }));
 
 vi.mock("../src/models/model-precedence.js", () => ({
-  resolveModel: vi.fn((opts: any) => opts?.parentModelId ?? ""),
+  resolveModelSelection: vi.fn((opts: any) => ({ model: opts?.parentModelId ?? "", source: "parent" })),
 }));
 
 vi.mock("../src/agents/agent-types.js", () => ({
@@ -136,15 +136,6 @@ vi.mock("../src/ui/agent-widget.js", () => ({
  */
 function findTool(api: MockExtensionAPI, name: string) {
   return api.tools.find((t) => t.name === name);
-}
-
-/**
- * Verify stealth schema properties: description ".", no promptSnippet, no promptGuidelines.
- */
-function expectStealthSchema(tool: any) {
-  expect(tool.description).toBe(".");
-  expect(tool.promptSnippet).toBeUndefined();
-  expect(tool.promptGuidelines).toBeUndefined();
 }
 
 /* ------------------------------------------------------------------ */

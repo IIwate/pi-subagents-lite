@@ -7,8 +7,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Input, type Component } from "@earendil-works/pi-tui";
 
-import { validateNumeric } from "../helpers.js";
-
 /**
  * Returns a `(initialValue, done) => submenu` function wired to
  * `ctx.ui.notify` for errors.
@@ -53,8 +51,8 @@ export function createNumericSubmenu(
         }
         return;
       }
-      const parsed = validateNumeric(trimmed, min);
-      if (parsed === undefined) {
+      const parsed = parseInt(trimmed, 10);
+      if (isNaN(parsed) || parsed < min) {
         onError(`Invalid value \u2014 must be a number ${fmtLabel(min)}`);
         return;
       }

@@ -4,7 +4,7 @@
  * model-option building, a swappable delegating component, and a
  * searchable pick-list submenu factory.
  */
-import type { Component, SettingsListTheme } from "@earendil-works/pi-tui";
+import type { Component, SettingsListTheme, SelectListTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "../types.js";
 import { SearchableSelectDialog, type SelectOption } from "../searchable-select.js";
 import { parseModelKey } from "../../utils.js";
@@ -26,10 +26,10 @@ export function buildModelOptions(rawOptions: string[]): SelectOption[] {
 }
 
 /**
- * Build a SettingsListTheme from a pi-coding-agent Theme.
- * Shared by widget settings and future SettingsList-based menus.
+ * Build the shared list theme (SettingsList + SelectList use the same
+ * accent/muted/dim visual style; each takes the keys it needs).
  */
-export function buildSettingsListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): SettingsListTheme {
+export function buildListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): SettingsListTheme & SelectListTheme {
   return {
     label: (text, selected) => selected ? theme.fg("accent", text) : text,
     value: (text, selected) => selected ? theme.fg("accent", text) : theme.fg("muted", text),
@@ -38,17 +38,11 @@ export function buildSettingsListTheme(theme: { fg(color: string, text: string):
     // This prevents menu items from shifting left/right when cursor moves
     cursor: theme.fg("accent", "→ "),
     hint: (text) => theme.fg("dim", text),
+    selectedPrefix: () => theme.fg("accent", "→ "),
+    selectedText: (text) => theme.fg("accent", text),
+    scrollInfo: (text) => theme.fg("dim", text),
+    noMatch: (text) => theme.fg("dim", text),
   };
-}
-
-/**
- * Pure numeric validation. Returns parsed integer ≥ min, or undefined.
- * Extracted from parseNumericInput for use in submenu Components.
- */
-export function validateNumeric(value: string, min: number): number | undefined {
-  const parsed = parseInt(value.trim(), 10);
-  if (isNaN(parsed) || parsed < min) return undefined;
-  return parsed;
 }
 
 /**
@@ -73,21 +67,6 @@ export function createDelegatingComponent(initial: Component): Component & { set
     set onSelect(v: any) { (active as any).onSelect = v; },
     get onCancel() { return (active as any)?.onCancel; },
     set onCancel(v: any) { (active as any).onCancel = v; },
-  };
-}
-
-/**
- * Build a SelectListTheme from a pi-coding-agent Theme.
- * Produces identical visual style to buildSettingsListTheme:
- *   → cursor, accent colors, muted descriptions.
- */
-export function buildSelectListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): import("@earendil-works/pi-tui").SelectListTheme {
-  return {
-    selectedPrefix: () => theme.fg("accent", "→ "),
-    selectedText: (text) => theme.fg("accent", text),
-    description: (text) => theme.fg("muted", text),
-    scrollInfo: (text) => theme.fg("dim", text),
-    noMatch: (text) => theme.fg("dim", text),
   };
 }
 

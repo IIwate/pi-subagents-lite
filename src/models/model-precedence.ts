@@ -72,7 +72,7 @@ export interface SessionModelOverrides {
   [agentType: string]: string | null | undefined;
 }
 
-/** Options for resolveModel. */
+/** Options for resolveModelSelection. */
 export interface ResolveModelOptions {
   /** The type of subagent being spawned. */
   subagentType: string;
@@ -87,16 +87,7 @@ export interface ResolveModelOptions {
 }
 
 /**
- * Resolve the model for a subagent invocation.
- *
- * Returns the first non-null, non-undefined, non-empty-string value
- * from the precedence chain. If all are empty/null, returns parentModelId.
- */
-export function resolveModel(options: ResolveModelOptions): string {
-  return resolveModelSelection(options).model;
-}
-
-/** Resolve both the model and whether it came from an automatic override. */
+ * Resolve both the model and whether it came from an automatic override. */
 export function resolveModelSelection(options: ResolveModelOptions): ResolvedModelSelection {
   const { subagentType, agentConfig, config, parentModelId, sessionOverrides } = options;
 

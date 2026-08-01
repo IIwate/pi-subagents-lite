@@ -5,7 +5,6 @@
  *   - createMockExtensionAPI: mock ExtensionAPI for index test
  *   - hasParam: check TypeBox schema for a parameter
  *   - loadExtension: import and invoke the extension factory
- *   - tempDirFixture: temp directory setup/teardown for filesystem tests
  *   - makeAgentMd: build agent .md content from frontmatter fields
  *   - tempDirWithFiles: create a temp dir with files for scanAgentFilesInDir tests
  *
@@ -78,7 +77,6 @@ export function shellMock(fns: ShellMockFns = {}) {
 }
 
 import {
-  existsSync,
   mkdirSync,
   rmSync,
   writeFileSync,
@@ -175,35 +173,6 @@ export async function loadExtension(api: any) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Temp directory fixture                                            */
-/* ------------------------------------------------------------------ */
-
-/**
- * Returns a setup/teardown pair for a temp directory.
- * Call setup() in beforeEach, teardown() in afterEach.
- */
-export function tempDirFixture(prefix = "subagents-test") {
-  let tmpDir: string;
-
-  return {
-    setup: () => {
-      tmpDir = join(
-        tmpdir(),
-        `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      );
-      mkdirSync(tmpDir, { recursive: true });
-      return tmpDir;
-    },
-    getDir: () => tmpDir,
-    teardown: () => {
-      if (tmpDir) {
-        try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
-      }
-    },
-  };
-}
-
-/* ------------------------------------------------------------------ */
 /*  Agent markdown helpers                                            */
 /* ------------------------------------------------------------------ */
 
@@ -224,8 +193,6 @@ export function makeAgentMd(overrides: Record<string, unknown> = {}): string {
     skills: "true",
     thinking: "off",
     max_turns: "25",
-    disallowed_tools: "",
-    enabled: "true",
   };
   const fm: Record<string, string> = { ...defaults };
   for (const [key, val] of Object.entries(overrides)) {

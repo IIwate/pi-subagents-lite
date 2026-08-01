@@ -37,7 +37,7 @@ export const fileConfigIO: ConfigIO = {
 
 /** Agent settings with all scalar defaults resolved. Model fields stay nullable. */
 export interface ResolvedAgentSettings {
-  /** null = inherit parent. Kept nullable to preserve resolveModel's null-skip. */
+  /** null = inherit parent. Kept nullable to preserve the null-skip in the precedence chain. */
   readonly defaultModel: string | null;
   readonly forceBackground: boolean;
   /** Whether subagents may use another provider and configured model overrides. */
@@ -138,8 +138,7 @@ export class ConfigStore {
   }
 
   /**
-   * Resolve the effective model for a spawn, hiding resolveModel's option
-   * assembly. Precedence: session per-type → session default → config per-type
+   * Resolve the effective model for a spawn. Precedence: session per-type → session default → config per-type
    * → config default → agentConfig (frontmatter) → parentModelId.
    */
   modelFor(type: string, parentModelId: string, agentConfig?: { model?: string }): string {

@@ -10,102 +10,62 @@ vi.mock("../../../src/ui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 
-import { validateNumeric, buildSettingsListTheme, buildSelectListTheme } from "../../../src/ui/menu/helpers.js";
+import { buildListTheme } from "../../../src/ui/menu/helpers.js";
 
 const mockTheme = {
   fg: (color: string, text: string) => `[${color}:${text}]`,
   bold: (text: string) => `**${text}**`,
 };
 
-describe("validateNumeric", () => {
-  it("returns parsed integer for valid input", () => {
-    expect(validateNumeric("10", 2)).toBe(10);
-  });
-
-  it("returns parsed integer at minimum boundary", () => {
-    expect(validateNumeric("2", 2)).toBe(2);
-  });
-
-  it("returns undefined for value below minimum", () => {
-    expect(validateNumeric("1", 2)).toBeUndefined();
-  });
-
-  it("returns undefined for non-numeric input", () => {
-    expect(validateNumeric("abc", 2)).toBeUndefined();
-  });
-
-  it("trims whitespace before parsing", () => {
-    expect(validateNumeric("  10  ", 2)).toBe(10);
-  });
-
-  it("returns undefined for empty string", () => {
-    expect(validateNumeric("", 2)).toBeUndefined();
-  });
-
-  it("handles min of 1", () => {
-    expect(validateNumeric("1", 1)).toBe(1);
-    expect(validateNumeric("0", 1)).toBeUndefined();
-  });
-});
-
-describe("buildSettingsListTheme", () => {
-
+describe("buildListTheme", () => {
   it("label applies accent when selected", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.label("test", true)).toBe("[accent:test]");
   });
 
   it("label returns plain text when not selected", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.label("test", false)).toBe("test");
   });
 
   it("value uses accent when selected", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.value("val", true)).toBe("[accent:val]");
   });
 
   it("value uses muted when not selected", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.value("val", false)).toBe("[muted:val]");
   });
 
   it("description uses dim", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.description("desc")).toBe("[dim:desc]");
   });
 
   it("cursor uses accent", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.cursor).toBe("[accent:→ ]");
   });
 
   it("hint uses dim", () => {
-    const theme = buildSettingsListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.hint("hint")).toBe("[dim:hint]");
   });
-});
-
-describe("buildSelectListTheme", () => {
 
   it("selectedPrefix uses accent color and cursor arrow", () => {
-    const theme = buildSelectListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.selectedPrefix("item")).toBe("[accent:→ ]");
   });
 
   it("selectedText uses accent color", () => {
-    const theme = buildSelectListTheme(mockTheme);
+    const theme = buildListTheme(mockTheme);
     expect(theme.selectedText("text")).toBe("[accent:text]");
   });
 
-  it("description uses muted", () => {
-    const theme = buildSelectListTheme(mockTheme);
-    expect(theme.description("desc")).toBe("[muted:desc]");
-  });
-
-  it("produces identical cursor style to buildSettingsListTheme", () => {
-    const settingsTheme = buildSettingsListTheme(mockTheme);
-    const selectTheme = buildSelectListTheme(mockTheme);
-    expect(selectTheme.selectedPrefix("item")).toBe(settingsTheme.cursor);
+  it("scrollInfo and noMatch use dim", () => {
+    const theme = buildListTheme(mockTheme);
+    expect(theme.scrollInfo("1-5")).toBe("[dim:1-5]");
+    expect(theme.noMatch("none")).toBe("[dim:none]");
   });
 });

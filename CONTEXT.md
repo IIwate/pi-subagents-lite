@@ -19,7 +19,7 @@ A user message sent via `/agents` that teaches the LLM about available agent typ
 _Avoid_: Agent documentation, tool description
 
 **Stealth tool**:
-A tool registered with minimal schema (description ".", no promptSnippet, no promptGuidelines). Usage is taught exclusively through the agent briefing.
+A tool registered with minimal schema (no description, no promptSnippet, no promptGuidelines). Usage is taught exclusively through the agent briefing.
 _Avoid_: Hidden tool, minimal tool
 
 ### Configuration
@@ -72,9 +72,6 @@ _Avoid_: Callback, notification
 - Recoverable-failure presentation is local-only. External transports such as webhooks, Telegram, and email are deferred until a concrete consumer exists; future notifications must not include prompts, transcripts, source code, or findings by default.
 - Input usage accumulates provider-reported values without a vLLM-specific delta heuristic. Revisit only when a supported backend demonstrably reports cumulative prompt tokens without usable cache accounting.
 
-## Test boundaries
+## Tests
 
-- `bun run test` is the Windows local fast lane and excludes `test/linux/**`.
-- `bun run test:ci` runs the complete suite; GitHub Actions executes it on Ubuntu.
-- Only assertions that depend on POSIX semantics, such as Unix mode bits, belong in `test/linux/`.
-- Cross-platform contracts, such as normalized path separators, stay in the normal suite; fix their expectations instead of hiding them in the Linux lane.
+- `bun run test` runs the complete suite; GitHub Actions executes it on Ubuntu.

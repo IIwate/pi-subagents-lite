@@ -1,9 +1,10 @@
 # Stealth tool registration
 
-The Agent tool is registered at extension init time with a minimal schema: `description: "."`,
-no `promptSnippet`, no `promptGuidelines`, and mostly undescribed parameters. The optional model
-parameter is resolved inside tool execution so its source remains available across queue waits.
-The LLM learns detailed usage from the `/agents` briefing rather than verbose tool descriptions.
+The Agent tool is registered at extension init time with a minimal schema: no
+`description`, no `promptSnippet`, no `promptGuidelines`, and mostly undescribed
+parameters. The optional model parameter is resolved inside tool execution so its
+source remains available across queue waits. The LLM learns detailed usage from
+the `/agents` briefing rather than verbose tool descriptions.
 
 ## Why
 
@@ -21,7 +22,7 @@ revoked cross-provider permission without confusing an automatic override with a
 
 ## Trade-off
 
-The minimal schema (`description: "."`, no parameter descriptions) means the LLM must infer
+The minimal schema (no description, no parameter descriptions) means the LLM must infer
 usage from the tool name and parameter names alone. In practice this works — models use the
 Agent and StopAgent tools without issues. The optional `/agents` briefing can supplement
 understanding when the LLM needs to discover available agent types, but is not required for

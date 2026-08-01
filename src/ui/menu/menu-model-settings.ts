@@ -14,7 +14,7 @@ import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { getAgentConfig, getAllTypes } from "../../agents/agent-types.js";
 import type { Theme } from "../types.js";
 import { CONFIG_AGENT_NON_MODEL_KEYS } from "../../config/types.js";
-import { buildSettingsListTheme, createSearchableSelect } from "./helpers.js";
+import { buildListTheme, createSearchableSelect } from "./helpers.js";
 import { createModelSelectSubmenu } from "./submenus/model-select.js";
 import { createConfirmSubmenu } from "./submenus/confirm.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
@@ -210,7 +210,7 @@ export async function showModelSettingsMenu(
     const store = getStore();
     const items = buildItems(store, theme);
 
-    const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), (id, value) => {
+    const settingsList = new SettingsList(items, 15, buildListTheme(theme), (id, value) => {
       if (id === "allowCrossProvider") {
         store.mutate.agent.setAllowCrossProvider(value === "ON");
         ctx.ui.notify(`Allow cross-provider set to ${value}`, "info");

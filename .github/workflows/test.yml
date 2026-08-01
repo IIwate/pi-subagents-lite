@@ -18,5 +18,4 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      # Windows local tests exclude POSIX-only assertions; Linux CI must run the complete suite.
-      - run: bun run test:ci
+      - run: bun run test

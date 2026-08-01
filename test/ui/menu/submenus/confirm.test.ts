@@ -27,9 +27,9 @@ vi.mock("@earendil-works/pi-tui", () => ({
 }));
 
 // Avoid loading the real menu-helpers (which pulls in searchable-select and its
-// full pi-tui dep graph). Only buildSelectListTheme is needed here.
+// full pi-tui dep graph). Only buildListTheme is needed here.
 vi.mock("../../../../src/ui/menu/helpers.js", () => ({
-  buildSelectListTheme: () => ({ selectedPrefix: () => "" }),
+  buildListTheme: () => ({ selectedPrefix: () => "" }),
 }));
 
 import { createConfirmSubmenu } from "../../../../src/ui/menu/submenus/confirm.js";

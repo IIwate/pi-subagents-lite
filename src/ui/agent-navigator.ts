@@ -1242,7 +1242,7 @@ export class AgentNavigator {
       this.requestRender(completed);
     } else {
       // Keep status map warm even when signature throttles (elapsed-only ticks).
-      this.syncAgentStatusMap(records);
+      this.consumeTerminalTransitions(records);
     }
 
     if (!this.selectedAgentId && !records.some(record =>
@@ -1271,17 +1271,6 @@ export class AgentNavigator {
 
   private isTerminalStatus(status: AgentRecord["lifecycle"]["status"]): boolean {
     return status !== "running" && status !== "queued";
-  }
-
-  private syncAgentStatusMap(records: AgentRecord[]): void {
-    const seen = new Set<string>();
-    for (const record of records) {
-      seen.add(record.id);
-      this.lastAgentStatus.set(record.id, record.lifecycle.status);
-    }
-    for (const id of this.lastAgentStatus.keys()) {
-      if (!seen.has(id)) this.lastAgentStatus.delete(id);
-    }
   }
 
   /** True if any agent newly entered a terminal status since last paint. */

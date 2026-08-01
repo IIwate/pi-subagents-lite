@@ -50,13 +50,6 @@ function isTerminalStatus(status: AgentStatus): boolean {
   return status !== "running" && status !== "queued";
 }
 
-/** Defense against future runners reintroducing a silent completed+empty result. */
-function assertCompletionResult(responseText: string, aborted: boolean, turnLimited: boolean): void {
-  if (!aborted && !turnLimited && !responseText.trim()) {
-    throw new Error("Subagent completed without final assistant text");
-  }
-}
-
 /** Configuration for per-model concurrency limits. */
 export interface ConcurrencyConfig {
   /** Default concurrency limit for models not in the models or providers map. */
@@ -415,7 +408,6 @@ export class AgentManager {
         record.execution.session = session;
         // Don't overwrite status if externally stopped via abort()
         if (record.lifecycle.status !== "stopped") {
-          assertCompletionResult(responseText, aborted, turnLimited);
           record.lifecycle.status = aborted ? "aborted" : turnLimited ? "turn_limited" : "completed";
         }
         record.result = responseText;
@@ -542,7 +534,7 @@ export class AgentManager {
    * Send a steering message to a running agent.
    * If the session hasn't been created yet, the message is queued.
    */
-  async steer(id: string, message: string, images?: ImageContent[]): Promise<boolean> {
+  private async steer(id: string, message: string, images?: ImageContent[]): Promise<boolean> {
     const record = this.agents.get(id);
     if (!record) return false;
 
@@ -627,7 +619,6 @@ export class AgentManager {
     })
       .then(({ responseText, aborted, turnLimited }) => {
         if (record.lifecycle.status !== "stopped") {
-          assertCompletionResult(responseText, aborted, turnLimited);
           record.lifecycle.status = aborted
             ? "aborted"
             : turnLimited

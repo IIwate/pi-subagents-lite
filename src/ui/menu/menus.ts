@@ -6,7 +6,7 @@
  * No nested ctx.ui.custom calls.
  *
  * Module structure:
- *   - helpers.ts: shared helpers (buildSettingsListTheme, buildSelectListTheme, validateNumeric)
+ *   - helpers.ts: shared helpers (buildListTheme, buildModelOptions, createSearchableSelect)
  *   - menu-model-settings.ts: showModelSettingsMenu
  *   - menu-concurrency.ts: showConcurrencySettingsMenu
  *   - menu-widget-settings.ts: showWidgetSettingsMenu
@@ -18,7 +18,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, type SelectItem } from "@earendil-works/pi-tui";
-import { buildSelectListTheme } from "./helpers.js";
+import { buildListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { showModelSettingsMenu } from "./menu-model-settings.js";
 import { showConcurrencySettingsMenu } from "./menu-concurrency.js";
@@ -40,7 +40,7 @@ async function runSelectMenu(
 ): Promise<void> {
   while (true) {
     const choice = await ctx.ui.custom<string | undefined>((_tui, theme, _kb, done) => {
-      const list = new SelectList([...items], 10, buildSelectListTheme(theme));
+      const list = new SelectList([...items], 10, buildListTheme(theme));
       list.onSelect = (item) => done(item.value);
       return new SettingsListWrapper(list, { title, theme, onCancel: () => done(undefined) });
     });

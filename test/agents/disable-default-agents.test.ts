@@ -4,7 +4,6 @@
  * Verifies:
  *   - When disableDefaultAgents is true, registerAgents skips DEFAULT_AGENTS
  *   - When disableDefaultAgents is false (default), DEFAULT_AGENTS are included
- *   - discoverNewAgents respects the setting
  *   - User agents overriding a default by name still work when setting is on
  *   - getConfig falls back to generic config when defaults disabled and no user agents
  */
@@ -16,12 +15,10 @@ import {
   resolveType,
   getAgentConfig,
   setAgentScanDirs,
-  discoverNewAgents,
   getConfig,
 } from "../../src/agents/agent-types.js";
 import { DEFAULT_AGENTS } from "../../src/agents/default-agents.js";
 import type { AgentConfig } from "../../src/agents/types.js";
-import { makeAgentMd, tempDirWithFiles } from "../fixtures.ts";
 
 /* ------------------------------------------------------------------ */
 /*  registerAgents with disableDefaultAgents                          */
@@ -76,37 +73,6 @@ describe("registerAgents — disableDefaultAgents", () => {
   it("returns empty types when defaults disabled and no user agents", () => {
     registerAgents(new Map(), { disableDefaultAgents: true });
     expect(getAvailableTypes()).toEqual([]);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  discoverNewAgents with disableDefaultAgents                       */
-/* ------------------------------------------------------------------ */
-
-describe("discoverNewAgents — disableDefaultAgents", () => {
-  beforeEach(() => {
-    registerAgents(new Map());
-    setAgentScanDirs("", "");
-  });
-
-  it("skips defaults when discovering with disableDefaultAgents", async () => {
-    const { dir: projectDir, cleanup } = tempDirWithFiles([
-      { name: "custom.md", content: makeAgentMd({ name: "custom", description: "Custom" }) },
-    ], "project-agents");
-
-    try {
-      setAgentScanDirs("", projectDir);
-      registerAgents(new Map(), { disableDefaultAgents: true });
-
-      await discoverNewAgents(undefined, { disableDefaultAgents: true });
-
-      const types = getAvailableTypes();
-      expect(types).toContain("custom");
-      expect(types).not.toContain("general-purpose");
-      expect(types).not.toContain("Explore");
-    } finally {
-      cleanup();
-    }
   });
 });
 

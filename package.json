@@ -43,9 +43,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --maxWorkers=1 --exclude \"test/linux/**\"",
-    "test:ci": "vitest run --maxWorkers=1",
-    "test:watch": "vitest --exclude \"test/linux/**\""
+    "test": "vitest run --maxWorkers=1",
+    "test:watch": "vitest"
   },
   "pi": {
     "extensions": [

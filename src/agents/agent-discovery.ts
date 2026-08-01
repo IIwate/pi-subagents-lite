@@ -169,7 +169,7 @@ export function parseExtensions(
  * Unlike parseExtensions, does NOT accept true/"true"/"all" —
  * preload requires an explicit list of skill names.
  */
-export function parsePreloadSkills(
+function parsePreloadSkills(
   raw: unknown,
 ): string[] | false | undefined {
   if (raw === false || raw === "false" || raw === "none") {

@@ -2,6 +2,7 @@
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentRecord } from "../types.js";
+import { formatTokens } from "../agents/usage.js";
 import type { Theme } from "./types.js";
 
 type FooterUsage = {
@@ -17,14 +18,6 @@ type ContextUsage = {
   percent: number | null;
   contextWindow: number;
 };
-
-function formatFooterTokens(count: number): string {
-  if (count < 1_000) return count.toString();
-  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  return `${Math.round(count / 1_000_000)}M`;
-}
 
 function readLatestCacheHitRate(
   session: NonNullable<AgentRecord["execution"]["session"]>,
@@ -118,8 +111,8 @@ function contextDisplay(
   const auto = autoCompact ? " (auto)" : "";
   const percent = context.percent;
   const text = percent === null
-    ? `?/${formatFooterTokens(context.contextWindow)}${auto}`
-    : `${percent.toFixed(1)}%/${formatFooterTokens(context.contextWindow)}${auto}`;
+    ? `?/${formatTokens(context.contextWindow, true)}${auto}`
+    : `${percent.toFixed(1)}%/${formatTokens(context.contextWindow, true)}${auto}`;
   if (percent !== null && percent > 90) return theme.fg("error", text);
   if (percent !== null && percent > 70) return theme.fg("warning", text);
   return text;
@@ -132,10 +125,10 @@ export function renderAgentFooterStats(record: AgentRecord, theme: Theme, width:
   const context = readContextUsage(record);
   const parts: string[] = [];
 
-  if (usage.input) parts.push(`↑${formatFooterTokens(usage.input)}`);
-  if (usage.output) parts.push(`↓${formatFooterTokens(usage.output)}`);
-  if (usage.cacheRead) parts.push(`R${formatFooterTokens(usage.cacheRead)}`);
-  if (usage.cacheWrite) parts.push(`W${formatFooterTokens(usage.cacheWrite)}`);
+  if (usage.input) parts.push(`↑${formatTokens(usage.input, true)}`);
+  if (usage.output) parts.push(`↓${formatTokens(usage.output, true)}`);
+  if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead, true)}`);
+  if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite, true)}`);
   if ((usage.cacheRead || usage.cacheWrite) && usage.latestCacheHitRate !== undefined) {
     parts.push(`CH${usage.latestCacheHitRate.toFixed(1)}%`);
   }

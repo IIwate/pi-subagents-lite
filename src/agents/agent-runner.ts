@@ -445,7 +445,7 @@ function createResourceLoader(
  * context. Copying them before extensions bind lets child sessions restore parent
  * preferences such as CLIProxyAPI Fast mode without inheriting conversation data.
  */
-export function inheritCustomSessionEntries(
+function inheritCustomSessionEntries(
   parentEntries: Iterable<{ type: string; customType?: string; data?: unknown }>,
   childSessionManager: Pick<SessionManager, "appendCustomEntry">,
 ): void {

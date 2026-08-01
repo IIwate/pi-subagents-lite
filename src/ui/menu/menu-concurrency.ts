@@ -12,8 +12,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, SelectList, type SettingItem } from "@earendil-works/pi-tui";
 import {
-  buildSettingsListTheme,
-  buildSelectListTheme,
+  buildListTheme,
   buildModelOptions,
   createDelegatingComponent,
   createSearchableSelect,
@@ -44,7 +43,7 @@ export async function showConcurrencySettingsMenu(
     ): SettingItem["submenu"] => (_currentValue, subDone) => {
       const list = new SelectList(
         [{ value: "edit", label: "Edit limit" }, { value: "remove", label: "Remove limit" }],
-        5, buildSelectListTheme(theme),
+        5, buildListTheme(theme),
       );
       const delegator = createDelegatingComponent(list);
       list.onSelect = (item) => {
@@ -194,7 +193,7 @@ export async function showConcurrencySettingsMenu(
     const triggerRebuild = () => rebuild?.(buildItems(getStore(), theme, modelOptions, triggerRebuild));
     const store = getStore();
     const items = buildItems(store, theme, modelOptions, triggerRebuild);
-    const settingsList = new SettingsList(items, 15, buildSettingsListTheme(theme), (_id, _v) => triggerRebuild(), () => done(undefined));
+    const settingsList = new SettingsList(items, 15, buildListTheme(theme), (_id, _v) => triggerRebuild(), () => done(undefined));
     return new SettingsListWrapper(settingsList, {
       title: "Concurrency Settings",
       theme,

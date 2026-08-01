@@ -55,11 +55,11 @@ export interface RunCallbacks {
 }
 
 /** Model and concurrency identity selected immediately before a queued start. */
-export interface QueuedModelSelection {
+type QueuedModelSelection = {
   model: Model<any>;
   modelKey: string;
   thinkingLevel?: ThinkingLevel;
-}
+};
 
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
@@ -111,7 +111,7 @@ export interface AgentLifecycle {
  * Display-oriented fields: type name, description, invocation params.
  * Used by the agent list and management menus.
  */
-export interface AgentDisplayInfo {
+interface AgentDisplayInfo {
   type: SubagentType;
   description: string;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
@@ -122,7 +122,7 @@ export interface AgentDisplayInfo {
  * Execution internals: session handle, abort controller, pending steers.
  * Used by agent-manager (session lifecycle), tool-execution (steering, nudge).
  */
-export interface AgentExecutionState {
+interface AgentExecutionState {
   session?: AgentSession;
   abortController?: AbortController;
   promise?: Promise<string>;
@@ -148,7 +148,7 @@ export interface AgentExecutionState {
  * Accumulated statistics: usage breakdown, tool uses, turn count.
  * Used by the agent list and selected-session footer.
  */
-export interface AgentAccumulatedStats {
+interface AgentAccumulatedStats {
   /**
    * Lifetime usage breakdown, accumulated from assistant/tool events and
    * compactions. Total = input + output + cacheWrite + cost (cacheRead deliberately

@@ -10,7 +10,7 @@
 import { SelectList, type Component } from "@earendil-works/pi-tui";
 import type { Theme } from "../../types.js";
 import { SearchableSelectDialog } from "../../../ui/searchable-select.js";
-import { buildModelOptions, buildSelectListTheme, createDelegatingComponent } from "../helpers.js";
+import { buildModelOptions, buildListTheme, createDelegatingComponent } from "../helpers.js";
 
 export interface ModelSelectSubmenuOptions {
   modelOptions: string[];
@@ -37,7 +37,7 @@ export function createModelSelectSubmenu(
       modeItems.push({ value: "clear", label: "Clear" });
     }
 
-    const modeList = new SelectList(modeItems, 5, buildSelectListTheme(options.theme));
+    const modeList = new SelectList(modeItems, 5, buildListTheme(options.theme));
 
     const delegator = createDelegatingComponent(modeList);
 

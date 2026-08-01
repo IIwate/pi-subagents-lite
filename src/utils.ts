@@ -12,15 +12,9 @@ export function isUnsafeName(name: string): boolean {
   return !name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
 }
 
-/** Common thinking levels shown in menus. Free-form values are also accepted at runtime. */
-export const VALID_THINKING_LEVELS: readonly string[] = [
-  "off", "minimal", "low", "medium", "high", "xhigh", "max",
-] as const;
-
 /**
  * Normalize a raw thinking value.
- * Accepts any non-empty string (not restricted to VALID_THINKING_LEVELS),
- * so provider-specific levels can pass through.
+ * Accepts any non-empty string, so provider-specific levels can pass through.
  */
 export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
   if (raw === undefined) return undefined;

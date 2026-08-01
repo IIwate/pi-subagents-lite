@@ -12,14 +12,6 @@ let inputInstances: Array<{
   getValue: () => string;
 }> = [];
 
-vi.mock("../../../../src/ui/menu/helpers.js", () => ({
-  validateNumeric: (value: string, min: number) => {
-    const parsed = parseInt(value.trim(), 10);
-    if (isNaN(parsed) || parsed < min) return undefined;
-    return parsed;
-  },
-}));
-
 vi.mock("@earendil-works/pi-tui", () => ({
   SettingsList: class MockSettingsList { constructor() {} },
   Input: class MockInput {

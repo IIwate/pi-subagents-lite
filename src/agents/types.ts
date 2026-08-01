@@ -37,8 +37,6 @@ export interface AgentConfig {
   maxTokens?: number;
   systemPrompt: string;
 
-  /** true = this is an embedded default agent (informational) */
-  isDefault?: boolean;
   /** true = agent is hidden from the schema enum but can still be called by name. */
   hidden?: boolean;
   /** Where this agent was loaded from */

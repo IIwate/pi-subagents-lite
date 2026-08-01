@@ -60,3 +60,24 @@ process, the shell would need to become per-instance.
 - **Per-handler dependency injection via a request-scoped context.** Rejected:
   PI's callback signatures don't accept extra parameters, so there is nowhere to
   inject per-call. Closure capture is the only injection mechanism available.
+
+## Decision change (2026-02)
+
+The implementation landed as a module-level mutable holder singleton
+(`shell.ts`: `getStore()` / `setManager()` and 11 sibling getter/setters,
+13 accessors total), not the closure-captured composition root described
+above. Tests still
+`vi.mock` the whole `shell.js` module (`test/fixtures.ts` `shellMock`,
+`test/menu-mock-setup.ts`).
+
+Why: pi's extension factory and event callbacks are registered once per
+process at module scope, so there is no per-session point where a
+closure-captured shell could be constructed without module-level state
+anyway. The holder singleton keeps the stale-`let` footgun fixed (fields are
+read through getters, never re-exported bindings) while accepting the
+15-mock test pattern the original decision rejected.
+
+Effect: the shell stays small and owns nothing; per-session services are
+still constructed at `session_start` and disposed at `session_shutdown`.
+The "composition root" wording in this ADR should be read as "single
+module-level holder for per-session services", not closure injection.

@@ -85,8 +85,8 @@ describe("renderAgentFooterStats", () => {
 
     expect(line).toContain("↑1.6M");
     expect(line).toContain("↓120k");
-    expect(line).toContain("R40M");
-    expect(line).toContain("W3.0k");
+    expect(line).toContain("R40.0M");
+    expect(line).toContain("W3k");
     expect(line).toContain("CH98.9%");
     expect(line).toContain("$0.250 (sub)");
     expect(line).toContain("27.2%/372k (auto)");
@@ -124,7 +124,7 @@ describe("renderAgentFooterStats", () => {
 
     const line = renderAgentFooterStats(record, makeTheme(), 100);
 
-    expect(line).toContain("↑1.5k");
+    expect(line).toContain("↑2k");
     expect(line).toContain("↓250");
     expect(line).toContain("$0.125");
     expect(line).toContain("queued-model • queued-provider • high");

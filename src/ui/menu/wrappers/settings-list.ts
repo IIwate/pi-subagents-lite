@@ -24,9 +24,6 @@ export interface SettingsListWrapperTheme {
 export interface SettingsListWrapperOptions {
   title: string;
   theme: SettingsListWrapperTheme;
-  separatorChar?: string;
-  /** If true, skip j/k→arrow and arrow→enter/escape conversion. Input passes through unchanged. */
-  passthroughKeys?: boolean;
   onCancel?: () => void;
   /** Called with a rebuild(newItems) function so the caller can trigger in-place updates. */
   onRebuild?: (rebuild: (items: any[]) => void) => void;
@@ -36,15 +33,11 @@ export class SettingsListWrapper implements Component {
   private settingsList: Component;
   private title: string;
   private theme: SettingsListWrapperTheme;
-  private separatorChar: string;
-  private passthroughKeys: boolean;
 
   constructor(settingsList: Component, options: SettingsListWrapperOptions) {
     this.settingsList = settingsList;
     this.title = options.title;
     this.theme = options.theme;
-    this.separatorChar = options.separatorChar ?? "─";
-    this.passthroughKeys = options.passthroughKeys ?? false;
 
     const list = this.settingsList as any;
 
@@ -116,10 +109,6 @@ export class SettingsListWrapper implements Component {
   }
 
   handleInput(data: string): void {
-    if (this.passthroughKeys) {
-      this.settingsList.handleInput?.(data);
-      return;
-    }
     if (data === "k" || data === "j") {
       if (this.hasSubmenu) {
         // Submenu: pass through as normal letters
@@ -145,7 +134,7 @@ export class SettingsListWrapper implements Component {
     const lines: string[] = [];
 
     // Top separator
-    lines.push(this.separatorChar.repeat(width));
+    lines.push("─".repeat(width));
     lines.push("");
 
     // Header (left-aligned with spacing, bold and colored)
@@ -166,7 +155,7 @@ export class SettingsListWrapper implements Component {
 
     // Bottom separator
     lines.push("");
-    lines.push(this.separatorChar.repeat(width));
+    lines.push("─".repeat(width));
 
     return lines;
   }

@@ -19,7 +19,6 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       // registeredTools omitted — means "all available tools" (resolved at lookup time)
       // extensions and skills intentionally omitted — resolved by global default
       systemPrompt: "",
-      isDefault: true,
     },
   ],
   [
@@ -58,7 +57,6 @@ Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find,
 - Report findings as regular messages
 - Do not use emojis
 - Be thorough and precise`,
-      isDefault: true,
     },
   ],
 ]);
