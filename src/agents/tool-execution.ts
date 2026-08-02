@@ -27,7 +27,6 @@ import {
   outOfScopeModelError,
   modelKey,
   scopedThinkingLevel,
-  automaticModelOverrideError,
   routingDisabledModelError,
   providerNotAllowedError,
 } from "../models/model-scope.js";
@@ -177,58 +176,14 @@ export async function executeAgentTool(
   }
 
   const resolvedModelKey = model ? modelKey(model) : undefined;
-  const resolveModelAtStart = modelSource === "automatic"
-    ? () => {
-      const currentStore = getStore();
-      const currentRouting = currentStore.routing;
-      // A revoked routing switch must fail at runner validation rather than
-      // silently changing an already-authorized automatic request into parent
-      // inheritance — or reusing the stale model.
-      if (!currentRouting.enabled) {
-        throw new Error(automaticModelOverrideError(modelKey(model)));
-      }
-      const currentParentRef = ctx.model ? modelKey(ctx.model) : "";
-      const selection = currentStore.modelSelectionFor(resolvedType, currentParentRef, agentConfig);
-      const currentSpec = parseModelSpec(selection.model);
-      const currentModel = currentSpec.modelRef
-        ? resolveExactModel(currentSpec.modelRef, ctx.modelRegistry, ctx.model?.provider)
-        : findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
-      if (!currentModel) {
-        throw new Error(currentSpec.modelRef ? unknownModelError(currentSpec.modelRef) : missingSubagentModelError());
-      }
-      // Re-check the allowlist and scope at start — permissions may have
-      // changed while queued; revoked ones fail loudly, never silently swap.
-      const scopedKeys = scopedModelKeys([...ctx.scopedModels]);
-      const verdict = authorizeModel({
-        modelKey: modelKey(currentModel),
-        parentModelKey: currentParentRef,
-        parentProvider: ctx.model?.provider ?? "",
-        allowedProviders: currentRouting.allowedProviders,
-        routingEnabled: true,
-        scopedKeys,
-      });
-      if (!verdict.ok) {
-        if (verdict.reason === "out-of-scope") {
-          throw new Error(outOfScopeModelError(modelKey(currentModel), scopedKeys!));
-        }
-        throw new Error(
-          providerNotAllowedError(modelKey(currentModel), ctx.model?.provider ?? "", currentRouting.allowedProviders),
-        );
-      }
-      return {
-        model: currentModel,
-        modelKey: modelKey(currentModel),
-        thinkingLevel: currentSpec.thinkingFromModel,
-      };
-    }
-    : undefined;
 
   // Capture the predicted model/provider for queued-agent display.
   const modelName = model?.id;
   const providerName = model?.provider;
 
-  // Only explicit choices are fixed at enqueue time. Scope pins are resolved
-  // again by the runner so queued agents use the scope active when they start.
+  // The runner re-validates the locked model against the scope, allowlist,
+  // and routing switch active when the agent starts (queued agents fail
+  // loudly if permission was revoked).
   const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
   const thinkingLevel = explicitThinkingLevel ?? thinkingFromModel;
   const thinkingSource = explicitThinkingLevel !== undefined
@@ -250,7 +205,6 @@ export async function executeAgentTool(
     model,
     modelSource,
     modelKey: resolvedModelKey,
-    resolveModelAtStart,
     thinkingSource,
     maxTurns,
     thinkingLevel,

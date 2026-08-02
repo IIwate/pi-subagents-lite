@@ -5,6 +5,9 @@
  *
  * Resolution chain (highest to lowest), consulted only when routing is ON:
  *   1. sessionOverrides[subagentType]  (session assignment)
+ *        - string → that model, stops the chain
+ *        - null   → the parent model, stops the chain (explicit session inherit)
+ *        - absent → continue
  *   2. modelRouting.agentModels[type]  (persistent assignment)
  *   3. agentConfig?.model              (agent config / frontmatter)
  *   4. parentModelId                   (inherit from parent)
@@ -39,12 +42,23 @@ export interface ResolveModelOptions {
  * Resolve the model candidate under routing. Provenance stays separate from
  * the string value so "automatic" is preserved even when the chosen model
  * spells exactly like the parent's.
+ *
+ * A session `null` means "this session explicitly inherits the parent" and
+ * short-circuits the chain — persistent assignments and frontmatter are not
+ * consulted.
  */
 export function resolveModelSelection(options: ResolveModelOptions): ResolvedModelSelection {
   const { subagentType, agentConfig, config, parentModelId, sessionOverrides } = options;
 
+  const sessionValue = sessionOverrides?.[subagentType];
+  // Empty strings are treated as absent; null is a real "inherit parent" value.
+  if (sessionValue !== undefined && sessionValue !== "") {
+    return sessionValue === null
+      ? { model: parentModelId, source: "parent" }
+      : { model: sessionValue, source: "automatic" };
+  }
+
   const automaticCandidates: Array<string | null | undefined> = [
-    sessionOverrides?.[subagentType],
     config.modelRouting.agentModels[subagentType],
     agentConfig?.model,
   ];

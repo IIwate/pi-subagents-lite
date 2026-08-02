@@ -54,13 +54,6 @@ export interface RunCallbacks {
   onCompaction?: () => void;
 }
 
-/** Model and concurrency identity selected immediately before a queued start. */
-type QueuedModelSelection = {
-  model: Model<any>;
-  modelKey: string;
-  thinkingLevel?: ThinkingLevel;
-};
-
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
  * The resolved run params that both the manager and coordinator agree on;
@@ -69,8 +62,6 @@ type QueuedModelSelection = {
 export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
-  /** Re-resolve automatic model choices immediately before a queued start. */
-  resolveModelAtStart?: () => QueuedModelSelection;
   /** Distinguish explicit thinking from automatic model-derived thinking. */
   thinkingSource?: "explicit" | "automatic" | "inherited";
   worktreePath?: string;

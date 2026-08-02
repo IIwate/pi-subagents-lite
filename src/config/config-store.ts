@@ -134,8 +134,40 @@ export class ConfigStore {
     };
   }
 
-  sessionModelOverride(type: string): string | null {
-    return this.sessionOverrides[type] ?? null;
+  /**
+   * Session assignment for an agent type: string = model, null = explicit
+   * session inherit, undefined = no session assignment.
+   */
+  sessionModelOverride(type: string): string | null | undefined {
+    return this.sessionOverrides[type];
+  }
+
+  /** Copy of all session assignments (string or null), for UI enumeration. */
+  sessionOverridesSnapshot(): Record<string, string | null> {
+    const out: Record<string, string | null> = {};
+    for (const [type, model] of Object.entries(this.sessionOverrides)) {
+      out[type] = model as string | null;
+    }
+    return out;
+  }
+
+  /**
+   * Agent types whose assignment (persistent or session string) resolves to
+   * the given provider. Used by the UI to list what a provider removal would
+   * clear, including types no longer registered as agents.
+   */
+  assignmentTypesForProvider(provider: string): string[] {
+    const types = new Set<string>();
+    for (const [type, model] of Object.entries(this.config.modelRouting.agentModels)) {
+      const parsed = parseModelKey(model);
+      if (parsed?.provider === provider) types.add(type);
+    }
+    for (const [type, model] of Object.entries(this.sessionOverrides)) {
+      if (model == null) continue;
+      const parsed = parseModelKey(model);
+      if (parsed?.provider === provider) types.add(type);
+    }
+    return [...types];
   }
 
   /**
@@ -179,9 +211,8 @@ export class ConfigStore {
         this.persist();
       },
       /**
-       * Remove a provider from the allowlist and drop every persistent
-       * assignment that resolves to it. Session assignments are cleared by
-       * the caller (menu confirm flow), which knows the affected types.
+       * Remove a provider from the allowlist and drop every assignment that
+       * resolves to it — persistent and session — in one persisted step.
        */
       removeProvider: (provider: string): void => {
         this.config.modelRouting.allowedProviders =
@@ -192,20 +223,31 @@ export class ConfigStore {
             return !parsed || parsed.provider !== provider;
           }),
         );
+        for (const [type, model] of Object.entries(this.sessionOverrides)) {
+          if (model == null) continue;
+          const parsed = parseModelKey(model);
+          if (parsed?.provider === provider) delete this.sessionOverrides[type];
+        }
         this.persist();
       },
-      /** Set or clear (null) a persistent per-agent assignment. Clearing restores parent inheritance. */
+      /**
+       * Set (string) or clear (null) a persistent per-agent assignment.
+       * A permanent choice supersedes any session override for the same type;
+       * a clear restores parent inheritance for both layers.
+       */
       setAgentModel: (type: string, model: string | null): void => {
         if (model === null || model === "") {
           delete this.config.modelRouting.agentModels[type];
         } else {
           this.config.modelRouting.agentModels[type] = model;
         }
+        delete this.sessionOverrides[type];
         this.persist();
       },
-      /** Clear allowlist, assignments, and disable routing. */
+      /** Clear allowlist, assignments (persistent + session), and disable routing. */
       clearAll: (): void => {
         this.config.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
+        this.sessionOverrides = {};
         this.persist();
       },
     },
@@ -291,12 +333,12 @@ export class ConfigStore {
       },
     },
     session: {
-      /** Set a session-only assignment for an agent type. Not persisted. */
-      setOverride: (type: string, model: string): void => {
+      /**
+       * Set a session-only assignment for an agent type. Null = explicitly
+       * inherit the parent for this session. Not persisted.
+       */
+      setOverride: (type: string, model: string | null): void => {
         this.sessionOverrides[type] = model;
-      },
-      clearOverride: (type: string): void => {
-        delete this.sessionOverrides[type];
       },
       clearAll: (): void => {
         this.sessionOverrides = {};

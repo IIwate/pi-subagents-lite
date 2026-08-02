@@ -31,28 +31,11 @@ function providersFromModelOptions(modelOptions: string[]): string[] {
   return [...providers];
 }
 
-/** Agent types with a session or persistent assignment. */
+/** Agent types with a session (string or inherit) or persistent assignment. */
 function assignedTypes(store: ReturnType<typeof getStore>): string[] {
   return getAllTypes().filter((type) =>
-    store.sessionModelOverride(type) != null || store.routing.agentModels[type] != null,
+    store.sessionModelOverride(type) !== undefined || store.routing.agentModels[type] != null,
   );
-}
-
-/** Agent types whose assignment (session or persistent) resolves to the given provider. */
-function assignmentTypesForProvider(
-  store: ReturnType<typeof getStore>,
-  provider: string,
-): string[] {
-  return getAllTypes().filter((type) => {
-    const session = store.sessionModelOverride(type);
-    const persistent = store.routing.agentModels[type];
-    for (const ref of [session, persistent]) {
-      if (!ref) continue;
-      const parsed = parseModelKey(ref);
-      if (parsed?.provider === provider) return true;
-    }
-    return false;
-  });
 }
 
 /** Filter model options to the parent provider plus allowed providers. */
@@ -181,7 +164,12 @@ export async function showModelRoutingMenu(
     const delegator = createDelegatingComponent(list);
 
     const confirmRemoval = (provider: string, types: string[]): Component => {
-      const message = `Removing ${provider} will clear assignments for: ${types.join(", ")}. Continue?`;
+      const message = [
+        `Removing ${provider} will clear assignments for:`,
+        ...types.map((t) => `- ${t}`),
+        "",
+        "Continue?",
+      ].join("\n");
       const confirmList = new SelectList(
         [
           { value: "Yes", label: "Yes", description: message },
@@ -193,7 +181,6 @@ export async function showModelRoutingMenu(
       confirmList.onSelect = (item) => {
         if (item.value === "Yes") {
           store.mutate.routing.removeProvider(provider);
-          for (const type of types) store.mutate.session.clearOverride(type);
           ctx.ui.notify(`Removed ${provider} and cleared its assignments`, "info");
         } else {
           ctx.ui.notify(`${provider} unchanged`, "info");
@@ -213,7 +200,9 @@ export async function showModelRoutingMenu(
       }
       const isAllowed = store.routing.allowedProviders.includes(provider);
       if (isAllowed) {
-        const types = assignmentTypesForProvider(store, provider);
+        // The store lists affected types from persisted + session state, so
+        // unregistered agents with leftover assignments are covered too.
+        const types = store.assignmentTypesForProvider(provider);
         if (types.length > 0) {
           delegator.setActive(confirmRemoval(provider, types));
           return;
@@ -248,23 +237,19 @@ export async function showModelRoutingMenu(
 
     const assignmentOnSelect = (typeName: string) => (mode: "session" | "permanent" | "clear", model: string | null) => {
       if (mode === "clear") {
+        // Clears persistent and session (setAgentModel deletes both layers).
         store.mutate.routing.setAgentModel(typeName, null);
-        store.mutate.session.clearOverride(typeName);
         ctx.ui.notify(`${typeName} assignment cleared`, "info");
         onRebuild();
         return;
       }
       const effective = model === "(inherits parent)" ? null : model;
       if (mode === "session") {
-        if (effective === null) {
-          // "(inherits parent)" in session mode means restore parent inheritance.
-          // A session null cannot shadow a persistent assignment, so both are cleared.
-          store.mutate.routing.setAgentModel(typeName, null);
-          store.mutate.session.clearOverride(typeName);
-        } else {
-          store.mutate.session.setOverride(typeName, effective);
-        }
+        // String = use this model for the session; null = explicitly inherit
+        // the parent for the session. Persistent stays untouched either way.
+        store.mutate.session.setOverride(typeName, effective);
       } else {
+        // Permanent: supersedes any session override for the same type.
         store.mutate.routing.setAgentModel(typeName, effective);
       }
       ctx.ui.notify(
@@ -281,21 +266,51 @@ export async function showModelRoutingMenu(
       const session = store.sessionModelOverride(typeName);
       const persistent = store.routing.agentModels[typeName];
       const effective = store.modelSelectionFor(typeName, "(inherits parent)", cfg).model;
-      return { typeName, cfg, session, persistent, effective };
+      return { typeName, cfg, session, persistent, effective, registered: true };
     });
 
-    const rows: Array<{ value: string; label: string; description: string }> = [];
-    for (const entry of typeEntries) {
-      rows.push({
-        value: entry.typeName,
-        label: entry.typeName,
-        description: entry.session
-          ? `${entry.session} [session]`
-          : entry.persistent ?? entry.effective,
+    // Configured types that are no longer registered as agents still appear
+    // (marked unavailable) so their assignments can be inspected and cleared.
+    const registeredTypes = new Set(getAllTypes());
+    const unregisteredTypes = new Set<string>();
+    for (const type of Object.keys(store.routing.agentModels)) {
+      if (!registeredTypes.has(type)) unregisteredTypes.add(type);
+    }
+    for (const type of Object.keys(store.sessionOverridesSnapshot())) {
+      if (!registeredTypes.has(type)) unregisteredTypes.add(type);
+    }
+    for (const typeName of unregisteredTypes) {
+      const session = store.sessionModelOverride(typeName);
+      const persistent = store.routing.agentModels[typeName];
+      typeEntries.push({
+        typeName,
+        cfg: undefined,
+        session,
+        persistent,
+        // Same effective semantics as the registered path: a session null
+        // pre-selects "(inherits parent)", not the persistent model.
+        effective: session === null
+          ? "(inherits parent)"
+          : session ?? persistent ?? "(inherits parent)",
+        registered: false,
       });
     }
 
-    const unassigned = typeEntries.filter((e) => e.session == null && e.persistent == null);
+    const rows: Array<{ value: string; label: string; description: string }> = [];
+    for (const entry of typeEntries) {
+      const description = entry.session === undefined
+        ? entry.persistent ?? entry.effective
+        : entry.session === null
+          ? "(inherits parent) [session]"
+          : `${entry.session} [session]`;
+      rows.push({
+        value: entry.typeName,
+        label: entry.registered ? entry.typeName : `${entry.typeName} (agent unavailable)`,
+        description,
+      });
+    }
+
+    const unassigned = typeEntries.filter((e) => e.registered && e.session === undefined && e.persistent == null);
     if (unassigned.length > 0) {
       rows.push({
         value: "__assign__",

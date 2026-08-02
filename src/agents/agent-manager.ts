@@ -487,28 +487,6 @@ export class AgentManager {
       const record = this.agents.get(entry.id);
       if (!record || record.lifecycle.status !== "queued") continue;
 
-      if (entry.args.options.modelSource === "automatic" && entry.args.options.resolveModelAtStart) {
-        try {
-          const resolved = entry.args.options.resolveModelAtStart();
-          entry.modelKey = resolved.modelKey;
-          entry.args.options.model = resolved.model;
-          entry.args.options.modelKey = resolved.modelKey;
-          if (entry.args.options.thinkingSource !== "explicit") {
-            entry.args.options.thinkingLevel = resolved.thinkingLevel;
-          }
-          record.execution.modelKey = resolved.modelKey;
-        } catch (err) {
-          record.lifecycle.status = "error";
-          record.error = errorMessage(err);
-          record.lifecycle.completedAt = Date.now();
-          record.execution.settled = true;
-          started.add(entry.id);
-          this.settleQueued(entry.id);
-          this.safeNotifyComplete(record);
-          continue;
-        }
-      }
-
       const slot = this.getSlot(entry.modelKey);
       if (slot.running >= slot.limit) continue;
 

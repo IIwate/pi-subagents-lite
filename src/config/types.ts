@@ -66,7 +66,13 @@ export interface SubagentsConfig {
  * Session-only per-agent model assignments. Never persisted — cleared at
  * session_start. No "default" key: the retired global default has no
  * successor, unassigned agents inherit the parent model.
+ *
+ * Three states per agent type:
+ *   - key absent / undefined → no session assignment
+ *   - string                  → this session uses that model
+ *   - null                    → this session explicitly inherits the parent
+ *                               model (shadows persistent assignments)
  */
 export interface SessionModelOverrides {
-  [agentType: string]: string | undefined;
+  [agentType: string]: string | null | undefined;
 }

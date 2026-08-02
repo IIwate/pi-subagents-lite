@@ -4,15 +4,14 @@
  * Atomic writes: write to .tmp then rename.
  * Loaded at session_start; saved on every /agents menu mutation.
  *
- * Legacy migration (one-time, no long-lived compat branches): the pre-1.2
- * shape (allowCrossProvider + dynamic agent[type] model keys + agent.default)
- * is normalized to modelRouting at load. Old model fields are dropped from
- * the file on the next explicit save via key pruning.
+ * New-schema only: pre-2.0 routing shapes (allowCrossProvider, dynamic
+ * agent[type] model keys, agent.default) are not migrated and not read. A
+ * missing or malformed modelRouting block falls back to the defaults below;
+ * the next explicit save writes the canonical schema.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseModelKey } from "../utils.js";
 import type { AgentSettings, ModelRoutingConfig, SubagentsConfig } from "./types.js";
 
 const CONFIG_DIR = path.join(process.env.HOME || "", ".pi", "agent");
@@ -28,27 +27,12 @@ export const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", 
 /** Default concurrency config — used for resets. */
 export const DEFAULT_CONCURRENCY: SubagentsConfig["concurrency"] = { default: 4 };
 
-/**
- * Known agent setting keys. Anything else on agent (legacy dynamic model
- * keys, the retired `default`) is pruned on load and on every save.
- */
-export const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
-  "forceBackground",
-  "graceTurns",
-  "showCost",
-  "systemPromptMode",
-  "includeContextFiles",
-  "defaultThinking",
-  "loadSkillsImplicitly",
-  "loadExtensionsImplicitly",
-  "disableDefaultAgents",
-  "showTools",
-  "showTurns",
-  "showInput",
-  "showOutput",
-  "showContext",
-  "showTime",
-];
+/** Fallback routing policy when modelRouting is missing or malformed. */
+const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
+  enabled: false,
+  allowedProviders: [],
+  agentModels: {},
+};
 
 /** Default agent settings — merged into loaded config so callers get a complete shape. */
 const DEFAULT_AGENT: AgentSettings = {
@@ -67,103 +51,112 @@ const DEFAULT_AGENT: AgentSettings = {
 };
 
 /**
- * Read config from disk. Merges loaded values over defaults so the result
- * is always a complete SubagentsConfig — no partial shapes for callers to handle.
+ * Known agent setting keys. Unknown keys (legacy dynamic model keys, the
+ * retired `default`) are dropped at load, so the next explicit save writes
+ * the canonical schema. This is schema hygiene, not migration: old model
+ * values are never read or transformed.
  */
-export function loadConfig(): SubagentsConfig {
-  let raw: SubagentsConfig;
-  try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as SubagentsConfig;
-  } catch {
-    raw = {} as SubagentsConfig;
-  }
+const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
+  "forceBackground",
+  "graceTurns",
+  "showCost",
+  "systemPromptMode",
+  "includeContextFiles",
+  "defaultThinking",
+  "loadSkillsImplicitly",
+  "loadExtensionsImplicitly",
+  "disableDefaultAgents",
+  "showTools",
+  "showTurns",
+  "showInput",
+  "showOutput",
+  "showContext",
+  "showTime",
+];
 
-  const legacy = raw as SubagentsConfig & {
-    allowCrossProvider?: boolean;
-    modelRouting?: Partial<ModelRoutingConfig>;
-    agent?: Record<string, unknown>;
-  };
-
-  // @ts-expect-error TS2783: spread may override 'default', which is intentional (loaded value wins)
-  const concurrency = { default: 4, ...(raw.concurrency ?? {}) } as SubagentsConfig["concurrency"];
-  return {
-    modelRouting: migrateModelRouting(legacy),
-    agent: pickAgentSettings({ ...DEFAULT_AGENT, ...legacy.agent }),
-    concurrency,
-  };
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
- * Normalize the persisted routing policy, migrating the pre-1.2 shape:
- *   - allowCrossProvider → modelRouting.enabled
- *   - dynamic agent[type] model strings → modelRouting.agentModels[type],
- *     with their provider joining the allowlist
- *   - agent.default has no successor — it is dropped with a warning; agents
- *     without an assignment inherit the parent model.
+ * Normalize the persisted routing policy. Malformed shapes are ignored
+ * field-by-field: modelRouting must be a plain object, enabled only accepts
+ * true, allowedProviders must be an array of trim-nonempty unique strings,
+ * and agentModels must be a plain object of nonempty string pairs. Anything
+ * else falls back to defaults — a bad config can never break startup.
  */
-function migrateModelRouting(raw: SubagentsConfig & {
-  allowCrossProvider?: boolean;
-  modelRouting?: Partial<ModelRoutingConfig>;
-  agent?: Record<string, unknown>;
-}): ModelRoutingConfig {
-  const routing = raw.modelRouting ?? {};
+function normalizeModelRouting(raw: unknown): ModelRoutingConfig {
+  if (!isPlainObject(raw)) return { ...DEFAULT_MODEL_ROUTING };
 
-  const allowedProviders = new Set<string>();
-  for (const provider of routing.allowedProviders ?? []) {
-    if (typeof provider === "string" && provider.length > 0) allowedProviders.add(provider);
-  }
+  const enabled = raw.enabled === true;
 
-  const agentModels: Record<string, string> = {};
-  for (const [type, model] of Object.entries(routing.agentModels ?? {})) {
-    if (typeof model === "string" && model.length > 0) agentModels[type] = model;
-  }
-
-  // Legacy dynamic model keys: any agent key that is not a real setting.
-  // The retired `default` key is explicitly excluded — it is dropped with a
-  // warning, never migrated into an assignment for an agent type named default.
-  for (const [key, value] of Object.entries(raw.agent ?? {})) {
-    if ((AGENT_SETTING_KEYS as readonly string[]).includes(key)) continue;
-    if (key === "default") continue;
-    if (typeof value === "string" && value.length > 0) {
-      agentModels[key] = value;
-      const parsed = parseModelKey(value);
-      if (parsed) allowedProviders.add(parsed.provider);
+  const allowedProviders: string[] = [];
+  if (Array.isArray(raw.allowedProviders)) {
+    const seen = new Set<string>();
+    for (const provider of raw.allowedProviders) {
+      if (typeof provider !== "string") continue;
+      const trimmed = provider.trim();
+      if (trimmed === "" || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      allowedProviders.push(trimmed);
     }
   }
 
-  if (raw.agent?.default != null) {
-    console.warn(
-      "[pi-subagents-lite] Legacy agent.default model is retired and ignored; "
-      + "agents without an assignment now inherit the parent model.",
-    );
+  const agentModels: Record<string, string> = {};
+  if (isPlainObject(raw.agentModels)) {
+    for (const [type, model] of Object.entries(raw.agentModels)) {
+      const trimmedType = type.trim();
+      if (trimmedType === "") continue;
+      if (typeof model !== "string") continue;
+      const trimmedModel = model.trim();
+      if (trimmedModel === "") continue;
+      agentModels[trimmedType] = trimmedModel;
+    }
   }
 
+  return { enabled, allowedProviders, agentModels };
+}
+
+/**
+ * Read config from disk. Merges loaded values over defaults so the result
+ * is always a complete SubagentsConfig — no partial shapes for callers to
+ * handle. Non-model agent and concurrency fields are read normally; legacy
+ * model fields on agent are ignored.
+ */
+export function loadConfig(): SubagentsConfig {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+  } catch {
+    raw = {};
+  }
+  // The literal JSON value `null` parses without throwing — guard it like
+  // any other malformed shape so startup can never break.
+  if (!isPlainObject(raw)) raw = {};
+
+  const agentRaw = isPlainObject(raw.agent) ? raw.agent : {};
+  const concurrencyRaw = isPlainObject(raw.concurrency) ? raw.concurrency : {};
+  const agent: AgentSettings = {} as AgentSettings;
+  for (const key of AGENT_SETTING_KEYS) {
+    const value = agentRaw[key];
+    if (value !== undefined) (agent as unknown as Record<string, unknown>)[key] = value;
+  }
   return {
-    enabled: routing.enabled ?? raw.allowCrossProvider === true,
-    allowedProviders: [...allowedProviders],
-    agentModels,
+    modelRouting: normalizeModelRouting(raw.modelRouting),
+    agent: { ...DEFAULT_AGENT, ...agent },
+    concurrency: {
+      ...concurrencyRaw,
+      default: typeof concurrencyRaw.default === "number" ? concurrencyRaw.default : 4,
+    } as SubagentsConfig["concurrency"],
   };
 }
 
-/** Keep only known agent settings; drops legacy model fields and retired keys. */
-function pickAgentSettings(agent: Record<string, unknown>): AgentSettings {
-  const out: Partial<AgentSettings> = {};
-  for (const key of AGENT_SETTING_KEYS) {
-    if (agent[key] !== undefined) (out as Record<string, unknown>)[key] = agent[key];
-  }
-  return out as AgentSettings;
-}
-
-/** Write config to disk with atomic rename. Legacy model fields are pruned. */
+/** Write config to disk with atomic rename. */
 export function saveConfigAtomic(config: SubagentsConfig): void {
   const tmpPath = CONFIG_PATH + ".tmp";
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    const pruned: SubagentsConfig = {
-      ...config,
-      agent: pickAgentSettings(config.agent as unknown as Record<string, unknown>),
-    };
-    fs.writeFileSync(tmpPath, JSON.stringify(pruned, null, 2), "utf-8");
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
     fs.renameSync(tmpPath, CONFIG_PATH);
   } catch (err) {
     console.error(`[subagents] Failed to save config: ${err}`);

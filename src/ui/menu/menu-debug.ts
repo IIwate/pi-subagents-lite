@@ -170,7 +170,7 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
   lines.push("| `prompt` | The task for the agent (required) |");
   lines.push("| `description` | One-line summary of what the agent should do (required) |");
   lines.push("| `agent` | Which agent type to use (default: general-purpose) |");
-  lines.push("| `model` | Optional explicit model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Default: omit — the agent inherits the parent provider and exact parent model. Other models are only allowed when Cross-provider routing is ON and the model comes from the parent provider or an allowed provider. |");
+  lines.push("| `model` | Optional explicit model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Do not pass by default — see Model routing below. |");
   lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Also accepted via `model` as `id:thinking`. |");
   lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll, sleep, or timeout-wait. Parent task advances automatically on completion. |");
   lines.push("| `worktree_path` | Optional path to a git worktree of the parent's repo. See below for details. |");
@@ -182,8 +182,10 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
   lines.push("- For parallel tasks, spawn multiple `run_in_background: true` agents in one turn");
   lines.push("  → Results are auto-delivered — do NOT poll, sleep, timeout, or busy-wait");
   lines.push("  → When a subagent finishes, a notification arrives and the parent task advances automatically");
-  lines.push("- Do NOT pass `model` by default — subagents inherit the parent provider and the exact parent model");
-  lines.push("  → Use another model only when the user explicitly asks for it, or when the user has configured an Agent model assignment in /agents > Settings > Cross-provider routing");
+  lines.push("- Model routing:");
+  lines.push("  → When Cross-provider routing is OFF, do not pass `model`. The child always uses the exact parent model. If the user requests another model, explain that routing is OFF and state that the child will inherit the parent model.");
+  lines.push("  → When routing is ON, omit `model` by default. The configured Agent assignment is applied automatically and falls back to the parent model.");
+  lines.push("  → Pass `model` only when the user explicitly requests a specific model and its provider is authorized. Never silently replace a rejected model request.");
   lines.push("");
   lines.push("## `worktree_path` Parameter\n");
   lines.push("Use `worktree_path` to run a subagent in a different git worktree of the parent's repository.");
