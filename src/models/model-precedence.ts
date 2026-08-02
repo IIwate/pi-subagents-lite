@@ -1,75 +1,24 @@
 /**
- * model-precedence.ts — Model resolution with explicit precedence.
+ * model-precedence.ts — Model resolution and authorization, pure functions.
  *
- * Pure function — no side effects, no file I/O, no pi SDK imports.
+ * No side effects, no file I/O, no pi SDK imports.
  *
- * Precedence chain (highest to lowest):
- *   1. sessionOverrides[subagentType]  (session per-type override)
- *   2. sessionOverrides["default"]     (session global default)
- *   3. config.agent[subagentType]      (config per-type override)
- *   4. config.agent["default"]         (config global default)
- *   5. agentConfig?.model              (agent config / frontmatter)
- *   6. parentModelId                   (inherit from parent)
+ * Resolution chain (highest to lowest), consulted only when routing is ON:
+ *   1. sessionOverrides[subagentType]  (session assignment)
+ *   2. modelRouting.agentModels[type]  (persistent assignment)
+ *   3. agentConfig?.model              (agent config / frontmatter)
+ *   4. parentModelId                   (inherit from parent)
+ *
+ * When routing is OFF callers use the exact parent model and never consult
+ * this chain; authorizeModel enforces that strict boundary (even explicit
+ * same-provider models are rejected).
  */
 
-import type { ThinkingLevel } from "../types.js";
-import type { SystemPromptMode } from "../agents/types.js";
+import type { SessionModelOverrides, SubagentsConfig } from "../config/types.js";
 
 export interface ResolvedModelSelection {
   model: string;
   source: "automatic" | "parent";
-}
-
-/** Shape of the subagents-lite.json config file. */
-export interface SubagentsConfig {
-  /** Allow subagents to use another provider and configured model overrides. */
-  allowCrossProvider?: boolean;
-  agent: {
-    default: string | null;
-    forceBackground: boolean;
-    graceTurns?: number;
-    showCost?: boolean;
-    /** System prompt mode: replace (default), inherit parent, or custom file. */
-    systemPromptMode?: SystemPromptMode;
-    /** Whether to include AGENTS.md context files in the subagent system prompt. Default: true. */
-    includeContextFiles?: boolean;
-    /** Default thinking level for spawned agents. Undefined = inherit from agent config. */
-    defaultThinking?: ThinkingLevel;
-    /** Global default for skills loading when agent doesn't explicitly set skills. true (default) or false. */
-    loadSkillsImplicitly?: boolean;
-    /** Global default for extensions loading when agent doesn't explicitly set extensions. true (default) or false. */
-    loadExtensionsImplicitly?: boolean;
-    /** When true, skip built-in default agents (general-purpose, Explore) at registration. */
-    disableDefaultAgents?: boolean;
-    /** Whether to show toolUses count in widget stats line. Default: true. */
-    showTools?: boolean;
-    /** Whether to show turn count in widget stats line. Default: true. */
-    showTurns?: boolean;
-    /** Whether to show input tokens in widget stats line. Default: true. */
-    showInput?: boolean;
-    /** Whether to show output tokens in widget stats line. Default: true. */
-    showOutput?: boolean;
-    /** Whether to show context percent and compactions in widget stats line. Default: true. */
-    showContext?: boolean;
-    /** Whether to show elapsed time in widget stats line. Default: true. */
-    showTime?: boolean;
-    [agentType: string]: string | null | undefined | boolean | number;
-  };
-  concurrency: {
-    default: number;
-    providers?: Record<string, number>;
-    models?: Record<string, number>;
-  };
-}
-
-/**
- * Shape of session-only model overrides.
- * Same as config.agent but without the forceBackground flag.
- * Not persisted — cleared on session_start.
- */
-export interface SessionModelOverrides {
-  default: string | null;
-  [agentType: string]: string | null | undefined;
 }
 
 /** Options for resolveModelSelection. */
@@ -78,26 +27,25 @@ export interface ResolveModelOptions {
   subagentType: string;
   /** The agent's config (from .md frontmatter or defaults). */
   agentConfig?: { model?: string };
-  /** The global subagents-lite.json config (model overrides). */
+  /** The global subagents-lite.json config (routing + agent settings). */
   config: SubagentsConfig;
   /** The parent agent's model ID (final fallback). */
   parentModelId: string;
-  /** Session-only overrides (checked first). */
+  /** Session-only assignments (checked first). */
   sessionOverrides?: SessionModelOverrides;
 }
 
 /**
- * Resolve both the model and whether it came from an automatic override. */
+ * Resolve the model candidate under routing. Provenance stays separate from
+ * the string value so "automatic" is preserved even when the chosen model
+ * spells exactly like the parent's.
+ */
 export function resolveModelSelection(options: ResolveModelOptions): ResolvedModelSelection {
   const { subagentType, agentConfig, config, parentModelId, sessionOverrides } = options;
 
-  // Precedence chain: session > config > frontmatter. Parent is a distinct
-  // fallback so provenance does not depend on equivalent string spellings.
-  const automaticCandidates: Array<string | boolean | null | undefined> = [
+  const automaticCandidates: Array<string | null | undefined> = [
     sessionOverrides?.[subagentType],
-    sessionOverrides?.["default"],
-    config.agent[subagentType] as string | null | undefined,
-    config.agent["default"],
+    config.modelRouting.agentModels[subagentType],
     agentConfig?.model,
   ];
   const automaticModel = automaticCandidates.find(isValidValue);
@@ -106,10 +54,59 @@ export function resolveModelSelection(options: ResolveModelOptions): ResolvedMod
     : { model: parentModelId, source: "parent" };
 }
 
+/** Reason a resolved model failed the routing/scope policy. */
+export type ModelAuthorizationVerdict =
+  | { ok: true }
+  | { ok: false; reason: "out-of-scope" | "routing-disabled" | "provider-not-allowed" };
+
+/** Context needed to authorize a resolved model key. */
+export interface ModelAuthorizationContext {
+  /** "provider/model" key of the candidate model. */
+  modelKey: string;
+  /** "provider/model" key of the parent session model; empty when the parent has none. */
+  parentModelKey: string;
+  /** Provider of the parent session model; empty when the parent has none. */
+  parentProvider: string;
+  /** Extra allowed providers (the parent provider is implicit). */
+  allowedProviders: readonly string[];
+  /** Cross-provider routing switch. */
+  routingEnabled: boolean;
+  /** Active model scope keys; null = unrestricted. */
+  scopedKeys: ReadonlySet<string> | null;
+}
+
+/**
+ * Authorize a resolved model under the routing policy.
+ *
+ * Order matters: the scope gate applies to every spawn; the exact parent
+ * model is always authorized; routing OFF authorizes only the parent model
+ * (same-provider lookalikes are rejected); routing ON authorizes the parent
+ * provider and the allowlist.
+ */
+export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizationVerdict {
+  const { modelKey, parentModelKey, parentProvider, allowedProviders, routingEnabled, scopedKeys } = ctx;
+
+  if (scopedKeys && !scopedKeys.has(modelKey)) {
+    return { ok: false, reason: "out-of-scope" };
+  }
+  if (parentModelKey && modelKey === parentModelKey) {
+    return { ok: true };
+  }
+  if (!routingEnabled) {
+    return { ok: false, reason: "routing-disabled" };
+  }
+  const slashIdx = modelKey.indexOf("/");
+  const provider = slashIdx > 0 ? modelKey.slice(0, slashIdx) : modelKey;
+  if (provider === parentProvider || allowedProviders.includes(provider)) {
+    return { ok: true };
+  }
+  return { ok: false, reason: "provider-not-allowed" };
+}
+
 /**
  * Check if a value is a valid non-empty model string.
  * Returns true for non-null, non-undefined, non-empty strings.
  */
-function isValidValue(value: string | boolean | null | undefined): value is string {
+function isValidValue(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length > 0;
 }

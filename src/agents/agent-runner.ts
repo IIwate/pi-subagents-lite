@@ -31,15 +31,16 @@ import type { LifetimeUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 import {
   automaticModelOverrideError,
-  crossProviderModelError,
-  isModelInScope,
   missingParentModelError,
   missingSubagentModelError,
   modelKey,
   outOfScopeModelError,
+  routingDisabledModelError,
+  providerNotAllowedError,
   scopedModelKeys,
   scopedThinkingLevel,
 } from "../models/model-scope.js";
+import { authorizeModel } from "../models/model-precedence.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
@@ -472,34 +473,41 @@ async function initSession(
   loader: DefaultResourceLoader,
 ) {
   const store = getStore();
-  if (!ctx.model && !store.agent.allowCrossProvider) {
+  const routing = store.routing;
+  if (!ctx.model && !routing.enabled) {
     throw new Error(missingParentModelError());
   }
   const model = options.model ?? findModelInRegistry(
-    store.agent.allowCrossProvider ? agentConfig?.model : undefined,
+    routing.enabled ? agentConfig?.model : undefined,
     ctx.modelRegistry,
     ctx.model,
   );
   if (!model) {
     throw new Error(missingSubagentModelError());
   }
-  // Queue waits may outlive permission or scope edits. Re-read both immediately
+  // Queue waits may outlive routing or scope edits. Re-read both immediately
   // before session creation so stale automatic choices cannot start.
   const scopedModels = [...ctx.scopedModels];
-  if (model && options.modelSource === "automatic" && !store.agent.allowCrossProvider) {
+  const scopedKeys = scopedModelKeys(scopedModels);
+  if (options.modelSource === "automatic" && !routing.enabled) {
     throw new Error(automaticModelOverrideError(modelKey(model)));
   }
-  if (
-    model
-    && ctx.model
-    && model.provider !== ctx.model.provider
-    && !store.agent.allowCrossProvider
-  ) {
-    throw new Error(crossProviderModelError(modelKey(model), ctx.model.provider));
-  }
-  const scopedKeys = scopedModelKeys(scopedModels);
-  if (model && scopedKeys && !isModelInScope(model, scopedKeys)) {
-    throw new Error(outOfScopeModelError(modelKey(model), scopedKeys));
+  const verdict = authorizeModel({
+    modelKey: modelKey(model),
+    parentModelKey: ctx.model ? modelKey(ctx.model) : "",
+    parentProvider: ctx.model?.provider ?? "",
+    allowedProviders: routing.allowedProviders,
+    routingEnabled: routing.enabled,
+    scopedKeys,
+  });
+  if (!verdict.ok) {
+    if (verdict.reason === "out-of-scope") {
+      throw new Error(outOfScopeModelError(modelKey(model), scopedKeys!));
+    }
+    if (verdict.reason === "routing-disabled") {
+      throw new Error(routingDisabledModelError(modelKey(model)));
+    }
+    throw new Error(providerNotAllowedError(modelKey(model), ctx.model?.provider ?? "", routing.allowedProviders));
   }
   // Explicit spawn override wins; otherwise mirror Pi's scope-pinned thinking
   // before falling back to agent/package defaults.

@@ -22,14 +22,16 @@ import {
 } from "../utils.js";
 import {
   scopedModelKeys,
-  isModelInScope,
   missingParentModelError,
   missingSubagentModelError,
   outOfScopeModelError,
   modelKey,
   scopedThinkingLevel,
-  crossProviderModelError,
+  automaticModelOverrideError,
+  routingDisabledModelError,
+  providerNotAllowedError,
 } from "../models/model-scope.js";
+import { authorizeModel } from "../models/model-precedence.js";
 import {
   getPiInstance,
   getSessionCtx,
@@ -116,7 +118,8 @@ export async function executeAgentTool(
   const maxTurns = agentConfig?.maxTurns;
   const scopedModels = [...ctx.scopedModels];
   const store = getStore();
-  if (!ctx.model && !store.agent.allowCrossProvider) {
+  const routing = store.routing;
+  if (!ctx.model && !routing.enabled) {
     return errorResult(missingParentModelError());
   }
 
@@ -124,7 +127,9 @@ export async function executeAgentTool(
   // whether a queued model was explicit, automatic, or inherited.
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
-  const automaticSelection = store.agent.allowCrossProvider
+  // OFF: strict parent inheritance — assignments, frontmatter, and explicit
+  // models are ignored. ON: explicit → session → persistent → frontmatter → parent.
+  const automaticSelection = routing.enabled
     ? store.modelSelectionFor(resolvedType, parentModelRef, agentConfig)
     : { model: parentModelRef, source: "parent" as const };
   const selectedModelSpec = explicitModel
@@ -145,20 +150,29 @@ export async function executeAgentTool(
     return errorResult(missingSubagentModelError());
   }
 
-  if (
-    model
-    && ctx.model
-    && model.provider !== ctx.model.provider
-    && !store.agent.allowCrossProvider
-  ) {
-    return errorResult(crossProviderModelError(modelKey(model), ctx.model.provider));
-  }
-
-  // Reject models outside the active Model scope (--models / enabledModels).
+  // Gate the resolved model: scope first, then exact-parent (always allowed),
+  // then routing OFF (only the parent model), then the provider allowlist.
   if (model) {
     const scopedKeys = scopedModelKeys(scopedModels);
-    if (!isModelInScope(model, scopedKeys)) {
-      return errorResult(outOfScopeModelError(modelKey(model), scopedKeys!));
+    const verdict = authorizeModel({
+      modelKey: modelKey(model),
+      parentModelKey: parentModelRef,
+      parentProvider: ctx.model?.provider ?? "",
+      allowedProviders: routing.allowedProviders,
+      routingEnabled: routing.enabled,
+      scopedKeys,
+    });
+    if (!verdict.ok) {
+      if (verdict.reason === "out-of-scope") {
+        return errorResult(outOfScopeModelError(modelKey(model), scopedKeys!));
+      }
+      if (verdict.reason === "routing-disabled") {
+        const ref = explicitModel ? (params.model as string) : modelKey(model);
+        return errorResult(routingDisabledModelError(ref));
+      }
+      return errorResult(
+        providerNotAllowedError(modelKey(model), ctx.model?.provider ?? "", routing.allowedProviders),
+      );
     }
   }
 
@@ -166,10 +180,12 @@ export async function executeAgentTool(
   const resolveModelAtStart = modelSource === "automatic"
     ? () => {
       const currentStore = getStore();
-      // A revoked permission must fail at runner validation rather than silently
-      // changing an already-authorized automatic request into parent inheritance.
-      if (!currentStore.agent.allowCrossProvider) {
-        return { model, modelKey: resolvedModelKey! };
+      const currentRouting = currentStore.routing;
+      // A revoked routing switch must fail at runner validation rather than
+      // silently changing an already-authorized automatic request into parent
+      // inheritance — or reusing the stale model.
+      if (!currentRouting.enabled) {
+        throw new Error(automaticModelOverrideError(modelKey(model)));
       }
       const currentParentRef = ctx.model ? modelKey(ctx.model) : "";
       const selection = currentStore.modelSelectionFor(resolvedType, currentParentRef, agentConfig);
@@ -179,6 +195,25 @@ export async function executeAgentTool(
         : findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
       if (!currentModel) {
         throw new Error(currentSpec.modelRef ? unknownModelError(currentSpec.modelRef) : missingSubagentModelError());
+      }
+      // Re-check the allowlist and scope at start — permissions may have
+      // changed while queued; revoked ones fail loudly, never silently swap.
+      const scopedKeys = scopedModelKeys([...ctx.scopedModels]);
+      const verdict = authorizeModel({
+        modelKey: modelKey(currentModel),
+        parentModelKey: currentParentRef,
+        parentProvider: ctx.model?.provider ?? "",
+        allowedProviders: currentRouting.allowedProviders,
+        routingEnabled: true,
+        scopedKeys,
+      });
+      if (!verdict.ok) {
+        if (verdict.reason === "out-of-scope") {
+          throw new Error(outOfScopeModelError(modelKey(currentModel), scopedKeys!));
+        }
+        throw new Error(
+          providerNotAllowedError(modelKey(currentModel), ctx.model?.provider ?? "", currentRouting.allowedProviders),
+        );
       }
       return {
         model: currentModel,

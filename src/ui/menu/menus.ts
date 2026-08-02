@@ -7,7 +7,7 @@
  *
  * Module structure:
  *   - helpers.ts: shared helpers (buildListTheme, buildModelOptions, createSearchableSelect)
- *   - menu-model-settings.ts: showModelSettingsMenu
+ *   - menu-model-routing.ts: showModelRoutingMenu
  *   - menu-concurrency.ts: showConcurrencySettingsMenu
  *   - menu-widget-settings.ts: showWidgetSettingsMenu
  *   - menu-debug.ts: showDebugMenu
@@ -20,12 +20,13 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { buildListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import { showModelSettingsMenu } from "./menu-model-settings.js";
+import { showModelRoutingMenu } from "./menu-model-routing.js";
 import { showConcurrencySettingsMenu } from "./menu-concurrency.js";
 import { showWidgetSettingsMenu } from "./menu-widget-settings.js";
 import { showDebugMenu } from "./menu-debug.js";
 import { showSpawnOptionsMenu } from "./menu-spawn-options.js";
 import { showSystemPromptMenu } from "./menu-system-prompt.js";
+import { getStore } from "../../shell.js";
 
 /**
  * Render `items` as a titled SelectList and dispatch the chosen value.
@@ -35,12 +36,13 @@ import { showSystemPromptMenu } from "./menu-system-prompt.js";
 async function runSelectMenu(
   ctx: ExtensionCommandContext,
   title: string,
-  items: SelectItem[],
+  items: SelectItem[] | (() => SelectItem[]),
   dispatch: (choice: string) => Promise<void>,
 ): Promise<void> {
   while (true) {
+    const listItems = typeof items === "function" ? items() : items;
     const choice = await ctx.ui.custom<string | undefined>((_tui, theme, _kb, done) => {
-      const list = new SelectList([...items], 10, buildListTheme(theme));
+      const list = new SelectList([...listItems], 10, buildListTheme(theme));
       list.onSelect = (item) => done(item.value);
       return new SettingsListWrapper(list, { title, theme, onCancel: () => done(undefined) });
     });
@@ -53,17 +55,21 @@ export async function showSettingsMenu(
   ctx: ExtensionCommandContext,
   modelOptions: string[],
 ): Promise<void> {
-  const items: SelectItem[] = [
-    { value: "model", label: "Model settings", description: "Parent inheritance, cross-provider, and model overrides" },
-    { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
-    { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
-    { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
-    { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
-  ];
+  // Items refresh per iteration so the routing row reflects live state.
+  const buildItems = (): SelectItem[] => {
+    const routing = getStore().routing;
+    return [
+      { value: "routing", label: "Cross-provider routing", description: routing.enabled ? "ON · allowed providers and agent assignments" : "OFF · inherits parent" },
+      { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
+      { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
+      { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
+      { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
+    ];
+  };
 
-  await runSelectMenu(ctx, "Settings", items, async (choice) => {
+  await runSelectMenu(ctx, "Settings", buildItems, async (choice) => {
     switch (choice) {
-      case "model": await showModelSettingsMenu(ctx, modelOptions); break;
+      case "routing": await showModelRoutingMenu(ctx, modelOptions); break;
       case "concurrency": await showConcurrencySettingsMenu(ctx, modelOptions); break;
       case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
       case "systemprompt": await showSystemPromptMenu(ctx); break;

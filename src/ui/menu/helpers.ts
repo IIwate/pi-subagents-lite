@@ -9,19 +9,33 @@ import type { Theme } from "../types.js";
 import { SearchableSelectDialog, type SelectOption } from "../searchable-select.js";
 import { parseModelKey } from "../../utils.js";
 /**
+ * Section separator row for SettingsList: a single full-width line with an
+ * optional centered title, drawn entirely in the label column so the line
+ * stays continuous (the value column is left empty).
+ */
+export function sectionRow(title?: string): { label: string; currentValue: string } {
+  const total = 40;
+  const body = title ? ` ${title} ` : "";
+  const side = Math.max(0, Math.floor((total - body.length) / 2));
+  return {
+    label: "─".repeat(side) + body + "─".repeat(Math.max(0, total - side - body.length)),
+    currentValue: "",
+  };
+}
+
+/**
  * Build SelectOption[] from raw "provider/model-id" strings.
- * Includes "(inherits parent)" as the first option.
+ * "(inherits parent)" is appended last — the explicit models come first.
  */
 export function buildModelOptions(rawOptions: string[]): SelectOption[] {
-  const items: SelectOption[] = [
-    { value: "(inherits parent)", label: "(inherits parent)", provider: "" },
-  ];
+  const items: SelectOption[] = [];
 
   for (const opt of rawOptions) {
     const parsed = parseModelKey(opt);
     if (!parsed) continue;
     items.push({ value: opt, label: parsed.modelId, provider: parsed.provider });
   }
+  items.push({ value: "(inherits parent)", label: "(inherits parent)", provider: "" });
   return items;
 }
 

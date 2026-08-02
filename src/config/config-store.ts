@@ -13,13 +13,14 @@
  * at session_start. `dispose()` drops deps at session_shutdown.
  */
 
-import type { ResolvedModelSelection, SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
+import type { ResolvedModelSelection } from "../models/model-precedence.js";
 import { resolveModelSelection } from "../models/model-precedence.js";
 import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
-import { CONFIG_AGENT_NON_MODEL_KEYS } from "./types.js";
+import type { SessionModelOverrides, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
+import { parseModelKey } from "../utils.js";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
 
 
@@ -35,13 +36,9 @@ export const fileConfigIO: ConfigIO = {
   save: (c) => saveConfigAtomic(c),
 };
 
-/** Agent settings with all scalar defaults resolved. Model fields stay nullable. */
+/** Agent settings with all scalar defaults resolved. */
 export interface ResolvedAgentSettings {
-  /** null = inherit parent. Kept nullable to preserve the null-skip in the precedence chain. */
-  readonly defaultModel: string | null;
   readonly forceBackground: boolean;
-  /** Whether subagents may use another provider and configured model overrides. */
-  readonly allowCrossProvider: boolean;
   readonly showCost: boolean;
   readonly graceTurns: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
@@ -70,6 +67,13 @@ export interface ResolvedAgentSettings {
   readonly showTime: boolean;
 }
 
+/** Resolved routing policy snapshot (copies, so callers cannot mutate the store). */
+export interface ResolvedRoutingConfig {
+  readonly enabled: boolean;
+  readonly allowedProviders: string[];
+  readonly agentModels: Record<string, string>;
+}
+
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   navigator?: AgentNavigator;
@@ -78,7 +82,7 @@ export interface ConfigStoreDeps {
 
 export class ConfigStore {
   private config: SubagentsConfig;
-  private sessionOverrides: SessionModelOverrides = { default: null };
+  private sessionOverrides: SessionModelOverrides = {};
   private navigator?: AgentNavigator;
   private manager?: AgentManager;
 
@@ -92,9 +96,7 @@ export class ConfigStore {
     const a = this.config.agent;
 
     return {
-      defaultModel: a.default ?? null,
       forceBackground: a.forceBackground === true,
-      allowCrossProvider: this.config.allowCrossProvider === true,
       showCost: a.showCost === true,
       graceTurns: a.graceTurns ?? 6,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
@@ -112,6 +114,14 @@ export class ConfigStore {
     };
   }
 
+  get routing(): ResolvedRoutingConfig {
+    return {
+      enabled: this.config.modelRouting.enabled,
+      allowedProviders: [...this.config.modelRouting.allowedProviders],
+      agentModels: { ...this.config.modelRouting.agentModels },
+    };
+  }
+
   get concurrency(): {
     default: number;
     providers: Record<string, number>;
@@ -124,27 +134,15 @@ export class ConfigStore {
     };
   }
 
-  get sessionDefaultModel(): string | null {
-    return this.sessionOverrides.default ?? null;
-  }
-
   sessionModelOverride(type: string): string | null {
     return this.sessionOverrides[type] ?? null;
   }
 
-  /** Raw agent config incl. dynamic per-type model keys (for menu display). */
-  agentConfigSnapshot(): Readonly<SubagentsConfig["agent"]> {
-    return this.config.agent;
-  }
-
   /**
-   * Resolve the effective model for a spawn. Precedence: session per-type → session default → config per-type
-   * → config default → agentConfig (frontmatter) → parentModelId.
+   * Resolve the effective model candidate for a spawn. Precedence: session assignment →
+   * persistent assignment → agentConfig (frontmatter) → parentModelId. The routing
+   * switch is enforced by callers (tool execution / runner), not here.
    */
-  modelFor(type: string, parentModelId: string, agentConfig?: { model?: string }): string {
-    return this.modelSelectionFor(type, parentModelId, agentConfig).model;
-  }
-
   modelSelectionFor(
     type: string,
     parentModelId: string,
@@ -164,33 +162,56 @@ export class ConfigStore {
   // are in-memory only: never persisted, no side effects.
 
   readonly mutate = {
-    agent: {
-      setModelOverride: (type: string, value: string | null): void => {
-        this.config.agent[type] = value;
+    routing: {
+      setEnabled: (enabled: boolean): void => {
+        this.config.modelRouting.enabled = enabled;
         this.persist();
       },
-      clearModelOverride: (type: string): void => {
-        delete this.config.agent[type];
-        this.persist();
-      },
-      /** Clear all per-type model overrides, preserving non-model settings. */
-      clearAllModelOverrides: (): void => {
-        const preserved: Record<string, unknown> = {};
-        for (const key of CONFIG_AGENT_NON_MODEL_KEYS) {
-          const val = this.config.agent[key];
-          if (val != null || key === "default" || key === "forceBackground") {
-            preserved[key] = val;
-          }
+      /** Add/remove a single provider on the allowlist. Parent provider is never stored here. */
+      setProviderAllowed: (provider: string, allowed: boolean): void => {
+        const set = new Set(this.config.modelRouting.allowedProviders);
+        if (allowed) {
+          set.add(provider);
+        } else {
+          set.delete(provider);
         }
-        this.config.agent = preserved as SubagentsConfig["agent"];
+        this.config.modelRouting.allowedProviders = [...set];
         this.persist();
       },
+      /**
+       * Remove a provider from the allowlist and drop every persistent
+       * assignment that resolves to it. Session assignments are cleared by
+       * the caller (menu confirm flow), which knows the affected types.
+       */
+      removeProvider: (provider: string): void => {
+        this.config.modelRouting.allowedProviders =
+          this.config.modelRouting.allowedProviders.filter((p) => p !== provider);
+        this.config.modelRouting.agentModels = Object.fromEntries(
+          Object.entries(this.config.modelRouting.agentModels).filter(([, model]) => {
+            const parsed = parseModelKey(model);
+            return !parsed || parsed.provider !== provider;
+          }),
+        );
+        this.persist();
+      },
+      /** Set or clear (null) a persistent per-agent assignment. Clearing restores parent inheritance. */
+      setAgentModel: (type: string, model: string | null): void => {
+        if (model === null || model === "") {
+          delete this.config.modelRouting.agentModels[type];
+        } else {
+          this.config.modelRouting.agentModels[type] = model;
+        }
+        this.persist();
+      },
+      /** Clear allowlist, assignments, and disable routing. */
+      clearAll: (): void => {
+        this.config.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
+        this.persist();
+      },
+    },
+    agent: {
       setForceBackground: (enabled: boolean): void => {
         this.config.agent.forceBackground = enabled;
-        this.persist();
-      },
-      setAllowCrossProvider: (enabled: boolean): void => {
-        this.config.allowCrossProvider = enabled;
         this.persist();
       },
       setShowCost: (enabled: boolean): void => {
@@ -270,7 +291,7 @@ export class ConfigStore {
       },
     },
     session: {
-      /** Set a session model override for a type (or "default"). Not persisted. */
+      /** Set a session-only assignment for an agent type. Not persisted. */
       setOverride: (type: string, model: string): void => {
         this.sessionOverrides[type] = model;
       },
@@ -278,17 +299,17 @@ export class ConfigStore {
         delete this.sessionOverrides[type];
       },
       clearAll: (): void => {
-        this.sessionOverrides = { default: null };
+        this.sessionOverrides = {};
       },
     },
   };
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
-  /** Re-read disk, reset session overrides, re-sync deps. Called at session_start. */
+  /** Re-read disk, reset session assignments, re-sync deps. Called at session_start. */
   reload(): void {
     this.config = this.io.load();
-    this.sessionOverrides = { default: null };
+    this.sessionOverrides = {};
     this.syncAllDeps();
   }
 

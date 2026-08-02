@@ -16,6 +16,7 @@ import {
   buildModelOptions,
   createDelegatingComponent,
   createSearchableSelect,
+  sectionRow,
 } from "./helpers.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { createConfirmSubmenu } from "./submenus/confirm.js";
@@ -89,7 +90,7 @@ export async function showConcurrencySettingsMenu(
 
     // Per-provider limits
     items.push({ id: "__sep__", label: " ", currentValue: "" });
-    items.push({ id: "__sep__", label: "── Per-provider limits ──", currentValue: "────────" });
+    items.push({ id: "__sep__", ...sectionRow("Per-provider limits") });
     const providerLimits = store.concurrency.providers;
     for (const provider of Object.keys(providerLimits)) {
       const limit = providerLimits[provider];
@@ -112,7 +113,7 @@ export async function showConcurrencySettingsMenu(
       });
     }
 
-    items.push({ id: "__sep__", label: "─────────────────────────", currentValue: "────────" });
+    items.push({ id: "__sep__", ...sectionRow() });
     // Add per-provider limit (submenu: provider selection → numeric input)
     if (providers.length > 0) {
       items.push({
@@ -129,7 +130,7 @@ export async function showConcurrencySettingsMenu(
 
     // Per-model limits
     items.push({ id: "__sep__", label: " ", currentValue: "" });
-    items.push({ id: "__sep__", label: "── Per-model limits ──", currentValue: "────────" });
+    items.push({ id: "__sep__", ...sectionRow("Per-model limits") });
     const models = store.concurrency.models;
     for (const modelKey of Object.keys(models)) {
       const limit = models[modelKey];
@@ -153,7 +154,7 @@ export async function showConcurrencySettingsMenu(
     }
 
     // Add per-model limit
-    items.push({ id: "__sep__", label: "─────────────────────────", currentValue: "────────" });
+    items.push({ id: "__sep__", ...sectionRow() });
     if (modelOptions.length > 0) {
       items.push({
         id: "addModelLimit",

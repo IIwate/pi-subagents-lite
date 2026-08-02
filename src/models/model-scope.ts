@@ -23,14 +23,6 @@ export function scopedModelKeys(
   return new Set(scopedModels.map(({ model }) => modelKey(model)));
 }
 
-/** True when model is allowed (always true when scopedKeys is null). */
-export function isModelInScope(
-  model: { provider: string; id: string },
-  scopedKeys: ReadonlySet<string> | null,
-): boolean {
-  return !scopedKeys || scopedKeys.has(modelKey(model));
-}
-
 /** Thinking level pinned to a model by the active scope, if any. */
 export function scopedThinkingLevel(
   scopedModels: readonly ScopedModel[],
@@ -51,19 +43,34 @@ export function missingSubagentModelError(): string {
   return "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.";
 }
 
-/** Build a clear error when an automatic override is no longer authorized. */
+/** Build a clear error when an automatic selection is no longer authorized. */
 export function automaticModelOverrideError(modelRef: string): string {
   return (
-    `Automatic model override "${modelRef}" is no longer authorized. `
-    + "Enable /agents > Model settings > Allow cross-provider to use configured overrides."
+    `Automatic model override "${modelRef}" is no longer authorized because `
+    + "Cross-provider routing is OFF. Enable /agents > Settings > Cross-provider routing to use assignments."
   );
 }
 
-/** Build a clear error when another provider is not authorized. */
-export function crossProviderModelError(modelRef: string, parentProvider: string): string {
+/** Build a clear error when routing is OFF and a non-parent model was requested. */
+export function routingDisabledModelError(modelRef: string): string {
   return (
-    `Model "${modelRef}" uses a different provider than the parent (${parentProvider}). `
-    + "Enable /agents > Model settings > Allow cross-provider to authorize it."
+    `Model "${modelRef}" cannot be used while Cross-provider routing is OFF: `
+    + "subagents use the exact parent model. "
+    + "Enable /agents > Settings > Cross-provider routing to assign other models."
+  );
+}
+
+/** Build a clear error when a model's provider is not on the allowlist. */
+export function providerNotAllowedError(
+  modelRef: string,
+  parentProvider: string,
+  allowedProviders: readonly string[],
+): string {
+  const allowed = [...new Set([parentProvider, ...allowedProviders].filter(Boolean))].sort();
+  return (
+    `Model "${modelRef}" is not authorized: its provider is neither the parent provider `
+    + `(${parentProvider || "none"}) nor on the allowed list [${allowed.join(", ")}]. `
+    + "Add it in /agents > Settings > Cross-provider routing > Allowed providers."
   );
 }
 
