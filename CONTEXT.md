@@ -25,7 +25,7 @@ _Avoid_: Hidden tool, minimal tool
 ### Configuration
 
 **Model assignment**:
-A user-configured model choice for one agent type, stored permanently in `modelRouting.agentModels` or for the session only. Applied automatically only when Cross-provider routing is ON (precedence: explicit Agent-tool model → session → persistent → agent frontmatter → parent model). When routing is OFF, subagents inherit the exact parent model and assignments, frontmatter models, and explicit model arguments are ignored. Configured via `/agents` > Settings > Cross-provider routing.
+A user-configured model choice for one agent type, stored permanently in `modelRouting.agentModels` or for the session only. Session assignments have three states: absent, a model string, or explicit `null` ("inherits parent") that jumps straight to the parent model. Applied automatically only when Cross-provider routing is ON (precedence: explicit Agent-tool model → session → persistent → agent frontmatter → parent model). When routing is OFF, subagents inherit the exact parent model and assignments, frontmatter models, and explicit model arguments are ignored. Configured via `/agents` > Settings > Cross-provider routing. The model is locked at enqueue time; queued agents re-validate the same model against routing, allowlist, and scope at start and fail loudly when permission was revoked.
 _Avoid_: Model override, model injection, model preference
 
 **Model scope**:

@@ -42,24 +42,36 @@ New config shape, `modelRouting`:
   display); no dynamic model keys.
 - `CONFIG_AGENT_NON_MODEL_KEYS` is deleted.
 
-ON precedence: explicit Agent-tool model → session assignment → persistent
-assignment → agent frontmatter model → parent model. Every non-parent model
-must satisfy `provider === parent.provider` or `provider ∈ allowedProviders`,
-and must be inside Pi's active model scope. Provenance stays explicit /
-automatic / parent; queued agents re-validate routing, allowlist, and scope at
-start and fail loudly when permission was revoked — never silently swap.
+Session assignments have three states per agent type: absent (no session
+assignment), a model string, or explicit `null` meaning "this session
+inherits the parent model" — a session `null` stops the chain before
+persistent assignments and frontmatter are consulted.
+
+ON precedence: explicit Agent-tool model → session assignment (string; a
+session `null` jumps straight to the parent) → persistent assignment → agent
+frontmatter model → parent model. Every non-parent model must satisfy
+`provider === parent.provider` or `provider ∈ allowedProviders`, and must be
+inside Pi's active model scope. Provenance stays explicit / automatic /
+parent. The model is resolved and locked at enqueue time; queued agents
+re-validate the same locked model (routing, allowlist, scope) at start and
+fail loudly when permission was revoked — never re-resolve, never silently
+swap.
 
 Removing an allowed provider that has assignments requires confirmation and
-clears the affected persistent and session assignments in one step; running
-agents are unaffected, queued agents fail at start.
+clears the affected persistent and session assignments in one step (the store
+lists affected types from persisted + session state, including types no
+longer registered as agents); running agents are unaffected, queued agents
+fail at start.
 
 ## Migration
 
-One-time, no long-lived compatibility: `allowCrossProvider` → `enabled`; old
-dynamic `agent[<type>]` keys → `agentModels` with their providers extracted
-into the allowlist; `agent.default` is dropped with a warning (no successor
-semantics — unassigned agents inherit the parent model). Old model fields are
-pruned from the persisted config on the next explicit save.
+Pre-2.0 routing configs are not supported: `allowCrossProvider`, dynamic
+`agent[<type>]` model keys, and `agent.default` are neither migrated nor
+read. A missing or malformed `modelRouting` block falls back to
+`{ enabled: false, allowedProviders: [], agentModels: {} }`; non-model
+`agent` and `concurrency` fields still load normally, and the next explicit
+save writes the canonical schema. This is a breaking change shipped as
+version 2.0.0.
 
 ## Consequences
 
