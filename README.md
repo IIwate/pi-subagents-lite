@@ -94,13 +94,13 @@ Frontmatter supports flat values and lists, not nested YAML objects. Extension t
 - `run_in_background` — return immediately and notify the parent when complete.
 - `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
 
-By default, subagents inherit the parent provider and exact parent model. Explicit models from the same provider are allowed. Enable **Allow cross-provider** in `/agents` > Model settings to authorize other providers and apply session overrides, persisted overrides, and agent frontmatter automatically before falling back to the parent model.
+By default, subagents inherit the exact parent model. With **Cross-provider routing** OFF (`/agents` > Settings > Cross-provider routing), every subagent uses the parent's exact model and any other model request is rejected — including same-provider models, assignments, frontmatter models, and explicit model arguments. Turn routing ON to authorize extra providers and per-agent model assignments: the Agent tool's explicit `model` param wins, then session assignments, then persistent assignments, then agent frontmatter, then the parent model. Non-parent models must come from the parent provider or an allowed provider in `modelRouting.allowedProviders`, and must stay inside Pi's active model scope.
 
 ## Settings
 
 Run `/agents` to configure:
 
-- parent-model inheritance, automatic cross-provider selection, and global/per-type model overrides;
+- strict parent-model inheritance when routing is OFF, plus allowed-provider and per-agent model assignments when ON;
 - default, per-provider, and per-model concurrency limits;
 - background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;

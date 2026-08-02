@@ -17,8 +17,9 @@ Registering at init time freezes the tool set from turn 1. No mid-session tool c
 no system prompt rebuilds, no cache invalidation.
 
 Resolving the model inside tool execution keeps the schema lean while preserving whether the
-choice was explicit, automatic, or inherited. That provenance lets queued starts recheck a
-revoked cross-provider permission without confusing an automatic override with a user choice.
+choice was explicit, automatic, or inherited. That provenance lets queued starts recheck
+a revoked model permission (routing switch, provider allowlist, or model scope) without
+confusing an automatic assignment with a user choice.
 
 ## Trade-off
 

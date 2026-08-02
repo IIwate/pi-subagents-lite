@@ -24,16 +24,16 @@ _Avoid_: Hidden tool, minimal tool
 
 ### Configuration
 
-**Model override**:
-A user-configured model preference (per-type or global). It is applied automatically only when Allow cross-provider is enabled; otherwise subagents inherit the exact parent model and models from other providers are rejected. Set via `/agents` > Model settings.
-_Avoid_: Model injection, model preference
+**Model assignment**:
+A user-configured model choice for one agent type, stored permanently in `modelRouting.agentModels` or for the session only. Applied automatically only when Cross-provider routing is ON (precedence: explicit Agent-tool model → session → persistent → agent frontmatter → parent model). When routing is OFF, subagents inherit the exact parent model and assignments, frontmatter models, and explicit model arguments are ignored. Configured via `/agents` > Settings > Cross-provider routing.
+_Avoid_: Model override, model injection, model preference
 
 **Model scope**:
 The active allowlist of models from pi (`--models` CLI or settings `enabledModels` / `/scoped-models`). Subagent spawns may only activate models in this list; menus are filtered to it. Empty/unset scope means unrestricted.
 _Avoid_: Enabled models list, model filter
 
 **Grace turns**:
-Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Model settings.
+Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Settings > Spawn options.
 _Avoid_: Grace period, extra turns
 
 ### Worktrees
@@ -53,7 +53,7 @@ _Avoid_: Callback, notification
 
 ## Relationships
 
-- An **Agent type** has an optional **Model override**
+- An **Agent type** has an optional **Model assignment** (session or permanent)
 - A **Subagent** is spawned from one **Agent type**
 - A **Subagent** model must be inside the active **Model scope** when one is set
 - A **Subagent** may run in a **Worktree** of the parent's repo
