@@ -42,6 +42,8 @@ const mockModules = vi.hoisted(() => ({
   mockIncludeContextFiles: true as boolean,
   mockSystemPromptMode: "replace" as string,
   mockAllowCrossProvider: false as boolean,
+  mockRoutingEnabled: false as boolean,
+  mockAllowedProviders: [] as string[],
   getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
@@ -80,9 +82,14 @@ vi.mock("../../src/shell.js", () => ({
       systemPromptMode: mockModules.mockSystemPromptMode,
       graceTurns: 6,
       forceBackground: false,
-      allowCrossProvider: mockModules.mockAllowCrossProvider,
       showCost: false,
-      defaultModel: null,
+    },
+    get routing() {
+      return {
+        enabled: mockModules.mockRoutingEnabled,
+        allowedProviders: [...mockModules.mockAllowedProviders],
+        agentModels: {},
+      };
     },
   }),
   enterSubagentSpawn: mockModules.mockEnterSubagentSpawn,
@@ -128,7 +135,8 @@ function resetMocks() {
   mockModules.clearLoaderExtensions();
   mockModules.mockIncludeContextFiles = true;
   mockModules.mockSystemPromptMode = "replace";
-  mockModules.mockAllowCrossProvider = false;
+  mockModules.mockRoutingEnabled = false;
+  mockModules.mockAllowedProviders = [];
   mockModules.mockLoadProjectContextFiles.mockReturnValue([]);
 
   mockModules.mockGetConfig.mockReturnValue({ ...defaultConfig });
@@ -373,19 +381,43 @@ describe("runAgent — tool visibility wiring", () => {
     expect(sessionOptions.tools).not.toContain("web_search");
   });
 
-  it("rechecks cross-provider permission before session creation", async () => {
-    mockModules.mockAllowCrossProvider = false;
+  it("rechecks routing and provider policy before session creation", async () => {
+    mockModules.mockRoutingEnabled = false;
     const ctx = fakeCtx();
     ctx.model = { provider: "parent", id: "main-model" };
 
     await expect(runAgent(ctx, "test-agent", "do something", {
       pi: fakePi,
       model: { provider: "other", id: "worker-model" },
-    })).rejects.toThrow("uses a different provider than the parent");
+    })).rejects.toThrow("Cross-provider routing is OFF");
     expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
   });
 
-  it("rejects starts without a parent model while provider authorization is off", async () => {
+  it("rejects a same-provider non-parent model while routing is OFF", async () => {
+    mockModules.mockRoutingEnabled = false;
+    const ctx = fakeCtx();
+    ctx.model = { provider: "parent", id: "main-model" };
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "parent", id: "worker-model" },
+    })).rejects.toThrow("Cross-provider routing is OFF");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a provider not on the allowlist while routing is ON", async () => {
+    mockModules.mockRoutingEnabled = true;
+    const ctx = fakeCtx();
+    ctx.model = { provider: "parent", id: "main-model" };
+
+    await expect(runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "other", id: "worker-model" },
+    })).rejects.toThrow("not authorized");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects starts without a parent model while routing is off", async () => {
     const ctx = fakeCtx();
     ctx.model = undefined;
 
@@ -397,8 +429,8 @@ describe("runAgent — tool visibility wiring", () => {
     expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
   });
 
-  it("rejects starts when permission is on but no model can be resolved", async () => {
-    mockModules.mockAllowCrossProvider = true;
+  it("rejects starts when routing is on but no model can be resolved", async () => {
+    mockModules.mockRoutingEnabled = true;
     const ctx = fakeCtx();
     ctx.model = undefined;
 

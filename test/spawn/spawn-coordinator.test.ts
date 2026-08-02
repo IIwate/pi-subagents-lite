@@ -27,9 +27,9 @@ vi.mock("../../src/utils.js", () => ({
 }));
 
 vi.mock("../../src/config/config-io.js", () => ({
-  loadConfig: vi.fn(() => ({ agent: { default: null, forceBackground: false }, concurrency: { default: 4 } })),
+  loadConfig: vi.fn(() => ({ modelRouting: { enabled: false, allowedProviders: [], agentModels: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } })),
   saveConfigAtomic: vi.fn(),
-  DEFAULT_CONFIG: { agent: { default: null, forceBackground: false }, concurrency: { default: 4 } },
+  DEFAULT_CONFIG: { modelRouting: { enabled: false, allowedProviders: [], agentModels: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } },
 }));
 
 // Result formatting has its own tests; coordinator only owns delivery and scheduling.

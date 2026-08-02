@@ -23,9 +23,10 @@ const mocks = vi.hoisted(() => {
   return Object.assign(state, {
     session,
     createAgentSession: vi.fn(async () => ({ session, extensionsResult: {} })),
+    routingEnabled: true as boolean,
+    allowedProviders: [] as string[],
     store: {
       agent: {
-        allowCrossProvider: true,
         defaultThinking: "high",
         graceTurns: 2,
         forceBackground: false,
@@ -33,7 +34,13 @@ const mocks = vi.hoisted(() => {
         loadExtensionsImplicitly: true,
         includeContextFiles: false,
       },
-      modelFor: vi.fn(() => "parent/worker-model"),
+      get routing() {
+        return {
+          enabled: state.routingEnabled,
+          allowedProviders: [...state.allowedProviders],
+          agentModels: {},
+        };
+      },
       modelSelectionFor: vi.fn(() => ({ model: "parent/worker-model", source: "automatic" })),
     },
     coordinator: undefined as any,
@@ -109,7 +116,8 @@ describe("queued automatic model permission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resetPrompt();
-    mocks.store.agent.allowCrossProvider = true;
+    mocks.routingEnabled = true;
+    mocks.allowedProviders = ["other"];
     mocks.ctx = {
       cwd: "/tmp/project",
       model: { provider: "parent", id: "main-model" },
@@ -135,7 +143,6 @@ describe("queued automatic model permission", () => {
     ["cross-provider explicit model", "other", true],
   ])("rechecks permission for a queued %s before creating the child session", async (_label, workerProvider, explicit) => {
     const selectedModel = `${workerProvider}/worker-model`;
-    mocks.store.modelFor.mockReturnValue(selectedModel);
     mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
     mocks.session.model = { provider: workerProvider, id: "worker-model" };
     mocks.ctx.scopedModels[1] = { model: { provider: workerProvider, id: "worker-model" } };
@@ -149,13 +156,13 @@ describe("queued automatic model permission", () => {
     expect(first.lifecycle.status).toBe("running");
     expect(second.lifecycle.status).toBe("queued");
 
-    mocks.store.agent.allowCrossProvider = false;
+    mocks.routingEnabled = false;
     mocks.releaseFirst();
     await first.execution.promise;
     await vi.waitFor(() => expect(second.lifecycle.status).toBe("error"));
 
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
-    expect(second.error).toContain(explicit ? "different provider" : "Automatic model override");
+    expect(second.error).toContain(explicit ? "Cross-provider routing is OFF" : "Automatic model override");
 
     mocks.coordinator.dispose();
     await mocks.manager.dispose();
@@ -192,7 +199,6 @@ describe("queued automatic model permission", () => {
 
   it("waits for a queued foreground agent until it actually settles", async () => {
     const selectedModel = "parent/worker-model";
-    mocks.store.modelFor.mockReturnValue(selectedModel);
     mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
     mocks.ctx.scopedModels[1] = { model: { provider: "parent", id: "worker-model" } };
 

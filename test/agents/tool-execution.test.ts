@@ -27,14 +27,14 @@ const {
   mockGetRecord,
   mockDiscoverNewAgents,
   mockScopedModelKeys,
-  mockAgentSettings,
+  mockRouting,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
   mockGetRecord: vi.fn(),
   mockDiscoverNewAgents: vi.fn(async () => 0),
   mockScopedModelKeys: vi.fn(() => null),
-  mockAgentSettings: { allowCrossProvider: false },
+  mockRouting: { enabled: false, allowedProviders: [] as string[] },
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -52,10 +52,6 @@ vi.mock("../../src/models/model-scope.js", () => ({
   // that executeAgentTool enforces the returned scope and surfaces its error.
   scopedModelKeys: mockScopedModelKeys,
   modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
-  isModelInScope: (
-    model: { provider: string; id: string },
-    scopedKeys: ReadonlySet<string> | null,
-  ) => !scopedKeys || scopedKeys.has(`${model.provider}/${model.id}`),
   scopedThinkingLevel: (
     scopedModels: Array<{ model: { provider: string; id: string }; thinkingLevel?: string }>,
     model: { provider: string; id: string } | undefined,
@@ -66,10 +62,25 @@ vi.mock("../../src/models/model-scope.js", () => ({
     "Cannot start an agent because the parent session has no active model. Select a parent model first.",
   missingSubagentModelError: () =>
     "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.",
-  crossProviderModelError: (modelRef: string, parentProvider: string) =>
-    `Model "${modelRef}" uses a different provider than the parent (${parentProvider}).`,
+  automaticModelOverrideError: (modelRef: string) =>
+    `Automatic model override "${modelRef}" is no longer authorized.`,
+  routingDisabledModelError: (modelRef: string) =>
+    `Model "${modelRef}" cannot be used while Cross-provider routing is OFF.`,
+  providerNotAllowedError: (modelRef: string) =>
+    `Model "${modelRef}" is not authorized: provider not on the allowed list.`,
   outOfScopeModelError: (modelRef: string, scopedKeys: ReadonlySet<string>) =>
     `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
+}));
+
+vi.mock("../../src/models/model-precedence.js", () => ({
+  authorizeModel: (ctx: any) => {
+    if (ctx.scopedKeys && !ctx.scopedKeys.has(ctx.modelKey)) return { ok: false, reason: "out-of-scope" };
+    if (ctx.parentModelKey && ctx.modelKey === ctx.parentModelKey) return { ok: true };
+    if (!ctx.routingEnabled) return { ok: false, reason: "routing-disabled" };
+    const provider = ctx.modelKey.slice(0, ctx.modelKey.indexOf("/"));
+    if (provider === ctx.parentProvider || ctx.allowedProviders.includes(provider)) return { ok: true };
+    return { ok: false, reason: "provider-not-allowed" };
+  },
 }));
 
 vi.mock("../../src/shell.js", () => ({
@@ -78,12 +89,14 @@ vi.mock("../../src/shell.js", () => ({
       return {
         graceTurns: 5,
         forceBackground: false,
-        allowCrossProvider: mockAgentSettings.allowCrossProvider,
       };
     },
-    modelFor(type: string, parentModelId: string, agentConfig?: any) {
-      if (agentConfig?.model) return agentConfig.model;
-      return parentModelId;
+    get routing() {
+      return {
+        enabled: mockRouting.enabled,
+        allowedProviders: [...mockRouting.allowedProviders],
+        agentModels: {},
+      };
     },
     modelSelectionFor(type: string, parentModelId: string, agentConfig?: any) {
       return agentConfig?.model
@@ -138,7 +151,8 @@ import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
 
 beforeEach(() => {
-  mockAgentSettings.allowCrossProvider = false;
+  mockRouting.enabled = false;
+  mockRouting.allowedProviders = [];
 });
 
 /* ------------------------------------------------------------------ */
@@ -525,12 +539,16 @@ describe("executeAgentTool — model param", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAgentSettings.allowCrossProvider = true;
+    mockRouting.enabled = true;
+    mockRouting.allowedProviders = ["cpa-responses"];
     ctx = fakeCtx();
     ctx.model = { provider: "test", id: "parent-model" };
     ctx.modelRegistry = {
       find: vi.fn((provider: string, modelId: string) => {
         if (provider === "cpa-responses" && modelId === "grok-4.5") {
+          return { provider, id: modelId };
+        }
+        if (provider === "test" && modelId === "parent-model") {
           return { provider, id: modelId };
         }
         return undefined;
@@ -552,8 +570,8 @@ describe("executeAgentTool — model param", () => {
   it.each([
     ["an inherited model", undefined],
     ["an explicit model", "cpa-responses/grok-4.5"],
-  ])("rejects %s when the parent has no active model and permission is off", async (_label, model) => {
-    mockAgentSettings.allowCrossProvider = false;
+  ])("rejects %s when the parent has no active model and routing is off", async (_label, model) => {
+    mockRouting.enabled = false;
     ctx.model = undefined;
 
     const result = await executeAgentTool(
@@ -569,7 +587,7 @@ describe("executeAgentTool — model param", () => {
     expect(result.content[0].text).toContain("parent session has no active model");
   });
 
-  it("rejects when permission is on but no model can be resolved", async () => {
+  it("rejects when routing is on but no model can be resolved", async () => {
     ctx.model = undefined;
 
     const result = await executeAgentTool(
@@ -585,8 +603,42 @@ describe("executeAgentTool — model param", () => {
     expect(result.content[0].text).toContain("no subagent model could be resolved");
   });
 
-  it("blocks another provider until the user enables it", async () => {
-    mockAgentSettings.allowCrossProvider = false;
+  it("rejects any non-parent explicit model while routing is OFF (even same provider)", async () => {
+    mockRouting.enabled = false;
+    ctx.modelRegistry.find = vi.fn((provider: string, id: string) => ({ provider, id }));
+
+    const result = await executeAgentTool(
+      "tc-model-routing-off",
+      makeParams({ model: "test/other-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Cross-provider routing is OFF");
+  });
+
+  it("allows the exact parent model explicitly while routing is OFF", async () => {
+    mockRouting.enabled = false;
+
+    const result = await executeAgentTool(
+      "tc-model-parent-explicit",
+      makeParams({ model: "test/parent-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "test", id: "parent-model" });
+  });
+
+  it("rejects a provider that is not on the allowlist while routing is ON", async () => {
+    mockRouting.allowedProviders = [];
 
     const result = await executeAgentTool(
       "tc-model-provider-blocked",
@@ -598,10 +650,12 @@ describe("executeAgentTool — model param", () => {
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("different provider");
+    expect(result.content[0].text).toContain("not authorized");
   });
 
-  it("forwards explicit provider/model-id to spawn", async () => {
+  it("forwards explicit provider/model-id to spawn when the provider is allowed", async () => {
+    mockRouting.allowedProviders = ["cpa-responses"];
+
     await executeAgentTool(
       "tc-model",
       makeParams({ model: "cpa-responses/grok-4.5" }),
@@ -617,6 +671,8 @@ describe("executeAgentTool — model param", () => {
   });
 
   it("resolves bare model id via registry getAvailable", async () => {
+    mockRouting.allowedProviders = ["cpa-responses"];
+
     await executeAgentTool(
       "tc-model-bare",
       makeParams({ model: "grok-4.5" }),
@@ -628,6 +684,22 @@ describe("executeAgentTool — model param", () => {
     const spawnOptions = mockSpawn.mock.calls[0][4];
     expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
     expect(spawnOptions.modelKey).toBe("cpa-responses/grok-4.5");
+  });
+
+  it("allows any model from the parent provider while routing is ON", async () => {
+    ctx.modelRegistry.find = vi.fn((provider: string, modelId: string) => ({ provider, id: modelId }));
+
+    await executeAgentTool(
+      "tc-model-parent-provider",
+      makeParams({ model: "test/other-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const spawnOptions = mockSpawn.mock.calls[0][4];
+    expect(spawnOptions.model).toEqual({ provider: "test", id: "other-model" });
   });
 
   it("keeps scope-pinned thinking above agent defaults", async () => {
@@ -750,6 +822,24 @@ describe("executeAgentTool — model param", () => {
     const spawnOptions = mockSpawn.mock.calls[0][4];
     expect(spawnOptions.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
   });
+
+  it("rejects a model outside the active Model scope", async () => {
+    mockScopedModelKeys.mockReturnValueOnce(
+      new Set(["test/parent-model"]),
+    );
+
+    const result = await executeAgentTool(
+      "tc-model-out-of-scope",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not in the active model scope");
+  });
 });
 
 describe("executeAgentTool — automatic model selection", () => {
@@ -757,6 +847,8 @@ describe("executeAgentTool — automatic model selection", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRouting.enabled = false;
+    mockRouting.allowedProviders = [];
     ctx = fakeCtx();
     ctx.model = { provider: "parent", id: "main-model" };
     ctx.modelRegistry = {
@@ -772,7 +864,7 @@ describe("executeAgentTool — automatic model selection", () => {
     });
   });
 
-  it("inherits the exact parent model by default", async () => {
+  it("inherits the exact parent model by default, ignoring frontmatter while OFF", async () => {
     vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
 
     await executeAgentTool(
@@ -788,8 +880,8 @@ describe("executeAgentTool — automatic model selection", () => {
     expect(options.modelSource).toBe("parent");
   });
 
-  it("keeps automatic provenance when the configured model equals the parent", async () => {
-    mockAgentSettings.allowCrossProvider = true;
+  it("keeps automatic provenance when an assignment equals the parent model", async () => {
+    mockRouting.enabled = true;
     vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "parent/main-model" } as any);
 
     await executeAgentTool(
@@ -805,8 +897,9 @@ describe("executeAgentTool — automatic model selection", () => {
     expect(options.modelSource).toBe("automatic");
   });
 
-  it("marks configured models as automatic when permission is enabled", async () => {
-    mockAgentSettings.allowCrossProvider = true;
+  it("marks frontmatter models as automatic when routing is enabled and the provider is allowed", async () => {
+    mockRouting.enabled = true;
+    mockRouting.allowedProviders = ["other"];
     vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
 
     await executeAgentTool(
@@ -820,5 +913,39 @@ describe("executeAgentTool — automatic model selection", () => {
     const options = mockSpawn.mock.calls[0][4];
     expect(options.model).toEqual({ provider: "other", id: "provider-model" });
     expect(options.modelSource).toBe("automatic");
+  });
+
+  it("explicit Agent-tool model wins over frontmatter while ON", async () => {
+    mockRouting.enabled = true;
+    vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
+
+    await executeAgentTool(
+      "tc-explicit-over-frontmatter",
+      makeParams({ agent: "Explore", model: "parent/other-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.model).toEqual({ provider: "parent", id: "other-model" });
+    expect(options.modelSource).toBe("explicit");
+  });
+
+  it("rejects a frontmatter model from a provider not on the allowlist", async () => {
+    mockRouting.enabled = true;
+    vi.mocked(agentTypes.getAgentConfig).mockReturnValueOnce({ model: "other/provider-model" } as any);
+
+    const result = await executeAgentTool(
+      "tc-frontmatter-blocked",
+      makeParams({ agent: "Explore", model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not authorized");
   });
 });

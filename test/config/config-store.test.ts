@@ -9,14 +9,17 @@ import { describe, it, expect } from "vitest";
 import { ConfigStore, type ConfigIO } from "../../src/config/config-store.ts";
 import type { AgentNavigator } from "../../src/ui/agent-navigator.ts";
 import type { AgentManager } from "../../src/agents/agent-manager.ts";
-import type { SubagentsConfig } from "../../src/models/model-precedence.ts";
+import type { SubagentsConfig } from "../../src/config/types.ts";
 
 function defaultConfig(): SubagentsConfig {
   // Matches the defaults merged by loadConfig when no config file exists
   return {
-    allowCrossProvider: false,
+    modelRouting: {
+      enabled: false,
+      allowedProviders: [],
+      agentModels: {},
+    },
     agent: {
-      default: null,
       forceBackground: false,
       graceTurns: 6,
       systemPromptMode: "replace",
@@ -38,7 +41,11 @@ function defaultConfig(): SubagentsConfig {
 function memIO(initial: Partial<SubagentsConfig> = defaultConfig()): { io: ConfigIO; saves: SubagentsConfig[]; current: () => SubagentsConfig } {
   // Merge with defaults like loadConfig does
   const merged: SubagentsConfig = {
-    allowCrossProvider: initial.allowCrossProvider === true,
+    modelRouting: {
+      enabled: initial.modelRouting?.enabled === true,
+      allowedProviders: [...(initial.modelRouting?.allowedProviders ?? [])],
+      agentModels: { ...(initial.modelRouting?.agentModels ?? {}) },
+    },
     agent: { ...(defaultConfig().agent), ...(initial.agent ?? {}) },
     concurrency: { default: 4, ...(initial.concurrency ?? {}) },
   };
@@ -77,31 +84,46 @@ function managerStub(): { m: AgentManager; concurrencies: unknown[] } {
 
 describe("ConfigStore reads", () => {
   it("bakes in scalar defaults when fields are absent", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false }, concurrency: { default: 4 } });
+    const { io } = memIO({ agent: { forceBackground: false }, concurrency: { default: 4 } });
     const store = new ConfigStore(io);
     expect(store.agent.graceTurns).toBe(6);
     expect(store.agent.showCost).toBe(false);
     expect(store.agent.forceBackground).toBe(false);
-    expect(store.agent.allowCrossProvider).toBe(false);
-    expect(store.agent.defaultModel).toBeNull();
+    expect(store.routing.enabled).toBe(false);
+    expect(store.routing.allowedProviders).toEqual([]);
+    expect(store.routing.agentModels).toEqual({});
   });
 
   it("returns configured values when present", () => {
     const { io } = memIO({
-      agent: { default: "config/default", forceBackground: true, graceTurns: 9, showCost: true },
+      modelRouting: { enabled: true, allowedProviders: ["openai"], agentModels: { Explore: "openai/gpt-4o" } },
+      agent: { forceBackground: true, graceTurns: 9, showCost: true },
       concurrency: { default: 2 },
     });
     const store = new ConfigStore(io);
     expect(store.agent.graceTurns).toBe(9);
     expect(store.agent.showCost).toBe(true);
     expect(store.concurrency.default).toBe(2);
-    expect(store.agent.defaultModel).toBe("config/default");
+    expect(store.routing.enabled).toBe(true);
+    expect(store.routing.allowedProviders).toEqual(["openai"]);
+    expect(store.routing.agentModels).toEqual({ Explore: "openai/gpt-4o" });
   });
 
   it("concurrency providers/models default to {}", () => {
     const store = new ConfigStore(memIO().io);
     expect(store.concurrency.providers).toEqual({});
     expect(store.concurrency.models).toEqual({});
+  });
+
+  it("routing getters return copies so callers cannot mutate the store", () => {
+    const { io } = memIO({
+      modelRouting: { enabled: true, allowedProviders: ["openai"], agentModels: { Explore: "openai/gpt-4o" } },
+    });
+    const store = new ConfigStore(io);
+    store.routing.allowedProviders.push("xai");
+    store.routing.agentModels["reviewer"] = "xai/grok-4";
+    expect(store.routing.allowedProviders).toEqual(["openai"]);
+    expect(store.routing.agentModels).toEqual({ Explore: "openai/gpt-4o" });
   });
 });
 
@@ -110,23 +132,35 @@ describe("ConfigStore reads", () => {
 /* ------------------------------------------------------------------ */
 
 describe("ConfigStore model resolution", () => {
-  it("session per-type override wins", () => {
-    const { io } = memIO({ agent: { default: "config/default", forceBackground: false, Explore: "config/explore" }, concurrency: { default: 4 } });
+  it("session assignment wins over persistent and frontmatter", () => {
+    const { io } = memIO({
+      modelRouting: { enabled: true, allowedProviders: [], agentModels: { Explore: "persistent/explore" } },
+      agent: { forceBackground: false },
+      concurrency: { default: 4 },
+    });
     const store = new ConfigStore(io);
     store.mutate.session.setOverride("Explore", "session/explore");
-    expect(store.modelFor("Explore", "parent", { model: "frontmatter" })).toBe("session/explore");
+    expect(store.modelSelectionFor("Explore", "parent", { model: "frontmatter" }))
+      .toEqual({ model: "session/explore", source: "automatic" });
   });
 
-  it("falls through config -> frontmatter -> parent", () => {
-    const { io } = memIO({ agent: { default: "config/default", forceBackground: false }, concurrency: { default: 4 } });
+  it("falls through persistent -> frontmatter -> parent", () => {
+    const { io } = memIO({
+      modelRouting: { enabled: true, allowedProviders: [], agentModels: { Explore: "persistent/explore" } },
+      agent: { forceBackground: false },
+      concurrency: { default: 4 },
+    });
     const store = new ConfigStore(io);
-    expect(store.modelFor("Explore", "parent", { model: "frontmatter" })).toBe("config/default");
-    expect(store.modelFor("Explore", "parent")).toBe("config/default");
+    expect(store.modelSelectionFor("Explore", "parent", { model: "frontmatter" }))
+      .toEqual({ model: "persistent/explore", source: "automatic" });
+    expect(store.modelSelectionFor("reviewer", "parent", { model: "frontmatter" }))
+      .toEqual({ model: "frontmatter", source: "automatic" });
   });
 
-  it("returns parentModelId when nothing else is set", () => {
+  it("returns parentModelId when nothing is assigned", () => {
     const store = new ConfigStore(memIO().io);
-    expect(store.modelFor("Explore", "parent/model")).toBe("parent/model");
+    expect(store.modelSelectionFor("Explore", "parent/model"))
+      .toEqual({ model: "parent/model", source: "parent" });
   });
 });
 
@@ -169,7 +203,7 @@ describe("ConfigStore persisted mutations", () => {
   });
 
   it("removeProvider / removeModel delete and re-sync", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false }, concurrency: { default: 4, providers: { llamacpp: 2 }, models: { "a/b": 1 } } });
+    const { io } = memIO({ agent: { forceBackground: false }, concurrency: { default: 4, providers: { llamacpp: 2 }, models: { "a/b": 1 } } });
     const { m } = managerStub();
     const store = new ConfigStore(io);
     store.setDeps({ manager: m });
@@ -180,7 +214,7 @@ describe("ConfigStore persisted mutations", () => {
   });
 
   it("resetConcurrency restores defaults and re-syncs", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false }, concurrency: { default: 4, providers: { x: 1 } } });
+    const { io } = memIO({ agent: { forceBackground: false }, concurrency: { default: 4, providers: { x: 1 } } });
     const store = new ConfigStore(io);
     store.mutate.concurrency.reset();
     expect(store.concurrency.default).toBe(4);
@@ -189,34 +223,70 @@ describe("ConfigStore persisted mutations", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Model-override clearing                                             */
+/*  Routing policy mutations                                            */
 /* ------------------------------------------------------------------ */
 
-describe("ConfigStore model-override clearing", () => {
-  it("clearModelOverride removes a single per-type override", () => {
-    const { io, saves } = memIO({ agent: { default: null, forceBackground: false, Explore: "m1", general: "m2" }, concurrency: { default: 4 } });
+describe("ConfigStore routing mutations", () => {
+  it("setEnabled toggles the routing switch and persists", () => {
+    const { io, saves } = memIO();
     const store = new ConfigStore(io);
-    store.mutate.agent.clearModelOverride("Explore");
-    expect(store.agentConfigSnapshot().Explore).toBeUndefined();
-    expect(store.agentConfigSnapshot().general).toBe("m2");
+    store.mutate.routing.setEnabled(true);
+    expect(store.routing.enabled).toBe(true);
+    expect(saves).toHaveLength(1);
+    expect(saves[0].modelRouting.enabled).toBe(true);
+  });
+
+  it("setProviderAllowed adds and removes providers from the allowlist", () => {
+    const { io } = memIO();
+    const store = new ConfigStore(io);
+    store.mutate.routing.setProviderAllowed("openai", true);
+    store.mutate.routing.setProviderAllowed("google", true);
+    expect(store.routing.allowedProviders.sort()).toEqual(["google", "openai"]);
+    store.mutate.routing.setProviderAllowed("openai", false);
+    expect(store.routing.allowedProviders).toEqual(["google"]);
+  });
+
+  it("removeProvider clears the allowlist entry and every assignment using it", () => {
+    const { io, saves } = memIO({
+      modelRouting: {
+        enabled: true,
+        allowedProviders: ["openai", "google"],
+        agentModels: {
+          Explore: "openai/gpt-4o",
+          researcher: "openai/gpt-5",
+          reviewer: "google/gemini-2.5-pro",
+        },
+      },
+    });
+    const store = new ConfigStore(io);
+    store.mutate.routing.removeProvider("openai");
+    expect(store.routing.allowedProviders).toEqual(["google"]);
+    expect(store.routing.agentModels).toEqual({ reviewer: "google/gemini-2.5-pro" });
     expect(saves).toHaveLength(1);
   });
 
-  it("clearAllModelOverrides preserves active settings and drops stale keys", () => {
-    const { io } = memIO({
-      agent: { default: "keep-default", forceBackground: true, graceTurns: 7, showCost: true, widgetMaxLines: 14, Explore: "m1", general: "m2" },
-      concurrency: { default: 4 },
+  it("setAgentModel sets, updates, and clears (null) a persistent assignment", () => {
+    const { io, saves } = memIO();
+    const store = new ConfigStore(io);
+    store.mutate.routing.setAgentModel("Explore", "openai/gpt-4o");
+    expect(store.routing.agentModels).toEqual({ Explore: "openai/gpt-4o" });
+    store.mutate.routing.setAgentModel("Explore", null);
+    expect(store.routing.agentModels).toEqual({});
+    expect(saves).toHaveLength(2);
+  });
+
+  it("clearAll resets the allowlist, assignments, and switch", () => {
+    const { io, saves } = memIO({
+      modelRouting: {
+        enabled: true,
+        allowedProviders: ["openai"],
+        agentModels: { Explore: "openai/gpt-4o" },
+      },
     });
     const store = new ConfigStore(io);
-    store.mutate.agent.clearAllModelOverrides();
-    const snap = store.agentConfigSnapshot();
-    expect(snap.Explore).toBeUndefined();
-    expect(snap.general).toBeUndefined();
-    expect(snap.default).toBe("keep-default");
-    expect(snap.forceBackground).toBe(true);
-    expect(snap.graceTurns).toBe(7);
-    expect(snap.showCost).toBe(true);
-    expect(snap.widgetMaxLines).toBeUndefined();
+    store.mutate.routing.clearAll();
+    expect(store.routing).toEqual({ enabled: false, allowedProviders: [], agentModels: {} });
+    expect(saves).toHaveLength(1);
   });
 });
 
@@ -235,20 +305,21 @@ describe("ConfigStore session overrides", () => {
     expect(saves).toHaveLength(0);
   });
 
-  it("are readable and affect modelFor", () => {
+  it("are readable and affect modelSelectionFor", () => {
     const store = new ConfigStore(memIO().io);
     store.mutate.session.setOverride("Explore", "session/explore");
     expect(store.sessionModelOverride("Explore")).toBe("session/explore");
-    expect(store.modelFor("Explore", "parent")).toBe("session/explore");
+    expect(store.modelSelectionFor("Explore", "parent"))
+      .toEqual({ model: "session/explore", source: "automatic" });
   });
 
-  it("clearAll resets to { default: null }", () => {
+  it("clearAll resets to an empty map", () => {
     const store = new ConfigStore(memIO().io);
     store.mutate.session.setOverride("Explore", "x");
-    store.mutate.session.setOverride("default", "y");
+    store.mutate.session.setOverride("reviewer", "y");
     store.mutate.session.clearAll();
     expect(store.sessionModelOverride("Explore")).toBeNull();
-    expect(store.sessionDefaultModel).toBeNull();
+    expect(store.sessionModelOverride("reviewer")).toBeNull();
   });
 });
 
@@ -263,7 +334,6 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.loadSkillsImplicitly).toBe(true);
     expect(store.agent.loadExtensionsImplicitly).toBe(true);
     expect(store.agent.disableDefaultAgents).toBe(false);
-    expect(store.agent.allowCrossProvider).toBe(false);
   });
 
   it("string property defaults to 'replace'", () => {
@@ -278,13 +348,13 @@ describe("ConfigStore agent properties", () => {
 
   it("configured values override defaults", () => {
     const { io } = memIO({
-      allowCrossProvider: true,
-      agent: { default: null, forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
+      modelRouting: { enabled: true, allowedProviders: [], agentModels: {} },
+      agent: { forceBackground: false, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "high", loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
     expect(store.agent.includeContextFiles).toBe(false);
-    expect(store.agent.allowCrossProvider).toBe(true);
+    expect(store.routing.enabled).toBe(true);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("high");
     expect(store.agent.loadSkillsImplicitly).toBe(false);
@@ -297,7 +367,6 @@ describe("ConfigStore agent properties", () => {
     const store = new ConfigStore(io);
 
     store.mutate.agent.setIncludeContextFiles(false);
-    store.mutate.agent.setAllowCrossProvider(true);
     store.mutate.agent.setSystemPromptMode("custom");
     store.mutate.agent.setDefaultThinking("medium");
     store.mutate.agent.setLoadSkillsImplicitly(false);
@@ -305,56 +374,30 @@ describe("ConfigStore agent properties", () => {
     store.mutate.agent.setDisableDefaultAgents(true);
 
     expect(store.agent.includeContextFiles).toBe(false);
-    expect(store.agent.allowCrossProvider).toBe(true);
     expect(store.agent.systemPromptMode).toBe("custom");
     expect(store.agent.defaultThinking).toBe("medium");
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
-    expect(saves).toHaveLength(7);
-  });
-
-  it("keeps an agent type named allowCrossProvider separate from the permission", () => {
-    const { io } = memIO({
-      allowCrossProvider: false,
-      agent: { default: null, forceBackground: false, allowCrossProvider: "provider/model" },
-      concurrency: { default: 4 },
-    });
-    const store = new ConfigStore(io);
-
-    store.mutate.agent.setAllowCrossProvider(true);
-
-    expect(store.agent.allowCrossProvider).toBe(true);
-    expect(store.agentConfigSnapshot().allowCrossProvider).toBe("provider/model");
+    expect(saves).toHaveLength(6);
   });
 
   it("setDefaultThinking(undefined) removes the field", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, defaultThinking: "high" }, concurrency: { default: 4 } });
+    const { io } = memIO({ agent: { forceBackground: false, defaultThinking: "high" }, concurrency: { default: 4 } });
     const store = new ConfigStore(io);
     store.mutate.agent.setDefaultThinking(undefined);
     expect(store.agent.defaultThinking).toBeUndefined();
-    expect(store.agentConfigSnapshot().defaultThinking).toBeUndefined();
   });
 
-  it("clearAllModelOverrides preserves all active agent properties", () => {
+  it("agent settings are never used to store model choices", () => {
     const { io } = memIO({
-      allowCrossProvider: true,
-      agent: { default: "keep", forceBackground: true, includeContextFiles: false, systemPromptMode: "custom", defaultThinking: "low", widgetDescLengthFull: 80, loadSkillsImplicitly: false, loadExtensionsImplicitly: false, disableDefaultAgents: true, showTools: false, Explore: "m1" },
-      concurrency: { default: 4 },
+      modelRouting: { enabled: true, allowedProviders: ["openai"], agentModels: { Explore: "openai/gpt-4o" } },
+      agent: { forceBackground: false },
     });
     const store = new ConfigStore(io);
-    store.mutate.agent.clearAllModelOverrides();
-    const snap = store.agentConfigSnapshot();
-    expect(snap.includeContextFiles).toBe(false);
-    expect(store.agent.allowCrossProvider).toBe(true);
-    expect(snap.systemPromptMode).toBe("custom");
-    expect(snap.defaultThinking).toBe("low");
-    expect(snap.widgetDescLengthFull).toBeUndefined();
-    expect(snap.loadSkillsImplicitly).toBe(false);
-    expect(snap.loadExtensionsImplicitly).toBe(false);
-    expect(snap.disableDefaultAgents).toBe(true);
-    expect(snap.showTools).toBe(false);
-    expect(snap.Explore).toBeUndefined();
+    expect(store.agent.forceBackground).toBe(false);
+    expect((store as any).config.agent.Explore).toBeUndefined();
+    expect(store.routing.agentModels.Explore).toBe("openai/gpt-4o");
   });
 });
 
@@ -363,7 +406,7 @@ describe("ConfigStore agent properties", () => {
 /* ------------------------------------------------------------------ */
 
 describe("ConfigStore lifecycle", () => {
-  it("reload re-reads disk and resets session overrides", () => {
+  it("reload re-reads disk and resets session assignments", () => {
     const { io, current } = memIO();
     const store = new ConfigStore(io);
     store.mutate.session.setOverride("Explore", "session/explore");
@@ -377,7 +420,7 @@ describe("ConfigStore lifecycle", () => {
   });
 
   it("reload resynchronizes navigator visibility", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showCost: true }, concurrency: { default: 4 } });
+    const { io } = memIO({ agent: { forceBackground: false, showCost: true }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
     store.setDeps({ navigator: nav });
@@ -387,7 +430,7 @@ describe("ConfigStore lifecycle", () => {
   });
 
   it("setDeps immediately syncs the navigator from current config", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
+    const { io } = memIO({ agent: { forceBackground: false, showTools: false }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
     store.setDeps({ navigator: nav });
@@ -423,7 +466,7 @@ describe("ConfigStore show* stats visibility", () => {
 
   it("configured false values are respected", () => {
     const { io } = memIO({
-      agent: { default: null, forceBackground: false, showTools: false, showTurns: false, showInput: false, showOutput: false, showContext: false, showTime: false },
+      agent: { forceBackground: false, showTools: false, showTurns: false, showInput: false, showOutput: false, showContext: false, showTime: false },
       concurrency: { default: 4 },
     });
     const store = new ConfigStore(io);
@@ -450,7 +493,7 @@ describe("ConfigStore show* stats visibility", () => {
   });
 
   it("reload syncs visibility to the navigator", () => {
-    const { io } = memIO({ agent: { default: null, forceBackground: false, showTools: false }, concurrency: { default: 4 } });
+    const { io } = memIO({ agent: { forceBackground: false, showTools: false }, concurrency: { default: 4 } });
     const { nav, calls } = navigatorStub();
     const store = new ConfigStore(io);
     store.setDeps({ navigator: nav });

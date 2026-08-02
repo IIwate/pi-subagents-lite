@@ -5,13 +5,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   automaticModelOverrideError,
-  crossProviderModelError,
-  isModelInScope,
   listModelOptionsForMenus,
   missingParentModelError,
   missingSubagentModelError,
   modelKey,
   outOfScopeModelError,
+  providerNotAllowedError,
+  routingDisabledModelError,
   scopedModelKeys,
   scopedThinkingLevel,
 } from "../../src/models/model-scope.ts";
@@ -27,19 +27,35 @@ describe("missing model errors", () => {
 });
 
 describe("automaticModelOverrideError", () => {
-  it("explains that queued automatic selection lost authorization", () => {
+  it("explains that a queued automatic selection lost authorization", () => {
     const message = automaticModelOverrideError("same-provider/worker");
     expect(message).toContain("same-provider/worker");
     expect(message).toContain("no longer authorized");
-    expect(message).toContain("Allow cross-provider");
+    expect(message).toContain("Cross-provider routing");
   });
 });
 
-describe("crossProviderModelError", () => {
-  it("points users to the cross-provider permission", () => {
-    const message = crossProviderModelError("other/model", "parent");
+describe("routingDisabledModelError", () => {
+  it("points users at the routing switch when OFF rejects a model", () => {
+    const message = routingDisabledModelError("parent/other");
+    expect(message).toContain("parent/other");
+    expect(message).toContain("Cross-provider routing is OFF");
+    expect(message).toContain("exact parent model");
+  });
+});
+
+describe("providerNotAllowedError", () => {
+  it("lists the parent provider and the allowlist", () => {
+    const message = providerNotAllowedError("other/model", "parent", ["openai"]);
     expect(message).toContain("other/model");
-    expect(message).toContain("Allow cross-provider");
+    expect(message).toContain("parent");
+    expect(message).toContain("openai");
+    expect(message).toContain("Allowed providers");
+  });
+
+  it("handles an empty parent provider", () => {
+    const message = providerNotAllowedError("other/model", "", []);
+    expect(message).toContain("none");
   });
 });
 
@@ -71,18 +87,6 @@ describe("scopedThinkingLevel", () => {
       { model: grok, thinkingLevel: "high" },
       { model: gemini, thinkingLevel: "low" },
     ], gemini)).toBe("low");
-  });
-});
-
-describe("isModelInScope", () => {
-  it("allows any model when scopedKeys is null", () => {
-    expect(isModelInScope({ provider: "x", id: "y" }, null)).toBe(true);
-  });
-
-  it("accepts only models present in the scope set", () => {
-    const scope = new Set(["cpa-responses/grok-4.5"]);
-    expect(isModelInScope(grok, scope)).toBe(true);
-    expect(isModelInScope(gemini, scope)).toBe(false);
   });
 });
 

@@ -43,7 +43,7 @@ import { showSystemPromptMenu } from "../../../src/ui/menu/menu-system-prompt.js
 
 describe("showSystemPromptMenu — SettingsList integration", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -60,7 +60,7 @@ describe("showSystemPromptMenu — SettingsList integration", () => {
 
 describe("showSystemPromptMenu — system prompt mode", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -95,7 +95,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
   let writeFileSyncSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false, systemPromptMode: "custom" };
+    mockModules.mockConfig.agent = { forceBackground: false, systemPromptMode: "custom" };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -159,7 +159,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
 
 describe("showSystemPromptMenu — Include AGENTS.md", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -191,7 +191,7 @@ describe("showSystemPromptMenu — Include AGENTS.md", () => {
 
 describe("showSystemPromptMenu — Load skills implicitly", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -223,7 +223,7 @@ describe("showSystemPromptMenu — Load skills implicitly", () => {
 
 describe("showSystemPromptMenu — Load extensions implicitly", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
@@ -255,7 +255,7 @@ describe("showSystemPromptMenu — Load extensions implicitly", () => {
 
 describe("showSystemPromptMenu — item order", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false };
     mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];

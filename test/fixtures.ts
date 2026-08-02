@@ -61,7 +61,6 @@ export function shellMock(fns: ShellMockFns = {}) {
   const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };
   const store = fns.store ?? {
     agent: { graceTurns: 6, forceBackground: false, showCost: false },
-    modelFor: () => "",
   };
   const coordinator = fns.coordinator ?? { spawn: vi.fn() };
   const widget = fns.widget ?? undefined;

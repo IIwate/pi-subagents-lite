@@ -10,12 +10,26 @@ vi.mock("../../../src/ui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 
-import { buildListTheme } from "../../../src/ui/menu/helpers.js";
+import { buildListTheme, buildModelOptions } from "../../../src/ui/menu/helpers.js";
 
 const mockTheme = {
   fg: (color: string, text: string) => `[${color}:${text}]`,
   bold: (text: string) => `**${text}**`,
 };
+
+describe("buildModelOptions", () => {
+  it("puts parent inheritance after explicit models", () => {
+    const options = buildModelOptions([
+      "anthropic/claude-sonnet-4",
+      "openai/gpt-4o",
+    ]);
+    expect(options.map((option) => option.value)).toEqual([
+      "anthropic/claude-sonnet-4",
+      "openai/gpt-4o",
+      "(inherits parent)",
+    ]);
+  });
+});
 
 describe("buildListTheme", () => {
   it("label applies accent when selected", () => {

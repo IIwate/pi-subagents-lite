@@ -27,7 +27,6 @@ import { showWidgetSettingsMenu } from "../../../src/ui/menu/menu-widget-setting
 
 function resetMocks(): void {
   mockModules.mockConfig.agent = {
-    default: null,
     forceBackground: false,
     showTools: true,
     showTurns: true,

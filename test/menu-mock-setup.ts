@@ -8,16 +8,19 @@
  */
 
 import { vi } from "vitest";
-import { CONFIG_AGENT_NON_MODEL_KEYS } from "../src/config/types.js";
 
 // Create the mock modules object
 export const mockModules = {
   mockConfig: {
-    allowCrossProvider: false,
-    agent: { default: null, forceBackground: false } as Record<string, any>,
+    modelRouting: {
+      enabled: false,
+      allowedProviders: [] as string[],
+      agentModels: {} as Record<string, string>,
+    },
+    agent: { forceBackground: false } as Record<string, any>,
     concurrency: { default: 4 } as Record<string, any>,
   },
-  mockSessionOverrides: { default: null } as Record<string, any>,
+  mockSessionOverrides: {} as Record<string, string>,
   mockPiInstance: null as any,
   mockNavigator: { setDebugStatusPreview: vi.fn() },
   mockManager: {
@@ -68,7 +71,8 @@ vi.mock("../src/config/config-io.js", () => ({
   DEFAULT_GRACE_TURNS: 6,
   CUSTOM_PROMPT_PATH: "/home/test/.pi/agent/subagents-lite-prompt.md",
   DEFAULT_CONFIG: {
-    agent: { default: null, forceBackground: false },
+    modelRouting: { enabled: false, allowedProviders: [], agentModels: {} },
+    agent: { forceBackground: false },
     concurrency: { default: 4 },
   },
 }));
@@ -82,9 +86,7 @@ vi.mock("../src/shell.js", () => {
     get agent() {
       const a = mockModules.mockConfig.agent;
       return {
-        defaultModel: a.default ?? null,
         forceBackground: a.forceBackground === true,
-        allowCrossProvider: mockModules.mockConfig.allowCrossProvider === true,
         showCost: a.showCost === true,
         graceTurns: a.graceTurns ?? 6,
         systemPromptMode: a.systemPromptMode ?? "replace",
@@ -92,12 +94,21 @@ vi.mock("../src/shell.js", () => {
         defaultThinking: a.defaultThinking,
         loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
         loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
+        disableDefaultAgents: a.disableDefaultAgents === true,
         showTools: a.showTools !== false,
         showTurns: a.showTurns !== false,
         showInput: a.showInput !== false,
         showOutput: a.showOutput !== false,
         showContext: a.showContext !== false,
         showTime: a.showTime !== false,
+      };
+    },
+    get routing() {
+      const r = mockModules.mockConfig.modelRouting;
+      return {
+        enabled: r.enabled === true,
+        allowedProviders: [...(r.allowedProviders ?? [])],
+        agentModels: { ...(r.agentModels ?? {}) },
       };
     },
     get concurrency() {
@@ -107,44 +118,48 @@ vi.mock("../src/shell.js", () => {
         models: mockModules.mockConfig.concurrency.models ?? {},
       };
     },
-    get sessionDefaultModel() {
-      return mockModules.mockSessionOverrides.default ?? null;
-    },
     sessionModelOverride(type: string) {
       return mockModules.mockSessionOverrides[type] ?? null;
     },
-    agentConfigSnapshot() {
-      return mockModules.mockConfig.agent;
-    },
-    modelFor(type: string, parentModelId: string, agentConfig?: any) {
+    modelSelectionFor(type: string, parentModelId: string, agentConfig?: any) {
       const sessionOverride = mockModules.mockSessionOverrides[type];
-      if (sessionOverride) return sessionOverride;
-      const sessionDefault = mockModules.mockSessionOverrides.default;
-      if (sessionDefault) return sessionDefault;
-      const configOverride = mockModules.mockConfig.agent[type];
-      if (configOverride) return configOverride;
-      const configDefault = mockModules.mockConfig.agent.default;
-      if (configDefault) return configDefault;
-      if (agentConfig?.model) return agentConfig.model;
-      return parentModelId;
+      if (sessionOverride) return { model: sessionOverride, source: "automatic" };
+      const persistent = mockModules.mockConfig.modelRouting.agentModels[type];
+      if (persistent) return { model: persistent, source: "automatic" };
+      if (agentConfig?.model) return { model: agentConfig.model, source: "automatic" };
+      return { model: parentModelId, source: "parent" };
     },
     mutate: {
-      agent: {
-        setModelOverride(type: string, value: string | null) { mockModules.mockConfig.agent[type] = value; },
-        clearModelOverride(type: string) { delete mockModules.mockConfig.agent[type]; },
-        clearAllModelOverrides() {
-          const preserved: Record<string, unknown> = {};
-          // Share the production non-model key list with clearAllModelOverrides to prevent drift.
-          for (const key of CONFIG_AGENT_NON_MODEL_KEYS) {
-            const val = mockModules.mockConfig.agent[key];
-            if (val != null || key === 'default' || key === 'forceBackground') {
-              preserved[key] = val;
-            }
-          }
-          mockModules.mockConfig.agent = preserved as any;
+      routing: {
+        setEnabled(enabled: boolean) { mockModules.mockConfig.modelRouting.enabled = enabled; },
+        setProviderAllowed(provider: string, allowed: boolean) {
+          const set = new Set(mockModules.mockConfig.modelRouting.allowedProviders ?? []);
+          if (allowed) set.add(provider); else set.delete(provider);
+          mockModules.mockConfig.modelRouting.allowedProviders = [...set];
         },
+        removeProvider(provider: string) {
+          mockModules.mockConfig.modelRouting.allowedProviders =
+            (mockModules.mockConfig.modelRouting.allowedProviders ?? []).filter((p: string) => p !== provider);
+          const kept: Record<string, string> = {};
+          for (const [type, model] of Object.entries(mockModules.mockConfig.modelRouting.agentModels ?? {})) {
+            const slashIdx = model.indexOf("/");
+            if (slashIdx <= 0 || model.slice(0, slashIdx) !== provider) kept[type] = model;
+          }
+          mockModules.mockConfig.modelRouting.agentModels = kept;
+        },
+        setAgentModel(type: string, model: string | null) {
+          if (model === null || model === "") {
+            delete mockModules.mockConfig.modelRouting.agentModels[type];
+          } else {
+            mockModules.mockConfig.modelRouting.agentModels[type] = model;
+          }
+        },
+        clearAll() {
+          mockModules.mockConfig.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
+        },
+      },
+      agent: {
         setForceBackground(enabled: boolean) { mockModules.mockConfig.agent.forceBackground = enabled; },
-        setAllowCrossProvider(enabled: boolean) { mockModules.mockConfig.allowCrossProvider = enabled; },
         setShowCost(enabled: boolean) { mockModules.mockConfig.agent.showCost = enabled; },
         setGraceTurns(n: number) { mockModules.mockConfig.agent.graceTurns = n; },
         setSystemPromptMode(mode: string) { mockModules.mockConfig.agent.systemPromptMode = mode; },
@@ -152,6 +167,7 @@ vi.mock("../src/shell.js", () => {
         setDefaultThinking(level: string | undefined) { mockModules.mockConfig.agent.defaultThinking = level; },
         setLoadSkillsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadSkillsImplicitly = value; },
         setLoadExtensionsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadExtensionsImplicitly = value; },
+        setDisableDefaultAgents(value: boolean) { mockModules.mockConfig.agent.disableDefaultAgents = value; },
         setShowTools(enabled: boolean) { mockModules.mockConfig.agent.showTools = enabled; },
         setShowTurns(enabled: boolean) { mockModules.mockConfig.agent.showTurns = enabled; },
         setShowInput(enabled: boolean) { mockModules.mockConfig.agent.showInput = enabled; },
@@ -182,7 +198,7 @@ vi.mock("../src/shell.js", () => {
       session: {
         setOverride(type: string, model: string) { mockModules.mockSessionOverrides[type] = model; },
         clearOverride(type: string) { delete mockModules.mockSessionOverrides[type]; },
-        clearAll() { mockModules.mockSessionOverrides = { default: null }; },
+        clearAll() { mockModules.mockSessionOverrides = {}; },
       },
     },
   };
