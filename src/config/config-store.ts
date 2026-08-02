@@ -1,5 +1,5 @@
 /**
- * config-store.ts — Deep module owning persisted config + per-session overrides.
+ * config-store.ts — Deep module owning persisted configuration.
  *
  * Absorbs config-io.ts, config-mutator.ts, and the config-sync half of
  * state.ts. See docs/adr/0004-composition-root-over-shared-state.md.
@@ -9,20 +9,24 @@
  *   side effect cannot be forgotten.
  * - Navigator/manager are injected after construction (they're created lazily).
  *
- * Lifecycle: per-session. `reload()` re-reads disk + resets session overrides
- * at session_start. `dispose()` drops deps at session_shutdown.
+ * Lifecycle: per-session. `reload()` re-reads disk at session_start;
+ * `dispose()` drops deps at session_shutdown.
  */
 
-import type { ResolvedModelSelection } from "../models/model-precedence.js";
-import { resolveModelSelection } from "../models/model-precedence.js";
 import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
-import type { SessionModelOverrides, SubagentsConfig } from "./types.js";
+import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
-import { parseModelKey } from "../utils.js";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
 
+function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
+}
 
 /** Injected persistence adapter. Swap for an in-memory adapter in tests. */
 export interface ConfigIO {
@@ -70,8 +74,8 @@ export interface ResolvedAgentSettings {
 /** Resolved routing policy snapshot (copies, so callers cannot mutate the store). */
 export interface ResolvedRoutingConfig {
   readonly enabled: boolean;
-  readonly allowedProviders: string[];
-  readonly agentModels: Record<string, string>;
+  readonly enabledProviders: string[];
+  readonly agentAccess: Record<string, AgentModelAccess>;
 }
 
 /** Side-effect targets, injected after construction. */
@@ -82,7 +86,6 @@ export interface ConfigStoreDeps {
 
 export class ConfigStore {
   private config: SubagentsConfig;
-  private sessionOverrides: SessionModelOverrides = {};
   private navigator?: AgentNavigator;
   private manager?: AgentManager;
 
@@ -115,10 +118,18 @@ export class ConfigStore {
   }
 
   get routing(): ResolvedRoutingConfig {
+    const agentAccess: Record<string, AgentModelAccess> = {};
+    for (const [type, access] of Object.entries(this.config.modelRouting.agentAccess)) {
+      const providers: Record<string, ProviderModelAccess> = {};
+      for (const [provider, rule] of Object.entries(access.providers)) {
+        setOwn(providers, provider, rule.models ? { models: [...rule.models] } : {});
+      }
+      setOwn(agentAccess, type, { providers });
+    }
     return {
       enabled: this.config.modelRouting.enabled,
-      allowedProviders: [...this.config.modelRouting.allowedProviders],
-      agentModels: { ...this.config.modelRouting.agentModels },
+      enabledProviders: [...this.config.modelRouting.enabledProviders],
+      agentAccess,
     };
   }
 
@@ -134,64 +145,16 @@ export class ConfigStore {
     };
   }
 
-  /**
-   * Session assignment for an agent type: string = model, null = explicit
-   * session inherit, undefined = no session assignment.
-   */
-  sessionModelOverride(type: string): string | null | undefined {
-    return this.sessionOverrides[type];
-  }
-
-  /** Copy of all session assignments (string or null), for UI enumeration. */
-  sessionOverridesSnapshot(): Record<string, string | null> {
-    const out: Record<string, string | null> = {};
-    for (const [type, model] of Object.entries(this.sessionOverrides)) {
-      out[type] = model as string | null;
-    }
-    return out;
-  }
-
-  /**
-   * Agent types whose assignment (persistent or session string) resolves to
-   * the given provider. Used by the UI to list what a provider removal would
-   * clear, including types no longer registered as agents.
-   */
-  assignmentTypesForProvider(provider: string): string[] {
-    const types = new Set<string>();
-    for (const [type, model] of Object.entries(this.config.modelRouting.agentModels)) {
-      const parsed = parseModelKey(model);
-      if (parsed?.provider === provider) types.add(type);
-    }
-    for (const [type, model] of Object.entries(this.sessionOverrides)) {
-      if (model == null) continue;
-      const parsed = parseModelKey(model);
-      if (parsed?.provider === provider) types.add(type);
-    }
-    return [...types];
-  }
-
-  /**
-   * Resolve the effective model candidate for a spawn. Precedence: session assignment →
-   * persistent assignment → agentConfig (frontmatter) → parentModelId. The routing
-   * switch is enforced by callers (tool execution / runner), not here.
-   */
-  modelSelectionFor(
-    type: string,
-    parentModelId: string,
-    agentConfig?: { model?: string },
-  ): ResolvedModelSelection {
-    return resolveModelSelection({
-      subagentType: type,
-      agentConfig,
-      config: this.config,
-      parentModelId,
-      sessionOverrides: this.sessionOverrides,
-    });
+  /** Agent types with a saved rule for one provider, including unavailable types. */
+  accessTypesForProvider(provider: string): string[] {
+    return Object.entries(this.config.modelRouting.agentAccess)
+      .filter(([, access]) => Object.hasOwn(access.providers, provider))
+      .map(([type]) => type)
+      .sort();
   }
 
   // ── Mutations ──────────────────────────────────────────────────
-  // Each persisted method = mutate + persist (+ side effect). Session methods
-  // are in-memory only: never persisted, no side effects.
+  // Each persisted method = mutate + persist (+ side effect).
 
   readonly mutate = {
     routing: {
@@ -199,55 +162,54 @@ export class ConfigStore {
         this.config.modelRouting.enabled = enabled;
         this.persist();
       },
-      /** Add/remove a single provider on the allowlist. Parent provider is never stored here. */
-      setProviderAllowed: (provider: string, allowed: boolean): void => {
-        const set = new Set(this.config.modelRouting.allowedProviders);
-        if (allowed) {
-          set.add(provider);
-        } else {
-          set.delete(provider);
-        }
-        this.config.modelRouting.allowedProviders = [...set];
+      /** Pause or restore one provider without touching dormant agent rules. */
+      setProviderEnabled: (provider: string, enabled: boolean): void => {
+        const key = provider.trim();
+        if (!key) return;
+        const providers = new Set(this.config.modelRouting.enabledProviders);
+        if (enabled) providers.add(key); else providers.delete(key);
+        this.config.modelRouting.enabledProviders = [...providers];
         this.persist();
       },
-      /**
-       * Remove a provider from the allowlist and drop every assignment that
-       * resolves to it — persistent and session — in one persisted step.
-       */
-      removeProvider: (provider: string): void => {
-        this.config.modelRouting.allowedProviders =
-          this.config.modelRouting.allowedProviders.filter((p) => p !== provider);
-        this.config.modelRouting.agentModels = Object.fromEntries(
-          Object.entries(this.config.modelRouting.agentModels).filter(([, model]) => {
-            const parsed = parseModelKey(model);
-            return !parsed || parsed.provider !== provider;
-          }),
-        );
-        for (const [type, model] of Object.entries(this.sessionOverrides)) {
-          if (model == null) continue;
-          const parsed = parseModelKey(model);
-          if (parsed?.provider === provider) delete this.sessionOverrides[type];
+      /** Replace one canonical Agent/provider rule; an empty exact list deletes it. */
+      setAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
+        this.writeAgentProviderAccess(type, provider, models);
+        this.persist();
+      },
+      /** Quick setup: enable routing/provider and write the same canonical rule once. */
+      configureAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
+        const key = provider.trim();
+        if (!key) return;
+        this.config.modelRouting.enabled = true;
+        this.config.modelRouting.enabledProviders = [...new Set([
+          ...this.config.modelRouting.enabledProviders,
+          key,
+        ])];
+        this.writeAgentProviderAccess(type, key, models);
+        this.persist();
+      },
+      /** Remove one provider rule from every agent, including unavailable agent types. */
+      deleteProviderRules: (provider: string): void => {
+        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
+          delete this.config.modelRouting.agentAccess[type].providers[provider];
+          this.pruneAgentAccess(type);
         }
         this.persist();
       },
-      /**
-       * Set (string) or clear (null) a persistent per-agent assignment.
-       * A permanent choice supersedes any session override for the same type;
-       * a clear restores parent inheritance for both layers.
-       */
-      setAgentModel: (type: string, model: string | null): void => {
-        if (model === null || model === "") {
-          delete this.config.modelRouting.agentModels[type];
-        } else {
-          this.config.modelRouting.agentModels[type] = model;
+      /** Remove exact unavailable IDs only; all-model rules are untouched. */
+      cleanUnavailableModels: (provider: string, modelIds: readonly string[]): void => {
+        const stale = new Set(modelIds);
+        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
+          const rule = ownValue(this.config.modelRouting.agentAccess[type].providers, provider);
+          if (!rule?.models) continue;
+          rule.models = rule.models.filter((modelId) => !stale.has(modelId));
+          if (rule.models.length === 0) delete this.config.modelRouting.agentAccess[type].providers[provider];
+          this.pruneAgentAccess(type);
         }
-        delete this.sessionOverrides[type];
         this.persist();
       },
-      /** Clear allowlist, assignments (persistent + session), and disable routing. */
       clearAll: (): void => {
-        this.config.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
-        this.sessionOverrides = {};
+        this.config.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
         this.persist();
       },
     },
@@ -332,26 +294,13 @@ export class ConfigStore {
         this.applyConcurrency();
       },
     },
-    session: {
-      /**
-       * Set a session-only assignment for an agent type. Null = explicitly
-       * inherit the parent for this session. Not persisted.
-       */
-      setOverride: (type: string, model: string | null): void => {
-        this.sessionOverrides[type] = model;
-      },
-      clearAll: (): void => {
-        this.sessionOverrides = {};
-      },
-    },
   };
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
-  /** Re-read disk, reset session assignments, re-sync deps. Called at session_start. */
+  /** Re-read disk and re-sync deps. Called at session_start. */
   reload(): void {
     this.config = this.io.load();
-    this.sessionOverrides = {};
     this.syncAllDeps();
   }
 
@@ -372,6 +321,31 @@ export class ConfigStore {
 
   private persist(): void {
     this.io.save(this.config);
+  }
+
+  private writeAgentProviderAccess(type: string, provider: string, models?: readonly string[]): void {
+    const typeKey = type.trim();
+    const providerKey = provider.trim();
+    if (!typeKey || !providerKey) return;
+    const normalized = models === undefined
+      ? undefined
+      : [...new Set(models.map((model) => model.trim()).filter(Boolean))];
+    const existing = ownValue(this.config.modelRouting.agentAccess, typeKey);
+    if (normalized?.length === 0) {
+      if (existing) delete existing.providers[providerKey];
+      this.pruneAgentAccess(typeKey);
+      return;
+    }
+    const agent = existing ?? { providers: {} };
+    if (!existing) setOwn(this.config.modelRouting.agentAccess, typeKey, agent);
+    setOwn(agent.providers, providerKey, normalized ? { models: normalized } : {});
+  }
+
+  private pruneAgentAccess(type: string): void {
+    const access = ownValue(this.config.modelRouting.agentAccess, type);
+    if (access && Object.keys(access.providers).length === 0) {
+      delete this.config.modelRouting.agentAccess[type];
+    }
   }
 
   /** Push stats visibility into the navigator below the editor. */

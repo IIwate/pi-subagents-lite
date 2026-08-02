@@ -63,7 +63,6 @@ tools:
   - read
   - grep
   - find
-model: provider/model-id
 thinking: high
 max_turns: 12
 extensions: false
@@ -78,9 +77,15 @@ Supported frontmatter fields:
 
 - Identity: `name`, `display_name`, `description`, `hidden`.
 - Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
-- Runtime: `model`, `thinking`, `max_turns`, `max_tokens`.
+- Runtime: `thinking`, `max_turns`, `max_tokens`.
 
 Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents.
+
+## Upgrading to 2.0
+
+Version 2.0 replaces fixed Agent model assignments with the access policy below. Legacy `allowCrossProvider`, `allowedProviders`, `agentModels`, dynamic `agent.<type>` model keys, `agent.default`, and session assignments are not read or migrated. Agent frontmatter `model` is also ignored; omit the Agent tool's `model` argument for the exact parent model, or pass an explicitly authorized alternate.
+
+A missing or legacy `modelRouting` block starts with routing OFF and no alternate access. Other Agent and concurrency settings continue to load. The next explicit settings save rewrites the file with only the canonical 2.0 routing schema.
 
 ## Agent Options
 
@@ -94,18 +99,69 @@ Frontmatter supports flat values and lists, not nested YAML objects. Extension t
 - `run_in_background` — return immediately and notify the parent when complete.
 - `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
 
-By default, subagents inherit the exact parent model. With **Cross-provider routing** OFF (`/agents` > Settings > Cross-provider routing), every subagent uses the parent's exact model and any other model request is rejected — including same-provider models, assignments, frontmatter models, and explicit model arguments. Turn routing ON to authorize extra providers and per-agent model assignments: the Agent tool's explicit `model` param wins, then session assignments (a session `null` — "inherits parent" — jumps straight to the parent model), then persistent assignments, then agent frontmatter, then the parent model. Non-parent models must come from the parent provider or an allowed provider in `modelRouting.allowedProviders`, and must stay inside Pi's active model scope. The model is resolved and locked when the Agent tool call is made; queued agents re-validate the same locked model at start and fail loudly if permission was revoked — never silently swapped. Setting a permanent assignment clears any same-type session override; "Clear routing settings" resets the switch, allowlist, and all assignments in one step.
+## Model Routing
+
+By default, every subagent uses the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. It is always available and is never persisted as routing configuration.
+
+With **Model routing** OFF (`/agents` > Settings > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
+
+- its provider is globally enabled for routing;
+- the selected agent type has access to that provider;
+- the agent's provider rule allows all models or the exact model ID;
+- the model exists in Pi's current registry;
+- the model is inside Pi's active model scope.
+
+Alternate models must be passed explicitly through the Agent tool. A rejected explicit choice is never replaced silently with the parent model. The parent provider receives no implicit access to its other models; same-provider alternatives use the same explicit provider and agent rules as every other alternate model.
+
+The canonical configuration is:
+
+```json
+{
+  "modelRouting": {
+    "enabled": true,
+    "enabledProviders": ["anthropic", "openai", "google"],
+    "agentAccess": {
+      "Explore": {
+        "providers": {
+          "anthropic": { "models": ["claude-haiku-4"] },
+          "openai": {},
+          "google": { "models": ["gemini-2.5-pro", "gemini-2.5-flash"] }
+        }
+      }
+    }
+  }
+}
+```
+
+An omitted `models` property means all currently available models from that provider. A non-empty array means only those exact IDs. Empty arrays are removed and never interpreted as all-model access.
+
+Each agent access page begins with a locked dynamic row and a separator:
+
+```text
+[✓] Default · anthropic/claude-sonnet-4
+────────────────────────────────────────
+openai       All models
+google       2 models
+```
+
+**Quick model setup** grants one agent alternate access to models from the current parent provider in one flow. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no separate quick configuration.
+
+Disabling a provider preserves its agent rules as inactive configuration. Re-enabling it restores the subset still valid in the current registry and scope. Provider maintenance distinguishes Active, Out of scope, Provider disabled, and Unavailable rules. **Clean unavailable rules** batch-removes only exact model IDs missing from a reliable current provider registry; it never removes out-of-scope, disabled-provider, or all-model rules. **Delete saved access rules** removes that provider from every agent policy.
+
+Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Configuration, parent-model, registry, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
+
+The selected model, parent model, thinking selection, and scoped-model state are locked when the Agent call is accepted. Running and queued agents retain that invocation snapshot; later settings changes affect only future Agent calls.
 
 ## Settings
 
 Run `/agents` to configure:
 
-- strict parent-model inheritance when routing is OFF, plus allowed-provider and per-agent model assignments when ON;
+- Parent default inheritance, Quick model setup, globally enabled routed providers, and per-agent provider/model access;
 - default, per-provider, and per-model concurrency limits;
 - background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;
-- agent type inspection, diagnostic briefing, runtime diagnostics, and UI-only status previews for list-layout testing;
+- agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
 - one-shot recovery tests that inject a failure after the next real child session is configured. The controls and runtime diagnostics are session-local and UI-only; injected failures use a fixed 10-second recovery window, while ordinary recoverable failures keep the normal 30-minute window. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
 Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.

@@ -2,24 +2,20 @@
  * menu-debug.ts — Debug menu concern.
  *
  * Uses SelectList from @earendil-works/pi-tui via ctx.ui.custom.
- * Items: Agent types, agent briefing, runtime diagnostics, UI-only status previews,
- * and one-shot recovery tests.
+ * Items: Agent types, runtime diagnostics, UI-only status previews, and
+ * one-shot recovery tests.
  * Actions execute on select; Escape closes the menu.
  *
  * Exports:
- *   - showDebugMenu: agent types, briefing, diagnostics, previews, and recovery tests
- *
- * Private helpers (single-consumer, co-located):
- *   - showAgentTypes: list available agent types and their configs
- *   - handleAgentBriefing: send agent types/capabilities info to LLM
+ *   - showDebugMenu: agent types, diagnostics, previews, and recovery tests
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, type SelectItem } from "@earendil-works/pi-tui";
-import { getAgentConfig, getAvailableTypes, getAllTypes } from "../../agents/agent-types.js";
+import { getAgentConfig, getAllTypes } from "../../agents/agent-types.js";
 import { buildListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import { getPiInstance, getManager, getNavigator } from "../../shell.js";
+import { getManager, getNavigator } from "../../shell.js";
 import {
   DEBUG_RECOVERY_TTL_MS,
   type DebugFaultKind,
@@ -67,7 +63,6 @@ const RECOVERY_TEST_ITEMS: Array<{
 function buildDebugMenuItems(armedKind?: DebugFaultKind): SelectItem[] {
   return [
     { value: "agent-types", label: "Agent types", description: "List available agent types and their configs" },
-    { value: "agent-briefing", label: "Agent briefing", description: "Send agent types/capabilities info to LLM (Optional, if having issues)" },
     { value: "runtime-diagnostics", label: "Runtime diagnostics", description: "Inspect live sessions, errors, recovery windows, and armed faults" },
     ...STATUS_PREVIEW_ITEMS,
     ...RECOVERY_TEST_ITEMS.map((item) => ({
@@ -120,83 +115,18 @@ async function showAgentTypes(ctx: ExtensionCommandContext): Promise<void> {
     const cfg = getAgentConfig(name);
     if (!cfg) continue;
     const hidden = cfg.hidden === true ? " [HIDDEN]" : "";
-    const model = cfg.model ? `  Model: ${cfg.model}` : "";
     const tools = cfg.registeredTools
       ? `  Tools: ${cfg.registeredTools.join(", ")}`
       : "  Tools: all built-in tools";
     const source = cfg.source ? `  Source: ${cfg.source}` : "";
     lines.push(`  ${name}${hidden}`);
     lines.push(`    ${cfg.description}`);
-    if (model) lines.push(model);
     lines.push(tools);
     if (source) lines.push(source);
     lines.push("");
   }
 
   ctx.ui.notify(lines.join("\n"), "info");
-}
-
-async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> {
-  const types = getAvailableTypes();
-  const agents = types.map((t) => ({ name: t, config: getAgentConfig(t) }));
-
-  const lines: string[] = [
-    "# Agent Types and Capabilities\n",
-    "The following agent types are available. Use the `agent` parameter to select one.\n",
-  ];
-
-  for (const { name, config } of agents) {
-    if (!config) continue;
-    lines.push(`## ${config.displayName ?? name}`);
-    lines.push(config.description);
-    lines.push("");
-
-    if (config.registeredTools) {
-      lines.push(`**Tools:** ${config.registeredTools.join(", ")}`);
-    }
-    if (config.model) {
-      lines.push(`**Default model:** ${config.model}`);
-    }
-    if (config.maxTurns) {
-      lines.push(`**Max turns:** ${config.maxTurns}`);
-    }
-    lines.push("");
-  }
-
-  // Parameter descriptions
-  lines.push("## Agent Tool Parameters\n");
-  lines.push("| Parameter | Description |");
-  lines.push("|-----------|-------------|");
-  lines.push("| `prompt` | The task for the agent (required) |");
-  lines.push("| `description` | One-line summary of what the agent should do (required) |");
-  lines.push("| `agent` | Which agent type to use (default: general-purpose) |");
-  lines.push("| `model` | Optional explicit model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Do not pass by default — see Model routing below. |");
-  lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Also accepted via `model` as `id:thinking`. |");
-  lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll, sleep, or timeout-wait. Parent task advances automatically on completion. |");
-  lines.push("| `worktree_path` | Optional path to a git worktree of the parent's repo. See below for details. |");
-  lines.push("");
-
-  // Usage guidelines
-  lines.push("## Usage Guidelines\n");
-  lines.push("- Agents start fresh with their config — they do NOT inherit the parent conversation");
-  lines.push("- For parallel tasks, spawn multiple `run_in_background: true` agents in one turn");
-  lines.push("  → Results are auto-delivered — do NOT poll, sleep, timeout, or busy-wait");
-  lines.push("  → When a subagent finishes, a notification arrives and the parent task advances automatically");
-  lines.push("- Model routing:");
-  lines.push("  → When Cross-provider routing is OFF, do not pass `model`. The child always uses the exact parent model. If the user requests another model, explain that routing is OFF and state that the child will inherit the parent model.");
-  lines.push("  → When routing is ON, omit `model` by default. The configured Agent assignment is applied automatically and falls back to the parent model.");
-  lines.push("  → Pass `model` only when the user explicitly requests a specific model and its provider is authorized. Never silently replace a rejected model request.");
-  lines.push("");
-  lines.push("## `worktree_path` Parameter\n");
-  lines.push("Use `worktree_path` to run a subagent in a different git worktree of the parent's repository.");
-  lines.push("");
-  lines.push("- **Optional.** Omit to run the subagent in the parent's working directory (default behavior).");
-  lines.push("- **Must be a path** inside a git worktree of the parent's repo, including the main checkout. Not a different repo, not a non-git directory.");
-  lines.push("- **Relative paths** are resolved against the parent's working directory.");
-  lines.push("- **On failure** the validator returns a specific reason (e.g., 'not a worktree of the parent's repository', 'path does not exist') — use this to self-correct.");
-  lines.push("- **Agent type discovery:** The worktree's `.pi/agents/` directory is scanned for agent types when this param is set, so worktree-local types become available to that spawn.");
-  getPiInstance().sendUserMessage(lines.join("\n"));
-  ctx.ui.notify("Agent briefing sent to LLM", "info");
 }
 
 export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void> {
@@ -208,8 +138,6 @@ export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void>
       selectList.onSelect = async (item) => {
         if (item.value === "agent-types") {
           await showAgentTypes(ctx);
-        } else if (item.value === "agent-briefing") {
-          await handleAgentBriefing(ctx);
         } else if (item.value === "runtime-diagnostics") {
           showRuntimeDiagnostics(ctx);
         } else {

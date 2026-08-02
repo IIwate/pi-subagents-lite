@@ -28,19 +28,8 @@ import {
 } from "./agent-types.js";
 import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
-import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
-import {
-  automaticModelOverrideError,
-  missingParentModelError,
-  missingSubagentModelError,
-  modelKey,
-  outOfScopeModelError,
-  routingDisabledModelError,
-  providerNotAllowedError,
-  scopedModelKeys,
-  scopedThinkingLevel,
-} from "../models/model-scope.js";
-import { authorizeModel } from "../models/model-precedence.js";
+import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
+import { missingSubagentModelError, scopedThinkingLevel } from "../models/model-scope.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
@@ -473,48 +462,18 @@ async function initSession(
   loader: DefaultResourceLoader,
 ) {
   const store = getStore();
-  const routing = store.routing;
-  if (!ctx.model && !routing.enabled) {
-    throw new Error(missingParentModelError());
-  }
-  const model = options.model ?? findModelInRegistry(
-    routing.enabled ? agentConfig?.model : undefined,
-    ctx.modelRegistry,
-    ctx.model,
-  );
-  if (!model) {
-    throw new Error(missingSubagentModelError());
-  }
-  // Queue waits may outlive routing or scope edits. Re-read both immediately
-  // before session creation so stale automatic choices cannot start.
-  const scopedModels = [...ctx.scopedModels];
-  const scopedKeys = scopedModelKeys(scopedModels);
-  if (options.modelSource === "automatic" && !routing.enabled) {
-    throw new Error(automaticModelOverrideError(modelKey(model)));
-  }
-  const verdict = authorizeModel({
-    modelKey: modelKey(model),
-    parentModelKey: ctx.model ? modelKey(ctx.model) : "",
-    parentProvider: ctx.model?.provider ?? "",
-    allowedProviders: routing.allowedProviders,
-    routingEnabled: routing.enabled,
-    scopedKeys,
-  });
-  if (!verdict.ok) {
-    if (verdict.reason === "out-of-scope") {
-      throw new Error(outOfScopeModelError(modelKey(model), scopedKeys!));
-    }
-    if (verdict.reason === "routing-disabled") {
-      throw new Error(routingDisabledModelError(modelKey(model)));
-    }
-    throw new Error(providerNotAllowedError(modelKey(model), ctx.model?.provider ?? "", routing.allowedProviders));
-  }
-  // Explicit spawn override wins; otherwise mirror Pi's scope-pinned thinking
-  // before falling back to agent/package defaults.
-  const thinkingLevel = options.thinkingLevel
-    ?? scopedThinkingLevel(scopedModels, model)
-    ?? agentConfig?.thinkingLevel
-    ?? store.agent.defaultThinking;
+  const model = options.model ?? ctx.model;
+  if (!model) throw new Error(missingSubagentModelError());
+
+  // Agent-tool calls pass invocation snapshots. The fallback keeps direct
+  // internal runAgent callers working without weakening accepted-call locks.
+  const scopedModels = options.scopedModels ? [...options.scopedModels] : [...ctx.scopedModels];
+  const thinkingLevel = options.thinkingResolved
+    ? options.thinkingLevel
+    : options.thinkingLevel
+      ?? scopedThinkingLevel(scopedModels, model)
+      ?? agentConfig?.thinkingLevel
+      ?? store.agent.defaultThinking;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);

@@ -1,33 +1,70 @@
-# Stealth tool registration
+# Stealth tool registration with dynamic guidance
 
-The Agent tool is registered at extension init time with a minimal schema: no
-`description`, no `promptSnippet`, no `promptGuidelines`, and mostly undescribed
-parameters. The optional model parameter is resolved inside tool execution so its
-source remains available across queue waits. The LLM learns detailed usage from
-the `/agents` briefing rather than verbose tool descriptions.
+The Agent tool is registered at extension initialization with a minimal schema:
+no `description`, no `promptSnippet`, no `promptGuidelines`, and mostly
+undescribed parameters. Registration remains stable for the lifetime of the
+extension runtime.
+
+The parent LLM receives current Agent usage and model-access guidance through a
+deterministic `before_agent_start` system-prompt addition. There is no manual
+Agent briefing command or injected conversation message.
 
 ## Why
 
-Registering the Agent tool at runtime (the `subagent-lazy` pattern) calls `registerTool()`
-→ `refreshTools()` → `setActiveToolsByName()` → system prompt rebuild. llama.cpp renders
-tool definitions into the prompt text via its Jinja2 chat template, so adding a tool changes
-the token sequence and invalidates the KV cache prefix match.
+Registering the Agent tool lazily calls `registerTool()` → `refreshTools()` →
+`setActiveToolsByName()` and rebuilds the system prompt. llama.cpp renders tool
+definitions into prompt text through its Jinja2 chat template, so adding a tool
+mid-session changes the token sequence and invalidates the KV-cache prefix.
 
-Registering at init time freezes the tool set from turn 1. No mid-session tool changes,
-no system prompt rebuilds, no cache invalidation.
+Registering at initialization freezes the tool set from turn one. No dynamic
+tool registration or active-tool replacement is needed for model-routing
+configuration changes.
 
-Resolving the model inside tool execution keeps the schema lean while preserving whether the
-choice was explicit, automatic, or inherited. That provenance lets queued starts recheck
-a revoked model permission (routing switch, provider allowlist, or model scope) without
-confusing an automatic assignment with a user choice.
+The access policy cannot live only in the static tool schema because it depends
+on current session state:
+
+- discovered agent types;
+- the exact parent model;
+- globally enabled routed providers;
+- per-agent provider/model rules;
+- the current model registry and active scope.
+
+Pi's `before_agent_start` hook can append that state to the system prompt before
+each parent run without creating a message, triggering an extra turn, or
+requiring `/reload`. Configuration or parent-model changes are therefore visible
+to the next parent run automatically.
+
+## Guidance contract
+
+The injected block is compact, deterministic, and present only while the Agent
+tool is active. It includes:
+
+- available agent types and the critical Agent invocation rules;
+- the exact parent model, selected by omitting `model`;
+- exact alternate model keys for restricted rules;
+- `provider/*` for all-model rules;
+- the requirement to pass `model` for alternate access;
+- the rule that rejected explicit models are never replaced silently.
+
+Disabled providers, unavailable models, and out-of-scope models are not
+advertised as callable. Unconfigured agents are summarized as parent-model
+only. Stable sorting keeps the prompt suffix identical while effective state is
+unchanged.
+
+## Cache boundary
+
+The system-prompt suffix changes when the effective access policy, parent model,
+registry, scope, or agent catalogue changes. That change may invalidate a prompt
+cache prefix, but it reflects real authorization state and occurs without
+changing the registered tool set. When state is unchanged, the generated suffix
+must be byte-stable.
 
 ## Trade-off
 
-The minimal schema (no description, no parameter descriptions) means the LLM must infer
-usage from the tool name and parameter names alone. In practice this works — models use the
-Agent and StopAgent tools without issues. The optional `/agents` briefing can supplement
-understanding when the LLM needs to discover available agent types, but is not required for
-basic tool invocation.
+The minimal tool schema still requires system-prompt guidance for reliable use.
+Automatic per-run injection adds a small prompt suffix, but removes stale manual
+briefings and user refresh steps. All-model rules use a compact wildcard instead
+of enumerating an entire provider catalogue.
 
-Registering at init time (rather than runtime) avoids system prompt rebuilds and KV-cache
-invalidation on mid-session tool changes.
+The Debug menu keeps agent-type and runtime diagnostics but has no Agent
+briefing action. Guidance is runtime behavior, not a user-maintained message.

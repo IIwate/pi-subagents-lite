@@ -96,10 +96,6 @@ vi.mock("../src/ui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 
-vi.mock("../src/models/model-precedence.js", () => ({
-  resolveModelSelection: vi.fn((opts: any) => ({ model: opts?.parentModelId ?? "", source: "parent" })),
-}));
-
 vi.mock("../src/agents/agent-types.js", () => ({
   resolveType: vi.fn((name: string) => name),
   getConfig: vi.fn(() => ({ displayName: "unknown" })),
@@ -191,8 +187,9 @@ describe("Agent tool schema — stealth", () => {
     expect(hasParam(agentTool()!.parameters, "description")).toBe(true);
   });
 
-  it("includes agent param", () => {
+  it("keeps the agent param static and lets per-run guidance list types", () => {
     expect(hasParam(agentTool()!.parameters, "agent")).toBe(true);
+    expect(agentTool()!.parameters.properties.agent.description).toBeUndefined();
   });
 
   it("excludes max_turns from schema (config-only, not LLM-controlled)", () => {
@@ -300,10 +297,32 @@ describe("event listener registration", () => {
     expect(api.listeners.some((l) => l.event === "session_start")).toBe(true);
   });
 
-  it("registers session_shutdown listener", () => {
-    expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(
-      true,
-    );
+  it("registers session_shutdown and automatic guidance listeners", () => {
+    expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(true);
+    expect(api.listeners.some((l) => l.event === "before_agent_start")).toBe(true);
+  });
+
+  it("injects current guidance only while the Agent tool is active", async () => {
+    const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
+    const ctx = {
+      model: { provider: "anthropic", id: "sonnet" },
+      modelRegistry: { getAll: () => [{ provider: "anthropic", id: "sonnet" }] },
+      scopedModels: [],
+    };
+    const active = await handler({
+      systemPrompt: "base",
+      systemPromptOptions: { selectedTools: ["Agent"] },
+    }, ctx);
+    expect(active.systemPrompt).toContain("base\n\n[Subagent access]");
+    expect(active.systemPrompt).toContain("anthropic/sonnet");
+    expect(api.api.sendUserMessage).not.toHaveBeenCalled();
+    expect(api.api.sendMessage).not.toHaveBeenCalled();
+
+    const inactive = await handler({
+      systemPrompt: "base",
+      systemPromptOptions: { selectedTools: ["read"] },
+    }, ctx);
+    expect(inactive).toBeUndefined();
   });
 
   it("continues shutdown cleanup after a display disposer fails", async () => {

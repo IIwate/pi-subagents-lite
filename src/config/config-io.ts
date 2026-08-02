@@ -4,15 +4,15 @@
  * Atomic writes: write to .tmp then rename.
  * Loaded at session_start; saved on every /agents menu mutation.
  *
- * New-schema only: pre-2.0 routing shapes (allowCrossProvider, dynamic
- * agent[type] model keys, agent.default) are not migrated and not read. A
+ * New-schema only: assignment-era routing shapes (allowCrossProvider,
+ * allowedProviders, agentModels, dynamic agent[type] keys, agent.default) are not migrated. A
  * missing or malformed modelRouting block falls back to the defaults below;
  * the next explicit save writes the canonical schema.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentSettings, ModelRoutingConfig, SubagentsConfig } from "./types.js";
+import type { AgentModelAccess, AgentSettings, ModelRoutingConfig, ProviderModelAccess, SubagentsConfig } from "./types.js";
 
 const CONFIG_DIR = path.join(process.env.HOME || "", ".pi", "agent");
 const CONFIG_PATH = path.join(CONFIG_DIR, "subagents-lite.json");
@@ -27,12 +27,10 @@ export const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", 
 /** Default concurrency config — used for resets. */
 export const DEFAULT_CONCURRENCY: SubagentsConfig["concurrency"] = { default: 4 };
 
-/** Fallback routing policy when modelRouting is missing or malformed. */
-const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
-  enabled: false,
-  allowedProviders: [],
-  agentModels: {},
-};
+/** Fresh fallback routing policy when modelRouting is missing or malformed. */
+function defaultModelRouting(): ModelRoutingConfig {
+  return { enabled: false, enabledProviders: [], agentAccess: {} };
+}
 
 /** Default agent settings — merged into loaded config so callers get a complete shape. */
 const DEFAULT_AGENT: AgentSettings = {
@@ -78,43 +76,56 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
 /**
- * Normalize the persisted routing policy. Malformed shapes are ignored
- * field-by-field: modelRouting must be a plain object, enabled only accepts
- * true, allowedProviders must be an array of trim-nonempty unique strings,
- * and agentModels must be a plain object of nonempty string pairs. Anything
- * else falls back to defaults — a bad config can never break startup.
+ * Normalize the persisted routing policy. Omitted models means all models;
+ * invalid or empty model arrays remove the provider rule instead of widening
+ * it to all-model access.
  */
 function normalizeModelRouting(raw: unknown): ModelRoutingConfig {
-  if (!isPlainObject(raw)) return { ...DEFAULT_MODEL_ROUTING };
+  if (!isPlainObject(raw)) return defaultModelRouting();
 
-  const enabled = raw.enabled === true;
-
-  const allowedProviders: string[] = [];
-  if (Array.isArray(raw.allowedProviders)) {
+  const enabledProviders: string[] = [];
+  if (Array.isArray(raw.enabledProviders)) {
     const seen = new Set<string>();
-    for (const provider of raw.allowedProviders) {
-      if (typeof provider !== "string") continue;
-      const trimmed = provider.trim();
-      if (trimmed === "" || seen.has(trimmed)) continue;
-      seen.add(trimmed);
-      allowedProviders.push(trimmed);
+    for (const value of raw.enabledProviders) {
+      if (typeof value !== "string") continue;
+      const provider = value.trim();
+      if (!provider || seen.has(provider)) continue;
+      seen.add(provider);
+      enabledProviders.push(provider);
     }
   }
 
-  const agentModels: Record<string, string> = {};
-  if (isPlainObject(raw.agentModels)) {
-    for (const [type, model] of Object.entries(raw.agentModels)) {
-      const trimmedType = type.trim();
-      if (trimmedType === "") continue;
-      if (typeof model !== "string") continue;
-      const trimmedModel = model.trim();
-      if (trimmedModel === "") continue;
-      agentModels[trimmedType] = trimmedModel;
+  const agentAccess: Record<string, AgentModelAccess> = {};
+  if (isPlainObject(raw.agentAccess)) {
+    for (const [rawType, rawAccess] of Object.entries(raw.agentAccess)) {
+      const type = rawType.trim();
+      if (!type || !isPlainObject(rawAccess) || !isPlainObject(rawAccess.providers)) continue;
+
+      const providers: Record<string, ProviderModelAccess> = {};
+      for (const [rawProvider, rawProviderAccess] of Object.entries(rawAccess.providers)) {
+        const provider = rawProvider.trim();
+        if (!provider || !isPlainObject(rawProviderAccess)) continue;
+        if (!Object.hasOwn(rawProviderAccess, "models")) {
+          if (Object.keys(rawProviderAccess).length === 0) setOwn(providers, provider, {});
+          continue;
+        }
+        if (!Array.isArray(rawProviderAccess.models)) continue;
+        const models = [...new Set(rawProviderAccess.models
+          .filter((model): model is string => typeof model === "string")
+          .map((model) => model.trim())
+          .filter(Boolean))];
+        if (models.length > 0) setOwn(providers, provider, { models });
+      }
+      if (Object.keys(providers).length > 0) setOwn(agentAccess, type, { providers });
     }
   }
 
-  return { enabled, allowedProviders, agentModels };
+  return { enabled: raw.enabled === true, enabledProviders, agentAccess };
 }
 
 /**

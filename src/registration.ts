@@ -1,6 +1,5 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getAvailableTypes } from "./agents/agent-types.js";
 import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
@@ -16,21 +15,12 @@ const SILENT_TOOL_RENDERING = {
 };
 
 // ============================================================================
-// Agent tool registration helper — dynamic enum for agent types
+// Agent tool registration helper — stable schema for the runtime lifetime
 // ============================================================================
 
-/**
- * Register (or re-register) the Agent tool with current agent types.
- * At init time only defaults exist; call again from session_start after
- * user/project agents are loaded to update the enum.
- */
+/** Register the Agent tool once; per-run guidance lists current Agent types. */
 export function registerAgentTool(pi: ExtensionAPI): void {
-  const types = getAvailableTypes();
-  // Use plain string to avoid verbose anyOf in prompt.
-  // Available types are listed in description for discoverability.
-  const agentParam = types.length > 0
-    ? Type.Optional(Type.String({ description: types.join(",") }))
-    : Type.Optional(Type.String());
+  const agentParam = Type.Optional(Type.String());
   // @ts-expect-error — description removed to save prompt tokens
   pi.registerTool({
     name: "Agent",
@@ -39,9 +29,9 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       prompt: Type.String(),
       description: Type.Optional(Type.String()),
       agent: agentParam,
-      // Optional model override: "id", "provider/id", or "id:thinking". Taught via agent briefing.
+      // Optional explicit alternate: "id", "provider/id", or "id:thinking".
       model: Type.Optional(Type.String()),
-      // Optional thinking override (off/minimal/low/medium/high/xhigh/max). Taught via agent briefing.
+      // Optional thinking override (off/minimal/low/medium/high/xhigh/max).
       thinking: Type.Optional(Type.String()),
       run_in_background: Type.Optional(Type.Boolean()),
       worktree_path: Type.Optional(Type.String({
@@ -60,7 +50,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
 
 /** Register all tools, commands, and message renderers. */
 export function registerTools(pi: ExtensionAPI): void {
-  // Agent tool — stealth schema with dynamic agent type enum
+  // Agent tool — stable stealth schema; dynamic state lives in per-run guidance
   registerAgentTool(pi);
 
   // StopAgent tool — stealth schema, stop a running agent by ID
@@ -87,7 +77,7 @@ export function registerTools(pi: ExtensionAPI): void {
 
   // Command registration
   pi.registerCommand("agents", {
-    description: "Manage subagents: model settings, concurrency, briefing, and agent types",
+    description: "Manage subagents: model access, concurrency, diagnostics, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       // Restrict menu picks to the active Model scope when one is set.
       const modelOptions = listModelOptionsForMenus(ctx);

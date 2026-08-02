@@ -1,26 +1,32 @@
 /**
  * config/types.ts — Persisted config shapes for subagents-lite.json.
  *
- * Model policy lives under modelRouting: the routing switch, the extra
- * provider allowlist, and per-agent model assignments. The agent object
- * holds only real agent settings (background, thinking, prompt, display) —
- * never dynamic model keys.
+ * Model routing is an access policy: a global switch, globally enabled
+ * providers, and per-agent provider/model grants. It never assigns a default
+ * model; omitting Agent.model always selects the exact parent model.
  */
 
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
 
-/** Cross-provider routing policy: switch, allowed providers, per-agent assignments. */
-export interface ModelRoutingConfig {
-  /** OFF: subagents use the exact parent model; assignments and explicit models are ignored. */
-  enabled: boolean;
-  /** Extra providers beyond the parent provider (which is implicit and always allowed). */
-  allowedProviders: string[];
-  /** Persistent per-agent model assignments: agent type → "provider/model". */
-  agentModels: Record<string, string>;
+export interface ProviderModelAccess {
+  /** Omitted = all current provider models; non-empty = exact model IDs. */
+  models?: string[];
 }
 
-/** Real agent settings. Model choices live in ModelRoutingConfig.agentModels. */
+export interface AgentModelAccess {
+  providers: Record<string, ProviderModelAccess>;
+}
+
+export interface ModelRoutingConfig {
+  /** OFF permits only the exact parent model. */
+  enabled: boolean;
+  /** Providers globally enabled for alternate model routing. */
+  enabledProviders: string[];
+  /** Per-agent provider/model access rules. */
+  agentAccess: Record<string, AgentModelAccess>;
+}
+
 export interface AgentSettings {
   forceBackground: boolean;
   graceTurns?: number;
@@ -51,7 +57,6 @@ export interface AgentSettings {
   showTime?: boolean;
 }
 
-/** Shape of the subagents-lite.json config file. */
 export interface SubagentsConfig {
   modelRouting: ModelRoutingConfig;
   agent: AgentSettings;
@@ -60,19 +65,4 @@ export interface SubagentsConfig {
     providers?: Record<string, number>;
     models?: Record<string, number>;
   };
-}
-
-/**
- * Session-only per-agent model assignments. Never persisted — cleared at
- * session_start. No "default" key: the retired global default has no
- * successor, unassigned agents inherit the parent model.
- *
- * Three states per agent type:
- *   - key absent / undefined → no session assignment
- *   - string                  → this session uses that model
- *   - null                    → this session explicitly inherits the parent
- *                               model (shadows persistent assignments)
- */
-export interface SessionModelOverrides {
-  [agentType: string]: string | null | undefined;
 }

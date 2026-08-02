@@ -43,35 +43,29 @@ export function missingSubagentModelError(): string {
   return "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.";
 }
 
-/** Build a clear error when an automatic selection is no longer authorized. */
-export function automaticModelOverrideError(modelRef: string): string {
-  return (
-    `Automatic model override "${modelRef}" is no longer authorized because `
-    + "Cross-provider routing is OFF. Enable /agents > Settings > Cross-provider routing to use assignments."
-  );
-}
-
 /** Build a clear error when routing is OFF and a non-parent model was requested. */
 export function routingDisabledModelError(modelRef: string): string {
   return (
-    `Model "${modelRef}" cannot be used while Cross-provider routing is OFF: `
+    `Model "${modelRef}" cannot be used while Model routing is OFF: `
     + "subagents use the exact parent model. "
-    + "Enable /agents > Settings > Cross-provider routing to assign other models."
+    + "Enable /agents > Settings > Model routing to authorize alternate models."
   );
 }
 
-/** Build a clear error when a model's provider is not on the allowlist. */
-export function providerNotAllowedError(
-  modelRef: string,
-  parentProvider: string,
-  allowedProviders: readonly string[],
-): string {
-  const allowed = [...new Set([parentProvider, ...allowedProviders].filter(Boolean))].sort();
-  return (
-    `Model "${modelRef}" is not authorized: its provider is neither the parent provider `
-    + `(${parentProvider || "none"}) nor on the allowed list [${allowed.join(", ")}]. `
-    + "Add it in /agents > Settings > Cross-provider routing > Allowed providers."
-  );
+export function providerDisabledError(modelRef: string, provider: string): string {
+  return `Model "${modelRef}" is not authorized: provider "${provider}" is not enabled in Model routing.`;
+}
+
+export function agentProviderDeniedError(modelRef: string, agentType: string, provider: string): string {
+  return `Model "${modelRef}" is not authorized: Agent "${agentType}" has no access rule for provider "${provider}".`;
+}
+
+export function modelDeniedError(modelRef: string, agentType: string): string {
+  return `Model "${modelRef}" is not authorized by the saved model access rule for Agent "${agentType}".`;
+}
+
+export function modelUnavailableError(modelRef: string): string {
+  return `Model "${modelRef}" is not available in the current Pi model registry.`;
 }
 
 /** Build a clear LLM/user-facing error for an out-of-scope model. */

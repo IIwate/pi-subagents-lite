@@ -14,9 +14,8 @@ import { getAgentConfig } from "../../../src/agents/agent-types.js";
 import { showAgentsMainMenu, showSettingsMenu } from "../../../src/ui/menu/menus.js";
 
 function resetAgentState(): void {
-  mockModules.mockConfig.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
+  mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
   mockModules.mockConfig.agent = { forceBackground: false };
-  mockModules.mockSessionOverrides = {};
 }
 
 describe("showAgentsMainMenu — SelectList dispatcher", () => {

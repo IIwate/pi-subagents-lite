@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockModules } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
-import { getAllTypes, getAvailableTypes, getAgentConfig } from "../../../src/agents/agent-types.js";
+import { getAllTypes, getAgentConfig } from "../../../src/agents/agent-types.js";
 
 // Capture SelectList constructor calls
 let selectListCalls: Array<{
@@ -70,7 +70,6 @@ describe("showDebugMenu — SelectList migration", () => {
     settingsListWrapperCalls = [];
     vi.clearAllMocks();
     (getAllTypes as any).mockReturnValue([]);
-    (getAvailableTypes as any).mockReturnValue([]);
     (getAgentConfig as any).mockImplementation(() => undefined);
     mockModules.mockManager.debugDiagnostics.mockReset().mockReturnValue({ agents: [] });
   });
@@ -86,9 +85,9 @@ describe("showDebugMenu — SelectList migration", () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
     expect(selectListCalls.length).toBe(1);
-    expect(selectListCalls[0].items).toHaveLength(15);
+    expect(selectListCalls[0].items).toHaveLength(14);
     expect(selectListCalls[0].items[0].value).toBe("agent-types");
-    expect(selectListCalls[0].items[1].value).toBe("agent-briefing");
+    expect(selectListCalls[0].items[1].value).toBe("runtime-diagnostics");
     expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
       value: "preview-needs-input",
       label: "Preview: Needs input",
@@ -255,19 +254,6 @@ describe("showDebugMenu — agent types action (SelectList)", () => {
     expect(notifyCall[0]).toContain("[HIDDEN]");
   });
 
-  it("shows model when config has one", async () => {
-    (getAllTypes as any).mockReturnValue(["test-agent"]);
-    (getAgentConfig as any).mockImplementation(() => ({
-      description: "Test agent",
-      model: "claude-sonnet-4-20250514",
-    }));
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-types" });
-    const notifyCall = ctx.ui.notify.mock.calls.find((c: any[]) => typeof c[0] === "string" && c[0].includes("Available agent types"));
-    expect(notifyCall[0]).toContain("Model: claude-sonnet-4-20250514");
-  });
-
   it("shows registered tools when present", async () => {
     (getAllTypes as any).mockReturnValue(["tool-agent"]);
     (getAgentConfig as any).mockImplementation(() => ({
@@ -318,113 +304,5 @@ describe("showDebugMenu — agent types action (SelectList)", () => {
     selectListCalls[0].onSelect!({ value: "agent-types" });
     const notifyCall = ctx.ui.notify.mock.calls.find((c: any[]) => typeof c[0] === "string" && c[0].includes("Available agent types"));
     expect(notifyCall[0]).toContain("Source: .pi/agents/ext-agent.md");
-  });
-});
-
-describe("showDebugMenu — agent briefing action (SelectList)", () => {
-  let mockSendUserMessage: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    selectListCalls = [];
-    settingsListWrapperCalls = [];
-    vi.clearAllMocks();
-    mockSendUserMessage = vi.fn();
-    mockModules.mockPiInstance.sendUserMessage = mockSendUserMessage;
-    (getAvailableTypes as any).mockReturnValue(["general-purpose", "Explore"]);
-    (getAgentConfig as any).mockImplementation((name: string) => {
-      if (name === "general-purpose") return {
-        displayName: "General Purpose",
-        description: "General-purpose agent",
-        registeredTools: ["file_read", "file_write"],
-        model: "claude-sonnet-4-20250514",
-        maxTurns: 50,
-      };
-      if (name === "Explore") return {
-        description: "Explore agent",
-      };
-      return undefined;
-    });
-  });
-
-  it("sends briefing to LLM via sendUserMessage", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    expect(mockSendUserMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("includes agent type headings in the briefing", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("General Purpose");
-    expect(message).toContain("Explore");
-  });
-
-  it("includes tool and model info when present", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("**Tools:** file_read, file_write");
-    expect(message).toContain("**Default model:** claude-sonnet-4-20250514");
-    expect(message).toContain("**Max turns:** 50");
-  });
-
-  it("includes the parameters table with all required parameters", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("prompt");
-    expect(message).toContain("description");
-    expect(message).toContain("agent");
-    expect(message).toContain("model");
-    expect(message).toContain("thinking");
-    expect(message).toContain("run_in_background");
-    expect(message).toContain("worktree_path");
-  });
-
-  it("states the OFF routing boundary in the model routing briefing", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("When Cross-provider routing is OFF, do not pass `model`.");
-    expect(message).toContain("the child will inherit the parent model");
-    expect(message).toContain("When routing is ON, omit `model` by default");
-    expect(message).toContain("Pass `model` only when the user explicitly requests a specific model");
-    expect(message).toContain("Never silently replace a rejected model request");
-  });
-
-  it("notifies the user after sending the briefing", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("includes worktree_path usage guidelines", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("worktree_path");
-    expect(message).toContain("git worktree of the parent");
-    expect(message).toContain("Relative paths");
-    expect(message).toContain(".pi/agents/");
-  });
-
-  it("includes usage guidelines for background agents", async () => {
-    const ctx = createMockCtx();
-    await showDebugMenu(ctx);
-    selectListCalls[0].onSelect!({ value: "agent-briefing" });
-    const message = mockSendUserMessage.mock.calls[0][0];
-    expect(message).toContain("run_in_background");
-    expect(message).toContain("do NOT poll");
-    expect(message).toContain("sleep");
-    expect(message).toContain("timeout");
-    expect(message).toContain("advances automatically");
   });
 });

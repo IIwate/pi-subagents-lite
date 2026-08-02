@@ -42,7 +42,9 @@ export function parseModelKey(modelStr: string): { provider: string; modelId: st
 /** Minimal registry surface used for model lookup. */
 export interface ModelLookupRegistry {
   find(provider: string, modelId: string): Model<any> | undefined;
-  /** Optional; used to resolve bare model ids (no provider prefix). */
+  /** Full loaded registry, preferred for routing and bare-ID resolution. */
+  getAll?: () => Array<Model<any>>;
+  /** Compatibility fallback for minimal registries in tests/integrations. */
   getAvailable?: () => Array<Model<any>>;
 }
 
@@ -101,8 +103,8 @@ export function resolveExactModel(
     return registry.find(parsed.provider, parsed.modelId);
   }
 
-  const available = registry.getAvailable?.() ?? [];
-  const exact = available.filter((m) => m.id === trimmed);
+  const registered = registry.getAll?.() ?? registry.getAvailable?.() ?? [];
+  const exact = registered.filter((m) => m.id === trimmed);
   if (exact.length === 0) return undefined;
   if (exact.length === 1) return exact[0];
   if (preferredProvider) {

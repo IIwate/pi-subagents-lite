@@ -18,7 +18,7 @@ const mockTheme = {
 };
 
 describe("buildModelOptions", () => {
-  it("puts parent inheritance after explicit models", () => {
+  it("returns only explicit registry models", () => {
     const options = buildModelOptions([
       "anthropic/claude-sonnet-4",
       "openai/gpt-4o",
@@ -26,7 +26,6 @@ describe("buildModelOptions", () => {
     expect(options.map((option) => option.value)).toEqual([
       "anthropic/claude-sonnet-4",
       "openai/gpt-4o",
-      "(inherits parent)",
     ]);
   });
 });

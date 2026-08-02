@@ -21,9 +21,11 @@ vi.mock("@earendil-works/pi-tui", () => ({
       this.items = items;
       selectListInstances.push(this as any);
     }
-    render() { return []; }
+    render() { return this.items.map((item) => item.label); }
     handleInput() {}
+    invalidate() {}
   },
+  wrapTextWithAnsi: (text: string) => [text],
 }));
 
 // Avoid loading the real menu-helpers (which pulls in searchable-select and its
@@ -32,7 +34,7 @@ vi.mock("../../../../src/ui/menu/helpers.js", () => ({
   buildListTheme: () => ({ selectedPrefix: () => "" }),
 }));
 
-import { createConfirmSubmenu } from "../../../../src/ui/menu/submenus/confirm.js";
+import { createConfirmSubmenu, createMultilineConfirmComponent } from "../../../../src/ui/menu/submenus/confirm.js";
 
 describe("createConfirmSubmenu", () => {
   beforeEach(() => {
@@ -89,5 +91,23 @@ describe("createConfirmSubmenu", () => {
     selectListInstances[0].onCancel!();
     expect(onConfirm).not.toHaveBeenCalled();
     expect(done).toHaveBeenCalledWith();
+  });
+
+  it("renders real multi-line content above Yes/No", () => {
+    const component = createMultilineConfirmComponent({
+      message: "Remove rules?\n\n- Explore\n  - retired",
+      theme: mockTheme,
+      onConfirm: vi.fn(),
+      done: vi.fn(),
+    });
+    expect(component.render(80)).toEqual([
+      "  Remove rules?",
+      "",
+      "  - Explore",
+      "    - retired",
+      "",
+      "Yes",
+      "No",
+    ]);
   });
 });

@@ -2,47 +2,58 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const state: any = {};
-  state.resetPrompt = () => {
+  state.reset = () => {
     state.firstPrompt = new Promise<void>((resolve) => { state.releaseFirst = resolve; });
+    state.created = 0;
   };
-  state.resetPrompt();
-  const session = {
-    model: { provider: "parent", id: "worker-model" },
-    thinkingLevel: "high",
-    agent: { onPayload: undefined as undefined | ((payload: unknown) => unknown) },
-    setSessionName: vi.fn(),
-    bindExtensions: vi.fn(async () => {}),
-    getAllTools: vi.fn(() => []),
-    setActiveToolsByName: vi.fn(),
-    subscribe: vi.fn(() => () => {}),
-    prompt: vi.fn(() => state.firstPrompt),
-    steer: vi.fn(async () => {}),
-    abort: vi.fn(async () => {}),
-    dispose: vi.fn(async () => {}),
+  state.reset();
+  state.routing = {
+    enabled: true,
+    enabledProviders: ["other"],
+    agentAccess: { "general-purpose": { providers: { other: {} } } },
   };
-  return Object.assign(state, {
-    session,
-    createAgentSession: vi.fn(async () => ({ session, extensionsResult: {} })),
-    routingEnabled: true as boolean,
-    allowedProviders: [] as string[],
-    store: {
-      agent: {
-        defaultThinking: "high",
-        graceTurns: 2,
-        forceBackground: false,
-        loadSkillsImplicitly: true,
-        loadExtensionsImplicitly: true,
-        includeContextFiles: false,
-      },
-      get routing() {
-        return {
-          enabled: state.routingEnabled,
-          allowedProviders: [...state.allowedProviders],
-          agentModels: {},
-        };
-      },
-      modelSelectionFor: vi.fn(() => ({ model: "parent/worker-model", source: "automatic" })),
+  state.store = {
+    agent: {
+      defaultThinking: undefined,
+      graceTurns: 2,
+      forceBackground: false,
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: true,
+      includeContextFiles: false,
+      systemPromptMode: "replace",
     },
+    get routing() { return structuredClone(state.routing); },
+  };
+  state.createAgentSession = vi.fn(async (options: any) => {
+    const index = state.created++;
+    const subscribers: Array<(event: any) => void> = [];
+    const session = {
+      model: options.model,
+      thinkingLevel: options.thinkingLevel,
+      agent: { onPayload: undefined },
+      setSessionName: vi.fn(),
+      bindExtensions: vi.fn(async () => {}),
+      getAllTools: vi.fn(() => []),
+      setActiveToolsByName: vi.fn(),
+      subscribe: vi.fn((callback: (event: any) => void) => {
+        subscribers.push(callback);
+        return () => {};
+      }),
+      prompt: vi.fn(async () => {
+        if (index === 0) await state.firstPrompt;
+        const event = {
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+        };
+        for (const subscriber of subscribers) subscriber(event);
+      }),
+      steer: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    return { session, extensionsResult: {} };
+  });
+  return Object.assign(state, {
     coordinator: undefined as any,
     manager: undefined as any,
     ctx: undefined as any,
@@ -58,12 +69,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
   getAgentDir: () => "/tmp/pi-agent",
   loadProjectContextFiles: () => [],
-  SessionManager: {
-    inMemory: () => ({ appendCustomEntry: vi.fn() }),
-  },
-  SettingsManager: {
-    create: () => ({}),
-  },
+  SessionManager: { inMemory: () => ({ appendCustomEntry: vi.fn() }) },
+  SettingsManager: { create: () => ({}) },
 }));
 
 vi.mock("../../src/agents/agent-types.js", () => {
@@ -72,7 +79,6 @@ vi.mock("../../src/agents/agent-types.js", () => {
     displayName: "Agent",
     description: "Test agent",
     systemPrompt: "Complete the task.",
-    model: "parent/worker-model",
     registeredTools: [],
   };
   return {
@@ -102,32 +108,47 @@ import { AgentManager } from "../../src/agents/agent-manager.js";
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
 
-function params(description: string, model?: string) {
+function params(description: string, model?: string, background = true) {
   return {
     agent: "general-purpose",
     prompt: description,
     description,
-    run_in_background: true,
+    run_in_background: background,
     ...(model ? { model } : {}),
   };
 }
 
-describe("queued automatic model permission", () => {
+async function dispose(): Promise<void> {
+  mocks.coordinator.dispose();
+  await mocks.manager.dispose();
+}
+
+describe("queued invocation snapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.resetPrompt();
-    mocks.routingEnabled = true;
-    mocks.allowedProviders = ["other"];
+    mocks.reset();
+    mocks.routing = {
+      enabled: true,
+      enabledProviders: ["other"],
+      agentAccess: { "general-purpose": { providers: { other: {} } } },
+    };
+    mocks.store.agent.defaultThinking = undefined;
+    const models = [
+      { provider: "parent", id: "main-model" },
+      { provider: "parent", id: "next-model" },
+      { provider: "other", id: "worker-model" },
+    ];
     mocks.ctx = {
       cwd: "/tmp/project",
-      model: { provider: "parent", id: "main-model" },
+      model: models[0],
       modelRegistry: {
-        find: vi.fn((provider: string, id: string) => ({ provider, id })),
-        getAvailable: vi.fn(() => []),
+        find: vi.fn((provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id)),
+        getAll: vi.fn(() => models),
+        getAvailable: vi.fn(() => models),
       },
       scopedModels: [
-        { model: { provider: "parent", id: "main-model" } },
-        { model: { provider: "parent", id: "worker-model" } },
+        { model: models[0] },
+        { model: models[2], thinkingLevel: "high" },
       ],
       sessionManager: { getBranch: () => [] },
       getSystemPrompt: () => "Parent prompt",
@@ -137,126 +158,83 @@ describe("queued automatic model permission", () => {
     mocks.coordinator = new SpawnCoordinator(mocks.manager);
   });
 
-  it.each([
-    ["same-provider automatic override", "parent", false],
-    ["cross-provider automatic override", "other", false],
-    ["cross-provider explicit model", "other", true],
-  ])("rechecks permission for a queued %s before creating the child session", async (_label, workerProvider, explicit) => {
-    const selectedModel = `${workerProvider}/worker-model`;
-    mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
-    mocks.session.model = { provider: workerProvider, id: "worker-model" };
-    mocks.ctx.scopedModels[1] = { model: { provider: workerProvider, id: "worker-model" } };
+  it("keeps queued model, scope, and thinking after policy and session edits", async () => {
+    await executeAgentTool("first", params("first", "other/worker-model"), undefined, undefined, mocks.ctx);
+    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
+    await executeAgentTool("second", params("second", "other/worker-model"), undefined, undefined, mocks.ctx);
 
-    await executeAgentTool("call-first", params("first", explicit ? selectedModel : undefined), undefined, undefined, mocks.ctx);
-    await executeAgentTool("call-second", params("second", explicit ? selectedModel : undefined), undefined, undefined, mocks.ctx);
-
-    const records = mocks.manager.listAgents();
-    const first = records.find(record => record.display.description === "first")!;
-    const second = records.find(record => record.display.description === "second")!;
-    expect(first.lifecycle.status).toBe("running");
+    const second = mocks.manager.listAgents().find((record: any) => record.display.description === "second")!;
     expect(second.lifecycle.status).toBe("queued");
 
-    mocks.routingEnabled = false;
+    mocks.routing.enabled = false;
+    mocks.routing.enabledProviders = [];
+    mocks.routing.agentAccess = {};
+    mocks.ctx.model = { provider: "parent", id: "next-model" };
+    mocks.ctx.scopedModels = [{ model: mocks.ctx.model, thinkingLevel: "low" }];
     mocks.releaseFirst();
-    await first.execution.promise;
-    await vi.waitFor(() => expect(second.lifecycle.status).toBe("error"));
-
-    expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
-    expect(second.error).toContain(explicit ? "Cross-provider routing is OFF" : "Automatic model override");
-
-    mocks.coordinator.dispose();
-    await mocks.manager.dispose();
-  });
-
-  it("keeps the enqueue-time model when an assignment changes while queued", async () => {
-    let selectedModel = "parent/worker-a:high";
-    mocks.store.modelSelectionFor.mockImplementation(() => ({ model: selectedModel, source: "automatic" }));
-    mocks.ctx.modelRegistry.find = vi.fn((provider: string, id: string) => ({ provider, id }));
-    mocks.ctx.scopedModels.push(
-      { model: { provider: "parent", id: "worker-a" } },
-    );
-
-    await executeAgentTool("call-first", params("first"), undefined, undefined, mocks.ctx);
-    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
-    await executeAgentTool("call-second", params("second"), undefined, undefined, mocks.ctx);
-
-    // The assignment changes while the second agent is queued, but the model
-    // was locked at enqueue time — no re-resolution happens at start.
-    selectedModel = "other/worker-b:low";
-    mocks.session.model = { provider: "other", id: "worker-b" };
-    mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map(record => record.execution.promise));
+    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
 
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
-    expect(mocks.createAgentSession.mock.calls[1][0].model).toEqual({
-      provider: "parent",
-      id: "worker-a",
-    });
-    expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBe("high");
+    const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
+    expect(queuedOptions.model).toEqual({ provider: "other", id: "worker-model" });
+    expect(queuedOptions.scopedModels).toEqual([
+      { model: { provider: "parent", id: "main-model" } },
+      { model: { provider: "other", id: "worker-model" }, thinkingLevel: "high" },
+    ]);
+    expect(queuedOptions.thinkingLevel).toBe("high");
+    expect(second.lifecycle.status, second.error).toBe("completed");
 
-    mocks.coordinator.dispose();
-    await mocks.manager.dispose();
+    const future = await executeAgentTool("future", params("future", "other/worker-model"), undefined, undefined, mocks.ctx);
+    expect(future.isError).toBe(true);
+    expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
+    await dispose();
   });
 
-  it("fails a queued agent with the same model key when its provider is revoked", async () => {
-    const selectedModel = "other/worker-model";
-    mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
-    mocks.session.model = { provider: "other", id: "worker-model" };
-    mocks.ctx.scopedModels[1] = { model: { provider: "other", id: "worker-model" } };
-
-    await executeAgentTool("call-first", params("first", selectedModel), undefined, undefined, mocks.ctx);
+  it("keeps an undefined thinking snapshot after the default changes", async () => {
+    mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
+    await executeAgentTool("first", params("first"), undefined, undefined, mocks.ctx);
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
-    await executeAgentTool("call-second", params("second", selectedModel), undefined, undefined, mocks.ctx);
+    await executeAgentTool("second", params("second"), undefined, undefined, mocks.ctx);
 
-    const records = mocks.manager.listAgents();
-    const second = records.find(record => record.display.description === "second")!;
-    expect(second.lifecycle.status).toBe("queued");
-    expect(second.execution.modelKey).toBe(selectedModel);
-
-    mocks.allowedProviders = [];
+    mocks.store.agent.defaultThinking = "xhigh";
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map(record => record.execution.promise));
+    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
 
-    expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
-    expect(second.lifecycle.status).toBe("error");
-    expect(second.error).toContain("not authorized");
-    // The locked model key is never swapped for the parent or a new assignment.
-    expect(second.execution.modelKey).toBe(selectedModel);
-
-    mocks.coordinator.dispose();
-    await mocks.manager.dispose();
+    expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBeUndefined();
+    await dispose();
   });
 
-  it("waits for a queued foreground agent until it actually settles", async () => {
-    const selectedModel = "parent/worker-model";
-    mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
-    mocks.ctx.scopedModels[1] = { model: { provider: "parent", id: "worker-model" } };
+  it("keeps the enqueue-time parent model when model is omitted", async () => {
+    mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
+    await executeAgentTool("first", params("first"), undefined, undefined, mocks.ctx);
+    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
+    await executeAgentTool("second", params("second"), undefined, undefined, mocks.ctx);
 
-    await executeAgentTool("call-background", params("first"), undefined, undefined, mocks.ctx);
+    mocks.ctx.model = { provider: "parent", id: "next-model" };
+    mocks.releaseFirst();
+    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+
+    expect(mocks.createAgentSession.mock.calls[1][0].model).toEqual({ provider: "parent", id: "main-model" });
+    await dispose();
+  });
+
+  it("waits for a queued foreground Agent until it settles", async () => {
+    mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
+    await executeAgentTool("first", params("first"), undefined, undefined, mocks.ctx);
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
 
     let settled = false;
-    const foreground = executeAgentTool(
-      "call-foreground",
-      { ...params("second"), run_in_background: false },
-      undefined,
-      undefined,
-      mocks.ctx,
-    ).then(result => {
-      settled = true;
-      return result;
-    });
-
+    const foreground = executeAgentTool("second", params("second", undefined, false), undefined, undefined, mocks.ctx)
+      .then((result) => { settled = true; return result; });
     await vi.waitFor(() => expect(
-      mocks.manager.listAgents().some(record => record.display.description === "second" && record.lifecycle.status === "queued"),
+      mocks.manager.listAgents().some((record: any) => record.display.description === "second" && record.lifecycle.status === "queued"),
     ).toBe(true));
     expect(settled).toBe(false);
 
     mocks.releaseFirst();
     await foreground;
+    expect(settled).toBe(true);
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
-
-    mocks.coordinator.dispose();
-    await mocks.manager.dispose();
+    await dispose();
   });
 });

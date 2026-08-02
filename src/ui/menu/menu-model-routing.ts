@@ -1,379 +1,489 @@
-/**
- * menu-model-routing.ts — Cross-provider routing menu concern.
- *
- * Three concepts, one policy: the routing switch (OFF = strict parent
- * inheritance), the allowed-provider allowlist (parent provider is implicit),
- * and per-agent model assignments (session or permanent). No global default,
- * no per-type override terminology.
- *
- * Exports:
- *   - showModelRoutingMenu: routing switch, allowed providers, assignments
- */
+/** Model routing access-policy menus. */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { SettingsList, SelectList, type Component, type SettingItem } from "@earendil-works/pi-tui";
-import { getAgentConfig, getAllTypes } from "../../agents/agent-types.js";
-import type { Theme } from "../types.js";
-import { buildListTheme, createDelegatingComponent, createSearchableSelect } from "./helpers.js";
-import { createModelSelectSubmenu } from "./submenus/model-select.js";
-import { createConfirmSubmenu } from "./submenus/confirm.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
+import { SelectList, SettingsList, type Component, type SettingItem } from "@earendil-works/pi-tui";
+import { getAllTypes } from "../../agents/agent-types.js";
+import type { ProviderModelAccess } from "../../config/types.js";
+import { accessSummary, unavailableModelRules } from "../../models/model-access.js";
+import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
 import { getStore } from "../../shell.js";
-import { parseModelKey } from "../../utils.js";
+import type { Theme } from "../types.js";
+import { buildListTheme, createDelegatingComponent, sectionRow } from "./helpers.js";
+import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
+import { SettingsListWrapper } from "./wrappers/settings-list.js";
 
-/** Unique providers present in the current model options (registry/scope). */
-function providersFromModelOptions(modelOptions: string[]): string[] {
-  const providers = new Set<string>();
-  for (const opt of modelOptions) {
-    const parsed = parseModelKey(opt);
-    if (parsed) providers.add(parsed.provider);
-  }
-  return [...providers];
+type Store = ReturnType<typeof getStore>;
+type ModelRef = { provider: string; id: string };
+type RebuildMenu = (preserveSubmenu?: boolean) => void;
+
+function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
-/** Agent types with a session (string or inherit) or persistent assignment. */
-function assignedTypes(store: ReturnType<typeof getStore>): string[] {
-  return getAllTypes().filter((type) =>
-    store.sessionModelOverride(type) !== undefined || store.routing.agentModels[type] != null,
-  );
-}
-
-/** Filter model options to the parent provider plus allowed providers. */
-function modelsForAssignment(
-  modelOptions: string[],
-  parentProvider: string,
-  allowedProviders: string[],
-): string[] {
-  return modelOptions.filter((opt) => {
-    const parsed = parseModelKey(opt);
-    if (!parsed) return false;
-    return parsed.provider === parentProvider || allowedProviders.includes(parsed.provider);
-  });
-}
-
-export async function showModelRoutingMenu(
-  ctx: ExtensionCommandContext,
-  modelOptions: string[],
-): Promise<void> {
-  // Build menu items from current store state.
-  const buildItems = (
-    store: ReturnType<typeof getStore>,
-    theme: Theme,
-    onRebuild: () => void,
-  ): SettingItem[] => {
-    const parentProvider = ctx.model?.provider ?? "";
-    const items: SettingItem[] = [];
-
-    items.push({
-      id: "enabled",
-      label: "Enabled",
-      currentValue: store.routing.enabled ? "ON" : "OFF",
-      values: ["ON", "OFF"],
-      description: "OFF: subagents use the exact parent model; assignments, frontmatter models, and explicit model arguments are rejected.",
-    });
-
-    if (!store.routing.enabled) {
-      // OFF: nothing to configure — strict parent inheritance.
-      items.push({ id: "__sep__", label: " ", currentValue: "" });
-      items.push({ id: "__sep__", label: "Subagents use the exact parent model.", currentValue: "" });
-      return items;
-    }
-
-    // ON: provider allowlist summary
-    const allowed = [...store.routing.allowedProviders].sort();
-    items.push({
-      id: "allowedProviders",
-      label: "Allowed providers",
-      currentValue: allowed.length > 0 ? allowed.join(", ") : "(parent only)",
-      description: "Extra providers subagents may use. The parent provider is always available.",
-      submenu: allowedProvidersSubmenu(store, theme, parentProvider, modelOptions, onRebuild),
-    });
-
-    // ON: assignments summary
-    const count = assignedTypes(store).length;
-    items.push({
-      id: "agentModels",
-      label: "Agent model assignments",
-      currentValue: count > 0 ? `${count} configured` : "None",
-      description: "Per-agent model choices. Unassigned agents inherit the parent model.",
-      submenu: assignmentsSubmenu(store, ctx, theme, modelOptions, onRebuild),
-    });
-
-    items.push({ id: "__sep__", label: " ", currentValue: "" });
-    items.push({
-      id: "clearAll",
-      label: "Clear routing settings",
-      currentValue: "",
-      description: "Clear the provider allowlist and all assignments, and disable routing.",
-      submenu: createConfirmSubmenu({
-        message: "Clear all routing settings?",
-        theme,
-        onConfirm: () => {
-          store.mutate.routing.clearAll();
-          ctx.ui.notify("Routing settings cleared", "info");
-          onRebuild();
-        },
-      }),
-    });
-
-    return items;
-  };
-
-  /**
-   * Provider allowlist submenu. The parent provider row is informational and
-   * cannot be toggled. Removing an allowed provider that has assignments asks
-   * for confirmation and clears session + persistent assignments on confirm.
-   */
-  const allowedProvidersSubmenu = (
-    store: ReturnType<typeof getStore>,
-    theme: Theme,
-    parentProvider: string,
-    modelOptions: string[],
-    onRebuild: () => void,
-  ): SettingItem["submenu"] => (_currentValue, subDone) => {
-    const available = providersFromModelOptions(modelOptions);
-    // Saved providers absent from the current registry/scope are marked unavailable.
-    const unavailable = store.routing.allowedProviders.filter((p) => !available.includes(p));
-
-    const rows: Array<{ value: string; label: string; description: string }> = [];
-    if (parentProvider) {
-      rows.push({
-        value: parentProvider,
-        label: parentProvider,
-        description: "Parent provider · always available",
-      });
-    }
-    for (const provider of available) {
-      if (provider === parentProvider) continue;
-      const isAllowed = store.routing.allowedProviders.includes(provider);
-      rows.push({
-        value: provider,
-        label: `${provider}  [${isAllowed ? "x" : " "}]`,
-        description: isAllowed ? "Allowed · select to remove" : "Not allowed · select to add",
-      });
-    }
-    for (const provider of unavailable) {
-      rows.push({
-        value: provider,
-        label: `${provider}  [x]`,
-        description: "Not available in the current model scope · select to remove",
-      });
-    }
-
-    const list = new SelectList(rows, 10, buildListTheme(theme));
-    const delegator = createDelegatingComponent(list);
-
-    const confirmRemoval = (provider: string, types: string[]): Component => {
-      const message = [
-        `Removing ${provider} will clear assignments for:`,
-        ...types.map((t) => `- ${t}`),
-        "",
-        "Continue?",
-      ].join("\n");
-      const confirmList = new SelectList(
-        [
-          { value: "Yes", label: "Yes", description: message },
-          { value: "No", label: "No", description: message },
-        ],
-        5,
-        buildListTheme(theme),
-      );
-      confirmList.onSelect = (item) => {
-        if (item.value === "Yes") {
-          store.mutate.routing.removeProvider(provider);
-          ctx.ui.notify(`Removed ${provider} and cleared its assignments`, "info");
-        } else {
-          ctx.ui.notify(`${provider} unchanged`, "info");
-        }
-        subDone();
-        onRebuild();
+function defaultModelRow(ctx: ExtensionCommandContext, theme: Theme) {
+  return ctx.model
+    ? {
+        value: "__default__",
+        label: theme.fg("dim", `[✓] Default · ${modelKey(ctx.model)}`),
+        description: "",
+      }
+    : {
+        value: "__default__",
+        label: theme.fg("dim", "[ ] Default · No active parent model"),
+        description: "Unavailable until a parent model is selected",
       };
-      confirmList.onCancel = () => subDone();
-      return confirmList;
-    };
+}
 
+interface RegistrySnapshot {
+  models: ModelRef[];
+  /** Providers shown in the UI, including saved dormant configuration. */
+  providers: Set<string>;
+  /** Providers actually present in the loaded registry. */
+  presentProviders: Set<string>;
+  reliable: boolean;
+}
+
+function registrySnapshot(ctx: ExtensionCommandContext, store: Store): RegistrySnapshot {
+  const models = ctx.modelRegistry.getAll();
+  const presentProviders = new Set(models.map((model) => model.provider));
+  for (const provider of ctx.modelRegistry.getRegisteredProviderIds()) presentProviders.add(provider);
+  const providers = new Set(presentProviders);
+  for (const provider of store.routing.enabledProviders) providers.add(provider);
+  for (const access of Object.values(store.routing.agentAccess)) {
+    for (const provider of Object.keys(access.providers)) providers.add(provider);
+  }
+  return { models, providers, presentProviders, reliable: ctx.modelRegistry.getError() === undefined };
+}
+
+function providerModels(snapshot: RegistrySnapshot, provider: string): ModelRef[] {
+  return snapshot.models
+    .filter((model) => model.provider === provider)
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function providerRegistryIds(snapshot: RegistrySnapshot, provider: string): Set<string> {
+  return new Set(providerModels(snapshot, provider).map((model) => model.id));
+}
+
+function configuredAgentCount(store: Store): number {
+  return Object.keys(store.routing.agentAccess).length;
+}
+
+function providerRuleCount(store: Store, provider: string): number {
+  return store.accessTypesForProvider(provider).length;
+}
+
+function agentSummary(store: Store, type: string): string {
+  const providers = ownValue(store.routing.agentAccess, type)?.providers;
+  if (!providers || Object.keys(providers).length === 0) return "Parent only";
+  return Object.keys(providers).sort().map((provider) => {
+    const rule = providers[provider];
+    const value = rule.models ? String(rule.models.length) : "all";
+    return `${provider}/${value}`;
+  }).join(" · ");
+}
+
+function savedProviderSummary(store: Store, provider: string, rule: ProviderModelAccess | undefined): string {
+  if (!rule) return "Not configured";
+  const summary = accessSummary(rule);
+  return store.routing.enabledProviders.includes(provider)
+    ? summary
+    : `Disabled globally · ${summary === "All models" ? "All models saved" : summary.replace(" model", " saved model")}`;
+}
+
+function modelStatus(
+  store: Store,
+  snapshot: RegistrySnapshot,
+  scopedKeys: ReadonlySet<string> | null,
+  provider: string,
+  modelId: string,
+  authorized: boolean,
+): string {
+  if (!store.routing.enabledProviders.includes(provider)) return "Provider disabled";
+  const key = `${provider}/${modelId}`;
+  if (!providerRegistryIds(snapshot, provider).has(modelId)) {
+    return snapshot.reliable && snapshot.presentProviders.has(provider) ? "Unavailable" : "Saved rule";
+  }
+  if (scopedKeys && !scopedKeys.has(key)) return "Out of current scope";
+  return authorized ? "Active" : "Available";
+}
+
+function buildModelEditor(options: {
+  store: Store;
+  ctx: ExtensionCommandContext;
+  theme: Theme;
+  snapshot: RegistrySnapshot;
+  type: string;
+  provider: string;
+  quick: boolean;
+  done: (selectedValue?: string) => void;
+  onApplied: () => void;
+}): Component {
+  const { store, ctx, theme, snapshot, type, provider, quick, done, onApplied } = options;
+  const agentAccess = ownValue(store.routing.agentAccess, type);
+  const existing = agentAccess ? ownValue(agentAccess.providers, provider) : undefined;
+  let allModels = existing !== undefined && existing.models === undefined;
+  const selected = new Set(existing?.models ?? []);
+  const parentId = ctx.model?.provider === provider ? ctx.model.id : undefined;
+  const scopedKeys = scopedModelKeys(ctx.scopedModels);
+  let delegator: ReturnType<typeof createDelegatingComponent>;
+
+  const buildList = (): SelectList => {
+    const known = new Set(providerModels(snapshot, provider).map((model) => model.id));
+    for (const modelId of selected) known.add(modelId);
+    if (parentId) known.delete(parentId);
+
+    const rows = [
+      defaultModelRow(ctx, theme),
+      { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "" },
+      {
+        value: "__all__",
+        label: `[${allModels ? "x" : " "}] All alternate models`,
+        description: allModels ? "Includes future registry models" : "Use exact model rules",
+      },
+      ...[...known].sort().map((modelId) => ({
+        value: modelId,
+        label: `[${!allModels && selected.has(modelId) ? "x" : " "}] ${modelId}`,
+        description: modelStatus(store, snapshot, scopedKeys, provider, modelId, allModels || selected.has(modelId)),
+      })),
+      { value: "__apply__", label: quick ? "Apply quick setup" : "Apply model access", description: "Save this provider rule" },
+    ];
+    const list = new SelectList(rows, 14, buildListTheme(theme));
     list.onSelect = (item) => {
-      const provider = item.value;
-      if (provider === parentProvider) {
-        ctx.ui.notify(`The parent provider ${parentProvider} is always available`, "info");
+      if (item.value === "__default__" || item.value === "__separator__") return;
+      if (item.value === "__all__") {
+        allModels = !allModels;
+        if (allModels) selected.clear();
+        delegator.setActive(buildList());
         return;
       }
-      const isAllowed = store.routing.allowedProviders.includes(provider);
-      if (isAllowed) {
-        // The store lists affected types from persisted + session state, so
-        // unregistered agents with leftover assignments are covered too.
-        const types = store.assignmentTypesForProvider(provider);
-        if (types.length > 0) {
-          delegator.setActive(confirmRemoval(provider, types));
-          return;
-        }
-        store.mutate.routing.setProviderAllowed(provider, false);
-        ctx.ui.notify(`${provider} removed from allowed providers`, "info");
+      if (item.value !== "__apply__") {
+        allModels = false;
+        if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
+        delegator.setActive(buildList());
+        return;
+      }
+
+      const models = [...selected].sort();
+      if (!quick) {
+        store.mutate.routing.setAgentProviderAccess(type, provider, allModels ? undefined : models);
+        ctx.ui.notify(`${type} model access updated for ${provider}`, "info");
+        onApplied();
+        done("applied");
+        return;
+      }
+
+      const lines = ["Apply model access?", ""];
+      if (allModels || models.length > 0) {
+        lines.push("- Enable Model routing", `- Enable ${provider} for routed models`, `- ${type} may use:`);
+        lines.push(...(allModels ? [`  - ${provider}/*`] : models.map((modelId) => `  - ${provider}/${modelId}`)));
       } else {
-        store.mutate.routing.setProviderAllowed(provider, true);
-        ctx.ui.notify(`${provider} added to allowed providers`, "info");
+        lines.push(`- Remove ${type}/${provider} alternate access`);
       }
-      subDone();
-      onRebuild();
-    };
-    list.onCancel = () => subDone();
-    return delegator;
-  };
-
-  /**
-   * Assignments submenu: one row per agent type plus "Assign another agent..."
-   * for unassigned types. Row selection opens the 2-step model flow
-   * (model → session/permanent); "(inherits parent)" clears the assignment.
-   */
-  const assignmentsSubmenu = (
-    store: ReturnType<typeof getStore>,
-    ctx: ExtensionCommandContext,
-    theme: Theme,
-    modelOptions: string[],
-    onRebuild: () => void,
-  ): SettingItem["submenu"] => (_currentValue, subDone) => {
-    const parentProvider = ctx.model?.provider ?? "";
-    const filteredModels = modelsForAssignment(modelOptions, parentProvider, store.routing.allowedProviders);
-
-    const assignmentOnSelect = (typeName: string) => (mode: "session" | "permanent" | "clear", model: string | null) => {
-      if (mode === "clear") {
-        // Clears persistent and session (setAgentModel deletes both layers).
-        store.mutate.routing.setAgentModel(typeName, null);
-        ctx.ui.notify(`${typeName} assignment cleared`, "info");
-        onRebuild();
-        return;
-      }
-      const effective = model === "(inherits parent)" ? null : model;
-      if (mode === "session") {
-        // String = use this model for the session; null = explicitly inherit
-        // the parent for the session. Persistent stays untouched either way.
-        store.mutate.session.setOverride(typeName, effective);
-      } else {
-        // Permanent: supersedes any session override for the same type.
-        store.mutate.routing.setAgentModel(typeName, effective);
-      }
-      ctx.ui.notify(
-        effective === null
-          ? `${typeName} inherits parent model`
-          : `${typeName} model set to ${effective}`,
-        "info",
-      );
-      onRebuild();
-    };
-
-    const typeEntries = getAllTypes().map((typeName) => {
-      const cfg = getAgentConfig(typeName);
-      const session = store.sessionModelOverride(typeName);
-      const persistent = store.routing.agentModels[typeName];
-      const effective = store.modelSelectionFor(typeName, "(inherits parent)", cfg).model;
-      return { typeName, cfg, session, persistent, effective, registered: true };
-    });
-
-    // Configured types that are no longer registered as agents still appear
-    // (marked unavailable) so their assignments can be inspected and cleared.
-    const registeredTypes = new Set(getAllTypes());
-    const unregisteredTypes = new Set<string>();
-    for (const type of Object.keys(store.routing.agentModels)) {
-      if (!registeredTypes.has(type)) unregisteredTypes.add(type);
-    }
-    for (const type of Object.keys(store.sessionOverridesSnapshot())) {
-      if (!registeredTypes.has(type)) unregisteredTypes.add(type);
-    }
-    for (const typeName of unregisteredTypes) {
-      const session = store.sessionModelOverride(typeName);
-      const persistent = store.routing.agentModels[typeName];
-      typeEntries.push({
-        typeName,
-        cfg: undefined,
-        session,
-        persistent,
-        // Same effective semantics as the registered path: a session null
-        // pre-selects "(inherits parent)", not the persistent model.
-        effective: session === null
-          ? "(inherits parent)"
-          : session ?? persistent ?? "(inherits parent)",
-        registered: false,
-      });
-    }
-
-    const rows: Array<{ value: string; label: string; description: string }> = [];
-    for (const entry of typeEntries) {
-      const description = entry.session === undefined
-        ? entry.persistent ?? entry.effective
-        : entry.session === null
-          ? "(inherits parent) [session]"
-          : `${entry.session} [session]`;
-      rows.push({
-        value: entry.typeName,
-        label: entry.registered ? entry.typeName : `${entry.typeName} (agent unavailable)`,
-        description,
-      });
-    }
-
-    const unassigned = typeEntries.filter((e) => e.registered && e.session === undefined && e.persistent == null);
-    if (unassigned.length > 0) {
-      rows.push({
-        value: "__assign__",
-        label: "Assign another agent...",
-        description: "Assign a model to an agent that currently inherits the parent model",
-      });
-    }
-
-    const list = new SelectList(rows, 10, buildListTheme(theme));
-    const delegator = createDelegatingComponent(list);
-
-    list.onSelect = (item) => {
-      if (item.value === "__assign__") {
-        delegator.setActive(createSearchableSelect(
-          unassigned.map((e) => ({ value: e.typeName, label: e.typeName })),
-          {
-            onSelect: (typeName) => {
-              const entry = unassigned.find((e) => e.typeName === typeName)!;
-              return createModelSelectSubmenu({
-                modelOptions: filteredModels,
-                showClear: false,
-                theme,
-                onSelect: assignmentOnSelect(entry.typeName),
-              })(entry.effective, subDone);
-            },
-            onCancel: () => subDone(),
-          },
-          theme,
-        ));
-        return;
-      }
-      const entry = typeEntries.find((e) => e.typeName === item.value)!;
-      delegator.setActive(createModelSelectSubmenu({
-        modelOptions: filteredModels,
-        showClear: entry.persistent != null,
+      delegator.setActive(createMultilineConfirmComponent({
+        message: lines.join("\n"),
         theme,
-        onSelect: assignmentOnSelect(entry.typeName),
-      })(entry.effective, subDone));
+        done,
+        onConfirm: () => {
+          if (allModels || models.length > 0) {
+            store.mutate.routing.configureAgentProviderAccess(type, provider, allModels ? undefined : models);
+          } else {
+            store.mutate.routing.setAgentProviderAccess(type, provider, []);
+          }
+          ctx.ui.notify("Quick model setup applied", "info");
+          onApplied();
+        },
+      }));
     };
-    list.onCancel = () => subDone();
-    return delegator;
+    list.onCancel = () => done();
+    return list;
   };
 
-  let rebuild: ((items: any[]) => void) | undefined;
+  delegator = createDelegatingComponent(buildList());
+  return delegator;
+}
+
+function quickSetupSubmenu(
+  store: Store,
+  ctx: ExtensionCommandContext,
+  theme: Theme,
+  snapshot: RegistrySnapshot,
+  onRebuild: () => void,
+): SettingItem["submenu"] {
+  return (_value, done) => {
+    if (!ctx.model) {
+      ctx.ui.notify("Select a parent model before using Quick model setup", "warning");
+      done();
+      return new SelectList([], 1, buildListTheme(theme));
+    }
+    const agents = getAllTypes().sort().map((type) => ({ value: type, label: type, description: agentSummary(store, type) }));
+    const list = new SelectList(agents, 10, buildListTheme(theme));
+    const delegator = createDelegatingComponent(list);
+    list.onSelect = (item) => delegator.setActive(buildModelEditor({
+      store,
+      ctx,
+      theme,
+      snapshot,
+      type: item.value,
+      provider: ctx.model!.provider,
+      quick: true,
+      done,
+      onApplied: onRebuild,
+    }));
+    list.onCancel = () => done();
+    return delegator;
+  };
+}
+
+function providerMaintenance(
+  store: Store,
+  ctx: ExtensionCommandContext,
+  theme: Theme,
+  provider: string,
+  done: (selectedValue?: string) => void,
+  onRebuild: RebuildMenu,
+): Component {
+  let delegator: ReturnType<typeof createDelegatingComponent>;
+  const build = (): SettingsList => {
+    const routing = store.routing;
+    const snapshot = registrySnapshot(ctx, store);
+    const stale = unavailableModelRules(
+      routing,
+      provider,
+      providerRegistryIds(snapshot, provider),
+      snapshot.presentProviders.has(provider),
+      snapshot.reliable,
+    );
+    const staleCount = Object.values(stale).reduce((sum, models) => sum + models.length, 0);
+    const types = store.accessTypesForProvider(provider);
+    const items: SettingItem[] = [
+      {
+        id: "enabled",
+        label: "Enabled",
+        currentValue: routing.enabledProviders.includes(provider) ? "ON" : "OFF",
+        values: ["ON", "OFF"],
+      },
+      { id: "agentAccess", label: "Agent access", currentValue: `${types.length} configured` },
+      { id: "unavailable", label: "Unavailable model rules", currentValue: String(staleCount) },
+    ];
+    if (staleCount > 0) {
+      items.push({
+        id: "cleanUnavailable",
+        label: "Clean unavailable rules...",
+        currentValue: "",
+        submenu: (_value, subDone) => createMultilineConfirmComponent({
+          message: [
+            `Remove ${staleCount} unavailable ${provider} model rules?`,
+            "",
+            ...Object.entries(stale).flatMap(([type, models]) => [
+              `- ${type}`,
+              ...models.map((modelId) => `  - ${modelId}`),
+              "",
+            ]),
+          ].join("\n").trimEnd(),
+          theme,
+          done: subDone,
+          onConfirm: () => {
+            const fresh = registrySnapshot(ctx, store);
+            const stillStale = unavailableModelRules(
+              store.routing,
+              provider,
+              providerRegistryIds(fresh, provider),
+              fresh.presentProviders.has(provider),
+              fresh.reliable,
+            );
+            const staleRules = Object.values(stillStale).flat();
+            store.mutate.routing.cleanUnavailableModels(provider, [...new Set(staleRules)]);
+            ctx.ui.notify(`Removed ${staleRules.length} unavailable model rules`, "info");
+            onRebuild(true);
+            delegator.setActive(build());
+          },
+        }),
+      });
+    }
+    if (types.length > 0) {
+      items.push({
+        id: "deleteRules",
+        label: "Delete saved access rules...",
+        currentValue: "",
+        submenu: (_value, subDone) => createMultilineConfirmComponent({
+          message: [
+            `Delete all saved ${provider} access rules for:`,
+            ...types.map((type) => `- ${type}`),
+            "",
+            "Continue?",
+          ].join("\n"),
+          theme,
+          done: subDone,
+          onConfirm: () => {
+            store.mutate.routing.deleteProviderRules(provider);
+            ctx.ui.notify(`Deleted saved ${provider} access rules`, "info");
+            onRebuild(true);
+            delegator.setActive(build());
+          },
+        }),
+      });
+    }
+    return new SettingsList(items, 12, buildListTheme(theme), (id, value) => {
+      if (id !== "enabled") return;
+      store.mutate.routing.setProviderEnabled(provider, value === "ON");
+      ctx.ui.notify(`${provider} ${value === "ON" ? "enabled" : "disabled"} for routed models`, "info");
+      onRebuild(true);
+      delegator.setActive(build());
+    }, () => done());
+  };
+  delegator = createDelegatingComponent(build());
+  return delegator;
+}
+
+function enabledProvidersSubmenu(
+  store: Store,
+  ctx: ExtensionCommandContext,
+  theme: Theme,
+  snapshot: RegistrySnapshot,
+  onRebuild: RebuildMenu,
+): SettingItem["submenu"] {
+  return (_value, done) => {
+    const rows = [...snapshot.providers].sort().map((provider) => ({
+      value: provider,
+      label: `${provider}  [${store.routing.enabledProviders.includes(provider) ? "x" : " "}]`,
+      description: `${providerRuleCount(store, provider)} saved Agent rules`,
+    }));
+    const list = new SelectList(rows, 12, buildListTheme(theme));
+    const delegator = createDelegatingComponent(list);
+    list.onSelect = (item) => delegator.setActive(providerMaintenance(
+      store, ctx, theme, item.value, done, onRebuild,
+    ));
+    list.onCancel = () => done();
+    return delegator;
+  };
+}
+
+function agentAccessSubmenu(
+  store: Store,
+  ctx: ExtensionCommandContext,
+  theme: Theme,
+  snapshot: RegistrySnapshot,
+  onRebuild: () => void,
+): SettingItem["submenu"] {
+  return (_value, done) => {
+    const registered = new Set(getAllTypes());
+    const types = [...new Set([...registered, ...Object.keys(store.routing.agentAccess)])].sort();
+    const rows = types.map((type) => ({
+      value: type,
+      label: registered.has(type) ? type : `${type} (agent unavailable)`,
+      description: agentSummary(store, type),
+    }));
+    const list = new SelectList(rows, 12, buildListTheme(theme));
+    const delegator = createDelegatingComponent(list);
+    list.onSelect = (item) => {
+      const type = item.value;
+      const rules = ownValue(store.routing.agentAccess, type)?.providers ?? {};
+      const providerRows = [
+        defaultModelRow(ctx, theme),
+        { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "" },
+        ...[...new Set([...snapshot.providers, ...Object.keys(rules)])].sort().map((provider) => ({
+          value: provider,
+          label: provider,
+          description: savedProviderSummary(store, provider, rules[provider]),
+        })),
+      ];
+      const providerList = new SelectList(providerRows, 14, buildListTheme(theme));
+      providerList.onSelect = (providerItem) => {
+        if (providerItem.value === "__default__" || providerItem.value === "__separator__") return;
+        delegator.setActive(buildModelEditor({
+          store,
+          ctx,
+          theme,
+          snapshot,
+          type,
+          provider: providerItem.value,
+          quick: false,
+          done,
+          onApplied: onRebuild,
+        }));
+      };
+      providerList.onCancel = () => done();
+      delegator.setActive(providerList);
+    };
+    list.onCancel = () => done();
+    return delegator;
+  };
+}
+
+export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promise<void> {
+  let rebuild: ((items: SettingItem[], preserveSubmenu?: boolean) => void) | undefined;
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const triggerRebuild = () => rebuild?.(buildItems(getStore(), theme, triggerRebuild));
-    const store = getStore();
-    const items = buildItems(store, theme, triggerRebuild);
+    const buildItems = (): SettingItem[] => {
+      const store = getStore();
+      const routing = store.routing;
+      const snapshot = registrySnapshot(ctx, store);
+      const triggerRebuild: RebuildMenu = (preserveSubmenu = false) => rebuild?.(buildItems(), preserveSubmenu);
+      const items: SettingItem[] = [{
+        id: "enabled",
+        label: "Enabled",
+        currentValue: routing.enabled ? "ON" : "OFF",
+        values: ["ON", "OFF"],
+        description: "OFF permits only the exact parent model.",
+      }];
 
-    const settingsList = new SettingsList(items, 15, buildListTheme(theme), (id, newValue) => {
-      if (id === "enabled") {
-        const enabled = newValue === "ON";
-        store.mutate.routing.setEnabled(enabled);
-        ctx.ui.notify(`Cross-provider routing ${enabled ? "enabled" : "disabled"}`, "info");
+      if (!routing.enabled) {
+        items.push({ id: "__space__", label: " ", currentValue: "" });
+        items.push({ id: "__parent__", label: "Subagents use the exact parent model.", currentValue: "" });
+        return items;
       }
-      triggerRebuild();
+
+      items.push({
+        id: "quickSetup",
+        label: "Quick model setup",
+        currentValue: "",
+        description: "Grant one Agent access to alternate models from the current parent provider.",
+        submenu: quickSetupSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+      });
+      const providers = [...routing.enabledProviders].sort();
+      items.push({
+        id: "enabledProviders",
+        label: "Enabled providers",
+        currentValue: providers.length ? providers.join(", ") : "None",
+        submenu: enabledProvidersSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+      });
+      items.push({
+        id: "agentAccess",
+        label: "Agent model access",
+        currentValue: `${configuredAgentCount(store)} configured`,
+        submenu: agentAccessSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+      });
+      items.push({ id: "__sep__", ...sectionRow() });
+      items.push({
+        id: "clearAll",
+        label: "Clear routing settings",
+        currentValue: "",
+        submenu: createConfirmSubmenu({
+          message: "Clear all Model routing settings?",
+          theme,
+          onConfirm: () => {
+            store.mutate.routing.clearAll();
+            ctx.ui.notify("Routing settings cleared", "info");
+            triggerRebuild();
+          },
+        }),
+      });
+      return items;
+    };
+
+    const settings = new SettingsList(buildItems(), 15, buildListTheme(theme), (id, value) => {
+      if (id === "enabled") {
+        getStore().mutate.routing.setEnabled(value === "ON");
+        ctx.ui.notify(`Model routing ${value === "ON" ? "enabled" : "disabled"}`, "info");
+      }
+      rebuild?.(buildItems());
     }, () => done(undefined));
-    return new SettingsListWrapper(settingsList, {
-      title: "Cross-provider Routing",
+    return new SettingsListWrapper(settings, {
+      title: "Model Routing",
       theme,
       onCancel: () => done(undefined),
-      onRebuild: (r) => { rebuild = r; },
+      onRebuild: (callback) => { rebuild = callback; },
     });
   });
 }

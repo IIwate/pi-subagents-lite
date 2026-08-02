@@ -25,8 +25,8 @@ export interface SettingsListWrapperOptions {
   title: string;
   theme: SettingsListWrapperTheme;
   onCancel?: () => void;
-  /** Called with a rebuild(newItems) function so the caller can trigger in-place updates. */
-  onRebuild?: (rebuild: (items: any[]) => void) => void;
+  /** Called with a rebuild function; nested pages may preserve the active submenu. */
+  onRebuild?: (rebuild: (items: any[], preserveSubmenu?: boolean) => void) => void;
 }
 
 export class SettingsListWrapper implements Component {
@@ -89,11 +89,11 @@ export class SettingsListWrapper implements Component {
     // wrapper-controlled items: descriptions are read dynamically at render
     // time, so they remain correct after a rebuild.
     if (options.onRebuild) {
-      const rebuild = (newItems: any[]) => {
+      const rebuild = (newItems: any[], preserveSubmenu = false) => {
         list.items = newItems;
         list.filteredItems = newItems;
         list.selectedIndex = 0;
-        list.submenuComponent = null;
+        if (!preserveSubmenu) list.submenuComponent = null;
       };
       options.onRebuild(rebuild);
     }

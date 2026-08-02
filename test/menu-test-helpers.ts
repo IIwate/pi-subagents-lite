@@ -18,7 +18,7 @@ import { vi } from "vitest";
  */
 export function selectByName(name: string): (title: string, items: string[]) => string | undefined {
   const nameMap: Record<string, string> = {
-    model: "Cross-provider routing",
+    model: "Model routing",
     concurrency: "Concurrency settings",
     display: "Display settings",
     debug: "Debug",
@@ -79,11 +79,22 @@ export function createMockCtx(
       }),
       notify: vi.fn(),
     },
+    model: { provider: "anthropic", id: "claude-sonnet-4-20250514" },
+    scopedModels: [],
     modelRegistry: {
+      getAll: vi.fn(() => [
+        { provider: "anthropic", id: "claude-sonnet-4-20250514" },
+        { provider: "anthropic", id: "claude-haiku-4" },
+        { provider: "openai", id: "gpt-4o" },
+        { provider: "openai", id: "o3" },
+        { provider: "google", id: "gemini-2.5-pro" },
+      ]),
       getAvailable: vi.fn(() => [
         { provider: "anthropic", id: "claude-sonnet-4-20250514" },
         { provider: "openai", id: "gpt-4o" },
       ]),
+      getRegisteredProviderIds: vi.fn(() => ["anthropic", "openai", "google"]),
+      getError: vi.fn(() => undefined),
     },
   };
 }

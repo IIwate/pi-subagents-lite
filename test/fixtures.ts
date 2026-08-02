@@ -185,7 +185,6 @@ export function makeAgentMd(overrides: Record<string, unknown> = {}): string {
   const defaults: Record<string, string> = {
     name: "test-agent",
     description: "A test agent",
-    model: "anthropic/claude-sonnet-4-6",
     display_name: "Test Agent",
     tools: "read, bash, edit",
     extensions: "true",
@@ -246,7 +245,7 @@ export function fakeCtx(): any {
   return {
     cwd: "/home/test/project",
     sessionManager: { getBranch: () => [] },
-    modelRegistry: { find: vi.fn() },
+    modelRegistry: { find: vi.fn(), getAll: vi.fn(() => []) },
     model: { provider: "test", id: "model" },
     scopedModels: [],
     getSystemPrompt: vi.fn(),

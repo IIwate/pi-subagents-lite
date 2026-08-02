@@ -1,11 +1,12 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
+import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentWidget, type UICtx } from "./ui/agent-widget.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
-import { registerAgentTool } from "./registration.js";
+import { modelKey, scopedModelKeys } from "./models/model-scope.js";
+import { buildCurrentAgentGuidance } from "./prompt/agent-guidance.js";
 import {
   getManager,
   getWidget,
@@ -115,6 +116,26 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
+  pi.on("before_agent_start", (event, ctx) => {
+    if (!event.systemPromptOptions.selectedTools?.includes("Agent")) return;
+    const guidance = buildCurrentAgentGuidance({
+      agents: getAvailableTypes().flatMap((name) => {
+        const config = getAgentConfig(name);
+        return config ? [{
+          name,
+          description: config.description,
+          registeredTools: config.registeredTools,
+          maxTurns: config.maxTurns,
+        }] : [];
+      }),
+      parentModelKey: ctx.model ? modelKey(ctx.model) : "",
+      routing: getStore().routing,
+      registryKeys: new Set(ctx.modelRegistry.getAll().map(modelKey)),
+      scopedKeys: scopedModelKeys(ctx.scopedModels),
+    });
+    return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+  });
+
   pi.on("input", async (event, ctx) => {
     if (event.source !== "interactive") return;
     const selectedAgentId = getNavigator()?.selectedId();
@@ -155,13 +176,10 @@ export function setupEventListeners(pi: ExtensionAPI): void {
   });
 
 
-  // session_start — load config, scan agents, register into registry,
-  // then re-register Agent tool with dynamic agent type enum
+  // session_start — load config and refresh the Agent catalogue used by guidance.
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
     setSessionCtx(ctx);
     await loadConfigAndRegisterAgents(ctx);
-    // Re-register with updated agent type list (now includes user/project agents)
-    registerAgentTool(pi);
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }

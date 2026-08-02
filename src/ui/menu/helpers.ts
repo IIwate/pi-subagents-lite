@@ -25,7 +25,6 @@ export function sectionRow(title?: string): { label: string; currentValue: strin
 
 /**
  * Build SelectOption[] from raw "provider/model-id" strings.
- * "(inherits parent)" is appended last — the explicit models come first.
  */
 export function buildModelOptions(rawOptions: string[]): SelectOption[] {
   const items: SelectOption[] = [];
@@ -35,7 +34,6 @@ export function buildModelOptions(rawOptions: string[]): SelectOption[] {
     if (!parsed) continue;
     items.push({ value: opt, label: parsed.modelId, provider: parsed.provider });
   }
-  items.push({ value: "(inherits parent)", label: "(inherits parent)", provider: "" });
   return items;
 }
 

@@ -92,7 +92,6 @@ describe("parseAgentFile", () => {
 name: explorer
 display_name: Explorer Agent
 description: A fast exploration agent
-model: anthropic/claude-haiku-4-5-20251001
 tools: read, bash, grep
 extensions: none
 skills: all
@@ -108,7 +107,6 @@ This is the system prompt body.
     expect(result.name).toBe("explorer");
     expect(result.display_name).toBe("Explorer Agent");
     expect(result.description).toBe("A fast exploration agent");
-    expect(result.model).toBe("anthropic/claude-haiku-4-5-20251001");
     expect(result.tools).toEqual(["read", "bash", "grep"]);
     expect(result.extensions).toBe(false); // "none" → false
     expect(result.skills).toBe(true); // "all" → true
@@ -130,7 +128,6 @@ Just a body.
     expect(result.name).toBe("minimal");
     expect(result.display_name).toBeUndefined();
     expect(result.description).toBeUndefined();
-    expect(result.model).toBeUndefined();
     expect(result.tools).toBeUndefined();
     expect(result.extensions).toBeUndefined();
     expect(result.skills).toBeUndefined();
@@ -257,18 +254,15 @@ describe("scanAgentFilesInDir", () => {
 
   it("parses all .md files in a directory", async () => {
     const { dir, cleanup } = tempDirWithFiles([
-      { name: "alpha.md", content: makeAgentMd({ name: "alpha", model: "model/a" }) },
-      { name: "beta.md", content: makeAgentMd({ name: "beta", model: "model/b" }) },
-      { name: "gamma.md", content: makeAgentMd({ name: "gamma", _skip: ["model"] }) },
+      { name: "alpha.md", content: makeAgentMd({ name: "alpha" }) },
+      { name: "beta.md", content: makeAgentMd({ name: "beta" }) },
+      { name: "gamma.md", content: makeAgentMd({ name: "gamma" }) },
       { name: "readme.txt", content: "not an agent file" },
     ]);
 
     try {
       const agents = await scanAgentFilesInDir(dir, "user");
-      expect(agents).toHaveLength(3);
-      expect(agents.find((a) => a.name === "alpha")?.model).toBe("model/a");
-      expect(agents.find((a) => a.name === "beta")?.model).toBe("model/b");
-      expect(agents.find((a) => a.name === "gamma")?.model).toBeUndefined();
+      expect(agents.map((agent) => agent.name).sort()).toEqual(["alpha", "beta", "gamma"]);
     } finally {
       cleanup();
     }
@@ -320,7 +314,6 @@ describe("mergeAgents", () => {
         {
           name: "explorer",
           description: "Explorer agent",
-          model: "model/a",
           extensions: true,
           skills: true,
           systemPrompt: "",
@@ -329,7 +322,7 @@ describe("mergeAgents", () => {
     ]);
     const result = mergeAgents(defaults, [], []);
     expect(result.size).toBe(1);
-    expect(result.get("explorer")?.model).toBe("model/a");
+    expect(result.get("explorer")?.description).toBe("Explorer agent");
   });
 
   it("user agents override defaults by name with per-field merge", () => {
@@ -339,14 +332,13 @@ describe("mergeAgents", () => {
         {
           name: "explorer",
           description: "Explorer agent",
-          model: "model/a",
           extensions: true,
           skills: true,
           systemPrompt: "default prompt",
         },
       ],
     ]);
-    // User agent only overrides model and description
+    // User agent overrides description and prompt.
     const userAgents: AgentConfigFromMd[] = [
       {
         name: "explorer",
@@ -360,8 +352,7 @@ describe("mergeAgents", () => {
     // User fields override defaults
     expect(agent.description).toBe("User explorer");
     expect(agent.systemPrompt).toBe("user prompt");
-    // Default fields preserved when user doesn't override
-    expect(agent.model).toBe("model/a");
+    // Default fields preserved when user doesn't override.
     expect(agent.extensions).toBe(true);
     expect(agent.skills).toBe(true);
   });
@@ -373,7 +364,6 @@ describe("mergeAgents", () => {
         {
           name: "explorer",
           description: "Default explorer",
-          model: "model/a",
           extensions: true,
           skills: true,
           systemPrompt: "default prompt",
@@ -391,15 +381,13 @@ describe("mergeAgents", () => {
     const projectAgents: AgentConfigFromMd[] = [
       {
         name: "explorer",
-        model: "model/project",
         source: "project",
         systemPrompt: "project prompt",
       },
     ];
     const result = mergeAgents(defaults, userAgents, projectAgents);
     const agent = result.get("explorer")!;
-    // Project overrides
-    expect(agent.model).toBe("model/project");
+    // Project overrides.
     expect(agent.systemPrompt).toBe("project prompt");
     // User overrides preserved where project doesn't override
     expect(agent.description).toBe("User explorer");

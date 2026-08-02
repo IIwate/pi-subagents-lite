@@ -41,9 +41,7 @@ const mockModules = vi.hoisted(() => ({
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
   mockIncludeContextFiles: true as boolean,
   mockSystemPromptMode: "replace" as string,
-  mockAllowCrossProvider: false as boolean,
-  mockRoutingEnabled: false as boolean,
-  mockAllowedProviders: [] as string[],
+  mockDefaultThinking: undefined as string | undefined,
   getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
@@ -83,13 +81,7 @@ vi.mock("../../src/shell.js", () => ({
       graceTurns: 6,
       forceBackground: false,
       showCost: false,
-    },
-    get routing() {
-      return {
-        enabled: mockModules.mockRoutingEnabled,
-        allowedProviders: [...mockModules.mockAllowedProviders],
-        agentModels: {},
-      };
+      defaultThinking: mockModules.mockDefaultThinking,
     },
   }),
   enterSubagentSpawn: mockModules.mockEnterSubagentSpawn,
@@ -135,8 +127,7 @@ function resetMocks() {
   mockModules.clearLoaderExtensions();
   mockModules.mockIncludeContextFiles = true;
   mockModules.mockSystemPromptMode = "replace";
-  mockModules.mockRoutingEnabled = false;
-  mockModules.mockAllowedProviders = [];
+  mockModules.mockDefaultThinking = undefined;
   mockModules.mockLoadProjectContextFiles.mockReturnValue([]);
 
   mockModules.mockGetConfig.mockReturnValue({ ...defaultConfig });
@@ -381,121 +372,78 @@ describe("runAgent — tool visibility wiring", () => {
     expect(sessionOptions.tools).not.toContain("web_search");
   });
 
-  it("rechecks routing and provider policy before session creation", async () => {
-    mockModules.mockRoutingEnabled = false;
-    const ctx = fakeCtx();
-    ctx.model = { provider: "parent", id: "main-model" };
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: { provider: "other", id: "worker-model" },
-    })).rejects.toThrow("Cross-provider routing is OFF");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects a same-provider non-parent model while routing is OFF", async () => {
-    mockModules.mockRoutingEnabled = false;
-    const ctx = fakeCtx();
-    ctx.model = { provider: "parent", id: "main-model" };
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: { provider: "parent", id: "worker-model" },
-    })).rejects.toThrow("Cross-provider routing is OFF");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects a provider not on the allowlist while routing is ON", async () => {
-    mockModules.mockRoutingEnabled = true;
-    const ctx = fakeCtx();
-    ctx.model = { provider: "parent", id: "main-model" };
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: { provider: "other", id: "worker-model" },
-    })).rejects.toThrow("not authorized");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects starts without a parent model while routing is off", async () => {
-    const ctx = fakeCtx();
-    ctx.model = undefined;
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: { provider: "test", id: "worker-model" },
-      modelSource: "explicit",
-    })).rejects.toThrow("parent session has no active model");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects starts when routing is on but no model can be resolved", async () => {
-    mockModules.mockRoutingEnabled = true;
-    const ctx = fakeCtx();
-    ctx.model = undefined;
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-    })).rejects.toThrow("no subagent model could be resolved");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects a queued automatic override after permission is disabled", async () => {
-    const ctx = fakeCtx();
-    ctx.model = { provider: "test", id: "parent-model" };
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: { provider: "test", id: "worker-model" },
-      modelSource: "automatic",
-    })).rejects.toThrow("Automatic model override");
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("ignores frontmatter model fallback while automatic overrides are disabled", async () => {
+  it("uses an accepted alternate model without rechecking current routing policy", async () => {
     const session = createMockSession();
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetAgentConfig.mockReturnValue({
-      ...defaultAgentConfig,
-      model: "other/worker-model",
-    });
     const ctx = fakeCtx();
-    ctx.model = { provider: "test", id: "parent-model" };
+    ctx.model = { provider: "parent", id: "main-model" };
 
-    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
+    await runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "other", id: "worker-model" },
+    });
 
-    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].model).toEqual(ctx.model);
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].model).toEqual({
+      provider: "other",
+      id: "worker-model",
+    });
   });
 
-  it("uses Pi's current scope and pinned thinking for the initial model", async () => {
+  it("allows an accepted explicit model when the parent is absent", async () => {
+    const session = createMockSession();
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const ctx = fakeCtx();
+    ctx.model = undefined;
+
+    await runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model: { provider: "other", id: "worker-model" },
+    });
+
+    expect(mockModules.mockCreateAgentSession).toHaveBeenCalledOnce();
+  });
+
+  it("rejects when neither the invocation nor parent supplies a model", async () => {
+    const ctx = fakeCtx();
+    ctx.model = undefined;
+    await expect(runAgent(ctx, "test-agent", "do something", { pi: fakePi }))
+      .rejects.toThrow("no subagent model could be resolved");
+  });
+
+  it("keeps a resolved undefined thinking snapshot from reading live defaults", async () => {
+    const session = createMockSession();
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockDefaultThinking = "xhigh";
+
+    await runAgent(fakeCtx(), "test-agent", "do something", {
+      pi: fakePi,
+      thinkingLevel: undefined,
+      thinkingResolved: true,
+    });
+
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].thinkingLevel).toBeUndefined();
+  });
+
+  it("uses the invocation scope and thinking snapshot instead of live context", async () => {
     const session = createMockSession();
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
     const model = { provider: "anthropic", id: "claude-opus-5" };
+    const acceptedScope = [{ model, thinkingLevel: "high" }];
     const ctx = fakeCtx();
-    ctx.model = model;
-    ctx.scopedModels = [{ model, thinkingLevel: "high" }];
+    ctx.model = { provider: "openai", id: "gpt-5.4" };
+    ctx.scopedModels = [{ model: ctx.model, thinkingLevel: "medium" }];
 
-    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
+    await runAgent(ctx, "test-agent", "do something", {
+      pi: fakePi,
+      model,
+      scopedModels: acceptedScope,
+      thinkingLevel: "high",
+    });
 
     const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
-    expect(sessionOptions.scopedModels).toEqual(ctx.scopedModels);
+    expect(sessionOptions.model).toEqual(model);
+    expect(sessionOptions.scopedModels).toEqual(acceptedScope);
     expect(sessionOptions.thinkingLevel).toBe("high");
-  });
-
-  it("rejects a queued model removed from the current scope before session creation", async () => {
-    const requestedModel = { provider: "anthropic", id: "claude-opus-5" };
-    const ctx = fakeCtx();
-    ctx.model = requestedModel;
-    ctx.scopedModels = [{
-      model: { provider: "openai", id: "gpt-5.4" },
-      thinkingLevel: "medium",
-    }];
-
-    await expect(runAgent(ctx, "test-agent", "do something", {
-      pi: fakePi,
-      model: requestedModel,
-    })).rejects.toThrow('Model "anthropic/claude-opus-5" is not in the active model scope');
-    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
   });
 
   it("applies an empty tool list when tools are disabled", async () => {

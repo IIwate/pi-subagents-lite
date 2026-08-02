@@ -122,7 +122,7 @@ describe("SettingsListWrapper — __sep__ navigation", () => {
 describe("SettingsListWrapper — onRebuild sets items directly", () => {
   it("rebuild replaces items without appending wrapper (__sep__/__back__) items", () => {
     const list = makeSettingsList([{ id: "a", label: "A", currentValue: "" }]);
-    let rebuild: ((items: any[]) => void) | undefined;
+    let rebuild: ((items: any[], preserveSubmenu?: boolean) => void) | undefined;
     new SettingsListWrapper(list, {
       title: "T",
       theme,
@@ -134,6 +134,24 @@ describe("SettingsListWrapper — onRebuild sets items directly", () => {
     expect(list.items.map((i) => i.id)).toEqual(["x"]);
     expect(list.filteredItems).toEqual(list.items);
     expect(list.selectedIndex).toBe(0);
+  });
+
+  it("can refresh parent items without detaching an active nested page", () => {
+    const list = makeSettingsList([{ id: "a", label: "A", currentValue: "" }]) as any;
+    const submenu = { render: () => ["nested"], handleInput: () => {} };
+    list.submenuComponent = submenu;
+    let rebuild: ((items: any[], preserveSubmenu?: boolean) => void) | undefined;
+    new SettingsListWrapper(list, {
+      title: "T",
+      theme,
+      onCancel: () => {},
+      onRebuild: (r) => { rebuild = r; },
+    });
+
+    rebuild!([{ id: "x", label: "X", currentValue: "" }], true);
+    expect(list.submenuComponent).toBe(submenu);
+    rebuild!([{ id: "y", label: "Y", currentValue: "" }]);
+    expect(list.submenuComponent).toBeNull();
   });
 });
 

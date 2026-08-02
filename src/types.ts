@@ -3,7 +3,7 @@
  */
 
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
 import type { SubagentType, AgentInvocation } from "./agents/types.js";
@@ -18,10 +18,12 @@ export type ThinkingLevel = string;
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
   model?: Model<any>;
-  /** How the model was chosen, retained across queue waits for permission rechecks. */
-  modelSource?: "explicit" | "automatic" | "parent";
+  /** Scope captured when the Agent call was accepted. */
+  scopedModels?: ExtensionContext["scopedModels"];
   maxTurns?: number;
   thinkingLevel?: ThinkingLevel;
+  /** True when thinkingLevel is the accepted-call snapshot, including undefined. */
+  thinkingResolved?: boolean;
   graceTurns?: number;
 }
 
@@ -62,8 +64,6 @@ export interface RunCallbacks {
 export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
-  /** Distinguish explicit thinking from automatic model-derived thinking. */
-  thinkingSource?: "explicit" | "automatic" | "inherited";
   worktreePath?: string;
   invocation?: AgentInvocation;
 }

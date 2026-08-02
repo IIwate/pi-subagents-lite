@@ -14,8 +14,8 @@ import { resolveType, getAgentConfig, discoverNewAgents } from "./agent-types.js
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
-  findModelInRegistry,
   parseThinkingLevel,
+  parseModelKey,
   parseModelSpec,
   resolveExactModel,
   unknownModelError,
@@ -28,9 +28,12 @@ import {
   modelKey,
   scopedThinkingLevel,
   routingDisabledModelError,
-  providerNotAllowedError,
+  providerDisabledError,
+  agentProviderDeniedError,
+  modelDeniedError,
+  modelUnavailableError,
 } from "../models/model-scope.js";
-import { authorizeModel } from "../models/model-precedence.js";
+import { authorizeModel } from "../models/model-access.js";
 import {
   getPiInstance,
   getSessionCtx,
@@ -118,83 +121,77 @@ export async function executeAgentTool(
   const scopedModels = [...ctx.scopedModels];
   const store = getStore();
   const routing = store.routing;
-  if (!ctx.model && !routing.enabled) {
-    return errorResult(missingParentModelError());
-  }
-
-  // Resolve here rather than mutating tool input in a listener, preserving
-  // whether a queued model was explicit, automatic, or inherited.
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
+  if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
+
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
-  // OFF: strict parent inheritance — assignments, frontmatter, and explicit
-  // models are ignored. ON: explicit → session → persistent → frontmatter → parent.
-  const automaticSelection = routing.enabled
-    ? store.modelSelectionFor(resolvedType, parentModelRef, agentConfig)
-    : { model: parentModelRef, source: "parent" as const };
-  const selectedModelSpec = explicitModel
-    ? params.model as string
-    : automaticSelection.model;
-  const modelSource = explicitModel ? "explicit" : automaticSelection.source;
+  const selectedModelSpec = explicitModel ? params.model as string : parentModelRef;
   const { modelRef, thinkingFromModel } = parseModelSpec(selectedModelSpec);
-  const model = modelSource === "parent"
-    ? findModelInRegistry(undefined, ctx.modelRegistry, ctx.model)
-    : modelRef
-      ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
-      : findModelInRegistry(undefined, ctx.modelRegistry, ctx.model);
+  const explicitlyRequestsParent = Boolean(
+    ctx.model
+    && modelRef
+    && (modelRef === parentModelRef || modelRef === ctx.model.id),
+  );
+  const model = explicitModel
+    ? explicitlyRequestsParent
+      ? ctx.model
+      : modelRef
+        ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
+        : undefined
+    : ctx.model;
+  const parsedModelKey = modelRef ? parseModelKey(modelRef) : null;
+  const resolvedModelKey = model
+    ? modelKey(model)
+    : parsedModelKey
+      ? `${parsedModelKey.provider}/${parsedModelKey.modelId}`
+      : "";
 
-  if (modelRef && !model) {
-    return errorResult(unknownModelError(modelRef));
-  }
-  if (!model) {
-    return errorResult(missingSubagentModelError());
-  }
+  if (explicitModel && modelRef && !resolvedModelKey) return errorResult(unknownModelError(modelRef));
+  if (!resolvedModelKey) return errorResult(missingSubagentModelError());
 
-  // Gate the resolved model: scope first, then exact-parent (always allowed),
-  // then routing OFF (only the parent model), then the provider allowlist.
-  if (model) {
-    const scopedKeys = scopedModelKeys(scopedModels);
-    const verdict = authorizeModel({
-      modelKey: modelKey(model),
-      parentModelKey: parentModelRef,
-      parentProvider: ctx.model?.provider ?? "",
-      allowedProviders: routing.allowedProviders,
-      routingEnabled: routing.enabled,
-      scopedKeys,
-    });
-    if (!verdict.ok) {
-      if (verdict.reason === "out-of-scope") {
-        return errorResult(outOfScopeModelError(modelKey(model), scopedKeys!));
-      }
-      if (verdict.reason === "routing-disabled") {
-        const ref = explicitModel ? (params.model as string) : modelKey(model);
-        return errorResult(routingDisabledModelError(ref));
-      }
-      return errorResult(
-        providerNotAllowedError(modelKey(model), ctx.model?.provider ?? "", routing.allowedProviders),
-      );
+  const scopedKeys = scopedModelKeys(scopedModels);
+  const registryKeys = new Set(ctx.modelRegistry.getAll().map(modelKey));
+  const verdict = authorizeModel({
+    agentType: resolvedType,
+    modelKey: resolvedModelKey,
+    parentModelKey: parentModelRef,
+    routing,
+    registryKeys,
+    scopedKeys,
+  });
+  if (!verdict.ok) {
+    const provider = resolvedModelKey.slice(0, resolvedModelKey.indexOf("/"));
+    if (verdict.reason === "out-of-scope") {
+      return errorResult(outOfScopeModelError(resolvedModelKey, scopedKeys!));
     }
+    if (verdict.reason === "routing-disabled") {
+      return errorResult(routingDisabledModelError(selectedModelSpec));
+    }
+    if (verdict.reason === "provider-disabled") {
+      return errorResult(providerDisabledError(resolvedModelKey, provider));
+    }
+    if (verdict.reason === "agent-provider-denied") {
+      return errorResult(agentProviderDeniedError(resolvedModelKey, resolvedType, provider));
+    }
+    if (verdict.reason === "model-denied") {
+      return errorResult(modelDeniedError(resolvedModelKey, resolvedType));
+    }
+    return errorResult(modelUnavailableError(resolvedModelKey));
   }
-
-  const resolvedModelKey = model ? modelKey(model) : undefined;
+  if (!model) return errorResult(unknownModelError(modelRef!));
 
   // Capture the predicted model/provider for queued-agent display.
   const modelName = model?.id;
   const providerName = model?.provider;
 
-  // The runner re-validates the locked model against the scope, allowlist,
-  // and routing switch active when the agent starts (queued agents fail
-  // loudly if permission was revoked).
+  // Resolve thinking now so queued work cannot observe later scope/config edits.
   const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
-  const thinkingLevel = explicitThinkingLevel ?? thinkingFromModel;
-  const thinkingSource = explicitThinkingLevel !== undefined
-    ? "explicit"
-    : thinkingFromModel !== undefined
-      ? "automatic"
-      : "inherited";
-  const displayThinkingLevel = thinkingLevel
+  const thinkingLevel = explicitThinkingLevel
+    ?? thinkingFromModel
     ?? scopedThinkingLevel(scopedModels, model)
     ?? agentConfig?.thinkingLevel
-    ?? store.agent.defaultThinking;
+    ?? store.agent.defaultThinking
+    ?? ctx.thinkingLevel;
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;
@@ -203,14 +200,14 @@ export async function executeAgentTool(
     prompt,
     description,
     model,
-    modelSource,
     modelKey: resolvedModelKey,
-    thinkingSource,
+    scopedModels,
     maxTurns,
     thinkingLevel,
+    thinkingResolved: true,
     graceTurns: store.agent.graceTurns,
     worktreePath: validatedWorktreePath,
-    invocation: { modelName, providerName, thinkingLevel: displayThinkingLevel },
+    invocation: { modelName, providerName, thinkingLevel },
     runInBackground: runInBackground || store.agent.forceBackground,
   });
 

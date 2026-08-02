@@ -4,13 +4,15 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
-  automaticModelOverrideError,
+  agentProviderDeniedError,
   listModelOptionsForMenus,
   missingParentModelError,
   missingSubagentModelError,
   modelKey,
+  modelDeniedError,
+  modelUnavailableError,
   outOfScopeModelError,
-  providerNotAllowedError,
+  providerDisabledError,
   routingDisabledModelError,
   scopedModelKeys,
   scopedThinkingLevel,
@@ -26,36 +28,21 @@ describe("missing model errors", () => {
   });
 });
 
-describe("automaticModelOverrideError", () => {
-  it("explains that a queued automatic selection lost authorization", () => {
-    const message = automaticModelOverrideError("same-provider/worker");
-    expect(message).toContain("same-provider/worker");
-    expect(message).toContain("no longer authorized");
-    expect(message).toContain("Cross-provider routing");
-  });
-});
-
 describe("routingDisabledModelError", () => {
   it("points users at the routing switch when OFF rejects a model", () => {
     const message = routingDisabledModelError("parent/other");
     expect(message).toContain("parent/other");
-    expect(message).toContain("Cross-provider routing is OFF");
+    expect(message).toContain("Model routing is OFF");
     expect(message).toContain("exact parent model");
   });
 });
 
-describe("providerNotAllowedError", () => {
-  it("lists the parent provider and the allowlist", () => {
-    const message = providerNotAllowedError("other/model", "parent", ["openai"]);
-    expect(message).toContain("other/model");
-    expect(message).toContain("parent");
-    expect(message).toContain("openai");
-    expect(message).toContain("Allowed providers");
-  });
-
-  it("handles an empty parent provider", () => {
-    const message = providerNotAllowedError("other/model", "", []);
-    expect(message).toContain("none");
+describe("model access errors", () => {
+  it("names the failed access boundary", () => {
+    expect(providerDisabledError("openai/gpt-5", "openai")).toContain("provider \"openai\"");
+    expect(agentProviderDeniedError("openai/gpt-5", "Explore", "openai")).toContain("Agent \"Explore\"");
+    expect(modelDeniedError("openai/gpt-5", "Explore")).toContain("saved model access rule");
+    expect(modelUnavailableError("openai/gpt-5")).toContain("current Pi model registry");
   });
 });
 

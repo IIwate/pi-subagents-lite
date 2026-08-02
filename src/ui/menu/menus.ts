@@ -59,7 +59,7 @@ export async function showSettingsMenu(
   const buildItems = (): SelectItem[] => {
     const routing = getStore().routing;
     return [
-      { value: "routing", label: "Cross-provider routing", description: routing.enabled ? "ON · allowed providers and agent assignments" : "OFF · inherits parent" },
+      { value: "routing", label: "Model routing", description: routing.enabled ? "ON · provider and Agent model access" : "OFF · exact parent only" },
       { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
@@ -69,7 +69,7 @@ export async function showSettingsMenu(
 
   await runSelectMenu(ctx, "Settings", buildItems, async (choice) => {
     switch (choice) {
-      case "routing": await showModelRoutingMenu(ctx, modelOptions); break;
+      case "routing": await showModelRoutingMenu(ctx); break;
       case "concurrency": await showConcurrencySettingsMenu(ctx, modelOptions); break;
       case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
       case "systemprompt": await showSystemPromptMenu(ctx); break;
@@ -85,7 +85,7 @@ export async function showAgentsMainMenu(
 ): Promise<void> {
   const items: SelectItem[] = [
     { value: "settings", label: "Settings", description: "Model, concurrency, and display settings" },
-    { value: "debug", label: "Debug", description: "Agent types, briefing, diagnostics" },
+    { value: "debug", label: "Debug", description: "Agent types, diagnostics, and recovery tests" },
   ];
 
   await runSelectMenu(ctx, "Agents", items, async (choice) => {

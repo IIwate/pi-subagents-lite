@@ -11,7 +11,7 @@
  *
  * Config:
  *   - Loaded from ~/.pi/agent/subagents-lite.json at session_start
- *   - ConfigStore owns config + session overrides + persistence + side effects
+ *   - ConfigStore owns canonical config, persistence, and side effects
  *   - Tool execution and menus read/write through store
  *
  * Commands:
