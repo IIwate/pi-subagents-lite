@@ -300,7 +300,7 @@ describe("ConfigStore session overrides", () => {
     const store = new ConfigStore(io);
     saves.length = 0;
     store.mutate.session.setOverride("Explore", "session/model");
-    store.mutate.session.clearOverride("Explore");
+    store.mutate.session.setOverride("reviewer", null);
     store.mutate.session.clearAll();
     expect(saves).toHaveLength(0);
   });
@@ -316,10 +316,75 @@ describe("ConfigStore session overrides", () => {
   it("clearAll resets to an empty map", () => {
     const store = new ConfigStore(memIO().io);
     store.mutate.session.setOverride("Explore", "x");
-    store.mutate.session.setOverride("reviewer", "y");
+    store.mutate.session.setOverride("reviewer", null);
     store.mutate.session.clearAll();
+    expect(store.sessionModelOverride("Explore")).toBeUndefined();
+    expect(store.sessionModelOverride("reviewer")).toBeUndefined();
+  });
+
+  it("treats null and undefined as distinct session states", () => {
+    const store = new ConfigStore(memIO().io);
+    expect(store.sessionModelOverride("Explore")).toBeUndefined();
+    store.mutate.session.setOverride("Explore", null);
     expect(store.sessionModelOverride("Explore")).toBeNull();
-    expect(store.sessionModelOverride("reviewer")).toBeNull();
+    expect(store.modelSelectionFor("Explore", "parent"))
+      .toEqual({ model: "parent", source: "parent" });
+  });
+
+  it("setAgentModel clears the same-type session override", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.session.setOverride("Explore", "openai/session-model");
+    store.mutate.routing.setAgentModel("Explore", "anthropic/persistent-model");
+    expect(store.sessionModelOverride("Explore")).toBeUndefined();
+    expect(store.routing.agentModels["Explore"]).toBe("anthropic/persistent-model");
+  });
+
+  it("setAgentModel(null) clears both layers", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setAgentModel("Explore", "anthropic/persistent-model");
+    store.mutate.session.setOverride("Explore", "openai/session-model");
+    store.mutate.routing.setAgentModel("Explore", null);
+    expect(store.routing.agentModels["Explore"]).toBeUndefined();
+    expect(store.sessionModelOverride("Explore")).toBeUndefined();
+  });
+
+  it("clearAll clears allowlist, assignments, session overrides, and disables routing", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setEnabled(true);
+    store.mutate.routing.setProviderAllowed("openai", true);
+    store.mutate.routing.setAgentModel("Explore", "openai/gpt-4o");
+    store.mutate.session.setOverride("reviewer", "openai/gpt-5");
+    store.mutate.routing.clearAll();
+    expect(store.routing.enabled).toBe(false);
+    expect(store.routing.allowedProviders).toEqual([]);
+    expect(store.routing.agentModels).toEqual({});
+    expect(store.sessionModelOverride("reviewer")).toBeUndefined();
+  });
+
+  it("removeProvider drops persistent and session assignments for that provider", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setProviderAllowed("openai", true);
+    store.mutate.routing.setAgentModel("Explore", "openai/gpt-4o");
+    store.mutate.session.setOverride("reviewer", "openai/gpt-5");
+    store.mutate.session.setOverride("general-purpose", null);
+    store.mutate.routing.removeProvider("openai");
+    expect(store.routing.allowedProviders).toEqual([]);
+    expect(store.routing.agentModels).toEqual({});
+    expect(store.sessionModelOverride("reviewer")).toBeUndefined();
+    // Session "inherit parent" carries no provider and survives.
+    expect(store.sessionModelOverride("general-purpose")).toBeNull();
+  });
+
+  it("assignmentTypesForProvider covers persistent and session string assignments", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setAgentModel("Explore", "openai/gpt-4o");
+    store.mutate.routing.setAgentModel("researcher", "anthropic/claude-4");
+    store.mutate.session.setOverride("reviewer", "openai/gpt-5");
+    store.mutate.session.setOverride("general-purpose", null);
+    expect(store.assignmentTypesForProvider("openai").sort())
+      .toEqual(["Explore", "reviewer"]);
+    expect(store.assignmentTypesForProvider("anthropic")).toEqual(["researcher"]);
+    expect(store.assignmentTypesForProvider("google")).toEqual([]);
   });
 });
 
@@ -416,7 +481,7 @@ describe("ConfigStore lifecycle", () => {
     store.reload();
 
     expect(store.agent.graceTurns).toBe(5);
-    expect(store.sessionModelOverride("Explore")).toBeNull();
+    expect(store.sessionModelOverride("Explore")).toBeUndefined();
   });
 
   it("reload resynchronizes navigator visibility", () => {

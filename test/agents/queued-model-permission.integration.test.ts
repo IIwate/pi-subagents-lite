@@ -168,19 +168,20 @@ describe("queued automatic model permission", () => {
     await mocks.manager.dispose();
   });
 
-  it("re-resolves an automatic model before a queued start", async () => {
+  it("keeps the enqueue-time model when an assignment changes while queued", async () => {
     let selectedModel = "parent/worker-a:high";
     mocks.store.modelSelectionFor.mockImplementation(() => ({ model: selectedModel, source: "automatic" }));
     mocks.ctx.modelRegistry.find = vi.fn((provider: string, id: string) => ({ provider, id }));
     mocks.ctx.scopedModels.push(
       { model: { provider: "parent", id: "worker-a" } },
-      { model: { provider: "other", id: "worker-b" } },
     );
 
     await executeAgentTool("call-first", params("first"), undefined, undefined, mocks.ctx);
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
     await executeAgentTool("call-second", params("second"), undefined, undefined, mocks.ctx);
 
+    // The assignment changes while the second agent is queued, but the model
+    // was locked at enqueue time — no re-resolution happens at start.
     selectedModel = "other/worker-b:low";
     mocks.session.model = { provider: "other", id: "worker-b" };
     mocks.releaseFirst();
@@ -188,10 +189,39 @@ describe("queued automatic model permission", () => {
 
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
     expect(mocks.createAgentSession.mock.calls[1][0].model).toEqual({
-      provider: "other",
-      id: "worker-b",
+      provider: "parent",
+      id: "worker-a",
     });
-    expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBe("low");
+    expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBe("high");
+
+    mocks.coordinator.dispose();
+    await mocks.manager.dispose();
+  });
+
+  it("fails a queued agent with the same model key when its provider is revoked", async () => {
+    const selectedModel = "other/worker-model";
+    mocks.store.modelSelectionFor.mockReturnValue({ model: selectedModel, source: "automatic" });
+    mocks.session.model = { provider: "other", id: "worker-model" };
+    mocks.ctx.scopedModels[1] = { model: { provider: "other", id: "worker-model" } };
+
+    await executeAgentTool("call-first", params("first", selectedModel), undefined, undefined, mocks.ctx);
+    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
+    await executeAgentTool("call-second", params("second", selectedModel), undefined, undefined, mocks.ctx);
+
+    const records = mocks.manager.listAgents();
+    const second = records.find(record => record.display.description === "second")!;
+    expect(second.lifecycle.status).toBe("queued");
+    expect(second.execution.modelKey).toBe(selectedModel);
+
+    mocks.allowedProviders = [];
+    mocks.releaseFirst();
+    await Promise.all(mocks.manager.listAgents().map(record => record.execution.promise));
+
+    expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(second.lifecycle.status).toBe("error");
+    expect(second.error).toContain("not authorized");
+    // The locked model key is never swapped for the parent or a new assignment.
+    expect(second.execution.modelKey).toBe(selectedModel);
 
     mocks.coordinator.dispose();
     await mocks.manager.dispose();

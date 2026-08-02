@@ -20,7 +20,7 @@ export const mockModules = {
     agent: { forceBackground: false } as Record<string, any>,
     concurrency: { default: 4 } as Record<string, any>,
   },
-  mockSessionOverrides: {} as Record<string, string>,
+  mockSessionOverrides: {} as Record<string, string | null>,
   mockPiInstance: null as any,
   mockNavigator: { setDebugStatusPreview: vi.fn() },
   mockManager: {
@@ -119,11 +119,31 @@ vi.mock("../src/shell.js", () => {
       };
     },
     sessionModelOverride(type: string) {
-      return mockModules.mockSessionOverrides[type] ?? null;
+      return mockModules.mockSessionOverrides[type];
+    },
+    sessionOverridesSnapshot() {
+      return { ...mockModules.mockSessionOverrides };
+    },
+    assignmentTypesForProvider(provider: string) {
+      const types = new Set<string>();
+      for (const [type, model] of Object.entries(mockModules.mockConfig.modelRouting.agentModels ?? {})) {
+        const slashIdx = model.indexOf("/");
+        if (slashIdx > 0 && model.slice(0, slashIdx) === provider) types.add(type);
+      }
+      for (const [type, model] of Object.entries(mockModules.mockSessionOverrides)) {
+        if (model == null) continue;
+        const slashIdx = model.indexOf("/");
+        if (slashIdx > 0 && model.slice(0, slashIdx) === provider) types.add(type);
+      }
+      return [...types];
     },
     modelSelectionFor(type: string, parentModelId: string, agentConfig?: any) {
       const sessionOverride = mockModules.mockSessionOverrides[type];
-      if (sessionOverride) return { model: sessionOverride, source: "automatic" };
+      if (sessionOverride !== undefined) {
+        return sessionOverride === null
+          ? { model: parentModelId, source: "parent" }
+          : { model: sessionOverride, source: "automatic" };
+      }
       const persistent = mockModules.mockConfig.modelRouting.agentModels[type];
       if (persistent) return { model: persistent, source: "automatic" };
       if (agentConfig?.model) return { model: agentConfig.model, source: "automatic" };
@@ -146,6 +166,11 @@ vi.mock("../src/shell.js", () => {
             if (slashIdx <= 0 || model.slice(0, slashIdx) !== provider) kept[type] = model;
           }
           mockModules.mockConfig.modelRouting.agentModels = kept;
+          for (const [type, model] of Object.entries(mockModules.mockSessionOverrides)) {
+            if (model == null) continue;
+            const slashIdx = model.indexOf("/");
+            if (slashIdx > 0 && model.slice(0, slashIdx) === provider) delete mockModules.mockSessionOverrides[type];
+          }
         },
         setAgentModel(type: string, model: string | null) {
           if (model === null || model === "") {
@@ -153,9 +178,11 @@ vi.mock("../src/shell.js", () => {
           } else {
             mockModules.mockConfig.modelRouting.agentModels[type] = model;
           }
+          delete mockModules.mockSessionOverrides[type];
         },
         clearAll() {
           mockModules.mockConfig.modelRouting = { enabled: false, allowedProviders: [], agentModels: {} };
+          mockModules.mockSessionOverrides = {};
         },
       },
       agent: {
@@ -196,8 +223,7 @@ vi.mock("../src/shell.js", () => {
         },
       },
       session: {
-        setOverride(type: string, model: string) { mockModules.mockSessionOverrides[type] = model; },
-        clearOverride(type: string) { delete mockModules.mockSessionOverrides[type]; },
+        setOverride(type: string, model: string | null) { mockModules.mockSessionOverrides[type] = model; },
         clearAll() { mockModules.mockSessionOverrides = {}; },
       },
     },

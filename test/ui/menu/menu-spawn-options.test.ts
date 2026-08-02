@@ -53,7 +53,6 @@ import { showSpawnOptionsMenu } from "../../../src/ui/menu/menu-spawn-options.js
 describe("showSpawnOptionsMenu — SettingsList integration", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { forceBackground: false };
-    mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -71,7 +70,6 @@ describe("showSpawnOptionsMenu — SettingsList integration", () => {
 describe("showSpawnOptionsMenu — force background", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { forceBackground: false };
-    mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -104,7 +102,6 @@ describe("showSpawnOptionsMenu — force background", () => {
 describe("showSpawnOptionsMenu — grace turns", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { forceBackground: false };
-    mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -175,7 +172,6 @@ describe("showSpawnOptionsMenu — grace turns", () => {
 describe("showSpawnOptionsMenu — default thinking level", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { forceBackground: false };
-    mockModules.mockSessionOverrides.default = null;
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];

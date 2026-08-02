@@ -36,7 +36,6 @@ function resetMocks(): void {
     showCost: false,
     showTime: true,
   };
-  mockModules.mockSessionOverrides.default = null;
   vi.clearAllMocks();
   settingsListCalls = [];
 }

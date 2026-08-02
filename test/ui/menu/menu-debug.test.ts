@@ -386,6 +386,18 @@ describe("showDebugMenu — agent briefing action (SelectList)", () => {
     expect(message).toContain("worktree_path");
   });
 
+  it("states the OFF routing boundary in the model routing briefing", async () => {
+    const ctx = createMockCtx();
+    await showDebugMenu(ctx);
+    selectListCalls[0].onSelect!({ value: "agent-briefing" });
+    const message = mockSendUserMessage.mock.calls[0][0];
+    expect(message).toContain("When Cross-provider routing is OFF, do not pass `model`.");
+    expect(message).toContain("the child will inherit the parent model");
+    expect(message).toContain("When routing is ON, omit `model` by default");
+    expect(message).toContain("Pass `model` only when the user explicitly requests a specific model");
+    expect(message).toContain("Never silently replace a rejected model request");
+  });
+
   it("notifies the user after sending the briefing", async () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);

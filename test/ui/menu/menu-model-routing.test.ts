@@ -157,19 +157,26 @@ describe("showModelRoutingMenu — routing switch", () => {
     expect(item("agentModels").currentValue).toBe("None");
   });
 
-  it("Clear routing settings resets allowlist, assignments, and switch", async () => {
+  it("Clear routing settings resets allowlist, assignments, switch, and session state", async () => {
     mockModules.mockConfig.modelRouting = {
       enabled: true,
       allowedProviders: ["openai"],
       agentModels: { Explore: "openai/gpt-4o" },
     };
+    mockModules.mockSessionOverrides = { reviewer: "openai/gpt-5", "general-purpose": null };
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx, MODEL_OPTIONS);
     const done = vi.fn();
     item("clearAll").submenu("", done);
     lastList().onSelect!({ value: "Yes" });
     expect(mockModules.mockConfig.modelRouting).toEqual({ enabled: false, allowedProviders: [], agentModels: {} });
+    expect(mockModules.mockSessionOverrides).toEqual({});
     expect(ctx.ui.notify).toHaveBeenCalledWith("Routing settings cleared", "info");
+    // Reopening the menu rebuilds from the cleared state (OFF page only).
+    settingsListCalls = [];
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    expect(item("enabled").currentValue).toBe("OFF");
+    expect(item("agentModels")).toBeUndefined();
   });
 });
 
@@ -284,6 +291,56 @@ describe("showModelRoutingMenu — allowed providers", () => {
     lastList().onSelect!({ value: "No" });
     expect(mockModules.mockConfig.modelRouting.allowedProviders).toEqual(["openai"]);
     expect(mockModules.mockConfig.modelRouting.agentModels).toEqual({ Explore: "openai/gpt-4o" });
+  });
+
+  it("lists unregistered agents with leftover assignments in the confirmation and clears them", async () => {
+    mockModules.mockConfig.modelRouting = {
+      enabled: true,
+      allowedProviders: ["openai"],
+      agentModels: { "ghost-agent": "openai/gpt-4o", Explore: "anthropic/claude-4" },
+    };
+    mockModules.mockSessionOverrides = { "dead-agent": "openai/gpt-5" };
+    // Neither ghost-agent nor dead-agent is registered anymore.
+    (getAllTypes as any).mockReturnValue(["Explore"]);
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    const done = vi.fn();
+    item("allowedProviders").submenu("", done);
+    lastList().onSelect!({ value: "openai", label: "openai  [x]" });
+
+    const yesItem = lastList().items.find((i: any) => i.value === "Yes");
+    expect(yesItem.description).toContain("Removing openai will clear assignments for:");
+    expect(yesItem.description).toContain("- ghost-agent");
+    expect(yesItem.description).toContain("- dead-agent");
+    expect(yesItem.description).toContain("Continue?");
+
+    lastList().onSelect!({ value: "Yes" });
+    expect(mockModules.mockConfig.modelRouting.allowedProviders).not.toContain("openai");
+    expect(mockModules.mockConfig.modelRouting.agentModels).toEqual({ Explore: "anthropic/claude-4" });
+    expect(mockModules.mockSessionOverrides).toEqual({});
+  });
+
+  it("marks unregistered configured types as '(agent unavailable)' on the assignments page", async () => {
+    mockModules.mockConfig.modelRouting = {
+      enabled: true,
+      allowedProviders: [],
+      agentModels: { "ghost-agent": "openai/gpt-4o", Explore: "anthropic/claude-4" },
+    };
+    mockModules.mockSessionOverrides = { "dead-agent": null };
+    (getAllTypes as any).mockReturnValue(["Explore"]);
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    item("agentModels").submenu("", vi.fn());
+    const rows = lastList().items;
+    const ghost = rows.find((r: any) => r.value === "ghost-agent");
+    const dead = rows.find((r: any) => r.value === "dead-agent");
+    expect(ghost.label).toBe("ghost-agent (agent unavailable)");
+    expect(ghost.description).toBe("openai/gpt-4o");
+    expect(dead.label).toBe("dead-agent (agent unavailable)");
+    expect(dead.description).toBe("(inherits parent) [session]");
+    expect(rows.find((r: any) => r.value === "Explore").label).toBe("Explore");
+    // Unavailable types are not offered for new assignments.
+    expect(rows.some((r: any) => r.value === "__assign__")).toBe(false);
   });
 
   it("marks saved providers missing from the current scope as unavailable and removable", async () => {
@@ -406,7 +463,7 @@ describe("showModelRoutingMenu — agent model assignments", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Explore inherits parent model", "info");
   });
 
-  it("(inherits parent) with Set for this session clears a persistent assignment too", async () => {
+  it("(inherits parent) with Set for this session preserves a persistent assignment", async () => {
     mockModules.mockConfig.modelRouting.agentModels = { Explore: "openai/gpt-4o" };
     const ctx = createMockCtx();
     ctx.model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
@@ -415,9 +472,47 @@ describe("showModelRoutingMenu — agent model assignments", () => {
     lastList().onSelect!({ value: "Explore", label: "Explore" });
     lastDialog().callbacks.onSelect("(inherits parent)");
     lastList().onSelect!({ value: "session" });
-    expect(mockModules.mockConfig.modelRouting.agentModels.Explore).toBeUndefined();
-    expect(mockModules.mockSessionOverrides.Explore).toBeUndefined();
+    // Session null = explicit parent inheritance for this session only.
+    expect(mockModules.mockSessionOverrides.Explore).toBeNull();
+    expect(mockModules.mockConfig.modelRouting.agentModels.Explore).toBe("openai/gpt-4o");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Explore inherits parent model", "info");
+  });
+
+  it("shows a session null assignment as '(inherits parent) [session]'", async () => {
+    mockModules.mockSessionOverrides.Explore = null;
+    mockModules.mockConfig.modelRouting.agentModels = { Explore: "openai/gpt-4o" };
+    const ctx = createMockCtx();
+    ctx.model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    item("agentModels").submenu("", vi.fn());
+    const row = lastList().items.find((i: any) => i.value === "Explore");
+    expect(row.description).toBe("(inherits parent) [session]");
+  });
+
+  it("session assignment to a model leaves the persistent assignment untouched", async () => {
+    mockModules.mockConfig.modelRouting.agentModels = { Explore: "openai/gpt-4o" };
+    const ctx = createMockCtx();
+    ctx.model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    item("agentModels").submenu("", vi.fn());
+    lastList().onSelect!({ value: "Explore", label: "Explore" });
+    lastDialog().callbacks.onSelect("openai/gpt-4o");
+    lastList().onSelect!({ value: "session" });
+    expect(mockModules.mockSessionOverrides.Explore).toBe("openai/gpt-4o");
+    expect(mockModules.mockConfig.modelRouting.agentModels.Explore).toBe("openai/gpt-4o");
+  });
+
+  it("permanent assignment clears the same-type session override", async () => {
+    mockModules.mockSessionOverrides.Explore = "openai/gpt-5";
+    const ctx = createMockCtx();
+    ctx.model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
+    await showModelRoutingMenu(ctx, MODEL_OPTIONS);
+    item("agentModels").submenu("", vi.fn());
+    lastList().onSelect!({ value: "Explore", label: "Explore" });
+    lastDialog().callbacks.onSelect("openai/gpt-4o");
+    lastList().onSelect!({ value: "permanent" });
+    expect(mockModules.mockConfig.modelRouting.agentModels.Explore).toBe("openai/gpt-4o");
+    expect(mockModules.mockSessionOverrides.Explore).toBeUndefined();
   });
 
   it("offers the Clear action only when a persistent assignment exists", async () => {

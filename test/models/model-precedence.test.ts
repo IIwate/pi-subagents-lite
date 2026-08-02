@@ -83,6 +83,57 @@ describe("model resolution precedence chain", () => {
     }).model;
     expect(r).toBe("parent");
   });
+
+  it("5 — session null means explicit parent inheritance, skipping persistent and frontmatter", () => {
+    const r = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: { model: "frontmatter" },
+      config: { ...baseConfig, modelRouting: { ...baseConfig.modelRouting, agentModels: { Explore: "persistent" } } },
+      parentModelId: "parent",
+      sessionOverrides: { Explore: null },
+    }).model;
+    expect(r).toBe("parent");
+  });
+
+  it("session null reports parent provenance", () => {
+    const selection = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: { model: "frontmatter" },
+      config: baseConfig,
+      parentModelId: "parent",
+      sessionOverrides: { Explore: null },
+    });
+    expect(selection).toEqual({ model: "parent", source: "parent" });
+  });
+
+  it("missing session key falls through to persistent, frontmatter, then parent", () => {
+    const withPersistent = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: { model: "frontmatter" },
+      config: { ...baseConfig, modelRouting: { ...baseConfig.modelRouting, agentModels: { Explore: "persistent" } } },
+      parentModelId: "parent",
+      sessionOverrides: { otherType: "ignored" },
+    }).model;
+    expect(withPersistent).toBe("persistent");
+
+    const withFrontmatter = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: { model: "frontmatter" },
+      config: baseConfig,
+      parentModelId: "parent",
+      sessionOverrides: { otherType: "ignored" },
+    }).model;
+    expect(withFrontmatter).toBe("frontmatter");
+
+    const withParent = resolveModelSelection({
+      subagentType: "Explore",
+      agentConfig: undefined,
+      config: baseConfig,
+      parentModelId: "parent",
+      sessionOverrides: { otherType: "ignored" },
+    }).model;
+    expect(withParent).toBe("parent");
+  });
 });
 
 describe("authorizeModel — scope gate", () => {
