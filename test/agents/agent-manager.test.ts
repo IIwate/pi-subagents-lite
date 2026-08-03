@@ -409,6 +409,153 @@ describe("AgentManager", () => {
     await manager.getRecord(blockerId)!.execution.promise;
   });
 
+  it("stops all running agents bound to the interrupted parent turn", async () => {
+    manager = new AgentManager(onComplete);
+    const first = makeResolvablePromise();
+    const second = makeResolvablePromise();
+    mockModules.mockRunAgent
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const controller = new AbortController();
+
+    const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+      description: "first",
+      signal: controller.signal,
+    });
+    const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+      description: "second",
+      signal: controller.signal,
+    });
+    const firstWait = manager.getRecord(firstId)!.execution.promise!;
+    const secondWait = manager.getRecord(secondId)!.execution.promise!;
+
+    controller.abort();
+
+    expect(manager.getRecord(firstId)?.lifecycle).toMatchObject({ status: "stopped", stoppedBy: "user" });
+    expect(manager.getRecord(secondId)?.lifecycle).toMatchObject({ status: "stopped", stoppedBy: "user" });
+    expect(mockModules.mockRunAgent.mock.calls[0][3].signal.aborted).toBe(true);
+    expect(mockModules.mockRunAgent.mock.calls[1][3].signal.aborted).toBe(true);
+
+    first.resolve(mockRunResult({ responseText: "", aborted: true }));
+    second.resolve(mockRunResult({ responseText: "", aborted: true }));
+    await Promise.all([firstWait, secondWait]);
+  });
+
+  it("cancels a queued agent when its parent turn is interrupted", async () => {
+    manager = new AgentManager(onComplete, {
+      default: 1,
+      models: { "test/model": 1 },
+    });
+    const blocker = makeResolvablePromise();
+    mockModules.mockRunAgent.mockReturnValueOnce(blocker.promise);
+    const controller = new AbortController();
+
+    const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
+      description: "blocker",
+      modelKey: "test/model",
+    });
+    const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
+      description: "queued",
+      modelKey: "test/model",
+      signal: controller.signal,
+    });
+    const queuedWait = manager.getRecord(queuedId)!.execution.promise!;
+
+    controller.abort();
+    await queuedWait;
+
+    expect(manager.getRecord(queuedId)).toMatchObject({
+      lifecycle: { status: "stopped", stoppedBy: "user" },
+      execution: { settled: true },
+    });
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    blocker.resolve(mockRunResult());
+    await manager.getRecord(blockerId)!.execution.promise;
+    expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps concurrency reserved until an interrupted run actually settles", async () => {
+    manager = new AgentManager(onComplete, {
+      default: 1,
+      models: { "test/model": 1 },
+    });
+    const first = makeResolvablePromise();
+    const second = makeResolvablePromise();
+    mockModules.mockRunAgent
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const controller = new AbortController();
+
+    const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+      description: "first",
+      modelKey: "test/model",
+      signal: controller.signal,
+    });
+    const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+      description: "second",
+      modelKey: "test/model",
+    });
+
+    controller.abort();
+    expect(manager.getRecord(firstId)?.lifecycle.status).toBe("stopped");
+    expect(manager.getRecord(secondId)?.lifecycle.status).toBe("queued");
+    expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    first.resolve(mockRunResult({ responseText: "", aborted: true }));
+    await manager.getRecord(firstId)!.execution.promise;
+    expect(manager.getRecord(secondId)?.lifecycle.status).toBe("running");
+    expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+
+    second.resolve(mockRunResult());
+    await manager.getRecord(secondId)!.execution.promise;
+  });
+
+  it("detaches the parent signal before a later continuation", async () => {
+    manager = new AgentManager(onComplete);
+    const session = mockAgentSession();
+    mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+    const controller = new AbortController();
+
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "initial", {
+      description: "initial",
+      signal: controller.signal,
+    });
+    const record = manager.getRecord(id)!;
+    await record.execution.promise;
+
+    const continuation = makeResolvablePromise();
+    mockModules.mockContinueAgentSession.mockReturnValueOnce(continuation.promise);
+    expect(await manager.interact(id, "continue")).toEqual({ accepted: true });
+
+    controller.abort();
+    expect(record.lifecycle.status).toBe("running");
+    expect(session.abort).not.toHaveBeenCalled();
+
+    continuation.resolve({ responseText: "continued", aborted: false, turnLimited: false });
+    await record.execution.promise;
+    expect(record.lifecycle.status).toBe("completed");
+  });
+
+  it("does not start an agent whose parent signal is already aborted", () => {
+    manager = new AgentManager(onComplete);
+    const controller = new AbortController();
+    controller.abort();
+
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "cancelled", {
+      description: "cancelled",
+      signal: controller.signal,
+    });
+
+    expect(manager.getRecord(id)).toMatchObject({
+      lifecycle: { status: "stopped", stoppedBy: "user" },
+      execution: { settled: true },
+    });
+    expect(mockModules.mockRunAgent).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith(manager.getRecord(id));
+  });
+
   // ── Completion contract ──
 
   describe("completion contract", () => {

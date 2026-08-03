@@ -124,18 +124,21 @@ describe("SpawnCoordinator", () => {
     expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("runInBackground");
   });
 
-  it("spawns a foreground agent and awaits its promise", async () => {
+  it("spawns a foreground agent, forwards its signal, and awaits its promise", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
+    const controller = new AbortController();
     const result = await coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
       description: "Test foreground",
+      signal: controller.signal,
       graceTurns: 6,
       runInBackground: false,
     });
 
     expect(result.agentId).toBeTruthy();
     expect(result.record).toBeTruthy();
+    expect(manager.spawn.mock.calls[0][4].signal).toBe(controller.signal);
   });
 
   it("routes direct interaction through the manager", async () => {

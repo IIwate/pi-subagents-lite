@@ -28,6 +28,7 @@ const {
   mockDiscoverNewAgents,
   mockScopedModelKeys,
   mockRouting,
+  mockForceBackground,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
@@ -39,6 +40,7 @@ const {
     enabledProviders: [] as string[],
     agentAccess: {} as Record<string, { providers: Record<string, { models?: string[] }> }>,
   },
+  mockForceBackground: { value: false },
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -85,7 +87,7 @@ vi.mock("../../src/shell.js", () => ({
     get agent() {
       return {
         graceTurns: 5,
-        forceBackground: false,
+        forceBackground: mockForceBackground.value,
       };
     },
     get routing() {
@@ -109,6 +111,7 @@ vi.mock("../../src/shell.js", () => ({
       };
       const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
         description: intent.description,
+        signal: intent.signal,
         model: intent.model,
         scopedModels: intent.scopedModels,
         maxTurns: intent.maxTurns,
@@ -139,6 +142,7 @@ beforeEach(() => {
   mockRouting.enabled = false;
   mockRouting.enabledProviders = [];
   mockRouting.agentAccess = {};
+  mockForceBackground.value = false;
 });
 
 /* ------------------------------------------------------------------ */
@@ -243,6 +247,28 @@ describe("executeAgentTool — worktree_path validation", () => {
 
     expect(mockValidateWorktreePath).not.toHaveBeenCalled();
     expect(mockSpawn).toHaveBeenCalled();
+  });
+
+  it("forwards the parent AbortSignal only to foreground agents", async () => {
+    const controller = new AbortController();
+
+    await executeAgentTool("tc-fg-signal", makeParams(), controller.signal, undefined, ctx);
+    expect(mockSpawn.mock.calls[0][4].signal).toBe(controller.signal);
+
+    vi.clearAllMocks();
+    await executeAgentTool(
+      "tc-bg-signal",
+      makeParams({ run_in_background: true }),
+      controller.signal,
+      undefined,
+      ctx,
+    );
+    expect(mockSpawn.mock.calls[0][4].signal).toBeUndefined();
+
+    vi.clearAllMocks();
+    mockForceBackground.value = true;
+    await executeAgentTool("tc-forced-bg-signal", makeParams(), controller.signal, undefined, ctx);
+    expect(mockSpawn.mock.calls[0][4].signal).toBeUndefined();
   });
 
   it("uses the resolved worktree path as cwd when validation succeeds", async () => {

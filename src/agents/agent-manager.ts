@@ -126,6 +126,8 @@ export class AgentManager {
   private queue: { id: string; modelKey: string; args: SpawnArgs }[] = [];
   /** Resolvers for foreground callers waiting on queued records to start and settle. */
   private queuedResolvers = new Map<string, (result: string) => void>();
+  /** Parent interrupt listeners scoped to the initial foreground execution only. */
+  private parentAbortCleanups = new Map<string, () => void>();
 
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
@@ -333,12 +335,33 @@ export class AgentManager {
     };
     this.agents.set(id, record);
 
+    if (options.signal?.aborted) {
+      record.lifecycle.status = "stopped";
+      record.lifecycle.stoppedBy = "user";
+      record.lifecycle.completedAt = Date.now();
+      record.execution.settled = true;
+      if (queued) {
+        this.queue = this.queue.filter(entry => entry.id !== id);
+        this.settleQueued(id);
+      } else if (reservedModelKey) {
+        this.releaseConcurrency(reservedModelKey);
+      }
+      this.safeNotifyComplete(record);
+      return id;
+    }
+    if (options.signal) {
+      const onParentAbort = () => this.abort(id, "user");
+      options.signal.addEventListener("abort", onParentAbort, { once: true });
+      this.parentAbortCleanups.set(id, () => options.signal?.removeEventListener("abort", onParentAbort));
+    }
+
     if (queued) return id;
 
     // startAgent can throw — clean up record so callers don't see an orphan
     try {
       this.startAgent(id, record, args, reservedModelKey);
     } catch (err) {
+      this.detachParentAbort(id);
       if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
       this.agents.delete(id);
       throw err;
@@ -361,11 +384,6 @@ export class AgentManager {
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
-
-    // Wire parent abort signal to stop the subagent when the parent is interrupted
-    if (options.signal) {
-      options.signal.addEventListener("abort", () => this.abort(id, "agent"), { once: true });
-    }
 
     const promise = runAgent(ctx, type, prompt, {
       pi,
@@ -429,6 +447,7 @@ export class AgentManager {
         return "";
       })
       .finally(() => {
+        this.detachParentAbort(id);
         if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
 
         record.execution.settled = true;
@@ -444,6 +463,11 @@ export class AgentManager {
     } else {
       record.execution.promise = promise;
     }
+  }
+
+  private detachParentAbort(id: string): void {
+    this.parentAbortCleanups.get(id)?.();
+    this.parentAbortCleanups.delete(id);
   }
 
   /** Resolve a foreground wait that was cancelled or failed before start. */
@@ -494,6 +518,7 @@ export class AgentManager {
         this.startAgent(entry.id, record, entry.args, entry.modelKey);
         started.add(entry.id);
       } catch (err) {
+        this.detachParentAbort(entry.id);
         this.releaseConcurrency(entry.modelKey);
         // Late failure — surface on the record so the user can see it
         record.lifecycle.status = "error";
@@ -678,9 +703,9 @@ export class AgentManager {
       this.queue = this.queue.filter(q => q.id !== record.id);
     } else if (record.lifecycle.status !== "running") {
       return false;
-    } else {
-      record.execution.abortController?.abort();
     }
+    this.detachParentAbort(record.id);
+    if (!wasQueued) record.execution.abortController?.abort();
     record.lifecycle.status = "stopped";
     record.lifecycle.stoppedBy = stoppedBy;
     record.lifecycle.completedAt = Date.now();
@@ -816,6 +841,7 @@ export class AgentManager {
 
   /** Shut down and dispose a record's session, then remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
+    this.detachParentAbort(id);
     this.clearRecoveryExpiry(id);
     const session = record.execution.session;
     record.execution.session = undefined;
@@ -859,6 +885,7 @@ export class AgentManager {
       record.execution.settled = true;
     }
     for (const id of this.queuedResolvers.keys()) this.settleQueued(id);
+    for (const id of this.parentAbortCleanups.keys()) this.detachParentAbort(id);
     this.queue = [];
     for (const record of this.agents.values()) {
       const session = record.execution.session;

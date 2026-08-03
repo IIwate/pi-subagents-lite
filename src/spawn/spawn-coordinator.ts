@@ -26,6 +26,8 @@ import { formatResultContent } from "../agents/tool-execution.js";
 export interface SpawnIntent extends SpawnConfig {
   type: string;
   prompt: string;
+  /** Parent tool-call signal, present only for foreground work. */
+  signal?: AbortSignal;
   runInBackground: boolean;
   /** Narrowed to required — all callers resolve this before spawn. */
   graceTurns: number;

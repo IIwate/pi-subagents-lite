@@ -74,7 +74,7 @@ export function formatResultContent(record: AgentRecord): string {
 export async function executeAgentTool(
   _toolCallId: string,
   params: Record<string, unknown>,
-  _signal: AbortSignal | undefined,
+  signal: AbortSignal | undefined,
   _onUpdate: ((update: any) => void) | undefined,
   ctx: ExtensionContext,
 ): Promise<any> {
@@ -115,11 +115,12 @@ export async function executeAgentTool(
 
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);
-  const runInBackground = params.run_in_background as boolean | undefined;
+  const requestedBackground = params.run_in_background as boolean | undefined;
   const agentConfig = getAgentConfig(resolvedType);
   const maxTurns = agentConfig?.maxTurns;
   const scopedModels = [...ctx.scopedModels];
   const store = getStore();
+  const runInBackground = requestedBackground === true || store.agent.forceBackground;
   const routing = store.routing;
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
@@ -199,6 +200,7 @@ export async function executeAgentTool(
     type: resolvedType,
     prompt,
     description,
+    signal: runInBackground ? undefined : signal,
     model,
     modelKey: resolvedModelKey,
     scopedModels,
@@ -208,12 +210,12 @@ export async function executeAgentTool(
     graceTurns: store.agent.graceTurns,
     worktreePath: validatedWorktreePath,
     invocation: { modelName, providerName, thinkingLevel },
-    runInBackground: runInBackground || store.agent.forceBackground,
+    runInBackground,
   });
 
   const { agentId, record } = result;
 
-  if (runInBackground || store.agent.forceBackground) {
+  if (runInBackground) {
     // Background: return immediately
     const suffix = `A notification will arrive when done — do NOT poll, sleep, timeout, check status, or redo the delegated work. The parent task advances automatically when the subagent completes.\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
