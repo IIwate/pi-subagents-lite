@@ -140,11 +140,12 @@ Each agent access page begins with a locked dynamic row and a separator:
 ```text
 [✓] Default · anthropic/claude-sonnet-4
 ────────────────────────────────────────
-openai       All models
-google       2 models
+anthropic · Parent alternates
+openai
+google
 ```
 
-**Quick model setup** grants one agent alternate access to models from the current parent provider in one flow. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no separate quick configuration.
+**Quick model setup** grants one agent alternate access to models from the current parent provider in one short flow. Its model checkboxes save immediately, enabling routing and the concrete provider when access is added. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no Apply row or separate quick configuration.
 
 **Provider access** is a direct switch list built fresh from `modelRegistry.getAvailable()`. It starts with the locked Parent default and one separator, excludes the current parent provider, and contains no availability diagnostics or Provider detail pages. Its summary counts only enabled alternate providers currently visible as mutable switches; unavailable saved providers and a redundantly persisted current parent do not count.
 

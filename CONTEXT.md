@@ -65,7 +65,7 @@ The active allowlist of models from pi (`--models`, `enabledModels`, or `/scoped
 _Avoid_: Enabled models list, model filter
 
 **Quick model setup**:
-The short UI path for granting one agent type alternate access to models from the current parent provider. It writes the same canonical `enabledProviders` and `agentAccess` state as the full menus; no separate quick-settings schema exists.
+The short UI path for granting one agent type alternate access to models from the current parent provider. Checkbox changes persist immediately; adding access enables routing and the concrete provider through the same canonical `enabledProviders` and `agentAccess` state as the full menus. No Apply step or separate quick-settings schema exists.
 _Avoid_: Quick assignment, quick default
 
 **Grace turns**:

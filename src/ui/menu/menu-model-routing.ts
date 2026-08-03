@@ -184,7 +184,10 @@ function agentSummary(
         return key !== parentKey && availableIds.has(modelId) && (!scopedKeys || scopedKeys.has(key));
       });
       if (effectiveIds.length === 0) return [];
-      return [`${provider}/${rule.models ? effectiveIds.length : "all"}`];
+      const access = rule.models
+        ? `${effectiveIds.length} model${effectiveIds.length === 1 ? "" : "s"}`
+        : "All models";
+      return [`${provider} (${access})`];
     });
   return summaries.length > 0 ? summaries.join(" · ") : "Parent only";
 }
@@ -210,12 +213,13 @@ function buildModelEditor(options: {
   let delegator: ReturnType<typeof createDelegatingComponent>;
 
   const persist = (): void => {
-    store.mutate.routing.setAgentProviderAccess(
-      type,
-      provider,
-      allModels ? undefined : [...selected].sort(),
-    );
-    ctx.ui.notify(`${type} model access updated for ${provider}`, "info");
+    const models = [...selected].sort();
+    if (quick && (allModels || models.length > 0)) {
+      store.mutate.routing.configureAgentProviderAccess(type, provider, allModels ? undefined : models);
+    } else {
+      store.mutate.routing.setAgentProviderAccess(type, provider, allModels ? undefined : models);
+    }
+    ctx.ui.notify(quick ? "Quick model setup updated" : `${type} model access updated for ${provider}`, "info");
     onApplied(true);
   };
 
@@ -250,12 +254,6 @@ function buildModelEditor(options: {
       defaultModelRow(ctx, theme),
       { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "", nonSelectable: true },
       ...modelRows,
-      ...(quick ? [{
-        kind: "apply",
-        value: "__apply__",
-        label: "Apply quick setup",
-        description: "Enable routing and save this rule",
-      }] : []),
     ];
     const list = new SelectList(rows, 14, buildListTheme(theme));
     skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
@@ -271,41 +269,16 @@ function buildModelEditor(options: {
       if (kind === "all") {
         allModels = !allModels;
         if (allModels) selected.clear();
-        if (!quick) persist();
+        persist();
         delegator.setActive(buildList({ kind, value: item.value }));
         return;
       }
       if (kind === "model") {
         allModels = false;
         if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
-        if (!quick) persist();
+        persist();
         delegator.setActive(buildList({ kind, value: item.value }));
-        return;
       }
-      if (kind !== "apply") return;
-
-      const models = [...selected].sort();
-      const lines = ["Apply quick model setup?", ""];
-      if (allModels || models.length > 0) {
-        lines.push("- Enable Model routing", `- Enable ${provider} for routed models`, `- ${type} may use:`);
-        lines.push(...(allModels ? [`  - ${provider}/*`] : models.map((modelId) => `  - ${provider}/${modelId}`)));
-      } else {
-        lines.push(`- Remove ${type}/${provider} alternate access`);
-      }
-      delegator.setActive(createMultilineConfirmComponent({
-        message: lines.join("\n"),
-        theme,
-        done,
-        onConfirm: () => {
-          if (allModels || models.length > 0) {
-            store.mutate.routing.configureAgentProviderAccess(type, provider, allModels ? undefined : models);
-          } else {
-            store.mutate.routing.setAgentProviderAccess(type, provider, []);
-          }
-          ctx.ui.notify("Quick model setup applied", "info");
-          onApplied();
-        },
-      }));
     };
     enableSpaceSelection(list);
     list.onCancel = () => done();
@@ -663,11 +636,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         description: "OFF permits only the exact parent model.",
       }];
 
-      if (!routing.enabled) {
-        items.push({ id: "__space__", label: " ", currentValue: "" });
-        items.push({ id: "__parent__", label: "Subagents use the exact parent model.", currentValue: "" });
-        return items;
-      }
+      if (!routing.enabled) return items;
 
       items.push({
         id: "quickSetup",

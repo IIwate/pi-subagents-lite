@@ -86,8 +86,9 @@ Each agent access page starts with a locked dynamic row:
 ```text
 [✓] Default · anthropic/claude-sonnet-4
 ────────────────────────────────────────
-openai       All models
-google       2 models
+anthropic · Parent alternates
+openai
+google
 ```
 
 The Default row is not stored and cannot be disabled. The separator is the only
@@ -113,10 +114,10 @@ origin is irrelevant: built-in and third-party providers are treated alike when
 Pi reports them available.
 
 **Quick model setup** configures one agent against the current parent provider.
-Applying it may enable model routing, enable the concrete current provider, and
-write the agent/provider rule in one atomic operation. It writes the same
-canonical state as the full provider and agent access menus; there is no second
-quick-settings schema.
+Each checkbox change persists immediately. Adding access enables model routing,
+enables the concrete current provider, and writes the agent/provider rule through
+the same canonical mutation; removing the final selection deletes only that
+Agent rule. There is no Apply row or second quick-settings schema.
 
 ## Provider lifecycle
 

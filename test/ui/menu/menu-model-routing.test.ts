@@ -92,7 +92,7 @@ describe("Model Routing top level", () => {
     expect(topItem("enabled").currentValue).toBe("OFF");
     expect(topItem("quickSetup")).toBeUndefined();
     expect(topItem("providerAccess")).toBeUndefined();
-    expect(settingsLists[0].items.some((item) => item.label.includes("exact parent model"))).toBe(true);
+    expect(settingsLists[0].items.map((item) => item.id)).toEqual(["enabled"]);
   });
 
   it("toggles Model routing", async () => {
@@ -305,38 +305,22 @@ describe("Quick model setup", () => {
     expect(rows[2].description).toBe("");
     expect(rows.some((row: any) => row.value === "claude-sonnet-4-20250514")).toBe(false);
     expect(rows.some((row: any) => row.description === "Use exact model rules")).toBe(false);
+    expect(rows.some((row: any) => row.value === "__apply__")).toBe(false);
   });
 
-  it("writes current-provider exact access and enables canonical routing state", async () => {
+  it("writes current-provider exact access immediately and enables canonical routing state", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
-    selectLastValue("claude-haiku-4");
     mockModules.mockConfig.modelRouting.enabled = false;
-    selectLastValue("__apply__");
-    expect(lastSelect().items.map((item: any) => item.value)).toEqual(["Yes", "No"]);
-    lastSelect().onSelect({ value: "Yes" });
+    selectLastValue("claude-haiku-4");
     expect(mockModules.mockConfig.modelRouting).toEqual({
       enabled: true,
       enabledProviders: ["anthropic"],
       agentAccess: { Explore: { providers: { anthropic: { models: ["claude-haiku-4"] } } } },
     });
-  });
-
-  it("does not mutate canonical routing when Quick setup is declined", async () => {
-    const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
-    topItem("quickSetup").submenu("", vi.fn());
-    lastSelect().onSelect({ value: "Explore" });
-    selectLastValue("claude-haiku-4");
-    selectLastValue("__apply__");
-    lastSelect().onSelect({ value: "No" });
-    expect(mockModules.mockConfig.modelRouting).toEqual({
-      enabled: true,
-      enabledProviders: [],
-      agentAccess: {},
-    });
+    expect(lastSelect().items[lastSelect().selectedIndex].value).toBe("claude-haiku-4");
   });
 
   it("uses the canonical all-model rule", async () => {
@@ -345,8 +329,6 @@ describe("Quick model setup", () => {
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
-    selectLastValue("__apply__");
-    lastSelect().onSelect({ value: "Yes" });
     expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.anthropic).toEqual({});
   });
 
@@ -357,8 +339,6 @@ describe("Quick model setup", () => {
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
     selectLastValue("claude-haiku-4");
-    selectLastValue("__apply__");
-    lastSelect().onSelect({ value: "Yes" });
     expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.anthropic)
       .toEqual({ models: ["claude-haiku-4"] });
   });
@@ -387,8 +367,6 @@ describe("Quick model setup", () => {
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("claude-haiku-4");
-    selectLastValue("__apply__");
-    lastSelect().onSelect({ value: "Yes" });
     expect(mockModules.mockConfig.modelRouting.agentAccess).toEqual({});
   });
 });
@@ -408,10 +386,25 @@ describe("Agent model access", () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     topItem("agentAccess").submenu("", vi.fn());
-    expect(lastSelect().items.find((item: any) => item.value === "Explore").description).toBe("openai/all");
+    expect(lastSelect().items.find((item: any) => item.value === "Explore").description)
+      .toBe("openai (All models)");
     expect(lastSelect().items.find((item: any) => item.value === "reviewer").description).toBe("Parent only");
     expect(lastSelect().items.find((item: any) => item.value === "ghost-agent").label).toContain("agent unavailable");
     expect(lastSelect().items.find((item: any) => item.value === "ghost-agent").description).toBe("Parent only");
+  });
+
+  it("formats exact model counts with readable singular and plural labels", async () => {
+    mockModules.mockConfig.modelRouting.agentAccess = {
+      Explore: { providers: { openai: { models: ["o3"] } } },
+      reviewer: { providers: { openai: { models: ["gpt-4o", "o3"] } } },
+    };
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    expect(lastSelect().items.find((item: any) => item.value === "Explore").description)
+      .toBe("openai (1 model)");
+    expect(lastSelect().items.find((item: any) => item.value === "reviewer").description)
+      .toBe("openai (2 models)");
   });
 
   it("shows only the parent Provider and globally enabled available Providers", async () => {
@@ -552,7 +545,8 @@ describe("Agent model access", () => {
     ];
     await showModelRoutingMenu(ctx);
     topItem("agentAccess").submenu("", vi.fn());
-    expect(lastSelect().items.find((row: any) => row.value === "Explore").description).toBe("openai/1");
+    expect(lastSelect().items.find((row: any) => row.value === "Explore").description)
+      .toBe("openai (1 model)");
     lastSelect().onSelect({ value: "Explore" });
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "openai"));
     const rows = lastSelect().items;
