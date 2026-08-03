@@ -23,6 +23,19 @@ export function sectionRow(title?: string): { label: string; currentValue: strin
   };
 }
 
+/** Let Space activate the currently selected SelectList row. */
+export function enableSpaceSelection(list: any): void {
+  const handleInput = list.handleInput.bind(list);
+  list.handleInput = (data: string) => {
+    if (data === " ") {
+      const item = list.items?.[list.selectedIndex ?? 0];
+      if (item) list.onSelect?.(item);
+      return;
+    }
+    handleInput(data);
+  };
+}
+
 /** Keep a list cursor off explicit headers, separators, and locked rows. */
 export function skipNonSelectableRows(
   list: any,

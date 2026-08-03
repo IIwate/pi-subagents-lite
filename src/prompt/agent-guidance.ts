@@ -62,18 +62,8 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     if (!rules) continue;
     const entries: string[] = [];
     for (const provider of Object.keys(rules).sort()) {
-      if (!routing.enabledProviders.includes(provider)) continue;
       const rule = rules[provider];
-      if (!rule.models) {
-        const active = [...availableKeys].some((key) =>
-          key.startsWith(`${provider}/`)
-          && key !== parentModelKey
-          && (!scopedKeys || scopedKeys.has(key)),
-        );
-        if (active) entries.push(`${provider}/*`);
-        continue;
-      }
-      entries.push(...effectiveAlternateModelKeys(
+      const effective = effectiveAlternateModelKeys(
         agent.name,
         {
           enabled: routing.enabled,
@@ -85,7 +75,9 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
         availableKeys,
         scopedKeys,
         parentModelKey,
-      ));
+      );
+      if (effective.length === 0) continue;
+      if (!rule.models) entries.push(`${provider}/*`); else entries.push(...effective);
     }
     if (entries.length === 0) continue;
     advertised = true;

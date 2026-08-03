@@ -99,15 +99,52 @@ describe("authorizeModel", () => {
     expect(authorize({ parentModelKey: "" })).toEqual({ ok: true });
   });
 
-  it("does not implicitly allow another model from the parent provider", () => {
+  it("bypasses only the global gate for a current-parent-provider alternate", () => {
+    const parentProviderRule = routing({
+      enabledProviders: [],
+      agentAccess: { Explore: { providers: { anthropic: { models: ["opus"] } } } },
+    });
     expect(authorize({
       modelKey: "anthropic/opus",
-      routing: routing({
-        enabledProviders: ["openai"],
-        agentAccess: { Explore: { providers: { openai: {} } } },
-      }),
+      routing: parentProviderRule,
       availableKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
+    })).toEqual({ ok: true });
+    expect(authorize({
+      modelKey: "anthropic/opus",
+      parentModelKey: "openai/gpt-5",
+      routing: parentProviderRule,
+      availableKeys: new Set(["anthropic/opus", "openai/gpt-5"]),
     })).toEqual({ ok: false, reason: "provider-disabled" });
+  });
+
+  it("keeps every non-global gate for current-parent-provider alternates", () => {
+    const parentProviderRule = routing({
+      enabledProviders: [],
+      agentAccess: { Explore: { providers: { anthropic: { models: ["opus"] } } } },
+    });
+    expect(authorize({
+      modelKey: "anthropic/opus",
+      routing: { ...parentProviderRule, enabled: false },
+    })).toEqual({ ok: false, reason: "routing-disabled" });
+    expect(authorize({
+      modelKey: "anthropic/opus",
+      routing: { ...parentProviderRule, agentAccess: {} },
+    })).toEqual({ ok: false, reason: "agent-provider-denied" });
+    expect(authorize({
+      modelKey: "anthropic/haiku",
+      routing: parentProviderRule,
+    })).toEqual({ ok: false, reason: "model-denied" });
+    expect(authorize({
+      modelKey: "anthropic/opus",
+      routing: parentProviderRule,
+      availableKeys: new Set(["anthropic/sonnet"]),
+    })).toEqual({ ok: false, reason: "model-unavailable" });
+    expect(authorize({
+      modelKey: "anthropic/opus",
+      routing: parentProviderRule,
+      availableKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
+      scopedKeys: new Set(["anthropic/sonnet"]),
+    })).toEqual({ ok: false, reason: "out-of-scope" });
   });
 });
 
@@ -127,6 +164,24 @@ describe("effectiveAlternateModelKeys", () => {
       new Set(["anthropic/sonnet"]),
       "anthropic/sonnet",
     )).toEqual([]);
+  });
+
+  it("moves the dynamic parent-provider gate when the parent changes", () => {
+    const policy = routing({
+      enabledProviders: [],
+      agentAccess: {
+        Explore: {
+          providers: {
+            anthropic: { models: ["haiku"] },
+            openai: { models: ["o3"] },
+          },
+        },
+      },
+    });
+    expect(effectiveAlternateModelKeys("Explore", policy, available, null, "anthropic/sonnet"))
+      .toEqual(["anthropic/haiku"]);
+    expect(effectiveAlternateModelKeys("Explore", policy, available, null, "openai/gpt-5"))
+      .toEqual(["openai/o3"]);
   });
 });
 
@@ -151,10 +206,29 @@ describe("provider rule maintenance", () => {
     });
   });
 
-  it("does not produce cleanup candidates for disabled or unreliable providers", () => {
+  it("preserves prototype-like Agent IDs as own cleanup entries", () => {
+    const agentAccess: ModelRoutingConfig["agentAccess"] = {};
+    Object.defineProperty(agentAccess, "__proto__", {
+      value: { providers: { openai: { models: ["retired"] } } },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    const result = unavailableModelRules(
+      routing({ enabledProviders: ["openai"], agentAccess }),
+      "openai",
+      new Set(),
+      true,
+      true,
+    );
+    expect(Object.hasOwn(result, "__proto__")).toBe(true);
+    expect(result.__proto__).toEqual(["retired"]);
+  });
+
+  it("keeps cleanup independent of routing state but requires a reliable catalogue provider", () => {
     expect(unavailableModelRules(
-      { ...policy, enabledProviders: [] }, "openai", new Set(), true, true,
-    )).toEqual({});
+      { ...policy, enabledProviders: [] }, "openai", new Set(["gpt-5"]), true, true,
+    )).toEqual({ Explore: ["retired"], reviewer: ["retired"] });
     expect(unavailableModelRules(policy, "openai", new Set(), false, true)).toEqual({});
     expect(unavailableModelRules(policy, "openai", new Set(), true, false)).toEqual({});
   });

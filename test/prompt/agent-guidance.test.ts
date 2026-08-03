@@ -73,4 +73,30 @@ describe("buildCurrentAgentGuidance", () => {
     expect(guidance).toContain("No parent default is active");
     expect(guidance).toContain("openai/*");
   });
+
+  it("advertises parent-provider alternates without widening their other gates", () => {
+    const routing = {
+      enabled: true,
+      enabledProviders: [],
+      agentAccess: {
+        Explore: { providers: { anthropic: { models: ["haiku", "missing"] } } },
+      },
+    };
+    const guidance = build({
+      routing,
+      availableKeys: new Set(["anthropic/sonnet", "anthropic/haiku"]),
+      scopedKeys: new Set(["anthropic/sonnet", "anthropic/haiku"]),
+    });
+    expect(guidance).toContain("anthropic/haiku");
+    expect(guidance).not.toContain("anthropic/missing");
+
+    const changedParent = build({
+      routing,
+      parentModelKey: "openai/gpt-5",
+      availableKeys: new Set(["anthropic/haiku", "openai/gpt-5"]),
+      scopedKeys: null,
+    });
+    expect(changedParent).not.toContain("anthropic/haiku");
+    expect(changedParent).toContain("No effective alternate model access");
+  });
 });

@@ -1,8 +1,9 @@
 # Provider and agent model access
 
 Model routing is an access policy, not a default-model or assignment system.
-The configuration enables providers globally, then narrows each agent type to
-specific providers and either all models or an exact model list.
+The configuration enables alternate providers globally, while the current
+parent provider dynamically passes that one gate, then narrows each agent type
+to specific providers and either all models or an exact model list.
 
 ## Context
 
@@ -52,7 +53,9 @@ The canonical configuration is:
 - `modelRouting.enabled` controls alternate model routing. OFF permits only the
   exact parent model.
 - `enabledProviders` is the global routed-provider set. It is an authorization
-  boundary, not a provider installer.
+  boundary, not a provider installer. The current parent provider dynamically
+  passes only this gate while it remains the parent, even if it is absent from
+  the set.
 - `agentAccess[agent].providers[provider]` grants one agent type access to that
   provider.
 - An omitted `models` property means every model Pi currently or later returns
@@ -63,9 +66,11 @@ The canonical configuration is:
 - The exact parent model is always available. It is dynamic session state, not
   persisted policy. Omitting `model`, or explicitly passing the exact same
   model key, selects it.
-- Every other model requires routing ON, a globally enabled provider, an agent
-  provider rule, a matching all/exact model rule, an exact
-  `modelRegistry.getAvailable()` match, and active model scope authorization.
+- Every other model requires routing ON, an agent provider rule, a matching
+  all/exact model rule, an exact `modelRegistry.getAvailable()` match, active
+  model scope authorization, and an explicit Agent tool `model` argument. Its
+  provider must also be globally enabled unless it is the current parent
+  provider. Parent-provider alternates receive no other bypass.
 - A rejected explicit model is never replaced silently with the parent model.
 - Agent frontmatter does not select a model automatically. If the frontmatter
   `model` field has no remaining consumer, it is removed rather than retained
@@ -88,14 +93,24 @@ google       2 models
 The Default row is not stored and cannot be disabled. The separator is the only
 explanatory boundary before alternate access rules.
 
-Normal Provider pickers are built from providers represented by
-`modelRegistry.getAvailable()`, plus providers referenced by `enabledProviders`
-or any saved agent access rule. The full `modelRegistry.getAll()` catalogue is
-never exposed as ordinary provider choices. Rows are split into non-selectable
-**Available providers** and **Saved but unavailable** sections. Provider origin
-is not part of classification: a third-party provider reported by Pi is
-available, while a built-in catalogue provider without availability is hidden
-unless saved state keeps it manageable.
+**Provider access** is a single-purpose direct switch list rebuilt from
+`modelRegistry.getAvailable()` whenever it opens or toggles. It contains a
+locked Default row, exactly one separator, and checkbox rows for current
+available providers except the current parent provider. There is no Available
+providers heading, Provider detail page, availability/effective diagnostics,
+or zero rule-count text. Enter or Space toggles a provider in place and keeps
+the cursor on that provider. If no alternate provider is available, one concise
+non-actionable empty row follows the separator. The top summary counts enabled
+providers visible as mutable switches, excluding unavailable providers and the
+current parent even when that parent is redundantly persisted.
+
+The full `modelRegistry.getAll()` catalogue is never exposed as ordinary
+provider choices. After an Agent is selected, its Provider picker further
+intersects Pi availability with enabled Provider access, then adds the current
+parent provider as the explicit `Parent alternates` exception. Disabled and
+unavailable providers are hidden while their rules remain dormant. Provider
+origin is irrelevant: built-in and third-party providers are treated alike when
+Pi reports them available.
 
 **Quick model setup** configures one agent against the current parent provider.
 Applying it may enable model routing, enable the concrete current provider, and
@@ -106,35 +121,53 @@ quick-settings schema.
 ## Provider lifecycle
 
 Disabling a provider or losing Pi availability suspends it without deleting
-agent rules. Provider maintenance shows three separate facts: the user's routing
-switch, whether Pi currently reports the provider through `getAvailable()`, and
-whether provider-level alternate access is effective. Effective access requires
-routing enabled and Pi availability. Saved rules are intersected with
-availability and active scope at evaluation time; configuration is not rewritten
-automatically.
+agent rules. Saved state referencing providers absent from `getAvailable()` is
+counted in the conditional **Saved unavailable providers** top-level row,
+excluding the current parent provider. Its separate exception flow shows only
+the provider, dormant routing ON/OFF, and a non-zero Agent rule count. It offers
+only routing toggle and explicit deletion of all saved access rules with a real
+multiline confirmation. Toggling never deletes rules. There is no ordinary
+Provider maintenance/detail page and no compatibility entry path to one.
 
-Model editors contain currently available models plus saved exact IDs, so
-provider or credential loss never makes a rule invisible or irremovable. The UI
-distinguishes:
+Saved rules are intersected with routing, current-parent provider gate,
+availability, model permission, explicit-model use, and active scope at
+evaluation time; configuration is not rewritten automatically.
 
-- **Active**: selected, Pi-available, in scope, and routed;
-- **Available**: Pi-available for normal selection but not currently effective;
-- **Out of current scope**: Pi-available but excluded by the current scope;
-- **Provider unavailable**: saved under a provider absent from `getAvailable()`;
-- **Unavailable catalogue ID**: a saved exact ID absent from a reliable
-  `getAll()` snapshot while that catalogue provider is still present.
+For a Provider that passed the effective gate, the model editor exposes only
+actionable alternates: current `getAvailable()` models intersected with Pi's
+active model scope, excluding the exact parent model. An empty scope means the
+usual unrestricted Pi inventory. The UI does not list excluded models with
+status text; scope configuration is a Pi prerequisite rather than an extension
+workflow.
 
-Only Unavailable catalogue IDs are eligible for **Clean unavailable rules**.
-The provider-level action previews all affected agents and model IDs in one real
-multi-line confirmation, then obtains a fresh `getAll()` snapshot before
-mutation. It never derives candidates from `getAvailable()`, so credential loss,
-provider unavailability, scope loss, and all-model rules cannot trigger cleanup.
-If cleanup empties an exact model list, the provider entry is removed; empty
-lists never become all-model access.
+In the normal Agent editor, `All models` and exact-model checkboxes persist immediately, keep the editor
+open, and retain the cursor on the changed row. There is no Apply row and no
+`Use exact model rules`, Active, Available, or Out-of-scope diagnostic text.
+When no actionable alternate remains, one concise empty row replaces the model
+choices.
 
-**Delete saved access rules** is the separate destructive action that removes a
-provider from every agent policy, including policies for agent types that are no
-longer registered. It does not change the provider's global enabled state.
+Saved exact IDs outside the visible intersection remain dormant in canonical
+configuration. Editing a visible checkbox preserves those hidden IDs; they
+reappear automatically if Pi availability and scope admit them again. Runtime
+scope validation remains mandatory because configuration and direct Agent tool
+calls are not constrained by the TUI. Disabling or losing a Provider likewise
+hides it without deleting its rules; unavailable-provider deletion remains in
+the separate exception flow.
+
+Only Unavailable catalogue IDs are eligible for the conditional global
+**Clean unavailable rules** action. Candidates may come from enabled or dormant
+provider rules, but only when `getAll()` is reliable and still contains the
+provider. The multiline confirmation lists every affected Provider, Agent, and
+model ID. Confirmation re-reads and recomputes the catalogue, then removes only
+IDs still unavailable. It never derives candidates from `getAvailable()`, so
+credential loss, provider unavailability, scope loss, and all-model rules cannot
+trigger cleanup. If cleanup empties an exact model list, the provider entry is
+removed; empty lists never become all-model access.
+
+**Delete saved access rules** exists only in the saved-unavailable exception
+flow and removes a provider from every agent policy, including policies for
+agent types that are no longer registered. It does not change the provider's
+global enabled state.
 
 ## Dynamic parent guidance
 
@@ -146,9 +179,11 @@ not create a session message, trigger an extra turn, or require reload/manual
 briefing.
 
 Specific rules list exact available model keys; all-model rules use
-`provider/*` only when that provider has an effective available model. Disabled,
-catalogue-only, provider-unavailable, and out-of-scope models are not advertised
-as callable.
+`provider/*` only when that provider has an effective available model. The
+current parent provider bypasses only the global provider set in this guidance,
+matching runtime authorization. Routing-OFF, missing Agent/provider rules,
+model-denied, catalogue-only, provider-unavailable, implicit alternate, and
+out-of-scope models are not advertised as callable.
 The guidance states that alternate models require an explicit `model` argument
 and that rejected explicit choices must not be replaced silently.
 
@@ -185,11 +220,12 @@ schema.
 ## Consequences
 
 - Omitted `model` has one meaning: exact parent inheritance.
-- Same-provider alternate models are explicit permissions, preventing parent
-  provider changes from widening agent access silently.
-- Provider disablement and Pi availability loss are reversible; dormant rules
-  remain manageable, while catalogue-stale one-off rules can be cleaned or
-  deleted explicitly.
+- Same-provider alternate models are explicit permissions. Parent changes move
+  only the dynamic global-gate exception; they do not bypass Agent/model,
+  availability, scope, explicit-model, or routing checks.
+- Provider disablement and Pi availability loss are reversible. Daily Provider
+  access remains diagnostic-free, dormant exceptions remain manageable, and
+  catalogue-stale one-off rules can be cleaned or deleted explicitly.
 - Accepted work is stable across later settings edits.
 - Current model access reaches the parent LLM automatically without a manual
   briefing workflow.

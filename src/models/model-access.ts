@@ -28,6 +28,24 @@ function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | unde
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
+function providerFromModelKey(key: string): string {
+  const slash = key.indexOf("/");
+  return slash > 0 ? key.slice(0, slash) : "";
+}
+
+function providerPassesGlobalGate(
+  provider: string,
+  routing: Readonly<ModelRoutingConfig>,
+  parentModelKey: string,
+): boolean {
+  return provider === providerFromModelKey(parentModelKey)
+    || routing.enabledProviders.includes(provider);
+}
+
 /** Authorize one already-resolved model key for a new Agent invocation. */
 export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizationVerdict {
   const { agentType, modelKey, parentModelKey, routing, availableKeys, scopedKeys } = ctx;
@@ -42,7 +60,7 @@ export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizati
   const provider = modelKey.slice(0, slash);
   const modelId = modelKey.slice(slash + 1);
 
-  if (!routing.enabledProviders.includes(provider)) {
+  if (!providerPassesGlobalGate(provider, routing, parentModelKey)) {
     return { ok: false, reason: "provider-disabled" };
   }
   const agentAccess = ownValue(routing.agentAccess, agentType);
@@ -70,7 +88,7 @@ export function effectiveAlternateModelKeys(
 
   const result: string[] = [];
   for (const provider of Object.keys(rules).sort()) {
-    if (!routing.enabledProviders.includes(provider)) continue;
+    if (!providerPassesGlobalGate(provider, routing, parentModelKey)) continue;
     const access = ownValue(rules, provider)!;
     const keys = access.models
       ? access.models.map((modelId) => `${provider}/${modelId}`)
@@ -95,7 +113,7 @@ export function agentTypesForProvider(
     .sort();
 }
 
-/** Exact IDs eligible for registry-only cleanup, grouped by agent type. */
+/** Exact IDs eligible for reliable catalogue cleanup, grouped by agent type. */
 export function unavailableModelRules(
   routing: Readonly<ModelRoutingConfig>,
   provider: string,
@@ -103,18 +121,14 @@ export function unavailableModelRules(
   providerPresent: boolean,
   registryReliable: boolean,
 ): Record<string, string[]> {
-  if (
-    !routing.enabledProviders.includes(provider)
-    || !providerPresent
-    || !registryReliable
-  ) return {};
+  if (!providerPresent || !registryReliable) return {};
 
   const result: Record<string, string[]> = {};
   for (const type of Object.keys(routing.agentAccess).sort()) {
     const models = ownValue(routing.agentAccess[type].providers, provider)?.models;
     if (!models) continue;
     const missing = models.filter((modelId) => !catalogueModelIds.has(modelId)).sort();
-    if (missing.length > 0) result[type] = missing;
+    if (missing.length > 0) setOwn(result, type, missing);
   }
   return result;
 }

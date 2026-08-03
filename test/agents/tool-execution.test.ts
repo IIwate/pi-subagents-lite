@@ -600,6 +600,33 @@ describe("executeAgentTool — model access", () => {
     expect(result.content[0].text).toContain("provider \"cpa-responses\" is disabled");
   });
 
+  it("allows an explicit current-parent-provider alternate past only the global gate", async () => {
+    mockRouting.enabledProviders = [];
+    mockRouting.agentAccess = {
+      "general-purpose": { providers: { test: { models: ["other-model"] } } },
+    };
+    await executeAgentTool(
+      "parent-provider-alternate",
+      makeParams({ model: "test/other-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+
+    vi.clearAllMocks();
+    mockRouting.agentAccess = {};
+    const denied = await executeAgentTool(
+      "parent-provider-no-rule",
+      makeParams({ model: "test/other-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(denied.content[0].text).toContain("has no access");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
   it("applies policy gates before registry availability for qualified models", async () => {
     mockRouting.enabledProviders = [];
     const result = await executeAgentTool("unknown-provider", makeParams({ model: "missing/worker" }), undefined, undefined, ctx);

@@ -21,7 +21,7 @@ export interface AgentModelAccess {
 export interface ModelRoutingConfig {
   /** OFF permits only the exact parent model. */
   enabled: boolean;
-  /** Providers globally enabled for alternate model routing. */
+  /** Providers globally enabled for alternates; the current parent passes this gate dynamically. */
   enabledProviders: string[];
   /** Per-agent provider/model access rules. */
   agentAccess: Record<string, AgentModelAccess>;
