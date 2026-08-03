@@ -38,16 +38,16 @@ describe("buildStatsParts — visible flag: showTools", () => {
   });
 });
 
-describe("buildStatsParts — model · provider · thinking", () => {
-  it("shows model, provider, and thinking as separate parts before calls", () => {
+describe("buildStatsParts — provider · model · thinking", () => {
+  it("shows provider, model, and thinking as separate parts before calls", () => {
     const parts = buildStatsParts({
       ...allStats,
       modelName: "grok-4.5",
       providerName: "cpa-responses",
       thinkingLevel: "high",
     }, mockTheme);
-    expect(parts[0]).toBe("grok-4.5");
-    expect(parts[1]).toBe("cpa-responses");
+    expect(parts[0]).toBe("cpa-responses");
+    expect(parts[1]).toBe("grok-4.5");
     expect(parts[2]).toBe("high");
     expect(parts[3]).toBe("5 calls");
   });

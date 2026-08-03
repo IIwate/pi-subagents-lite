@@ -90,7 +90,7 @@ describe("renderAgentFooterStats", () => {
     expect(line).toContain("CH98.9%");
     expect(line).toContain("$0.250 (sub)");
     expect(line).toContain("27.2%/372k (auto)");
-    expect(line).toContain("gpt-5.6-sol • openai-codex • xhigh");
+    expect(line).toContain("openai-codex • gpt-5.6-sol • xhigh");
     expect(line).not.toContain("stale-model");
     expect(record.execution.session.modelRuntime.isUsingOAuth)
       .toHaveBeenCalledWith("openai-codex");
@@ -127,6 +127,6 @@ describe("renderAgentFooterStats", () => {
     expect(line).toContain("↑2k");
     expect(line).toContain("↓250");
     expect(line).toContain("$0.125");
-    expect(line).toContain("queued-model • queued-provider • high");
+    expect(line).toContain("queued-provider • queued-model • high");
   });
 });

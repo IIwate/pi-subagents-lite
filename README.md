@@ -24,9 +24,9 @@ Progress appears in the below-editor list, capped at six visible entries and scr
 
 ```text
 › ● Main
-  ○ Security (Needs input)  Audit authentication       claude-sonnet-4 · anthropic · high · 81 calls · 36m
-  ○ Explore (Running)  Inspect the project              gpt-5.4 · openai-codex · high · 4 calls · 25s
-  ◇ Reviewer (Done)  Preserve this review               gpt-5.4 · openai-codex · high · 12 calls · 2m
+  ○ Security (Needs input)  Audit authentication       anthropic · claude-sonnet-4 · high · 81 calls · 36m
+  ○ Explore (Running)  Inspect the project              openai-codex · gpt-5.4 · high · 4 calls · 25s
+  ◇ Reviewer (Done)  Preserve this review               openai-codex · gpt-5.4 · high · 12 calls · 2m
 ```
 
 - `›` marks the keyboard-highlighted row.

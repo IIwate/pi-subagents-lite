@@ -227,7 +227,7 @@ describe("AgentNavigator", () => {
     // Claude-style rows use a filled active circle and no spinner column.
     expect(text).toContain("● Main");
     expect(text).toMatch(/○ \S+ \(Running\)  Inspect the project/);
-    expect(text).toContain("gpt-test · openai-test · high");
+    expect(text).toContain("openai-test · gpt-test · high");
     expect(text).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
       "agent-navigator-selector",
@@ -256,7 +256,7 @@ describe("AgentNavigator", () => {
     const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
     expect(runningRow).toMatch(/Explore \(Running\) {2}Active task/);
     expect(blockedRow).toMatch(/Explore \(Needs input\) {2}Blocked task/);
-    expect(runningRow).toMatch(/gpt-test · openai-test · high/);
+    expect(runningRow).toMatch(/openai-test · gpt-test · high/);
   });
 
   it("orders Needs input first and Done last without moving Main", () => {
@@ -350,7 +350,7 @@ describe("AgentNavigator", () => {
     expect(row).not.toContain("security audit description");
   });
 
-  it("preserves status and model space for a long custom display name", () => {
+  it("preserves status and provider-first identity space for a long custom display name", () => {
     registerAgents(new Map([[
       "long-agent",
       {
@@ -371,8 +371,8 @@ describe("AgentNavigator", () => {
 
     const rows = selector.render(42);
     expect(rows.join("\n")).toContain("(Running)");
-    expect(rows.join("\n")).toContain("gpt-test");
-    expect(rows.join("\n")).toContain("openai-tes");
+    expect(rows.join("\n")).toContain("openai-test");
+    expect(rows.join("\n")).toContain("gpt-tes");
   });
 
   it("shows the recovery reason while a continuable failure is highlighted", () => {
@@ -964,7 +964,7 @@ describe("AgentNavigator", () => {
     expect(footerLines[0]).toBe("parent cwd");
     expect(footerLines[1]).toContain("↑12k");
     expect(footerLines[1]).toContain("25.0%/128k (auto)");
-    expect(footerLines[1]).toContain("child-model • test • high");
+    expect(footerLines[1]).toContain("test • child-model • high");
     expect(footerLines[1]).not.toContain("parent stats");
   });
 

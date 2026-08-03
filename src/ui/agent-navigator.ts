@@ -1051,7 +1051,7 @@ export class AgentNavigator {
       const fixedPrefix = `${focus} ${indicator} `;
       const statusSuffix = ` (${status})`;
       const plainStatusSuffix = ` (${plainStatus})`;
-      const identityStats = [modelName, providerName].filter(Boolean).join(STATS_SEP);
+      const identityStats = [providerName, modelName].filter(Boolean).join(STATS_SEP);
       const reservedStatsWidth = Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStats));
       const maxNameWidth = Math.max(
         1,
