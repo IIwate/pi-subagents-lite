@@ -633,7 +633,6 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         label: "Enabled",
         currentValue: routing.enabled ? "ON" : "OFF",
         values: ["ON", "OFF"],
-        description: "OFF permits only the exact parent model.",
       }];
 
       if (!routing.enabled) return items;
@@ -642,7 +641,6 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         id: "quickSetup",
         label: "Quick model setup",
         currentValue: "",
-        description: "Grant one Agent access to alternate models from the current parent provider.",
         submenu: quickSetupSubmenu(store, ctx, theme, triggerRebuild),
       });
       const snapshot = registrySnapshot(ctx, store);
