@@ -26,15 +26,18 @@ Progress appears in the below-editor list, capped at six visible entries and scr
 › ● Main
   ○ Security (Needs input)  Audit authentication       claude-sonnet-4 · anthropic · high · 81 calls · 36m
   ○ Explore (Running)  Inspect the project              gpt-5.4 · openai-codex · high · 4 calls · 25s
+  ◇ Reviewer (Done)  Preserve this review               gpt-5.4 · openai-codex · high · 12 calls · 2m
 ```
 
 - `›` marks the keyboard-highlighted row.
-- `●` marks the active transcript; `○` marks inactive rows.
+- `○` and `●` mark inactive and active unpinned transcripts.
+- `◇` and `◆` mark inactive and active session-local pinned transcripts.
 - Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`.
-- With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, and `Esc` to return to the editor.
-- Press `Ctrl+D` on an inactive subagent to clear it; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
+- With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
+- Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
+- Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
 - While a subagent is active, editor input is routed to that session. Activate `Main` to return to the parent transcript.
-- `Needs input` means the run failed after a live child session already existed. Select it and send another prompt to continue the same in-memory session. The normal recovery window is 30 minutes; selecting that child view pauses its remaining recovery time, and switching back to `Main` resumes the same countdown. This is not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
+- Consumed terminal results are normally removed after 10 minutes. `Needs input` means the run failed after a live child session already existed and instead has a 30-minute recovery window. Select it and send another prompt to continue the same in-memory session. Viewing or pinning it pauses the remaining recovery time; the countdown resumes only after both pause reasons are released. Pins and recovery state are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.
 

@@ -679,6 +679,74 @@ describe("AgentManager", () => {
       expect(onRemove).toHaveBeenCalledWith(record);
     });
 
+    it("pins multiple completed records and resumes each remaining cleanup window", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
+
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        modelKey: "test/model",
+      });
+      const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        modelKey: "test/model",
+      });
+      await Promise.all([
+        manager.getRecord(firstId)!.execution.promise,
+        manager.getRecord(secondId)!.execution.promise,
+      ]);
+
+      const completedAt = Date.now() - 9 * 60_000;
+      for (const id of [firstId, secondId]) {
+        const record = manager.getRecord(id)!;
+        record.lifecycle.completedAt = completedAt;
+        record.lifecycle.resultConsumed = true;
+        expect(manager.togglePinned(id)).toBe(true);
+      }
+
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(manager.getRecord(firstId)).toBeDefined();
+      expect(manager.getRecord(secondId)).toBeDefined();
+
+      expect(manager.togglePinned(firstId)).toBe(false);
+      (manager as any).cleanup();
+      expect(manager.getRecord(firstId)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(60_001);
+      (manager as any).cleanup();
+      expect(manager.getRecord(firstId)).toBeUndefined();
+      expect(manager.getRecord(secondId)).toBeDefined();
+      expect(manager.clear(secondId)).toBe(true);
+      expect(manager.getRecord(secondId)).toBeUndefined();
+    });
+
+    it("starts a full cleanup window after a run pinned before completion is unpinned", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      expect(manager.togglePinned(id)).toBe(true);
+      deferred.resolve(mockRunResult());
+      await manager.getRecord(id)!.execution.promise;
+      manager.getRecord(id)!.lifecycle.resultConsumed = true;
+
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(manager.getRecord(id)).toBeDefined();
+      expect(manager.togglePinned(id)).toBe(false);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      (manager as any).cleanup();
+      expect(manager.getRecord(id)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1);
+      (manager as any).cleanup();
+      expect(manager.getRecord(id)).toBeUndefined();
+    });
+
     it("retains failed live sessions within the 30-minute recovery window", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
@@ -914,6 +982,37 @@ describe("AgentManager", () => {
 
       expect(manager.resumeRecoveryExpiry(id)).toBe(true);
       expect(manager.debugDiagnostics().agents[0].recoveryPaused).toBe(false);
+      await vi.advanceTimersByTimeAsync(5_999);
+      expect(manager.getRecord(id)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(manager.getRecord(id)).toBeUndefined();
+    });
+
+    it("keeps recovery paused until both view and pin pauses are released", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("debug injected: content was flagged");
+      });
+      manager.armDebugFault("output_blocked");
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(id)!.execution.promise;
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      expect(manager.togglePinned(id)).toBe(true);
+      expect(manager.pauseRecoveryExpiry(id)).toBe(true);
+      expect(manager.togglePinned(id)).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(manager.getRecord(id)).toBeDefined();
+      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
+
+      expect(manager.resumeRecoveryExpiry(id)).toBe(true);
       await vi.advanceTimersByTimeAsync(5_999);
       expect(manager.getRecord(id)).toBeDefined();
       await vi.advanceTimersByTimeAsync(1);

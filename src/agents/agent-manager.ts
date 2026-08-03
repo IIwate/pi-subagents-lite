@@ -185,26 +185,47 @@ export class AgentManager {
     this.armedDebugFault = undefined;
   }
 
-  /** Freeze a recoverable record's countdown while its child view is active. */
+  /** Track the active child view as an independent recovery-expiry pause reason. */
   pauseRecoveryExpiry(id: string): boolean {
     const record = this.agents.get(id);
-    if (!record || !needsUserInput(record)) return false;
-    const expiresAt = this.recoveryExpiresAt(record);
-    record.execution.recoveryExpiryPausedRemainingMs = Math.max(0, expiresAt - Date.now());
-    record.execution.recoveryExpiresAt = undefined;
-    this.clearRecoveryExpiry(id);
+    if (!record) return false;
+    this.setRecoveryExpiryPause(record, "view", true);
     return true;
   }
 
-  /** Resume a paused countdown without granting a fresh recovery window. */
+  /** Release only the active-view pause without granting a fresh recovery window. */
   resumeRecoveryExpiry(id: string): boolean {
     const record = this.agents.get(id);
-    const remaining = record?.execution.recoveryExpiryPausedRemainingMs;
-    if (!record || remaining == null || !needsUserInput(record)) return false;
-    record.execution.recoveryExpiryPausedRemainingMs = undefined;
-    record.execution.recoveryExpiresAt = Date.now() + remaining;
-    this.scheduleRecoveryExpiry(record);
+    if (!record) return false;
+    this.setRecoveryExpiryPause(record, "view", false);
     return true;
+  }
+
+  /** Toggle a session-local pin. Pins pause automatic cleanup but never block manual clear. */
+  togglePinned(id: string): boolean | undefined {
+    const record = this.agents.get(id);
+    if (!record) return undefined;
+
+    const pinnedAt = record.lifecycle.pinnedAt;
+    if (pinnedAt == null) {
+      record.lifecycle.pinnedAt = Date.now();
+      this.setRecoveryExpiryPause(record, "pin", true);
+      return true;
+    }
+
+    const now = Date.now();
+    if (
+      isTerminalStatus(record.lifecycle.status)
+      && !needsUserInput(record)
+      && record.lifecycle.completedAt != null
+    ) {
+      const pausedFrom = Math.max(pinnedAt, record.lifecycle.completedAt);
+      record.lifecycle.cleanupExpiryPausedMs = (record.lifecycle.cleanupExpiryPausedMs ?? 0)
+        + Math.max(0, now - pausedFrom);
+    }
+    record.lifecycle.pinnedAt = undefined;
+    this.setRecoveryExpiryPause(record, "pin", false);
+    return false;
   }
 
   debugDiagnostics(): DebugDiagnostics {
@@ -582,6 +603,7 @@ export class AgentManager {
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();
     record.lifecycle.completedAt = undefined;
+    record.lifecycle.cleanupExpiryPausedMs = undefined;
     record.lifecycle.resultConsumed = undefined;
     record.result = undefined;
     record.error = undefined;
@@ -703,6 +725,39 @@ export class AgentManager {
       ?? Math.max(0, this.recoveryExpiresAt(record) - now);
   }
 
+  private hasRecoveryExpiryPause(record: AgentRecord): boolean {
+    return record.execution.recoveryExpiryPausedByView === true
+      || record.execution.recoveryExpiryPausedByPin === true;
+  }
+
+  private setRecoveryExpiryPause(
+    record: AgentRecord,
+    reason: "view" | "pin",
+    paused: boolean,
+  ): void {
+    const key = reason === "view"
+      ? "recoveryExpiryPausedByView"
+      : "recoveryExpiryPausedByPin";
+    record.execution[key] = paused ? true : undefined;
+
+    if (!needsUserInput(record)) return;
+    if (paused) {
+      if (record.execution.recoveryExpiryPausedRemainingMs == null) {
+        record.execution.recoveryExpiryPausedRemainingMs = this.recoveryRemainingMs(record);
+        record.execution.recoveryExpiresAt = undefined;
+        this.clearRecoveryExpiry(record.id);
+      }
+      return;
+    }
+    if (this.hasRecoveryExpiryPause(record)) return;
+
+    const remaining = record.execution.recoveryExpiryPausedRemainingMs;
+    if (remaining == null) return;
+    record.execution.recoveryExpiryPausedRemainingMs = undefined;
+    record.execution.recoveryExpiresAt = Date.now() + remaining;
+    this.scheduleRecoveryExpiry(record);
+  }
+
   private clearRecoveryExpiry(id: string): void {
     const timer = this.recoveryExpiryTimers.get(id);
     if (!timer) return;
@@ -713,7 +768,17 @@ export class AgentManager {
   /** Schedule exact expiry so Debug's 10-second scenario is not delayed by cleanup polling. */
   private scheduleRecoveryExpiry(record: AgentRecord): void {
     this.clearRecoveryExpiry(record.id);
-    if (!needsUserInput(record) || record.execution.recoveryExpiryPausedRemainingMs != null) return;
+    if (!needsUserInput(record)) return;
+    if (this.hasRecoveryExpiryPause(record)) {
+      record.execution.recoveryExpiryPausedRemainingMs ??= this.recoveryRemainingMs(record);
+      record.execution.recoveryExpiresAt = undefined;
+      return;
+    }
+    if (record.execution.recoveryExpiryPausedRemainingMs != null) {
+      record.execution.recoveryExpiresAt = Date.now()
+        + record.execution.recoveryExpiryPausedRemainingMs;
+      record.execution.recoveryExpiryPausedRemainingMs = undefined;
+    }
 
     const expiresAt = this.recoveryExpiresAt(record);
     record.execution.recoveryExpiresAt = expiresAt;
@@ -782,16 +847,19 @@ export class AgentManager {
     const now = Date.now();
     for (const [id, record] of this.agents) {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
+      if (record.lifecycle.pinnedAt != null) continue;
       const waitingForInput = needsUserInput(record);
       // Ordinary terminal results stay until the LLM has read them. A failed live
       // session has a finite recovery deadline instead, even if its nudge failed.
       if (!waitingForInput && !record.lifecycle.resultConsumed) continue;
       if (waitingForInput) {
-        // An active child view intentionally freezes its remaining recovery time.
         if (record.execution.recoveryExpiryPausedRemainingMs != null) continue;
         if (this.recoveryExpiresAt(record) >= now) continue;
-      } else if ((record.lifecycle.completedAt ?? 0) >= now - CLEANUP_AGE_CUTOFF_MS) {
-        continue;
+      } else {
+        const cleanupExpiresAt = (record.lifecycle.completedAt ?? 0)
+          + CLEANUP_AGE_CUTOFF_MS
+          + (record.lifecycle.cleanupExpiryPausedMs ?? 0);
+        if (cleanupExpiresAt >= now) continue;
       }
       this.removeRecord(id, record);
     }

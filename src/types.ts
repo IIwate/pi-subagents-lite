@@ -90,6 +90,10 @@ export interface AgentLifecycle {
   startedAt: number;
   completedAt?: number;
   stoppedBy?: StopInitiator;
+  /** Session-local pin timestamp. Pinned records are exempt from automatic cleanup. */
+  pinnedAt?: number;
+  /** Terminal cleanup time already spent paused by completed pin intervals. */
+  cleanupExpiryPausedMs?: number;
   /**
    * Whether the result has been read by the LLM (foreground return or background nudge).
    * cleanup() preserves terminal records until this is set, so a completed background
@@ -129,8 +133,12 @@ interface AgentExecutionState {
   recoveryTtlMs?: number;
   /** Absolute expiry for an active recovery window; kept separate from failure time. */
   recoveryExpiresAt?: number;
-  /** Frozen remaining recovery time while the user is viewing the failed child session. */
+  /** Frozen remaining recovery time while the failed child session has any pause reason. */
   recoveryExpiryPausedRemainingMs?: number;
+  /** The active child view currently pauses any present or future recovery window. */
+  recoveryExpiryPausedByView?: boolean;
+  /** A user pin currently pauses any present or future recovery window. */
+  recoveryExpiryPausedByPin?: boolean;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
 }

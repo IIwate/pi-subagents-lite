@@ -546,8 +546,9 @@ export class AgentNavigator {
   /**
    * Enter the list from an empty editor with Down. Up/Down only moves the
    * candidate row; Enter confirms the switch and keeps the active row focused.
-   * Ctrl+D clears a non-active subagent (Enter confirms, Esc cancels). Escape
-   * or Up above Main returns input to the editor without changing the active agent.
+   * Space toggles a session-local pin. Ctrl+D clears a non-active subagent
+   * (Enter confirms, Esc cancels). Escape or Up above Main returns input to the
+   * editor without changing the active agent.
    */
   handleTerminalInput(data: string): { consume?: boolean } | undefined {
     const entries = this.navigationEntries();
@@ -599,6 +600,11 @@ export class AgentNavigator {
       return { consume: true };
     }
 
+    if (data === " ") {
+      this.toggleHighlightedPin();
+      return { consume: true };
+    }
+
     if (matchesKey(data, Key.enter)) {
       const candidate = this.highlightedAgentId;
       // Keep list focus so consecutive Up/Down/Enter switches do not require
@@ -640,6 +646,21 @@ export class AgentNavigator {
       this.update();
     }
     return undefined;
+  }
+
+  private toggleHighlightedPin(): void {
+    const id = this.highlightedAgentId;
+    if (id === null) {
+      this.uiCtx?.notify("Cannot pin Main agent", "warning");
+      return;
+    }
+    const pinned = this.manager.togglePinned(id);
+    if (pinned == null) {
+      this.uiCtx?.notify("Agent not found", "warning");
+      return;
+    }
+    this.uiCtx?.notify(pinned ? "Subagent pinned" : "Subagent unpinned", "info");
+    this.update();
   }
 
   /** Ctrl+D target rules: never Main, never the currently selected subagent. */
@@ -961,13 +982,21 @@ export class AgentNavigator {
           theme.fg("dim", " · Esc Cancel"),
         ].join("");
         lines.push(`  ${truncateToWidth(confirmation, commandWidth)}`);
-      } else if (failureHint) {
-        lines.push(`  ${truncateToWidth(theme.fg("warning", failureHint), commandWidth)}`);
       } else {
-        lines.push(`  ${truncateToWidth(
-          theme.fg("dim", "↑↓ Move · Enter Open · Ctrl+D Remove · Esc Editor"),
-          commandWidth,
-        )}`);
+        const pinHint = highlightedRecord
+          ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
+          : "";
+        if (failureHint) {
+          lines.push(`  ${truncateToWidth(
+            `${theme.fg("warning", failureHint)}${theme.fg("dim", pinHint)}`,
+            commandWidth,
+          )}`);
+        } else {
+          lines.push(`  ${truncateToWidth(
+            theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
+            commandWidth,
+          )}`);
+        }
       }
     }
     if (start > 0) {
@@ -977,11 +1006,17 @@ export class AgentNavigator {
     for (const entry of visibleEntries) {
       const active = entry.id === this.selectedAgentId;
       const highlighted = this.listFocused && entry.id === this.highlightedAgentId;
-      const circle = active ? theme.fg("accent", "●") : theme.fg("dim", "○");
+      const pinned = entry.record?.lifecycle.pinnedAt != null;
+      const indicatorText = pinned
+        ? active ? "◆" : "◇"
+        : active ? "●" : "○";
+      const indicator = active || pinned
+        ? theme.fg("accent", indicatorText)
+        : theme.fg("dim", indicatorText);
       const focus = highlighted ? theme.fg("accent", "›") : " ";
       if (!entry.record) {
         const label = active || highlighted ? theme.bold("Main") : "Main";
-        lines.push(truncateToWidth(`${focus} ${circle} ${label}`, tui.terminal.columns));
+        lines.push(truncateToWidth(`${focus} ${indicator} ${label}`, tui.terminal.columns));
         continue;
       }
 
@@ -1013,7 +1048,7 @@ export class AgentNavigator {
       }, theme, this.statsVisibility);
       const plainStatus = plainAgentStatus(record, this.debugStatusPreview);
       const status = renderAgentStatus(record, theme, this.debugStatusPreview);
-      const fixedPrefix = `${focus} ${circle} `;
+      const fixedPrefix = `${focus} ${indicator} `;
       const statusSuffix = ` (${status})`;
       const plainStatusSuffix = ` (${plainStatus})`;
       const identityStats = [modelName, providerName].filter(Boolean).join(STATS_SEP);
@@ -1311,6 +1346,7 @@ export class AgentNavigator {
         getDisplayName(record.display.type),
         record.lifecycle.status,
         record.lifecycle.completedAt ?? "",
+        record.lifecycle.pinnedAt ?? "",
         record.execution.settled ? "1" : "0",
         record.execution.debugFaultKind ?? "",
         record.error ?? "",

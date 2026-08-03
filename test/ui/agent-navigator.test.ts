@@ -61,6 +61,16 @@ function makeManager(records: any[]): AgentManager {
     getRecord: (id: string) => records.find(record => record.id === id),
     pauseRecoveryExpiry: vi.fn(),
     resumeRecoveryExpiry: vi.fn(),
+    togglePinned: vi.fn((id: string) => {
+      const record = records.find(candidate => candidate.id === id);
+      if (!record) return undefined;
+      if (record.lifecycle.pinnedAt == null) {
+        record.lifecycle.pinnedAt = Date.now();
+        return true;
+      }
+      record.lifecycle.pinnedAt = undefined;
+      return false;
+    }),
   } as unknown as AgentManager;
 }
 
@@ -396,6 +406,66 @@ describe("AgentNavigator", () => {
     const row = selector.render(120).find((line: string) => line.includes("Inspect the project"))!;
     expect(row).toContain("Error");
     expect(row).not.toContain("Needs input");
+  });
+
+  it("toggles highlighted pins with Space without changing status order", () => {
+    const done = makeRecord("agent-done", "completed");
+    const running = makeRecord("agent-running", "running");
+    const needsInput = makeRecord("agent-needs-input", "error");
+    needsInput.execution.settled = true;
+    needsInput.error = "provider internal error";
+    const records = [done, running, needsInput];
+    const ui = makeUI({ value: "" });
+    const manager = makeManager(records) as any;
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B"); // Focus Main.
+    navigator.handleTerminalInput(" ");
+    expect(ui.ctx.notify).toHaveBeenCalledWith("Cannot pin Main agent", "warning");
+
+    navigator.handleTerminalInput("\x1b[B"); // Needs input.
+    navigator.handleTerminalInput("\x1b[B"); // Running.
+    navigator.handleTerminalInput("\x1b[B"); // Done.
+    navigator.handleTerminalInput(" ");
+
+    let lines = selector.render(120);
+    const needsIndex = lines.findIndex((line: string) => line.includes("Needs input"));
+    const runningIndex = lines.findIndex((line: string) => line.includes("Running"));
+    const doneIndex = lines.findIndex((line: string) => line.includes("Done"));
+    expect(manager.togglePinned).toHaveBeenCalledWith(done.id);
+    expect(lines[doneIndex]).toContain("◇ Explore");
+    expect(lines.join("\n")).toContain("Space Unpin");
+    expect(needsIndex).toBeLessThan(runningIndex);
+    expect(runningIndex).toBeLessThan(doneIndex);
+
+    navigator.handleTerminalInput("\r");
+    lines = selector.render(120);
+    expect(lines.find((line: string) => line.includes("Done"))).toContain("◆ Explore");
+    expect(lines.find((line: string) => line.includes("Main"))).toContain("○ Main");
+
+    navigator.handleTerminalInput(" ");
+    lines = selector.render(120);
+    expect(lines.find((line: string) => line.includes("Done"))).toContain("● Explore");
+    expect(lines.join("\n")).toContain("Space Pin");
+  });
+
+  it("renders an inactive pinned indicator with the accent color", () => {
+    const record = makeRecord("agent-pinned", "completed");
+    record.lifecycle.pinnedAt = Date.now();
+    const ui = makeUI({ value: "" });
+    const fg = vi.spyOn(ui.theme, "fg");
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    selector.render(120);
+
+    expect(fg).toHaveBeenCalledWith("accent", "◇");
+    expect(fg).not.toHaveBeenCalledWith("dim", "◇");
   });
 
   it("Ctrl+D then Enter clears inactive subagents and moves the highlight", () => {
