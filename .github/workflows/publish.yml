@@ -1,0 +1,34 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Use Trusted Publishing-compatible npm
+        run: npm install --global npm@11.19.0
+      - run: bun install --frozen-lockfile
+      - name: Check tag version
+        run: |
+          node -e 'const expected = `v${require("./package.json").version}`; if (process.env.GITHUB_REF_NAME !== expected) { console.error(`Tag ${process.env.GITHUB_REF_NAME} does not match ${expected}`); process.exit(1); }'
+      - run: bun run typecheck
+      - run: bun run test
+      - run: npm pack --dry-run
+      - run: npm publish --access public
