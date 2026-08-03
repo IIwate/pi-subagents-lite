@@ -20,7 +20,7 @@ export interface ModelAuthorizationContext {
   modelKey: string;
   parentModelKey: string;
   routing: Readonly<ModelRoutingConfig>;
-  registryKeys: ReadonlySet<string>;
+  availableKeys: ReadonlySet<string>;
   scopedKeys: ReadonlySet<string> | null;
 }
 
@@ -30,7 +30,7 @@ function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | unde
 
 /** Authorize one already-resolved model key for a new Agent invocation. */
 export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizationVerdict {
-  const { agentType, modelKey, parentModelKey, routing, registryKeys, scopedKeys } = ctx;
+  const { agentType, modelKey, parentModelKey, routing, availableKeys, scopedKeys } = ctx;
 
   // The exact parent is the only implicit capability and remains valid even
   // when routing, provider access, or the active scope changes around it.
@@ -51,7 +51,7 @@ export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizati
   if (access.models && !access.models.includes(modelId)) {
     return { ok: false, reason: "model-denied" };
   }
-  if (!registryKeys.has(modelKey)) return { ok: false, reason: "model-unavailable" };
+  if (!availableKeys.has(modelKey)) return { ok: false, reason: "model-unavailable" };
   if (scopedKeys && !scopedKeys.has(modelKey)) return { ok: false, reason: "out-of-scope" };
   return { ok: true };
 }
@@ -60,7 +60,7 @@ export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizati
 export function effectiveAlternateModelKeys(
   agentType: string,
   routing: Readonly<ModelRoutingConfig>,
-  registryKeys: ReadonlySet<string>,
+  availableKeys: ReadonlySet<string>,
   scopedKeys: ReadonlySet<string> | null,
   parentModelKey = "",
 ): string[] {
@@ -74,9 +74,9 @@ export function effectiveAlternateModelKeys(
     const access = ownValue(rules, provider)!;
     const keys = access.models
       ? access.models.map((modelId) => `${provider}/${modelId}`)
-      : [...registryKeys].filter((key) => key.startsWith(`${provider}/`));
+      : [...availableKeys].filter((key) => key.startsWith(`${provider}/`));
     for (const key of keys) {
-      if (key === parentModelKey || !registryKeys.has(key)) continue;
+      if (key === parentModelKey || !availableKeys.has(key)) continue;
       if (scopedKeys && !scopedKeys.has(key)) continue;
       result.push(key);
     }
@@ -99,7 +99,7 @@ export function agentTypesForProvider(
 export function unavailableModelRules(
   routing: Readonly<ModelRoutingConfig>,
   provider: string,
-  registryModelIds: ReadonlySet<string>,
+  catalogueModelIds: ReadonlySet<string>,
   providerPresent: boolean,
   registryReliable: boolean,
 ): Record<string, string[]> {
@@ -113,7 +113,7 @@ export function unavailableModelRules(
   for (const type of Object.keys(routing.agentAccess).sort()) {
     const models = ownValue(routing.agentAccess[type].providers, provider)?.models;
     if (!models) continue;
-    const missing = models.filter((modelId) => !registryModelIds.has(modelId)).sort();
+    const missing = models.filter((modelId) => !catalogueModelIds.has(modelId)).sort();
     if (missing.length > 0) result[type] = missing;
   }
   return result;

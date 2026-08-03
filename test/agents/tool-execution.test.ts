@@ -75,7 +75,7 @@ vi.mock("../../src/models/model-scope.js", () => ({
   modelDeniedError: (modelRef: string, agent: string) =>
     `Model "${modelRef}" is not authorized for Agent "${agent}".`,
   modelUnavailableError: (modelRef: string) =>
-    `Model "${modelRef}" is not available in the current Pi model registry.`,
+    `Model "${modelRef}" is not currently available to Pi.`,
   outOfScopeModelError: (modelRef: string, scopedKeys: ReadonlySet<string>) =>
     `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
 }));
@@ -572,6 +572,7 @@ describe("executeAgentTool — model access", () => {
     mockRouting.enabled = false;
     ctx.modelRegistry.find.mockReturnValue(undefined);
     ctx.modelRegistry.getAll.mockReturnValue([]);
+    ctx.modelRegistry.getAvailable.mockReturnValue([]);
     await executeAgentTool("parent-unregistered", makeParams({ model: "test/parent-model" }), undefined, undefined, ctx);
     expect(mockSpawn.mock.calls[0][4].model).toBe(ctx.model);
   });
@@ -623,10 +624,11 @@ describe("executeAgentTool — model access", () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
-  it("requires the explicit model to remain in the registry", async () => {
-    ctx.modelRegistry.getAll = vi.fn(() => [{ provider: "test", id: "parent-model" }]);
-    const result = await executeAgentTool("registry", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("current Pi model registry");
+  it("rejects catalogue-only alternate models", async () => {
+    ctx.modelRegistry.getAvailable = vi.fn(() => [{ provider: "test", id: "parent-model" }]);
+    const result = await executeAgentTool("availability", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
+    expect(result.content[0].text).toContain("not currently available to Pi");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects alternate models outside active scope", async () => {

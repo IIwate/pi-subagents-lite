@@ -130,7 +130,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       }),
       parentModelKey: ctx.model ? modelKey(ctx.model) : "",
       routing: getStore().routing,
-      registryKeys: new Set(ctx.modelRegistry.getAll().map(modelKey)),
+      availableKeys: new Set(ctx.modelRegistry.getAvailable().map(modelKey)),
       scopedKeys: scopedModelKeys(ctx.scopedModels),
     });
     return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };

@@ -123,6 +123,87 @@ describe("Model Routing top level", () => {
   });
 });
 
+describe("Provider picker", () => {
+  beforeEach(() => {
+    reset();
+    mockModules.mockConfig.modelRouting.enabled = true;
+  });
+
+  it("hides unconfigured catalogue-only providers", async () => {
+    const ctx = createMockCtx();
+    ctx.modelRegistry.getAll.mockReturnValue([
+      ...ctx.modelRegistry.getAll(),
+      ...Array.from({ length: 40 }, (_, index) => ({ provider: `builtin-${index}`, id: "default" })),
+    ]);
+    await showModelRoutingMenu(ctx);
+    topItem("enabledProviders").submenu("", vi.fn());
+    const values = lastSelect().items.filter((item: any) => !item.nonSelectable).map((item: any) => item.value);
+    expect(values).toEqual(["anthropic", "openai"]);
+
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    const agentProviders = lastSelect().items
+      .filter((item: any) => !item.nonSelectable)
+      .map((item: any) => item.value);
+    expect(agentProviders).toEqual(["anthropic", "openai"]);
+  });
+
+  it("reads current availability when the Provider submenu opens", async () => {
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      { provider: "anthropic", id: "claude-haiku-4" },
+      { provider: "late-provider", id: "worker" },
+    ]);
+    topItem("enabledProviders").submenu("", vi.fn());
+    const providers = lastSelect().items.filter((item: any) => !item.nonSelectable).map((item: any) => item.value);
+    expect(providers).toEqual(["anthropic", "late-provider"]);
+  });
+
+  it("groups available built-in and third-party providers together", async () => {
+    mockModules.mockConfig.modelRouting.enabledProviders = ["openai", "cpa-responses"];
+    const ctx = createMockCtx();
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "cpa-responses", id: "grok-4.5" },
+    ]);
+    await showModelRoutingMenu(ctx);
+    topItem("enabledProviders").submenu("", vi.fn());
+    const rows = lastSelect().items;
+    expect(rows[0].label).toContain("Available providers");
+    expect(rows.find((row: any) => row.value === "openai")).toBeDefined();
+    expect(rows.find((row: any) => row.value === "cpa-responses")).toBeDefined();
+    expect(rows.some((row: any) => row.label.includes("Saved but unavailable"))).toBe(false);
+  });
+
+  it("keeps prototype-like Provider IDs selectable and unconfigured", async () => {
+    const ctx = createMockCtx();
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "constructor", id: "worker" },
+      { provider: "__proto__", id: "worker" },
+    ]);
+    await showModelRoutingMenu(ctx);
+    topItem("enabledProviders").submenu("", vi.fn());
+    const rows = lastSelect().items;
+    expect(rows.find((row: any) => row.value === "constructor").nonSelectable).toBeUndefined();
+    expect(rows.find((row: any) => row.value === "__proto__").nonSelectable).toBeUndefined();
+    lastSelect().onSelect({ value: "__proto__" });
+    expect(lastSettings().items.find((item: any) => item.id === "piAvailability").currentValue).toBe("Available");
+  });
+
+  it("places saved providers missing from Pi availability in a dormant group", async () => {
+    mockModules.mockConfig.modelRouting.enabledProviders = ["google"];
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("enabledProviders").submenu("", vi.fn());
+    const rows = lastSelect().items;
+    const savedHeader = rows.findIndex((row: any) => row.label.includes("Saved but unavailable"));
+    expect(savedHeader).toBeGreaterThan(rows.findIndex((row: any) => row.value === "openai"));
+    expect(rows.findIndex((row: any) => row.value === "google")).toBeGreaterThan(savedHeader);
+  });
+});
+
 describe("Quick model setup", () => {
   beforeEach(() => {
     reset();
@@ -243,7 +324,8 @@ describe("Agent model access", () => {
     const rows = lastSelect().items;
     expect(rows[0].label).toContain("[✓] Default");
     expect(rows[1].value).toBe("__separator__");
-    expect(rows.find((item: any) => item.value === "google").description).toContain("Disabled globally");
+    expect(rows.find((item: any) => item.value === "google").description).toContain("Saved but unavailable");
+    expect(rows.find((item: any) => item.value === "google").description).toContain("Routing disabled");
   });
 
   it("marks the Default row unavailable when no parent model is active", async () => {
@@ -257,6 +339,31 @@ describe("Agent model access", () => {
     expect(defaultRow.description).toContain("Unavailable");
   });
 
+  it("refreshes available models when entering the model editor", async () => {
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "openai", id: "late-model" },
+    ]);
+    lastSelect().onSelect({ value: "openai" });
+    expect(lastSelect().items.find((row: any) => row.value === "late-model")).toBeDefined();
+  });
+
+  it("does not inherit a saved rule for a prototype-like Provider ID", async () => {
+    const ctx = createMockCtx();
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "constructor", id: "worker" },
+    ]);
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    expect(lastSelect().items.find((row: any) => row.value === "constructor").description).toBe("Available");
+  });
+
   it("applies exact access without session or assignment layers", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
@@ -268,11 +375,19 @@ describe("Agent model access", () => {
     expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.openai).toEqual({ models: ["o3"] });
   });
 
-  it("distinguishes Active, Out of scope, and Unavailable exact rules", async () => {
+  it("distinguishes Active, Available, scope, and unavailable catalogue statuses", async () => {
     mockModules.mockConfig.modelRouting.agentAccess = {
       Explore: { providers: { openai: { models: ["gpt-4o", "o3", "retired"] } } },
     };
     const ctx = createMockCtx();
+    ctx.modelRegistry.getAll.mockReturnValue([
+      ...ctx.modelRegistry.getAll(),
+      { provider: "openai", id: "gpt-4.1" },
+    ]);
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "openai", id: "gpt-4.1" },
+    ]);
     ctx.scopedModels = [
       { model: { provider: "anthropic", id: "claude-sonnet-4-20250514" } },
       { model: { provider: "openai", id: "o3" } },
@@ -284,7 +399,33 @@ describe("Agent model access", () => {
     const rows = lastSelect().items;
     expect(rows.find((row: any) => row.value === "o3").description).toBe("Active");
     expect(rows.find((row: any) => row.value === "gpt-4o").description).toBe("Out of current scope");
-    expect(rows.find((row: any) => row.value === "retired").description).toBe("Unavailable");
+    expect(rows.find((row: any) => row.value === "gpt-4.1").description).toBe("Out of current scope");
+    expect(rows.find((row: any) => row.value === "retired").description).toBe("Unavailable catalogue ID");
+  });
+
+  it("marks unselected selectable models as Available", async () => {
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    lastSelect().onSelect({ value: "openai" });
+    expect(lastSelect().items.find((row: any) => row.value === "o3").description).toBe("Available");
+  });
+
+  it("shows saved exact IDs as provider-unavailable without deleting them", async () => {
+    mockModules.mockConfig.modelRouting.enabledProviders = ["google"];
+    mockModules.mockConfig.modelRouting.agentAccess = {
+      Explore: { providers: { google: { models: ["gemini-2.5-pro"] } } },
+    };
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    lastSelect().onSelect({ value: "google" });
+    expect(lastSelect().items.find((row: any) => row.value === "gemini-2.5-pro").description)
+      .toBe("Provider unavailable");
+    expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.google.models)
+      .toEqual(["gemini-2.5-pro"]);
   });
 });
 
@@ -306,6 +447,14 @@ describe("Provider lifecycle and cleanup", () => {
     topItem("enabledProviders").submenu("", vi.fn());
     lastSelect().onSelect({ value: "openai" });
   }
+
+  it("distinguishes routing, Pi availability, and effective access", async () => {
+    const ctx = createMockCtx();
+    await openOpenAI(ctx);
+    expect(lastSettings().items.find((item: any) => item.id === "enabled").currentValue).toBe("ON");
+    expect(lastSettings().items.find((item: any) => item.id === "piAvailability").currentValue).toBe("Available");
+    expect(lastSettings().items.find((item: any) => item.id === "effectiveAccess").currentValue).toBe("Active");
+  });
 
   it("pauses a provider without deleting saved rules", async () => {
     const ctx = createMockCtx();
@@ -348,6 +497,22 @@ describe("Provider lifecycle and cleanup", () => {
       Explore: { providers: { openai: { models: ["gpt-4o", "retired"] } } },
       "ghost-agent": { providers: { openai: { models: ["retired"] } } },
     });
+  });
+
+  it("keeps rules dormant and creates no cleanup candidate when availability is lost", async () => {
+    mockModules.mockConfig.modelRouting.agentAccess = {
+      Explore: { providers: { openai: { models: ["gpt-4o"] } } },
+    };
+    const ctx = createMockCtx();
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      { provider: "anthropic", id: "claude-sonnet-4-20250514" },
+      { provider: "anthropic", id: "claude-haiku-4" },
+    ]);
+    await openOpenAI(ctx);
+    expect(lastSettings().items.find((item: any) => item.id === "piAvailability").currentValue).toBe("Unavailable");
+    expect(lastSettings().items.find((item: any) => item.id === "effectiveAccess").currentValue).toBe("Dormant");
+    expect(lastSettings().items.find((item: any) => item.id === "cleanUnavailable")).toBeUndefined();
+    expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.openai.models).toEqual(["gpt-4o"]);
   });
 
   it("does not offer unavailable cleanup while the provider is disabled", async () => {

@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { SelectList } from "@earendil-works/pi-tui";
 
 // helpers.ts imports SearchableSelectDialog only for createSearchableSelect;
 // these cases never touch it. Mock the dialog so we don't load DynamicBorder/pi.
@@ -10,7 +11,7 @@ vi.mock("../../../src/ui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 
-import { buildListTheme, buildModelOptions } from "../../../src/ui/menu/helpers.js";
+import { buildListTheme, buildModelOptions, skipNonSelectableRows } from "../../../src/ui/menu/helpers.js";
 
 const mockTheme = {
   fg: (color: string, text: string) => `[${color}:${text}]`,
@@ -27,6 +28,28 @@ describe("buildModelOptions", () => {
       "anthropic/claude-sonnet-4",
       "openai/gpt-4o",
     ]);
+  });
+});
+
+describe("skipNonSelectableRows", () => {
+  it("starts on the first selectable row and skips section headers", () => {
+    const list = new SelectList([
+      { value: "available", label: "Available", nonSelectable: true },
+      { value: "anthropic", label: "anthropic" },
+      { value: "saved", label: "Saved", nonSelectable: true },
+      { value: "__proto__", label: "__proto__" },
+    ] as any, 10, buildListTheme(mockTheme));
+    skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
+
+    expect(list.selectedIndex).toBe(1);
+    list.handleInput("\x1b[B");
+    expect(list.selectedIndex).toBe(3);
+    list.handleInput("\x1b[A");
+    expect(list.selectedIndex).toBe(1);
+    list.handleInput("\x1b[A");
+    expect(list.selectedIndex).toBe(3);
+    list.handleInput("\x1b[B");
+    expect(list.selectedIndex).toBe(1);
   });
 });
 

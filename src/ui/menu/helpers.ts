@@ -23,6 +23,41 @@ export function sectionRow(title?: string): { label: string; currentValue: strin
   };
 }
 
+/** Keep a list cursor off explicit headers, separators, and locked rows. */
+export function skipNonSelectableRows(
+  list: any,
+  isNonSelectable: (item: any) => boolean,
+): void {
+  if (!Array.isArray(list.items) || list.items.length === 0) return;
+  const rawIndex = Symbol("rawIndex");
+  const initialIndex = list.selectedIndex ?? 0;
+  const firstSelectableFrom = (start: number, step: number): number => {
+    let next = start;
+    for (let count = 0; count < list.items.length; count++) {
+      next = (next + step + list.items.length) % list.items.length;
+      if (!isNonSelectable(list.items[next])) return next;
+    }
+    return start;
+  };
+  Object.defineProperty(list, "selectedIndex", {
+    get() { return list[rawIndex] ?? 0; },
+    set(index) {
+      const current = list[rawIndex] ?? initialIndex;
+      const clamped = Math.max(0, Math.min(index, list.items.length - 1));
+      if (!isNonSelectable(list.items[clamped])) {
+        list[rawIndex] = clamped;
+        return;
+      }
+      const wrappedDown = current === list.items.length - 1 && index === 0;
+      const wrappedUp = current === 0 && index === list.items.length - 1;
+      const step = index === current || wrappedDown ? 1 : wrappedUp || index < current ? -1 : 1;
+      list[rawIndex] = firstSelectableFrom(clamped, step);
+    },
+    configurable: true,
+  });
+  list.selectedIndex = initialIndex;
+}
+
 /**
  * Build SelectOption[] from raw "provider/model-id" strings.
  */

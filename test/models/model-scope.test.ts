@@ -42,7 +42,7 @@ describe("model access errors", () => {
     expect(providerDisabledError("openai/gpt-5", "openai")).toContain("provider \"openai\"");
     expect(agentProviderDeniedError("openai/gpt-5", "Explore", "openai")).toContain("Agent \"Explore\"");
     expect(modelDeniedError("openai/gpt-5", "Explore")).toContain("saved model access rule");
-    expect(modelUnavailableError("openai/gpt-5")).toContain("current Pi model registry");
+    expect(modelUnavailableError("openai/gpt-5")).toContain("not currently available to Pi");
   });
 });
 

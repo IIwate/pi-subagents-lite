@@ -29,7 +29,7 @@ function authorize(overrides: Record<string, unknown> = {}) {
     modelKey: "openai/gpt-5",
     parentModelKey: "anthropic/sonnet",
     routing: routing(),
-    registryKeys: new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]),
+    availableKeys: new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]),
     scopedKeys: null,
     ...overrides,
   } as any);
@@ -40,7 +40,7 @@ describe("authorizeModel", () => {
     expect(authorize({
       modelKey: "anthropic/sonnet",
       routing: routing({ enabled: false, enabledProviders: [], agentAccess: {} }),
-      registryKeys: new Set(),
+      availableKeys: new Set(),
       scopedKeys: new Set(["openai/gpt-5"]),
     })).toEqual({ ok: true });
   });
@@ -66,7 +66,7 @@ describe("authorizeModel", () => {
         enabledProviders: ["constructor"],
         agentAccess: { Explore: { providers: {} } },
       }),
-      registryKeys: new Set(["constructor/worker"]),
+      availableKeys: new Set(["constructor/worker"]),
     })).toEqual({ ok: false, reason: "agent-provider-denied" });
     expect(authorize({
       agentType: "constructor",
@@ -85,8 +85,8 @@ describe("authorizeModel", () => {
       .toEqual({ ok: false, reason: "model-denied" });
   });
 
-  it("requires a current registry match", () => {
-    expect(authorize({ registryKeys: new Set(["anthropic/sonnet"]) }))
+  it("rejects models absent from Pi availability", () => {
+    expect(authorize({ availableKeys: new Set(["anthropic/sonnet"]) }))
       .toEqual({ ok: false, reason: "model-unavailable" });
   });
 
@@ -106,16 +106,16 @@ describe("authorizeModel", () => {
         enabledProviders: ["openai"],
         agentAccess: { Explore: { providers: { openai: {} } } },
       }),
-      registryKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
+      availableKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
     })).toEqual({ ok: false, reason: "provider-disabled" });
   });
 });
 
 describe("effectiveAlternateModelKeys", () => {
-  const registry = new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]);
+  const available = new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]);
 
-  it("expands all-model rules and removes the exact parent", () => {
-    expect(effectiveAlternateModelKeys("Explore", routing(), registry, null, "openai/gpt-5"))
+  it("expands all-model rules over available keys and removes the exact parent", () => {
+    expect(effectiveAlternateModelKeys("Explore", routing(), available, null, "openai/gpt-5"))
       .toEqual(["anthropic/haiku", "openai/o3"]);
   });
 
@@ -123,7 +123,7 @@ describe("effectiveAlternateModelKeys", () => {
     expect(effectiveAlternateModelKeys(
       "Explore",
       routing({ enabledProviders: ["anthropic"] }),
-      registry,
+      available,
       new Set(["anthropic/sonnet"]),
       "anthropic/sonnet",
     )).toEqual([]);

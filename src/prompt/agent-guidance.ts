@@ -12,13 +12,13 @@ export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
   parentModelKey: string;
   routing: Readonly<ModelRoutingConfig>;
-  registryKeys: ReadonlySet<string>;
+  availableKeys: ReadonlySet<string>;
   scopedKeys: ReadonlySet<string> | null;
 }
 
 /** Deterministic per-run guidance for the schema-stealth Agent tool. */
 export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string {
-  const { parentModelKey, routing, registryKeys, scopedKeys } = options;
+  const { parentModelKey, routing, availableKeys, scopedKeys } = options;
   const agents = [...options.agents].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   const lines = ["[Subagent access]", "", "Available agent types:"];
 
@@ -65,7 +65,7 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
       if (!routing.enabledProviders.includes(provider)) continue;
       const rule = rules[provider];
       if (!rule.models) {
-        const active = [...registryKeys].some((key) =>
+        const active = [...availableKeys].some((key) =>
           key.startsWith(`${provider}/`)
           && key !== parentModelKey
           && (!scopedKeys || scopedKeys.has(key)),
@@ -82,7 +82,7 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
             [agent.name]: { providers: { [provider]: rule } },
           },
         },
-        registryKeys,
+        availableKeys,
         scopedKeys,
         parentModelKey,
       ));

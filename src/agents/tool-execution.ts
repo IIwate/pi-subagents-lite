@@ -150,13 +150,13 @@ export async function executeAgentTool(
   if (!resolvedModelKey) return errorResult(missingSubagentModelError());
 
   const scopedKeys = scopedModelKeys(scopedModels);
-  const registryKeys = new Set(ctx.modelRegistry.getAll().map(modelKey));
+  const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
   const verdict = authorizeModel({
     agentType: resolvedType,
     modelKey: resolvedModelKey,
     parentModelKey: parentModelRef,
     routing,
-    registryKeys,
+    availableKeys,
     scopedKeys,
   });
   if (!verdict.ok) {

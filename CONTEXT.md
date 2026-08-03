@@ -36,13 +36,21 @@ _Avoid_: Global default, inherited assignment
 A persistent authorization for one agent type to use one provider. An omitted `models` property means all currently available models from that provider; a non-empty array means only those exact model IDs. Empty arrays are invalid and removed. Alternate models must be passed explicitly through the Agent tool.
 _Avoid_: Model assignment, model override, model preference
 
+**Pi availability**:
+The models returned by `modelRegistry.getAvailable()` for the current Pi process. This is the authorization and normal-selection boundary. Provider origin is irrelevant: built-in and third-party providers are equally available when Pi reports their models here.
+_Avoid_: Model catalogue, installed providers
+
+**Model catalogue**:
+The full `modelRegistry.getAll()` snapshot. It may contain built-in models without usable credentials and is used only for exact lookup and reliable destructive-cleanup checks, never as the ordinary Provider picker or alternate-authorization source.
+_Avoid_: Available models, authorized models
+
 **Dormant provider rule**:
-A saved Agent/provider access rule whose provider is globally disabled. Disabling a provider preserves these rules; re-enabling restores the subset still valid in the current registry and scope.
-_Avoid_: Stale assignment, disabled model
+A saved Agent/provider access rule whose routing switch is disabled or whose provider is absent from Pi availability. Either condition preserves every rule; effective access returns only when routing and Pi availability both return.
+_Avoid_: Stale assignment, deleted provider
 
 **Unavailable model rule**:
-A saved exact model ID absent from a reliable current registry snapshot for a provider that is present. It may be batch-removed by Clean unavailable rules. A model that merely falls outside the current scope is not unavailable.
-_Avoid_: Out-of-scope model, disabled model
+A saved exact model ID absent from a reliable current Model catalogue snapshot while that catalogue still contains the provider. It may be batch-removed by Clean unavailable rules. Authentication loss, provider unavailability, and model scope never create this state.
+_Avoid_: Out-of-scope model, dormant provider rule
 
 **Model scope**:
 The active allowlist of models from pi (`--models`, `enabledModels`, or `/scoped-models`). A routed model must be inside this scope. Empty/unset scope means unrestricted. Scope affects effective access but never makes a saved rule eligible for stale-rule cleanup.
@@ -80,9 +88,9 @@ _Avoid_: Callback, notification
 - An **Agent type** may have multiple **Model access rules** across multiple providers
 - A **Subagent** is spawned from one **Agent type**
 - Every **Subagent** can use the dynamic **Parent default**
-- An alternate model must satisfy global provider, Agent/provider, Agent/model, registry, and **Model scope** checks
+- An alternate model must satisfy global provider, Agent/provider, Agent/model, **Pi availability**, and **Model scope** checks
 - **Quick model setup** writes the same rules as the full model-access menus
-- A disabled provider leaves **Dormant provider rules** intact
+- A disabled or Pi-unavailable provider leaves **Dormant provider rules** intact
 - An **Unavailable model rule** can be batch-cleaned; an out-of-scope rule cannot
 - Accepted running and queued work uses an **Invocation snapshot**
 - **Agent guidance** communicates current effective access to the parent LLM before each run
@@ -93,8 +101,8 @@ _Avoid_: Callback, notification
 ## Product boundaries
 
 - The `Agent` tool is the only spawn entry point. `/agents` owns settings and diagnostics, not a second user-driven spawn flow. Revisit only if users need to start agents without involving the parent LLM.
-- Model routing is authorization, not provider installation and not automatic model selection. Omitted `model` always means the exact parent model; rejected explicit choices never fall back silently.
-- Provider disablement is reversible. Destructive cleanup is limited to explicit Clean unavailable rules, Delete saved access rules, and Clear routing settings actions.
+- Model routing is authorization, not provider installation and not automatic model selection. Omitted `model` always means the exact parent model; rejected explicit choices never fall back silently. Alternate access and guidance use **Pi availability**, not the full **Model catalogue**.
+- Provider disablement and authentication loss are reversible. Provider pickers show available providers plus saved dormant providers, never unconfigured catalogue-only providers. Destructive cleanup is limited to explicit Clean unavailable rules, Delete saved access rules, and Clear routing settings actions.
 - Configuration changes apply immediately to future Agent calls. Running and queued calls retain their invocation snapshot; users stop accepted work explicitly through StopAgent.
 - A failed subagent with a settled in-memory session remains available for the existing list-driven user interaction flow for 30 minutes, or until manual clear or parent shutdown. The recovery countdown freezes while that child view is active and resumes from its remaining duration on return to Main; this prevents an expiry-triggered screen swap while the user is inspecting the session. This is not persisted resume, and the parent LLM does not receive a continuation tool.
 - Debug may arm a session-local, one-shot fault for the next Agent that actually starts. Queued records do not reserve or consume it. Injection happens after the real child session is configured and before its first provider prompt, with a fixed 10-second recovery window; ordinary recoverable failures keep 30 minutes. Debug is UI-only, is not persisted across reload, does not create a provider probe or second spawn path, and exposes neither diagnostics nor lifecycle control to the parent LLM.

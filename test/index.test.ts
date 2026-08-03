@@ -306,7 +306,7 @@ describe("event listener registration", () => {
     const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
     const ctx = {
       model: { provider: "anthropic", id: "sonnet" },
-      modelRegistry: { getAll: () => [{ provider: "anthropic", id: "sonnet" }] },
+      modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "sonnet" }] },
       scopedModels: [],
     };
     const active = await handler({

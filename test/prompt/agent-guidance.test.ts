@@ -22,7 +22,7 @@ function build(overrides: Record<string, unknown> = {}): string {
         },
       },
     },
-    registryKeys: new Set(["anthropic/sonnet", "openai/gpt-5", "openai/o3", "google/gemini-pro"]),
+    availableKeys: new Set(["anthropic/sonnet", "openai/gpt-5", "openai/o3", "google/gemini-pro"]),
     scopedKeys: new Set(["anthropic/sonnet", "openai/gpt-5", "google/gemini-pro"]),
     ...overrides,
   } as any);
@@ -51,6 +51,13 @@ describe("buildCurrentAgentGuidance", () => {
     expect(guidance).toContain("google/gemini-pro");
     expect(guidance).not.toContain("openai/o3");
     expect(guidance).not.toContain("google/missing");
+  });
+
+  it("does not advertise catalogue-only models", () => {
+    const guidance = build({ availableKeys: new Set(["anthropic/sonnet"]) });
+    expect(guidance).not.toContain("openai/*");
+    expect(guidance).not.toContain("google/gemini-pro");
+    expect(guidance).toContain("No effective alternate model access");
   });
 
   it("describes routing OFF without alternate access", () => {

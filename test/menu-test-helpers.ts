@@ -91,7 +91,9 @@ export function createMockCtx(
       ]),
       getAvailable: vi.fn(() => [
         { provider: "anthropic", id: "claude-sonnet-4-20250514" },
+        { provider: "anthropic", id: "claude-haiku-4" },
         { provider: "openai", id: "gpt-4o" },
+        { provider: "openai", id: "o3" },
       ]),
       getRegisteredProviderIds: vi.fn(() => ["anthropic", "openai", "google"]),
       getError: vi.fn(() => undefined),

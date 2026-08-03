@@ -65,7 +65,7 @@ export function modelDeniedError(modelRef: string, agentType: string): string {
 }
 
 export function modelUnavailableError(modelRef: string): string {
-  return `Model "${modelRef}" is not available in the current Pi model registry.`;
+  return `Model "${modelRef}" is not currently available to Pi.`;
 }
 
 /** Build a clear LLM/user-facing error for an out-of-scope model. */

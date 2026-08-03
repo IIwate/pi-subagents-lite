@@ -108,7 +108,7 @@ With **Model routing** OFF (`/agents` > Settings > Model routing), any other mod
 - its provider is globally enabled for routing;
 - the selected agent type has access to that provider;
 - the agent's provider rule allows all models or the exact model ID;
-- the model exists in Pi's current registry;
+- Pi reports the exact model through `modelRegistry.getAvailable()`;
 - the model is inside Pi's active model scope.
 
 Alternate models must be passed explicitly through the Agent tool. A rejected explicit choice is never replaced silently with the parent model. The parent provider receives no implicit access to its other models; same-provider alternatives use the same explicit provider and agent rules as every other alternate model.
@@ -133,7 +133,7 @@ The canonical configuration is:
 }
 ```
 
-An omitted `models` property means all currently available models from that provider. A non-empty array means only those exact IDs. Empty arrays are removed and never interpreted as all-model access.
+An omitted `models` property means all models that Pi currently or later reports available from that provider. It does not authorize unauthenticated entries from Pi's full built-in catalogue. A non-empty array means only those exact IDs. Empty arrays are removed and never interpreted as all-model access.
 
 Each agent access page begins with a locked dynamic row and a separator:
 
@@ -146,9 +146,11 @@ google       2 models
 
 **Quick model setup** grants one agent alternate access to models from the current parent provider in one flow. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no separate quick configuration.
 
-Disabling a provider preserves its agent rules as inactive configuration. Re-enabling it restores the subset still valid in the current registry and scope. Provider maintenance distinguishes Active, Out of scope, Provider disabled, and Unavailable rules. **Clean unavailable rules** batch-removes only exact model IDs missing from a reliable current provider registry; it never removes out-of-scope, disabled-provider, or all-model rules. **Delete saved access rules** removes that provider from every agent policy.
+Provider pickers use `modelRegistry.getAvailable()` plus providers already named by saved routing state. They never expose the full `getAll()` built-in catalogue as ordinary choices. Available built-in and third-party providers are listed together under **Available providers**; saved providers missing from Pi availability remain manageable under **Saved but unavailable**.
 
-Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Configuration, parent-model, registry, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
+Disabling routing for a provider or losing its credentials/availability preserves every agent rule as dormant configuration. Provider maintenance shows the routing switch, Pi availability, and effective access separately. Model rows distinguish **Active**, **Available**, **Out of current scope**, **Provider unavailable**, and **Unavailable catalogue ID**. Cleanup uses a reliable `getAll()` catalogue snapshot only: **Clean unavailable rules** removes exact IDs missing from a catalogue provider that is still present, rechecks at confirmation time, and never treats authentication loss or scope loss as catalogue removal. **Delete saved access rules** remains the separate action that removes that provider from every agent policy.
+
+Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
 
 The selected model, parent model, thinking selection, and scoped-model state are locked when the Agent call is accepted. Running and queued agents retain that invocation snapshot; later settings changes affect only future Agent calls.
 

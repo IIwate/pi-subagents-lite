@@ -8,7 +8,7 @@ import { accessSummary, unavailableModelRules } from "../../models/model-access.
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
 import { getStore } from "../../shell.js";
 import type { Theme } from "../types.js";
-import { buildListTheme, createDelegatingComponent, sectionRow } from "./helpers.js";
+import { buildListTheme, createDelegatingComponent, sectionRow, skipNonSelectableRows } from "./helpers.js";
 import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 
@@ -26,43 +26,52 @@ function defaultModelRow(ctx: ExtensionCommandContext, theme: Theme) {
         value: "__default__",
         label: theme.fg("dim", `[✓] Default · ${modelKey(ctx.model)}`),
         description: "",
+        nonSelectable: true,
       }
     : {
         value: "__default__",
         label: theme.fg("dim", "[ ] Default · No active parent model"),
         description: "Unavailable until a parent model is selected",
+        nonSelectable: true,
       };
 }
 
 interface RegistrySnapshot {
-  models: ModelRef[];
-  /** Providers shown in the UI, including saved dormant configuration. */
+  catalogueModels: ModelRef[];
+  availableModels: ModelRef[];
   providers: Set<string>;
-  /** Providers actually present in the loaded registry. */
-  presentProviders: Set<string>;
-  reliable: boolean;
+  availableProviders: Set<string>;
+  catalogueProviders: Set<string>;
+  catalogueReliable: boolean;
 }
 
 function registrySnapshot(ctx: ExtensionCommandContext, store: Store): RegistrySnapshot {
-  const models = ctx.modelRegistry.getAll();
-  const presentProviders = new Set(models.map((model) => model.provider));
-  for (const provider of ctx.modelRegistry.getRegisteredProviderIds()) presentProviders.add(provider);
-  const providers = new Set(presentProviders);
+  const catalogueModels = ctx.modelRegistry.getAll();
+  const availableModels = ctx.modelRegistry.getAvailable();
+  const availableProviders = new Set(availableModels.map((model) => model.provider));
+  const providers = new Set(availableProviders);
   for (const provider of store.routing.enabledProviders) providers.add(provider);
   for (const access of Object.values(store.routing.agentAccess)) {
     for (const provider of Object.keys(access.providers)) providers.add(provider);
   }
-  return { models, providers, presentProviders, reliable: ctx.modelRegistry.getError() === undefined };
+  return {
+    catalogueModels,
+    availableModels,
+    providers,
+    availableProviders,
+    catalogueProviders: new Set(catalogueModels.map((model) => model.provider)),
+    catalogueReliable: ctx.modelRegistry.getError() === undefined,
+  };
 }
 
-function providerModels(snapshot: RegistrySnapshot, provider: string): ModelRef[] {
-  return snapshot.models
+function providerModels(models: readonly ModelRef[], provider: string): ModelRef[] {
+  return models
     .filter((model) => model.provider === provider)
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function providerRegistryIds(snapshot: RegistrySnapshot, provider: string): Set<string> {
-  return new Set(providerModels(snapshot, provider).map((model) => model.id));
+function providerModelIds(models: readonly ModelRef[], provider: string): Set<string> {
+  return new Set(providerModels(models, provider).map((model) => model.id));
 }
 
 function configuredAgentCount(store: Store): number {
@@ -83,12 +92,18 @@ function agentSummary(store: Store, type: string): string {
   }).join(" · ");
 }
 
-function savedProviderSummary(store: Store, provider: string, rule: ProviderModelAccess | undefined): string {
-  if (!rule) return "Not configured";
+function savedProviderSummary(
+  store: Store,
+  snapshot: RegistrySnapshot,
+  provider: string,
+  rule: ProviderModelAccess | undefined,
+): string {
+  const availability = snapshot.availableProviders.has(provider) ? "Available" : "Saved but unavailable";
+  if (!rule) return availability;
   const summary = accessSummary(rule);
   return store.routing.enabledProviders.includes(provider)
-    ? summary
-    : `Disabled globally · ${summary === "All models" ? "All models saved" : summary.replace(" model", " saved model")}`;
+    ? `${availability} · ${summary}`
+    : `${availability} · Routing disabled · ${summary === "All models" ? "All models saved" : summary.replace(" model", " saved model")}`;
 }
 
 function modelStatus(
@@ -97,15 +112,53 @@ function modelStatus(
   scopedKeys: ReadonlySet<string> | null,
   provider: string,
   modelId: string,
-  authorized: boolean,
+  selected: boolean,
 ): string {
-  if (!store.routing.enabledProviders.includes(provider)) return "Provider disabled";
   const key = `${provider}/${modelId}`;
-  if (!providerRegistryIds(snapshot, provider).has(modelId)) {
-    return snapshot.reliable && snapshot.presentProviders.has(provider) ? "Unavailable" : "Saved rule";
+  if (providerModelIds(snapshot.availableModels, provider).has(modelId)) {
+    if (scopedKeys && !scopedKeys.has(key)) return "Out of current scope";
+    return selected
+      && store.routing.enabled
+      && store.routing.enabledProviders.includes(provider)
+      ? "Active"
+      : "Available";
   }
-  if (scopedKeys && !scopedKeys.has(key)) return "Out of current scope";
-  return authorized ? "Active" : "Available";
+  if (
+    !providerModelIds(snapshot.catalogueModels, provider).has(modelId)
+    && snapshot.catalogueReliable
+    && snapshot.catalogueProviders.has(provider)
+  ) return "Unavailable catalogue ID";
+  return snapshot.availableProviders.has(provider) ? "Model unavailable" : "Provider unavailable";
+}
+
+function providerSection(title: string, theme: Theme) {
+  return {
+    value: title,
+    label: theme.fg("dim", sectionRow(title).label),
+    description: "",
+    nonSelectable: true,
+  };
+}
+
+function groupedProviderRows(
+  snapshot: RegistrySnapshot,
+  theme: Theme,
+  row: (provider: string) => { value: string; label: string; description: string },
+) {
+  const available = [...snapshot.providers]
+    .filter((provider) => snapshot.availableProviders.has(provider))
+    .sort();
+  const unavailable = [...snapshot.providers]
+    .filter((provider) => !snapshot.availableProviders.has(provider))
+    .sort();
+  return [
+    providerSection("Available providers", theme),
+    ...available.map(row),
+    ...(unavailable.length > 0 ? [
+      providerSection("Saved but unavailable", theme),
+      ...unavailable.map(row),
+    ] : []),
+  ];
 }
 
 function buildModelEditor(options: {
@@ -129,17 +182,17 @@ function buildModelEditor(options: {
   let delegator: ReturnType<typeof createDelegatingComponent>;
 
   const buildList = (): SelectList => {
-    const known = new Set(providerModels(snapshot, provider).map((model) => model.id));
+    const known = new Set(providerModels(snapshot.availableModels, provider).map((model) => model.id));
     for (const modelId of selected) known.add(modelId);
-    if (parentId) known.delete(parentId);
+    if (parentId && !selected.has(parentId)) known.delete(parentId);
 
     const rows = [
       defaultModelRow(ctx, theme),
-      { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "" },
+      { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "", nonSelectable: true },
       {
         value: "__all__",
         label: `[${allModels ? "x" : " "}] All alternate models`,
-        description: allModels ? "Includes future registry models" : "Use exact model rules",
+        description: allModels ? "Includes future available models" : "Use exact model rules",
       },
       ...[...known].sort().map((modelId) => ({
         value: modelId,
@@ -149,8 +202,9 @@ function buildModelEditor(options: {
       { value: "__apply__", label: quick ? "Apply quick setup" : "Apply model access", description: "Save this provider rule" },
     ];
     const list = new SelectList(rows, 14, buildListTheme(theme));
+    skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
     list.onSelect = (item) => {
-      if (item.value === "__default__" || item.value === "__separator__") return;
+      if ((item as any).nonSelectable === true) return;
       if (item.value === "__all__") {
         allModels = !allModels;
         if (allModels) selected.clear();
@@ -207,7 +261,6 @@ function quickSetupSubmenu(
   store: Store,
   ctx: ExtensionCommandContext,
   theme: Theme,
-  snapshot: RegistrySnapshot,
   onRebuild: () => void,
 ): SettingItem["submenu"] {
   return (_value, done) => {
@@ -223,7 +276,7 @@ function quickSetupSubmenu(
       store,
       ctx,
       theme,
-      snapshot,
+      snapshot: registrySnapshot(ctx, store),
       type: item.value,
       provider: ctx.model!.provider,
       quick: true,
@@ -247,24 +300,32 @@ function providerMaintenance(
   const build = (): SettingsList => {
     const routing = store.routing;
     const snapshot = registrySnapshot(ctx, store);
+    const providerEnabled = routing.enabledProviders.includes(provider);
+    const piAvailable = snapshot.availableProviders.has(provider);
     const stale = unavailableModelRules(
       routing,
       provider,
-      providerRegistryIds(snapshot, provider),
-      snapshot.presentProviders.has(provider),
-      snapshot.reliable,
+      providerModelIds(snapshot.catalogueModels, provider),
+      snapshot.catalogueProviders.has(provider),
+      snapshot.catalogueReliable,
     );
     const staleCount = Object.values(stale).reduce((sum, models) => sum + models.length, 0);
     const types = store.accessTypesForProvider(provider);
     const items: SettingItem[] = [
       {
         id: "enabled",
-        label: "Enabled",
-        currentValue: routing.enabledProviders.includes(provider) ? "ON" : "OFF",
+        label: "Routing enabled",
+        currentValue: providerEnabled ? "ON" : "OFF",
         values: ["ON", "OFF"],
       },
+      { id: "piAvailability", label: "Pi availability", currentValue: piAvailable ? "Available" : "Unavailable" },
+      {
+        id: "effectiveAccess",
+        label: "Effective access",
+        currentValue: routing.enabled && providerEnabled && piAvailable ? "Active" : "Dormant",
+      },
       { id: "agentAccess", label: "Agent access", currentValue: `${types.length} configured` },
-      { id: "unavailable", label: "Unavailable model rules", currentValue: String(staleCount) },
+      { id: "unavailable", label: "Unavailable catalogue IDs", currentValue: String(staleCount) },
     ];
     if (staleCount > 0) {
       items.push({
@@ -288,9 +349,9 @@ function providerMaintenance(
             const stillStale = unavailableModelRules(
               store.routing,
               provider,
-              providerRegistryIds(fresh, provider),
-              fresh.presentProviders.has(provider),
-              fresh.reliable,
+              providerModelIds(fresh.catalogueModels, provider),
+              fresh.catalogueProviders.has(provider),
+              fresh.catalogueReliable,
             );
             const staleRules = Object.values(stillStale).flat();
             store.mutate.routing.cleanUnavailableModels(provider, [...new Set(staleRules)]);
@@ -340,20 +401,22 @@ function enabledProvidersSubmenu(
   store: Store,
   ctx: ExtensionCommandContext,
   theme: Theme,
-  snapshot: RegistrySnapshot,
   onRebuild: RebuildMenu,
 ): SettingItem["submenu"] {
   return (_value, done) => {
-    const rows = [...snapshot.providers].sort().map((provider) => ({
+    const snapshot = registrySnapshot(ctx, store);
+    const rows = groupedProviderRows(snapshot, theme, (provider) => ({
       value: provider,
       label: `${provider}  [${store.routing.enabledProviders.includes(provider) ? "x" : " "}]`,
       description: `${providerRuleCount(store, provider)} saved Agent rules`,
     }));
     const list = new SelectList(rows, 12, buildListTheme(theme));
+    skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
     const delegator = createDelegatingComponent(list);
-    list.onSelect = (item) => delegator.setActive(providerMaintenance(
-      store, ctx, theme, item.value, done, onRebuild,
-    ));
+    list.onSelect = (item) => {
+      if ((item as any).nonSelectable === true) return;
+      delegator.setActive(providerMaintenance(store, ctx, theme, item.value, done, onRebuild));
+    };
     list.onCancel = () => done();
     return delegator;
   };
@@ -363,7 +426,6 @@ function agentAccessSubmenu(
   store: Store,
   ctx: ExtensionCommandContext,
   theme: Theme,
-  snapshot: RegistrySnapshot,
   onRebuild: () => void,
 ): SettingItem["submenu"] {
   return (_value, done) => {
@@ -378,24 +440,26 @@ function agentAccessSubmenu(
     const delegator = createDelegatingComponent(list);
     list.onSelect = (item) => {
       const type = item.value;
+      const snapshot = registrySnapshot(ctx, store);
       const rules = ownValue(store.routing.agentAccess, type)?.providers ?? {};
       const providerRows = [
         defaultModelRow(ctx, theme),
-        { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "" },
-        ...[...new Set([...snapshot.providers, ...Object.keys(rules)])].sort().map((provider) => ({
+        { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "", nonSelectable: true },
+        ...groupedProviderRows(snapshot, theme, (provider) => ({
           value: provider,
           label: provider,
-          description: savedProviderSummary(store, provider, rules[provider]),
+          description: savedProviderSummary(store, snapshot, provider, ownValue(rules, provider)),
         })),
       ];
       const providerList = new SelectList(providerRows, 14, buildListTheme(theme));
+      skipNonSelectableRows(providerList, (row) => row?.nonSelectable === true);
       providerList.onSelect = (providerItem) => {
-        if (providerItem.value === "__default__" || providerItem.value === "__separator__") return;
+        if ((providerItem as any).nonSelectable === true) return;
         delegator.setActive(buildModelEditor({
           store,
           ctx,
           theme,
-          snapshot,
+          snapshot: registrySnapshot(ctx, store),
           type,
           provider: providerItem.value,
           quick: false,
@@ -418,7 +482,6 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
     const buildItems = (): SettingItem[] => {
       const store = getStore();
       const routing = store.routing;
-      const snapshot = registrySnapshot(ctx, store);
       const triggerRebuild: RebuildMenu = (preserveSubmenu = false) => rebuild?.(buildItems(), preserveSubmenu);
       const items: SettingItem[] = [{
         id: "enabled",
@@ -439,20 +502,20 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         label: "Quick model setup",
         currentValue: "",
         description: "Grant one Agent access to alternate models from the current parent provider.",
-        submenu: quickSetupSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+        submenu: quickSetupSubmenu(store, ctx, theme, triggerRebuild),
       });
       const providers = [...routing.enabledProviders].sort();
       items.push({
         id: "enabledProviders",
         label: "Enabled providers",
         currentValue: providers.length ? providers.join(", ") : "None",
-        submenu: enabledProvidersSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+        submenu: enabledProvidersSubmenu(store, ctx, theme, triggerRebuild),
       });
       items.push({
         id: "agentAccess",
         label: "Agent model access",
         currentValue: `${configuredAgentCount(store)} configured`,
-        submenu: agentAccessSubmenu(store, ctx, theme, snapshot, triggerRebuild),
+        submenu: agentAccessSubmenu(store, ctx, theme, triggerRebuild),
       });
       items.push({ id: "__sep__", ...sectionRow() });
       items.push({

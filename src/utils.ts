@@ -42,7 +42,7 @@ export function parseModelKey(modelStr: string): { provider: string; modelId: st
 /** Minimal registry surface used for model lookup. */
 export interface ModelLookupRegistry {
   find(provider: string, modelId: string): Model<any> | undefined;
-  /** Full loaded registry, preferred for routing and bare-ID resolution. */
+  /** Full loaded catalogue, used for exact bare-ID resolution before authorization. */
   getAll?: () => Array<Model<any>>;
   /** Compatibility fallback for minimal registries in tests/integrations. */
   getAvailable?: () => Array<Model<any>>;

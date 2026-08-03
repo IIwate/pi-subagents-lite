@@ -105,17 +105,16 @@ describe("SettingsListWrapper — __sep__ navigation", () => {
     expect((list.items as any[])[list.selectedIndex].id).toBe("a");
   });
 
-  it("falls back to the opposite direction when a trailing separator is the target", () => {
+  it("wraps past a trailing separator to the first selectable item", () => {
     const list = makeSettingsList([
       { id: "a", label: "A", currentValue: "" },
       { id: "b", label: "B", currentValue: "" },
       { id: "__sep__", label: " ", currentValue: "" },
     ]);
     new SettingsListWrapper(list, { title: "T", theme, onCancel: () => {} });
-    // moving down past the end lands on the trailing sep, which clamp +
-    // backward fallback should resolve back to the last real item
-    (list as any).selectedIndex = 5;
-    expect((list.items as any[])[list.selectedIndex].id).toBe("b");
+    (list as any).selectedIndex = 1;
+    (list as any).selectedIndex = 2;
+    expect((list.items as any[])[list.selectedIndex].id).toBe("a");
   });
 });
 
