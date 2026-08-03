@@ -23,7 +23,7 @@ The extension registers three tools for the LLM:
 Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the record count temporarily reaches zero. With no records, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
-› ● Main (1 running · 0 queued · 3 total)
+› ● Main (1 needs input · 1 running · 0 queued · 3 total · Alt+A collapse)
   ○ Security (Needs input)  Audit authentication       anthropic · claude-sonnet-4 · high · 81 calls · 36m
   ○ Explore (Running)  Inspect the project              openai-codex · gpt-5.4 · high · 4 calls · 25s
   ◇ Reviewer (Done)  Preserve this review               openai-codex · gpt-5.4 · high · 12 calls · 2m
@@ -32,13 +32,13 @@ Once a subagent exists, progress appears in the below-editor list with a sticky 
 - `›` marks the keyboard-highlighted row.
 - `○` and `●` mark inactive and active unpinned transcripts.
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
-- Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason instead of notifying in Main's transcript area.
-- The footer shows `Subagent` or `Subagents` according to the retained record count. While folded it includes running, queued, and total counts plus the `Alt+A` hint; while expanded it keeps the toggle hint and any needs-input emphasis without repeating Main's summary. An active subagent also shows `Alt+M main`. Fields follow reading order: needs input, running/queued/total counts, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate the trailing help text first.
-- Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`. The list label and footer count use the same orange emphasis; the footer places it first without changing list visibility.
+- Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
+- While expanded, sticky Main owns the needs-input count, running/queued/total counts, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Both forms follow reading order: needs input, counts, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
+- Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`. The list label, expanded Main count, and folded Footer count use the same orange emphasis without changing list visibility.
 - With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
 - Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
 - Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
-- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution.
+- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
 - Consumed terminal results are normally removed after 10 minutes. `Needs input` means the run failed after a live child session already existed and instead has a 30-minute recovery window. Select it and send another prompt to continue the same in-memory session. Viewing or pinning it pauses the remaining recovery time; the countdown resumes only after both pause reasons are released. Pins and recovery state are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.

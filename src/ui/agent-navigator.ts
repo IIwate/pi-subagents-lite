@@ -35,7 +35,6 @@ import {
   summarizeToolArgs,
   type StatsVisibility,
 } from "./format.js";
-import { renderAgentFooterStats } from "./agent-footer.js";
 import { errorMessage } from "../utils.js";
 import type { Theme } from "./types.js";
 
@@ -231,6 +230,22 @@ function isComponent(value: unknown): value is Component {
 function isContainerLike(value: unknown): value is Component & { children: Component[] } {
   return isComponent(value)
     && Array.isArray((value as { children?: unknown }).children);
+}
+
+function isBuiltinFooter(value: Component): boolean {
+  const footer = value as Component & {
+    session?: { getContextUsage?: unknown; sessionManager?: { getCwd?: unknown; getEntries?: unknown } };
+    footerData?: { getGitBranch?: unknown; getExtensionStatuses?: unknown };
+    setSession?: unknown;
+    setAutoCompactEnabled?: unknown;
+  };
+  return typeof footer.setSession === "function"
+    && typeof footer.setAutoCompactEnabled === "function"
+    && typeof footer.session?.getContextUsage === "function"
+    && typeof footer.session?.sessionManager?.getCwd === "function"
+    && typeof footer.session?.sessionManager?.getEntries === "function"
+    && typeof footer.footerData?.getGitBranch === "function"
+    && typeof footer.footerData?.getExtensionStatuses === "function";
 }
 
 function containsComponent(root: Component & { children: Component[] }, target: Component): boolean {
@@ -1026,7 +1041,7 @@ export class AgentNavigator {
   private updateFooterStatus(records: AgentRecord[]): void {
     const ctx = this.uiCtx;
     if (!ctx) return;
-    if (records.length === 0) {
+    if (records.length === 0 || this.listExpanded) {
       if (this.footerStatus !== undefined) ctx.setStatus(STATUS_KEY, undefined);
       this.footerStatus = undefined;
       return;
@@ -1038,18 +1053,20 @@ export class AgentNavigator {
     const title = records.length === 1 ? "Subagent" : "Subagents";
     const separator = ctx.theme.fg("dim", " · ");
     const parts: string[] = [];
-    if (needsInput > 0) {
-      parts.push(renderNeedsInput(
-        `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
-        ctx.theme,
-      ));
-    }
-    if (!this.listExpanded) {
+    if (this.interactionNotice) {
+      parts.push(ctx.theme.bold(ctx.theme.fg("warning", this.interactionNotice)));
+    } else {
+      if (needsInput > 0) {
+        parts.push(renderNeedsInput(
+          `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
+          ctx.theme,
+        ));
+      }
       parts.push(ctx.theme.fg("dim", `${running} running`));
       parts.push(ctx.theme.fg("dim", `${queued} queued`));
       parts.push(ctx.theme.fg("dim", `${records.length} total`));
     }
-    parts.push(ctx.theme.fg("dim", `Alt+A ${this.listExpanded ? "collapse" : "expand"}`));
+    parts.push(ctx.theme.fg("dim", "Alt+A expand"));
     if (this.selectedAgentId) parts.push(ctx.theme.fg("dim", "Alt+M main"));
     const status = `${ctx.theme.fg("dim", `${title} (`)}${parts.join(separator)}${ctx.theme.fg("dim", ")")}`;
     if (status === this.footerStatus) return;
@@ -1121,11 +1138,26 @@ export class AgentNavigator {
     const mainLabel = mainActive || mainHighlighted ? theme.bold("Main") : "Main";
     const running = records.filter(record => record.lifecycle.status === "running").length;
     const queued = records.filter(record => record.lifecycle.status === "queued").length;
-    const summary = this.interactionNotice
-      ?? `${running} running · ${queued} queued · ${records.length} total`;
-    const summaryColor = this.interactionNotice ? "warning" : "dim";
+    const needsInput = records.filter(needsUserInput).length;
+    const summaryParts: string[] = [];
+    if (this.interactionNotice) {
+      summaryParts.push(theme.bold(theme.fg("warning", this.interactionNotice)));
+    } else {
+      if (needsInput > 0) {
+        summaryParts.push(renderNeedsInput(
+          `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
+          theme,
+        ));
+      }
+      summaryParts.push(theme.fg("dim", `${running} running`));
+      summaryParts.push(theme.fg("dim", `${queued} queued`));
+      summaryParts.push(theme.fg("dim", `${records.length} total`));
+    }
+    summaryParts.push(theme.fg("dim", "Alt+A collapse"));
+    if (this.selectedAgentId) summaryParts.push(theme.fg("dim", "Alt+M main"));
+    const summary = summaryParts.join(theme.fg("dim", " · "));
     lines.push(truncateToWidth(
-      `${mainFocus} ${mainIndicator} ${mainLabel}${theme.fg(summaryColor, ` (${summary})`)}`,
+      `${mainFocus} ${mainIndicator} ${mainLabel}${theme.fg("dim", " (")}${summary}${theme.fg("dim", ")")}`,
       tui.terminal.columns,
     ));
 
@@ -1212,17 +1244,7 @@ export class AgentNavigator {
 
   private renderChildFooter(originalFooter: Component, width: number): string[] {
     const originalLines = originalFooter.render(width);
-    const record = this.selectedAgentId
-      ? this.manager.getRecord(this.selectedAgentId)
-      : undefined;
-    const theme = this.uiCtx?.theme;
-    if (!record || !theme) return originalLines;
-
-    const childStats = renderAgentFooterStats(record, theme, width);
-    if (originalFooter.constructor?.name === "FooterComponent" && originalLines.length >= 2) {
-      return [originalLines[0], childStats, ...originalLines.slice(2)];
-    }
-    return [childStats];
+    return isBuiltinFooter(originalFooter) ? originalLines.slice(2) : originalLines;
   }
 
   private renderActiveTranscript(width: number): string[] {

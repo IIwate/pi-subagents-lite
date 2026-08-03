@@ -120,6 +120,13 @@ function makeTui(prefixCount = 2): any {
   const belowIndex = chatIndex + 5;
   const footerIndex = chatIndex + 6;
   const originalFooter = {
+    session: {
+      getContextUsage: vi.fn(),
+      sessionManager: { getCwd: vi.fn(), getEntries: vi.fn() },
+    },
+    footerData: { getGitBranch: vi.fn(), getExtensionStatuses: vi.fn() },
+    setSession: vi.fn(),
+    setAutoCompactEnabled: vi.fn(),
     render: () => ["parent cwd", "parent stats"],
     invalidate: vi.fn(),
   };
@@ -233,15 +240,17 @@ describe("AgentNavigator", () => {
     expect(ui.statuses.size).toBe(0);
   });
 
-  it("defaults to an expanded list with a compact footer control", () => {
+  it("defaults to an expanded list with controls on Main", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
-    expect(selector.render(120).join("\n")).toContain("● Main");
-    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
+    expect(selector.render(120).join("\n")).toContain(
+      "● Main (1 running · 0 queued · 1 total · Alt+A collapse)",
+    );
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
   });
 
   it("lets the user collapse and expand the list", () => {
@@ -259,8 +268,10 @@ describe("AgentNavigator", () => {
     expect(navigator.handleTerminalInput("\x1b[B")).toBeUndefined();
 
     navigator.toggleList();
-    expect(selector.render(120).join("\n")).toContain("● Main");
-    expect(ui.statuses.get("subagents-lite")).toBe("Subagents (Alt+A collapse)");
+    expect(selector.render(120).join("\n")).toContain(
+      "● Main (1 running · 1 queued · 2 total · Alt+A collapse)",
+    );
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
   });
 
   it("returns to Main without changing expanded or collapsed list state", () => {
@@ -275,14 +286,17 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     expect(navigator.selectedId()).toBe(record.id);
-    const activeStatus = ui.statuses.get("subagents-lite")!;
-    expect(activeStatus.indexOf("Alt+A collapse")).toBeLessThan(activeStatus.indexOf("Alt+M main"));
+    const activeMain = selector.render(120).find((line: string) => line.includes("Main"))!;
+    expect(activeMain.indexOf("Alt+A collapse")).toBeLessThan(activeMain.indexOf("Alt+M main"));
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
 
     navigator.activateMain();
     expect(navigator.selectedId()).toBeNull();
     expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
-    expect(selector.render(120).join("\n")).toContain("● Main");
-    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
+    const mainText = selector.render(120).join("\n");
+    expect(mainText).toContain("● Main");
+    expect(mainText).not.toContain("Alt+M main");
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
 
     tui.requestRender.mockClear();
     ui.ctx.setStatus.mockClear();
@@ -335,8 +349,11 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
-    const row = selector.render(120).find((line: string) => line.includes("Needs input"))!;
+    const expandedLines = selector.render(120);
+    const row = expandedLines.find((line: string) => line.includes("Needs input") && !line.includes("Main"))!;
+    const main = expandedLines.find((line: string) => line.includes("Main"))!;
     expect(row).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)mNeeds input/);
+    expect(main).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)m1 needs input/);
     navigator.toggleList();
 
     const status = ui.statuses.get("subagents-lite")!;
@@ -348,10 +365,11 @@ describe("AgentNavigator", () => {
     expect(selector.render(120)).toEqual([]);
   });
 
-  it("clears the footer status when disposed", () => {
+  it("clears the folded footer status when disposed", () => {
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([makeRecord()]));
     navigator.setUICtx(ui.ctx as any);
+    navigator.toggleList();
     expect(ui.statuses.has("subagents-lite")).toBe(true);
 
     navigator.dispose();
@@ -395,7 +413,7 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
 
     let lines = selector.render(120);
-    expect(lines[0]).toContain("● Main (2 running · 1 queued · 8 total)");
+    expect(lines[0]).toContain("● Main (2 running · 1 queued · 8 total · Alt+A collapse)");
     expect(lines.filter((line: string) => line.includes("Task "))).toHaveLength(6);
 
     navigator.handleTerminalInput("\x1b[B");
@@ -403,7 +421,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\r");
     lines = selector.render(120);
     expect(lines.find((line: string) => line.includes("Main"))).toContain(
-      "○ Main (2 running · 1 queued · 8 total)",
+      "○ Main (2 running · 1 queued · 8 total · Alt+A collapse · Alt+M main)",
     );
     expect(lines.filter((line: string) => line.includes("Task "))).toHaveLength(6);
   });
@@ -1072,6 +1090,45 @@ describe("AgentNavigator", () => {
     expect(editor).toBeDefined();
   });
 
+  it("renders interaction blocks in the footer while the list is folded", async () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const routeInput = vi.fn()
+      .mockResolvedValueOnce({
+        accepted: false,
+        reason: "concurrency",
+        modelKey: "cliproxyapi/gpt-5.6-sol",
+      })
+      .mockResolvedValueOnce({ accepted: true });
+    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    navigator.toggleList();
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    editor.onSubmit = vi.fn();
+
+    (ui.baseEditor as any).onSubmit("continue the child");
+    await vi.waitFor(() => {
+      expect(ui.statuses.get("subagents-lite")).toContain(
+        "Blocked: cliproxyapi/gpt-5.6-sol concurrency limit reached",
+      );
+    });
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toContain("Alt+A expand");
+    expect(ui.statuses.get("subagents-lite")).toContain("Alt+M main");
+
+    (ui.baseEditor as any).onSubmit("retry");
+    await vi.waitFor(() => {
+      expect(ui.statuses.get("subagents-lite")).toBe(
+        "Subagent (1 running · 0 queued · 1 total · Alt+A expand · Alt+M main)",
+      );
+    });
+  });
+
   it("ignores an older failed interaction after a newer success", async () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
@@ -1208,68 +1265,55 @@ describe("AgentNavigator", () => {
     expect(ui.widgets.has("agent-navigator-transcript")).toBe(false);
   });
 
-  it("replaces Main footer stats with the selected subagent state", () => {
-    const record = makeRecord();
-    Object.assign(record.execution.session, {
-      model: {
-        id: "child-model",
-        provider: "test",
-        reasoning: true,
-        contextWindow: 128_000,
-      },
-      thinkingLevel: "high",
-      autoCompactionEnabled: true,
-      modelRuntime: { isUsingOAuth: () => false },
-      getSessionStats: () => ({
-        tokens: {
-          input: 12_000,
-          output: 3_000,
-          cacheRead: 20_000,
-          cacheWrite: 0,
-          total: 35_000,
-        },
-        cost: 0.25,
-      }),
-      getContextUsage: () => ({ percent: 25, contextWindow: 128_000 }),
-      sessionManager: {
-        getEntries: () => [],
-      },
-    });
-    const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
-    navigator.setUICtx(ui.ctx as any);
-    navigator.ensureTimer();
-    const { tui } = mountSelector(ui);
-
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\r");
-
-    const footerLines = tui.children[tui.footerIndex].render(120);
-    expect(footerLines[0]).toBe("parent cwd");
-    expect(footerLines[1]).toContain("↑12k");
-    expect(footerLines[1]).toContain("25.0%/128k (auto)");
-    expect(footerLines[1]).toContain("test • child-model • high");
-    expect(footerLines[1]).not.toContain("parent stats");
-  });
-
-  it("hides a one-line Main custom footer while a subagent is selected", () => {
+  it("removes built-in Main footer data while preserving extension statuses", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
-    tui.originalFooter.render = () => ["main-model • xhigh"];
+    tui.originalFooter.render = () => [
+      "parent cwd",
+      "parent stats",
+      "Subagent (Alt+A collapse · Alt+M main)",
+    ];
     mountSelector(ui, tui);
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    const footerLines = tui.children[tui.footerIndex].render(120);
-    expect(footerLines).toHaveLength(1);
-    expect(footerLines[0]).not.toContain("main-model");
+    expect(tui.children[tui.footerIndex].render(120)).toEqual([
+      "Subagent (Alt+A collapse · Alt+M main)",
+    ]);
+  });
+
+  it("preserves a same-named custom footer while a subagent is selected", () => {
+    class FooterComponent {
+      render(): string[] {
+        return ["custom row 1", "custom row 2", "custom row 3"];
+      }
+      invalidate(): void {}
+    }
+
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const tui = makeTui();
+    tui.children[tui.footerIndex] = new FooterComponent();
+    mountSelector(ui, tui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    expect(tui.children[tui.footerIndex].render(120)).toEqual([
+      "custom row 1",
+      "custom row 2",
+      "custom row 3",
+    ]);
   });
 
   it("adopts a footer replaced by another extension while Main is selected", () => {
@@ -1356,17 +1400,18 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager(records));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    mountSelector(ui);
+    const { selector } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
-    expect(ui.statuses.get("subagents-lite")).toContain("Alt+M main");
+    expect(selector.render(120).join("\n")).toContain("Alt+M main");
 
     records.shift();
     navigator.update();
 
     expect(navigator.selectedId()).toBeNull();
-    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
+    expect(selector.render(120).join("\n")).not.toContain("Alt+M main");
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
   });
 
   it("falls back to the main screen when the selected record disappears", () => {
