@@ -20,7 +20,7 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list current and completed agents without polling or waiting.
 
-Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
+Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the record count temporarily reaches zero. With no records, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
 › ● Main (1 running · 0 queued · 3 total)
@@ -33,11 +33,12 @@ Once a subagent exists, progress appears in the below-editor list with a sticky 
 - `○` and `●` mark inactive and active unpinned transcripts.
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
 - Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason instead of notifying in Main's transcript area.
-- Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`.
-- With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
+- The footer shows `Subagent` or `Subagents` according to the retained record count. While folded it includes running, queued, and total counts plus the `Alt+A` hint; while expanded it keeps the toggle hint and any needs-input emphasis without repeating Main's summary. An active subagent also shows `Alt+M main`. Fields follow reading order: needs input, running/queued/total counts, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate the trailing help text first.
+- Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`. The list label and footer count use the same orange emphasis; the footer places it first without changing list visibility.
+- With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
 - Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
 - Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
-- While a subagent is active, editor input is routed to that session. Activate `Main` to return to the parent transcript.
+- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution.
 - Consumed terminal results are normally removed after 10 minutes. `Needs input` means the run failed after a live child session already existed and instead has a 30-minute recovery window. Select it and send another prompt to continue the same in-memory session. Viewing or pinning it pauses the remaining recovery time; the countdown resumes only after both pause reasons are released. Pins and recovery state are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.
@@ -183,7 +184,7 @@ Run `/agents` to configure:
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
-- one-shot recovery tests that inject a failure after the next real child session is configured. The controls and runtime diagnostics are session-local and UI-only; injected failures use a fixed 10-second recovery window, while ordinary recoverable failures keep the normal 30-minute window. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
+- one-shot recovery tests that inject a failure after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their lifecycle status in both the list and child header. The controls and runtime diagnostics are session-local and UI-only; injected failures use a fixed 10-second recovery window, while ordinary recoverable failures keep the normal 30-minute window. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
 Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
 

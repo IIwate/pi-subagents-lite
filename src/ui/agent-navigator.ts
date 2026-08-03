@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   Key,
+  getCapabilities,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -39,6 +40,7 @@ import { errorMessage } from "../utils.js";
 import type { Theme } from "./types.js";
 
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
+const STATUS_KEY = "subagents-lite";
 const REFRESH_INTERVAL_MS = 1000;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
 const PI_ROOT_CHILDREN = 9;
@@ -55,6 +57,7 @@ type NavigatorUICtx = Pick<
   | "notify"
   | "setEditorComponent"
   | "setEditorText"
+  | "setStatus"
   | "setWidget"
   | "theme"
 >;
@@ -171,8 +174,14 @@ function agentStatusLabel(status: DebugStatusPreview): string {
 }
 
 function plainAgentStatus(record: AgentRecord, preview?: DebugStatusPreview): string {
-  const label = agentStatusLabel(agentStatusValue(record, preview));
-  return record.execution.debugFaultKind ? `${label} (Debug)` : label;
+  return agentStatusLabel(agentStatusValue(record, preview));
+}
+
+function renderNeedsInput(text: string, theme: Theme): string {
+  const color = getCapabilities().trueColor
+    ? "\x1b[38;2;217;119;87m"
+    : "\x1b[38;5;173m";
+  return theme.bold(`${color}${text}\x1b[39m`);
 }
 
 function renderAgentStatus(
@@ -181,7 +190,7 @@ function renderAgentStatus(
   preview?: DebugStatusPreview,
 ): string {
   const statusValue = agentStatusValue(record, preview);
-  const color = statusValue === "needs_input" || statusValue === "turn_limited" || statusValue === "aborted"
+  const color = statusValue === "turn_limited" || statusValue === "aborted"
     ? "warning"
     : statusValue === "running"
       ? "accent"
@@ -190,11 +199,15 @@ function renderAgentStatus(
         : statusValue === "error"
           ? "error"
           : "dim";
-  const renderedStatus = theme.fg(color, agentStatusLabel(statusValue));
-  const baseStatus = statusValue === "needs_input" ? theme.bold(renderedStatus) : renderedStatus;
+  return statusValue === "needs_input"
+    ? renderNeedsInput(agentStatusLabel(statusValue), theme)
+    : theme.fg(color, agentStatusLabel(statusValue));
+}
+
+function renderDebugBadge(record: AgentRecord, theme: Theme): string {
   return record.execution.debugFaultKind
-    ? `${baseStatus}${theme.fg("dim", " (Debug)")}`
-    : baseStatus;
+    ? theme.bold(theme.fg("accent", "[DEBUG]"))
+    : "";
 }
 
 function recoverableFailureHint(record: AgentRecord): string | undefined {
@@ -432,7 +445,10 @@ export class AgentNavigator {
   private statsVisibility: StatsVisibility = {};
   /** Debug-only display override; never changes agent lifecycle or session state. */
   private debugStatusPreview: DebugStatusPreview | undefined;
+  /** User-controlled list visibility for this extension runtime. */
+  private listExpanded = true;
   private listFocused = false;
+  private footerStatus: string | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Skip requestRender when list content is unchanged between timer ticks. */
   private lastRenderSig = "";
@@ -464,6 +480,8 @@ export class AgentNavigator {
     if (this.restoreMainScreen()) this.clearScrollbackAndRender();
     this.restoreShrinkClearing();
     this.restoreEditor?.();
+    this.uiCtx?.setStatus(STATUS_KEY, undefined);
+    this.footerStatus = undefined;
     this.hostTui = undefined;
     this.uiCtx = ctx;
     this.selectorRegistered = false;
@@ -485,6 +503,23 @@ export class AgentNavigator {
       this.navigationEditor = undefined;
     };
     this.update();
+  }
+
+  toggleList(): void {
+    if (this.manager.listAgents().length === 0) return;
+    this.listExpanded = !this.listExpanded;
+    if (!this.listExpanded) {
+      this.listFocused = false;
+      this.confirmingClearId = null;
+      this.highlightedAgentId = this.selectedAgentId;
+    }
+    this.lastRenderSig = "";
+    this.update();
+  }
+
+  activateMain(): void {
+    if (this.selectedAgentId === null) return;
+    if (this.activate(null)) this.update();
   }
 
   selectedId(): string | null {
@@ -556,6 +591,7 @@ export class AgentNavigator {
    * editor without changing the active agent.
    */
   handleTerminalInput(data: string): { consume?: boolean } | undefined {
+    if (!this.listExpanded) return undefined;
     const entries = this.navigationEntries();
     if (entries.length <= 1) return undefined;
 
@@ -987,6 +1023,40 @@ export class AgentNavigator {
     tui?.requestRender(force);
   }
 
+  private updateFooterStatus(records: AgentRecord[]): void {
+    const ctx = this.uiCtx;
+    if (!ctx) return;
+    if (records.length === 0) {
+      if (this.footerStatus !== undefined) ctx.setStatus(STATUS_KEY, undefined);
+      this.footerStatus = undefined;
+      return;
+    }
+
+    const running = records.filter(record => record.lifecycle.status === "running").length;
+    const queued = records.filter(record => record.lifecycle.status === "queued").length;
+    const needsInput = records.filter(needsUserInput).length;
+    const title = records.length === 1 ? "Subagent" : "Subagents";
+    const separator = ctx.theme.fg("dim", " · ");
+    const parts: string[] = [];
+    if (needsInput > 0) {
+      parts.push(renderNeedsInput(
+        `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
+        ctx.theme,
+      ));
+    }
+    if (!this.listExpanded) {
+      parts.push(ctx.theme.fg("dim", `${running} running`));
+      parts.push(ctx.theme.fg("dim", `${queued} queued`));
+      parts.push(ctx.theme.fg("dim", `${records.length} total`));
+    }
+    parts.push(ctx.theme.fg("dim", `Alt+A ${this.listExpanded ? "collapse" : "expand"}`));
+    if (this.selectedAgentId) parts.push(ctx.theme.fg("dim", "Alt+M main"));
+    const status = `${ctx.theme.fg("dim", `${title} (`)}${parts.join(separator)}${ctx.theme.fg("dim", ")")}`;
+    if (status === this.footerStatus) return;
+    this.footerStatus = status;
+    ctx.setStatus(STATUS_KEY, status);
+  }
+
   /**
    * Full TUI reflow after main-session Working row drops (agent_end).
    * Clears residual blank lines between editor and below-editor list.
@@ -1001,7 +1071,7 @@ export class AgentNavigator {
     // whole below-editor widget corrupts Pi's differential row cache when the next editor
     // update arrives; an empty render preserves identity while contributing zero height.
     const records = this.manager.listAgents();
-    if (records.length === 0) return [];
+    if (records.length === 0 || !this.listExpanded) return [];
 
     const entries = this.navigationEntries();
     const agentEntries = entries.slice(1);
@@ -1102,9 +1172,10 @@ export class AgentNavigator {
       }, theme, this.statsVisibility);
       const plainStatus = plainAgentStatus(record, this.debugStatusPreview);
       const status = renderAgentStatus(record, theme, this.debugStatusPreview);
+      const debugBadge = renderDebugBadge(record, theme);
       const fixedPrefix = `${focus} ${indicator} `;
-      const statusSuffix = ` (${status})`;
-      const plainStatusSuffix = ` (${plainStatus})`;
+      const statusSuffix = `${debugBadge ? ` ${debugBadge}` : ""} (${status})`;
+      const plainStatusSuffix = `${debugBadge ? " [DEBUG]" : ""} (${plainStatus})`;
       const identityStats = [providerName, modelName].filter(Boolean).join(STATS_SEP);
       const reservedStatsWidth = Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStats));
       const maxNameWidth = Math.max(
@@ -1169,8 +1240,11 @@ export class AgentNavigator {
   private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
     const shortId = record.id.slice(0, 8);
     const status = plainAgentStatus(record);
+    const debugLabel = record.execution.debugFaultKind ? " [DEBUG]" : "";
     const lines: string[] = [
-      theme.fg("accent", theme.bold(`${getDisplayName(record.display.type)} (${status}) · ${shortId}`)),
+      theme.fg("accent", theme.bold(
+        `${getDisplayName(record.display.type)}${debugLabel} (${status}) · ${shortId}`,
+      )),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
     ];
 
@@ -1276,6 +1350,7 @@ export class AgentNavigator {
     const records = this.manager.listAgents();
     if (this.screenSwap) this.syncExternalFooter(this.screenSwap);
     if (records.length === 0) {
+      this.updateFooterStatus(records);
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
       this.confirmingClearId = null;
@@ -1302,6 +1377,7 @@ export class AgentNavigator {
     if (this.confirmingClearId && !records.some(record => record.id === this.confirmingClearId)) {
       this.confirmingClearId = null;
     }
+    this.updateFooterStatus(records);
 
     if (!this.selectorRegistered) {
       this.uiCtx.setWidget(SELECTOR_WIDGET_KEY, (tui, theme) => {
@@ -1427,6 +1503,7 @@ export class AgentNavigator {
       this.listFocused ? "1" : "0",
       this.confirmingClearId ?? "",
       this.interactionNotice ?? "",
+      this.listExpanded ? "1" : "0",
     ].join("#");
   }
 
@@ -1477,6 +1554,8 @@ export class AgentNavigator {
     // even when one host component was already torn down during reload.
     attempt(() => { if (this.restoreMainScreen()) this.requestRender(); });
     attempt(() => this.unregisterWidgets());
+    attempt(() => this.uiCtx?.setStatus(STATUS_KEY, undefined));
+    this.footerStatus = undefined;
     attempt(() => tui?.requestRender(true));
     attempt(() => this.restoreShrinkClearing());
     this.screenSwap = undefined;

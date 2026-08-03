@@ -278,6 +278,46 @@ describe("command registration", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  Shortcut Registration                                             */
+/* ------------------------------------------------------------------ */
+
+describe("shortcut registration", () => {
+  let api: MockExtensionAPI;
+
+  beforeAll(async () => {
+    api = createMockExtensionAPI();
+    await loadExtension(api.api);
+  });
+
+  it("registers list and Main navigation shortcuts", () => {
+    expect(api.shortcuts).toEqual([
+      expect.objectContaining({
+        shortcut: "alt+a",
+        description: "Toggle subagent list",
+      }),
+      expect.objectContaining({
+        shortcut: "alt+m",
+        description: "Return to Main agent",
+      }),
+    ]);
+  });
+
+  it("routes shortcuts to the current navigator", async () => {
+    const shell = await import("../src/shell.js");
+    const navigator = { toggleList: vi.fn(), activateMain: vi.fn() };
+    shell.setNavigator(navigator as any);
+    try {
+      await api.shortcuts[0]!.handler({});
+      await api.shortcuts[1]!.handler({});
+      expect(navigator.toggleList).toHaveBeenCalledOnce();
+      expect(navigator.activateMain).toHaveBeenCalledOnce();
+    } finally {
+      shell.setNavigator(null);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  Event Listener Registration                                       */
 /* ------------------------------------------------------------------ */
 
@@ -411,6 +451,7 @@ describe("subagent spawn guard", () => {
       // (setPiInstance/setSessionCtx happen via the factory + session_start handler).
       expect(api.tools).toHaveLength(0);
       expect(api.listeners).toHaveLength(0);
+      expect(api.shortcuts).toHaveLength(0);
     } finally {
       shell.exitSubagentSpawn();
     }

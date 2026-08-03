@@ -17,6 +17,10 @@
  * Commands:
  *   - /agents: Management menu (model settings, concurrency, debug)
  *
+ * Shortcuts:
+ *   - Alt+A: Toggle the below-editor subagent list
+ *   - Alt+M: Return to Main from an active subagent
+ *
  * Events:
  *   - session_start: Load config, register agents, initialise manager
  *   - session_shutdown: Abort all, dispose manager

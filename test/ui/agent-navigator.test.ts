@@ -74,10 +74,14 @@ function makeManager(records: any[]): AgentManager {
   } as unknown as AgentManager;
 }
 
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
 function makeTheme(): any {
   return {
-    fg: (_color: string, text: string) => text,
-    bold: (text: string) => text,
+    fg: vi.fn((_color: string, text: string) => text),
+    bold: vi.fn((text: string) => text),
   };
 }
 
@@ -156,6 +160,7 @@ function makeTui(prefixCount = 2): any {
 
 function makeUI(editorText: { value: string }) {
   const widgets = new Map<string, any>();
+  const statuses = new Map<string, string>();
   const theme = makeTheme();
   const baseEditor = {
     getText: () => editorText.value,
@@ -170,6 +175,7 @@ function makeUI(editorText: { value: string }) {
   let editorFactory: any = () => baseEditor;
   return {
     widgets,
+    statuses,
     theme,
     baseEditor,
     get editorFactory() { return editorFactory; },
@@ -180,6 +186,10 @@ function makeUI(editorText: { value: string }) {
       notify: vi.fn(),
       setEditorComponent: vi.fn((factory: any) => { editorFactory = factory; }),
       setEditorText: vi.fn((text: string) => { editorText.value = text; }),
+      setStatus: vi.fn((key: string, text: string | undefined) => {
+        if (text === undefined) statuses.delete(key);
+        else statuses.set(key, text);
+      }),
       setWidget: vi.fn((key: string, content: any) => {
         if (content === undefined) widgets.delete(key);
         else widgets.set(key, content);
@@ -220,6 +230,133 @@ describe("AgentNavigator", () => {
     navigator.setUICtx(ui.ctx as any);
 
     expect(ui.widgets.size).toBe(0);
+    expect(ui.statuses.size).toBe(0);
+  });
+
+  it("defaults to an expanded list with a compact footer control", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120).join("\n")).toContain("● Main");
+    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
+  });
+
+  it("lets the user collapse and expand the list", () => {
+    const records = [makeRecord("agent-1"), makeRecord("agent-2", "queued")];
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+
+    navigator.toggleList();
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toBe(
+      "Subagents (1 running · 1 queued · 2 total · Alt+A expand)",
+    );
+    expect(navigator.handleTerminalInput("\x1b[B")).toBeUndefined();
+
+    navigator.toggleList();
+    expect(selector.render(120).join("\n")).toContain("● Main");
+    expect(ui.statuses.get("subagents-lite")).toBe("Subagents (Alt+A collapse)");
+  });
+
+  it("returns to Main without changing expanded or collapsed list state", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+    const activeStatus = ui.statuses.get("subagents-lite")!;
+    expect(activeStatus.indexOf("Alt+A collapse")).toBeLessThan(activeStatus.indexOf("Alt+M main"));
+
+    navigator.activateMain();
+    expect(navigator.selectedId()).toBeNull();
+    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(selector.render(120).join("\n")).toContain("● Main");
+    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
+
+    tui.requestRender.mockClear();
+    ui.ctx.setStatus.mockClear();
+    navigator.activateMain();
+    expect(tui.requestRender).not.toHaveBeenCalled();
+    expect(ui.ctx.setStatus).not.toHaveBeenCalled();
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    navigator.toggleList();
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toContain("Alt+M main");
+
+    navigator.activateMain();
+    expect(navigator.selectedId()).toBeNull();
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toBe(
+      "Subagent (1 running · 0 queued · 1 total · Alt+A expand)",
+    );
+  });
+
+  it("preserves the user's collapsed choice while the record list is empty", () => {
+    const records = [makeRecord()];
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+    navigator.toggleList();
+
+    records.length = 0;
+    navigator.update();
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
+    expect(selector.render(120)).toEqual([]);
+
+    records.push(makeRecord("agent-next"));
+    navigator.update();
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toBe(
+      "Subagent (1 running · 0 queued · 1 total · Alt+A expand)",
+    );
+  });
+
+  it("uses the same needs-input orange in the footer and list", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "error";
+    record.execution.settled = true;
+    record.error = "503 service unavailable";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+    const row = selector.render(120).find((line: string) => line.includes("Needs input"))!;
+    expect(row).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)mNeeds input/);
+    navigator.toggleList();
+
+    const status = ui.statuses.get("subagents-lite")!;
+    expect(status).toContain("1 needs input");
+    expect(status).toContain("Alt+A expand");
+    expect(status.indexOf("1 needs input")).toBeLessThan(status.indexOf("0 running"));
+    expect(status.indexOf("1 total")).toBeLessThan(status.indexOf("Alt+A expand"));
+    expect(status).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)m1 needs input/);
+    expect(selector.render(120)).toEqual([]);
+  });
+
+  it("clears the footer status when disposed", () => {
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([makeRecord()]));
+    navigator.setUICtx(ui.ctx as any);
+    expect(ui.statuses.has("subagents-lite")).toBe(true);
+
+    navigator.dispose();
+    navigator = undefined;
+    expect(ui.statuses.has("subagents-lite")).toBe(false);
   });
 
   it("registers a below-editor selector containing Main and subagents", () => {
@@ -299,7 +436,7 @@ describe("AgentNavigator", () => {
 
     const lines = selector.render(120);
     const runningRow = lines.find((line: string) => line.includes("Active task"))!;
-    const blockedRow = lines.find((line: string) => line.includes("Blocked task"))!;
+    const blockedRow = stripAnsi(lines.find((line: string) => line.includes("Blocked task"))!);
     expect(runningRow).toMatch(/Explore \(Running\) {2}Active task/);
     expect(blockedRow).toMatch(/Explore \(Needs input\) {2}Blocked task/);
     expect(runningRow).toMatch(/openai-test · gpt-test · high/);
@@ -353,9 +490,17 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    const { selector } = mountSelector(ui);
+    const { tui, selector } = mountSelector(ui);
 
-    expect(selector.render(120).join("\n")).toContain("Needs input (Debug)");
+    const listText = stripAnsi(selector.render(120).join("\n"));
+    expect(listText).toContain("Explore [DEBUG] (Needs input)");
+    expect(listText).not.toContain("Needs input (Debug)");
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = stripAnsi(tui.children[tui.chatIndex].render(120).join("\n"));
+    expect(transcript).toContain("Explore [DEBUG] (Needs input) · agent-de");
   });
 
   it.each([
@@ -1201,6 +1346,27 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
 
     expect((navigator as any).refreshTimer).toBeUndefined();
+  });
+
+  it("removes the Main shortcut hint when the active record disappears", () => {
+    const active = makeRecord("agent-active");
+    const remaining = makeRecord("agent-remaining", "completed");
+    const records = [active, remaining];
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(ui.statuses.get("subagents-lite")).toContain("Alt+M main");
+
+    records.shift();
+    navigator.update();
+
+    expect(navigator.selectedId()).toBeNull();
+    expect(ui.statuses.get("subagents-lite")).toBe("Subagent (Alt+A collapse)");
   });
 
   it("falls back to the main screen when the selected record disappears", () => {

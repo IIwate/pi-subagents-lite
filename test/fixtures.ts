@@ -107,13 +107,21 @@ export interface ListenerRegistration {
   handler: (...args: any[]) => any;
 }
 
+export interface RegisteredShortcut {
+  shortcut: string;
+  description?: string;
+  handler: (...args: any[]) => any;
+}
+
 export interface MockExtensionAPI {
   tools: RegisteredTool[];
   commands: RegisteredCommand[];
   listeners: ListenerRegistration[];
+  shortcuts: RegisteredShortcut[];
   api: {
     registerTool: ReturnType<typeof vi.fn>;
     registerCommand: ReturnType<typeof vi.fn>;
+    registerShortcut: ReturnType<typeof vi.fn>;
     on: ReturnType<typeof vi.fn>;
     sendUserMessage: ReturnType<typeof vi.fn>;
     sendMessage: ReturnType<typeof vi.fn>;
@@ -128,17 +136,22 @@ export function createMockExtensionAPI(): MockExtensionAPI {
   const tools: RegisteredTool[] = [];
   const commands: RegisteredCommand[] = [];
   const listeners: ListenerRegistration[] = [];
+  const shortcuts: RegisteredShortcut[] = [];
 
   return {
     tools,
     commands,
     listeners,
+    shortcuts,
     api: {
       registerTool: vi.fn((tool: any) => {
         tools.push(tool);
       }),
       registerCommand: vi.fn((name: string, opts: any) => {
         commands.push({ name, ...opts });
+      }),
+      registerShortcut: vi.fn((shortcut: string, opts: any) => {
+        shortcuts.push({ shortcut, ...opts });
       }),
       on: vi.fn((event: string, handler: any) => {
         listeners.push({ event, handler });
