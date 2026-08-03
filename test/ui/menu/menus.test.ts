@@ -1,5 +1,5 @@
 /**
- * menus.test.ts — Tests for the dispatcher (showAgentsMainMenu, showSettingsMenu).
+ * menus.test.ts — Tests for the /agents menu dispatcher.
  *
  * After migration: uses SelectList via ctx.ui.custom (not ctx.ui.select).
  * Each iteration creates a fresh SelectList; submenu closes it before opening.
@@ -11,7 +11,7 @@ import { createMockCtx } from "../../menu-test-helpers.js";
 import { getAgentConfig } from "../../../src/agents/agent-types.js";
 
 // Import
-import { showAgentsMainMenu, showSettingsMenu } from "../../../src/ui/menu/menus.js";
+import { showAgentsMenu } from "../../../src/ui/menu/menus.js";
 
 function resetAgentState(): void {
   mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
@@ -19,7 +19,34 @@ function resetAgentState(): void {
   mockModules.mockConfig.concurrency = { default: 4 };
 }
 
-describe("showAgentsMainMenu — SelectList dispatcher", () => {
+function captureMenuFlow(ctx: any, firstChoice: string, cancelKey = "\x1b"): {
+  rendered: string[];
+  calls: () => number;
+} {
+  const rendered: string[] = [];
+  let calls = 0;
+  ctx.ui.custom.mockImplementation(async (factory: any) => {
+    calls++;
+    return new Promise((resolve) => {
+      const component = factory(
+        { terminal: { rows: 40, columns: 120 } },
+        {
+          fg: (_color: string, text: string) => text,
+          bold: (text: string) => text,
+          italic: (text: string) => text,
+        },
+        null,
+        resolve,
+      );
+      rendered.push(component.render(120).join("\n"));
+      if (calls === 1) resolve(firstChoice);
+      else component.handleInput(cancelKey);
+    });
+  });
+  return { rendered, calls: () => calls };
+}
+
+describe("showAgentsMenu — SelectList dispatcher", () => {
   beforeEach(() => {
     resetAgentState();
     vi.clearAllMocks();
@@ -27,12 +54,12 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showAgentsMainMenu(ctx);
+    await showAgentsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("shows Settings and Debug without manual spawn or running-agent entries", async () => {
+  it("shows all settings and Debug without an extra category menu", async () => {
     const ctx = createMockCtx();
     let rendered = "";
     ctx.ui.custom.mockImplementation(async (factory: any) => {
@@ -49,23 +76,46 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
       return undefined;
     });
 
-    await showAgentsMainMenu(ctx);
+    await showAgentsMenu(ctx);
 
     expect(rendered).not.toContain("Spawn agent");
-    expect(rendered).toContain("Settings");
+    expect(rendered).not.toMatch(/^\s+Settings\b/m);
+    expect(rendered).toContain("Agents");
+    expect(rendered).toContain("Model routing");
+    expect(rendered).toContain("Concurrency settings");
+    expect(rendered).toContain("Spawn options");
+    expect(rendered).toContain("System prompt");
+    expect(rendered).toContain("Display settings");
     expect(rendered).toContain("Debug");
     expect(rendered).not.toContain("Running agents");
+  });
+
+  it.each([
+    ["routing", "Model Routing"],
+    ["concurrency", "Concurrency"],
+    ["spawnoptions", "Spawn Options"],
+    ["systemprompt", "System Prompt"],
+    ["display", "Display Settings"],
+  ])("dispatches %s to its submenu", async (choice, title) => {
+    const ctx = createMockCtx();
+    const flow = captureMenuFlow(ctx, choice);
+
+    await showAgentsMenu(ctx);
+
+    expect(flow.calls()).toBe(3);
+    expect(flow.rendered[0]).toContain("Agents");
+    expect(flow.rendered[1]).toContain(title);
   });
 
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
     // custom returns undefined = escape
-    await showAgentsMainMenu(ctx);
+    await showAgentsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
 
-describe("showSettingsMenu — SelectList dispatcher", () => {
+describe("showAgentsMenu — current state", () => {
   beforeEach(() => {
     resetAgentState();
     vi.clearAllMocks();
@@ -73,7 +123,7 @@ describe("showSettingsMenu — SelectList dispatcher", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showSettingsMenu(ctx);
+    await showAgentsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
@@ -93,7 +143,7 @@ describe("showSettingsMenu — SelectList dispatcher", () => {
       return undefined;
     });
 
-    await showSettingsMenu(ctx);
+    await showAgentsMenu(ctx);
 
     expect(rendered).toContain("8 slots per model");
     expect(rendered).not.toContain("Default 8");
@@ -101,12 +151,12 @@ describe("showSettingsMenu — SelectList dispatcher", () => {
 
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
-    await showSettingsMenu(ctx);
+    await showAgentsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
 
-describe("main menu — submenu navigation", () => {
+describe("Agents menu — submenu navigation", () => {
   beforeEach(() => {
     resetAgentState();
     vi.clearAllMocks();
@@ -117,18 +167,17 @@ describe("main menu — submenu navigation", () => {
     });
   });
 
-  it("debug submenu is accessible from main menu", async () => {
+  it.each([
+    ["Escape", "\x1b"],
+    ["left arrow", "\x1b[D"],
+  ])("opens Debug and returns to Agents with %s", async (_label, cancelKey) => {
     const ctx = createMockCtx();
-    // First custom call: main menu, returns 'debug'
-    // Second custom call: debug menu (via showDebugMenu), returns undefined
-    // Third custom call: back to main menu, returns undefined
-    let customCallCount = 0;
-    ctx.ui.custom.mockImplementation(async () => {
-      customCallCount++;
-      if (customCallCount === 1) return "debug"; // main menu → select debug
-      return undefined; // debug menu and main menu escape
-    });
-    await showAgentsMainMenu(ctx);
-    expect(ctx.ui.custom).toHaveBeenCalled();
+    const flow = captureMenuFlow(ctx, "debug", cancelKey);
+
+    await showAgentsMenu(ctx);
+
+    expect(flow.calls()).toBe(3);
+    expect(flow.rendered[1]).toContain("Debug");
+    expect(flow.rendered[2]).toContain("Agents");
   });
 });

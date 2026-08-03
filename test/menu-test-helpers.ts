@@ -22,7 +22,6 @@ export function selectByName(name: string): (title: string, items: string[]) => 
     concurrency: "Concurrency settings",
     display: "Display settings",
     debug: "Debug",
-    settings: "Settings",
     spawnoptions: "Spawn options",
   };
   const search = nameMap[name.toLowerCase()] ?? name;

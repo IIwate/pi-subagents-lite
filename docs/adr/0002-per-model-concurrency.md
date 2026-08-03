@@ -12,7 +12,7 @@ Every run must satisfy both ceilings. Model limits may sum above the Provider
 limit so one model can use otherwise-idle shared capacity. For example, Provider
 4 with Model A 4 and Model B 4 still permits only four combined runs.
 
-Configured via `/agents` > Settings > Concurrency settings and persisted in
+Configured via `/agents` > Concurrency settings and persisted in
 `~/.pi/agent/subagents-lite.json`.
 
 ## Why

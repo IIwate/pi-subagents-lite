@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
-import { showAgentsMainMenu } from "./ui/menu/menus.js";
+import { showAgentsMenu } from "./ui/menu/menus.js";
 import { getNavigator } from "./shell.js";
 
 // Subagent state belongs to the below-editor list. Results still reach the LLM,
@@ -79,7 +79,7 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerCommand("agents", {
     description: "Manage subagents: model access, concurrency, diagnostics, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      await showAgentsMainMenu(ctx);
+      await showAgentsMenu(ctx);
     },
   });
 

@@ -48,7 +48,7 @@ export function routingDisabledModelError(modelRef: string): string {
   return (
     `Model "${modelRef}" cannot be used while Model routing is OFF: `
     + "subagents use the exact parent model. "
-    + "Enable /agents > Settings > Model routing to authorize alternate models."
+    + "Enable /agents > Model routing to authorize alternate models."
   );
 }
 

@@ -13,7 +13,7 @@
  *   - menu-debug.ts: showDebugMenu
  *   - menu-spawn-options.ts: showSpawnOptionsMenu
  *   - menu-system-prompt.ts: showSystemPromptMenu
- *   - menus.ts (this file): dispatcher — main menu and settings menu
+ *   - menus.ts (this file): /agents dispatcher and settings entries
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -51,7 +51,7 @@ async function runSelectMenu(
   }
 }
 
-export async function showSettingsMenu(
+export async function showAgentsMenu(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   // Items refresh per iteration so the routing row reflects live state.
@@ -63,10 +63,11 @@ export async function showSettingsMenu(
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
+      { value: "debug", label: "Debug", description: "Agent types, diagnostics, and recovery tests" },
     ];
   };
 
-  await runSelectMenu(ctx, "Settings", buildItems, async (choice) => {
+  await runSelectMenu(ctx, "Agents", buildItems, async (choice) => {
     switch (choice) {
       case "routing": await showModelRoutingMenu(ctx); break;
       case "concurrency": await showConcurrencySettingsMenu(ctx); break;
@@ -74,21 +75,6 @@ export async function showSettingsMenu(
       case "systemprompt": await showSystemPromptMenu(ctx); break;
       // Keep the widget-settings function/file name to avoid a history-only rename; the menu now means display settings.
       case "display": await showWidgetSettingsMenu(ctx); break;
-    }
-  });
-}
-
-export async function showAgentsMainMenu(
-  ctx: ExtensionCommandContext,
-): Promise<void> {
-  const items: SelectItem[] = [
-    { value: "settings", label: "Settings", description: "Model, concurrency, and display settings" },
-    { value: "debug", label: "Debug", description: "Agent types, diagnostics, and recovery tests" },
-  ];
-
-  await runSelectMenu(ctx, "Agents", items, async (choice) => {
-    switch (choice) {
-      case "settings": await showSettingsMenu(ctx); break;
       case "debug": await showDebugMenu(ctx); break;
     }
   });

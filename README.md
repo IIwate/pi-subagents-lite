@@ -109,7 +109,7 @@ A missing or legacy `modelRouting` block starts with routing OFF and no alternat
 
 By default, every subagent uses the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. It is always available and is never persisted as routing configuration.
 
-With **Model routing** OFF (`/agents` > Settings > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
+With **Model routing** OFF (`/agents` > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
 
 - its provider is globally enabled for routing, unless it is the current parent provider;
 - the selected agent type has access to that provider;

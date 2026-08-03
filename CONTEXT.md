@@ -25,7 +25,7 @@ _Avoid_: Hidden tool, minimal tool
 ### Configuration
 
 **Model routing**:
-The policy that controls access to models other than the exact parent model. OFF allows only the exact parent model. ON applies Provider access switches and per-agent model access rules; the current parent provider dynamically passes only the global Provider access gate. Configured via `/agents` > Settings > Model routing.
+The policy that controls access to models other than the exact parent model. OFF allows only the exact parent model. ON applies Provider access switches and per-agent model access rules; the current parent provider dynamically passes only the global Provider access gate. Configured via `/agents` > Model routing.
 _Avoid_: Cross-provider routing, model assignment
 
 **Provider access**:
@@ -69,7 +69,7 @@ The short UI path for granting one agent type alternate access to models from th
 _Avoid_: Quick assignment, quick default
 
 **Grace turns**:
-Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Settings > Spawn options.
+Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Spawn options.
 _Avoid_: Grace period, extra turns
 
 ### Worktrees
