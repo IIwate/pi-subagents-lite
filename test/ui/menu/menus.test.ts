@@ -16,6 +16,7 @@ import { showAgentsMainMenu, showSettingsMenu } from "../../../src/ui/menu/menus
 function resetAgentState(): void {
   mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
   mockModules.mockConfig.agent = { forceBackground: false };
+  mockModules.mockConfig.concurrency = { default: 4 };
 }
 
 describe("showAgentsMainMenu — SelectList dispatcher", () => {
@@ -26,7 +27,7 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showAgentsMainMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
@@ -48,7 +49,7 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
       return undefined;
     });
 
-    await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showAgentsMainMenu(ctx);
 
     expect(rendered).not.toContain("Spawn agent");
     expect(rendered).toContain("Settings");
@@ -59,7 +60,7 @@ describe("showAgentsMainMenu — SelectList dispatcher", () => {
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
     // custom returns undefined = escape
-    await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showAgentsMainMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
@@ -72,14 +73,35 @@ describe("showSettingsMenu — SelectList dispatcher", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showSettingsMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showSettingsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
+  it("shows the current fallback value without calling it Default", async () => {
+    mockModules.mockConfig.concurrency = { default: 8 };
+    const ctx = createMockCtx();
+    let rendered = "";
+    ctx.ui.custom.mockImplementation(async (factory: any) => {
+      const component = factory(
+        { terminal: { rows: 40, columns: 120 } },
+        { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+        null,
+        () => {},
+      );
+      rendered = component.render(120).join("\n");
+      return undefined;
+    });
+
+    await showSettingsMenu(ctx);
+
+    expect(rendered).toContain("8 slots per model");
+    expect(rendered).not.toContain("Default 8");
+  });
+
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
-    await showSettingsMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showSettingsMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
@@ -106,7 +128,7 @@ describe("main menu — submenu navigation", () => {
       if (customCallCount === 1) return "debug"; // main menu → select debug
       return undefined; // debug menu and main menu escape
     });
-    await showAgentsMainMenu(ctx, ["anthropic/claude-sonnet-4-20250514"]);
+    await showAgentsMainMenu(ctx);
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });

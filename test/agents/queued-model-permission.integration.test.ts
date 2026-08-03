@@ -97,7 +97,6 @@ vi.mock("../../src/shell.js", () => ({
   getCoordinator: () => mocks.coordinator,
   getManager: () => mocks.manager,
   getNavigator: () => undefined,
-  getWidget: () => undefined,
   getPiInstance: () => mocks.pi,
   getSessionCtx: () => mocks.ctx,
   enterSubagentSpawn: vi.fn(),

@@ -98,7 +98,7 @@ export interface StatsVisibility {
 
 /**
  * Build common stats parts: provider · model · thinking · calls · turns · tokens · cost · time.
- * Shared by AgentWidget and index.ts for consistent stats display.
+ * Shared by list rendering and display tests for consistent stats output.
  *
  * @param visible - Optional visibility flags. All default to true for backward compatibility.
  * @param durationMs - Optional duration in ms. When provided and showTime is not false, appends formatted time.

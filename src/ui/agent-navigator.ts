@@ -23,7 +23,7 @@ import {
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
-import type { AgentManager } from "../agents/agent-manager.js";
+import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
 import { needsUserInput, recoverableFailureKind } from "../agents/failure-state.js";
 import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
@@ -424,6 +424,10 @@ export class AgentNavigator {
   private highlightedAgentId: string | null = null;
   /** Agent id waiting for Ctrl+D → Enter clear confirmation. */
   private confirmingClearId: string | null = null;
+  /** Local interaction failure rendered on the sticky Main row instead of Main's notification area. */
+  private interactionNotice: string | undefined;
+  /** Monotonic request id preventing stale async interaction results from mutating current UI. */
+  private interactionRequestId = 0;
   /** Stats visibility, including showCost, injected and synchronized by ConfigStore. */
   private statsVisibility: StatsVisibility = {};
   /** Debug-only display override; never changes agent lifecycle or session state. */
@@ -452,7 +456,7 @@ export class AgentNavigator {
 
   constructor(
     private manager: AgentManager,
-    private routeInput?: (agentId: string, text: string) => Promise<boolean>,
+    private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
   ) {}
 
   setUICtx(ctx: NavigatorUICtx): void {
@@ -487,6 +491,8 @@ export class AgentNavigator {
     if (this.selectedAgentId && !this.manager.getRecord(this.selectedAgentId)) {
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
+      this.interactionRequestId++;
+      this.interactionNotice = undefined;
       this.listFocused = false;
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
       this.update();
@@ -530,16 +536,15 @@ export class AgentNavigator {
       return false;
     }
 
+    const requestId = this.beginInteraction(agentId);
     void this.routeInput(agentId, trimmed)
-      .then((accepted) => {
-        if (accepted) return;
-        this.uiCtx?.setEditorText(text);
-        this.uiCtx?.notify("Selected subagent is not available for interaction", "warning");
-      })
-      .catch(() => {
-        this.uiCtx?.setEditorText(text);
-        this.uiCtx?.notify("Failed to send input to selected subagent", "warning");
-      });
+      .then((result) => this.completeInteraction(requestId, agentId, text, result))
+      .catch(() => this.completeInteraction(
+        requestId,
+        agentId,
+        text,
+        { accepted: false, reason: "unavailable" },
+      ));
     return true;
   }
 
@@ -648,6 +653,42 @@ export class AgentNavigator {
     return undefined;
   }
 
+  beginInteraction(agentId: string): number {
+    if (agentId !== this.selectedAgentId) return -1;
+    return ++this.interactionRequestId;
+  }
+
+  completeInteraction(
+    requestId: number,
+    agentId: string,
+    text: string,
+    result: InteractionResult,
+  ): boolean {
+    if (requestId !== this.interactionRequestId || agentId !== this.selectedAgentId) return false;
+    if (result.accepted) {
+      this.clearInteractionNotice();
+      return true;
+    }
+
+    // Do not overwrite a newer draft typed while the async continuation was pending.
+    if (this.uiCtx?.getEditorText() === "") this.uiCtx.setEditorText(text);
+    this.interactionNotice = result.reason === "concurrency" && result.modelKey
+      ? `Blocked: ${result.modelKey} concurrency limit reached`
+      : result.reason === "queued"
+        ? "Blocked: selected subagent is queued"
+        : "Blocked: selected subagent is unavailable";
+    this.lastRenderSig = "";
+    this.update();
+    return true;
+  }
+
+  clearInteractionNotice(): void {
+    if (!this.interactionNotice) return;
+    this.interactionNotice = undefined;
+    this.lastRenderSig = "";
+    this.update();
+  }
+
   private toggleHighlightedPin(): void {
     const id = this.highlightedAgentId;
     if (id === null) {
@@ -748,6 +789,8 @@ export class AgentNavigator {
       if (previousId) this.manager.resumeRecoveryExpiry(previousId);
     }
 
+    this.interactionRequestId++;
+    this.interactionNotice = undefined;
     this.highlightedAgentId = this.selectedAgentId;
     this.clearScrollbackAndRender();
     if (id && !this.refreshTimer) this.ensureTimer();
@@ -957,13 +1000,15 @@ export class AgentNavigator {
     // Keep the registered component stable across idle periods. Removing and re-adding the
     // whole below-editor widget corrupts Pi's differential row cache when the next editor
     // update arrives; an empty render preserves identity while contributing zero height.
-    if (this.manager.listAgents().length === 0) return [];
+    const records = this.manager.listAgents();
+    if (records.length === 0) return [];
 
     const entries = this.navigationEntries();
+    const agentEntries = entries.slice(1);
     const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
-    const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
-    const { start, end } = computeListWindow(entries.length, focusIndex, tui.terminal.rows);
-    const visibleEntries = entries.slice(start, end);
+    const agentFocusIndex = Math.max(0, agentEntries.findIndex(entry => entry.id === focusId));
+    const { start, end } = computeListWindow(agentEntries.length, agentFocusIndex, tui.terminal.rows);
+    const visibleEntries = agentEntries.slice(start, end);
     const highlightedRecord = entries.find(entry => entry.id === this.highlightedAgentId)?.record;
 
     // No permanent header chrome; show one contextual command bar while navigating.
@@ -999,14 +1044,30 @@ export class AgentNavigator {
         }
       }
     }
+    const mainActive = this.selectedAgentId === null;
+    const mainHighlighted = this.listFocused && this.highlightedAgentId === null;
+    const mainIndicator = mainActive ? theme.fg("accent", "●") : theme.fg("dim", "○");
+    const mainFocus = mainHighlighted ? theme.fg("accent", "›") : " ";
+    const mainLabel = mainActive || mainHighlighted ? theme.bold("Main") : "Main";
+    const running = records.filter(record => record.lifecycle.status === "running").length;
+    const queued = records.filter(record => record.lifecycle.status === "queued").length;
+    const summary = this.interactionNotice
+      ?? `${running} running · ${queued} queued · ${records.length} total`;
+    const summaryColor = this.interactionNotice ? "warning" : "dim";
+    lines.push(truncateToWidth(
+      `${mainFocus} ${mainIndicator} ${mainLabel}${theme.fg(summaryColor, ` (${summary})`)}`,
+      tui.terminal.columns,
+    ));
+
     if (start > 0) {
       lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
     }
 
     for (const entry of visibleEntries) {
+      const record = entry.record!;
       const active = entry.id === this.selectedAgentId;
       const highlighted = this.listFocused && entry.id === this.highlightedAgentId;
-      const pinned = entry.record?.lifecycle.pinnedAt != null;
+      const pinned = record.lifecycle.pinnedAt != null;
       const indicatorText = pinned
         ? active ? "◆" : "◇"
         : active ? "●" : "○";
@@ -1014,13 +1075,6 @@ export class AgentNavigator {
         ? theme.fg("accent", indicatorText)
         : theme.fg("dim", indicatorText);
       const focus = highlighted ? theme.fg("accent", "›") : " ";
-      if (!entry.record) {
-        const label = active || highlighted ? theme.bold("Main") : "Main";
-        lines.push(truncateToWidth(`${focus} ${indicator} ${label}`, tui.terminal.columns));
-        continue;
-      }
-
-      const record = entry.record;
       const name = getDisplayName(record.display.type);
       const description = record.display.description;
       const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
@@ -1078,8 +1132,8 @@ export class AgentNavigator {
       ));
     }
 
-    if (end < entries.length) {
-      lines.push(theme.fg("dim", `  ↓ ${entries.length - end} hidden`));
+    if (end < agentEntries.length) {
+      lines.push(theme.fg("dim", `  ↓ ${agentEntries.length - end} hidden`));
     }
 
     return lines;
@@ -1225,9 +1279,9 @@ export class AgentNavigator {
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
       this.confirmingClearId = null;
+      this.interactionRequestId++;
+      this.interactionNotice = undefined;
       this.listFocused = false;
-      // Render the existing widget at zero height instead of unregistering it. Pi's native
-      // shrink pass then observes the footer and selector changes in one stable component tree.
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
       this.lastRenderSig = "";
       this.lastAgentStatus.clear();
@@ -1238,6 +1292,8 @@ export class AgentNavigator {
 
     if (this.selectedAgentId && !records.some(record => record.id === this.selectedAgentId)) {
       this.selectedAgentId = null;
+      this.interactionRequestId++;
+      this.interactionNotice = undefined;
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
     }
     if (this.highlightedAgentId && !records.some(record => record.id === this.highlightedAgentId)) {
@@ -1370,6 +1426,7 @@ export class AgentNavigator {
       this.highlightedAgentId ?? "",
       this.listFocused ? "1" : "0",
       this.confirmingClearId ?? "",
+      this.interactionNotice ?? "",
     ].join("#");
   }
 

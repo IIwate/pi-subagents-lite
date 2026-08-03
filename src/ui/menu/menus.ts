@@ -53,14 +53,13 @@ async function runSelectMenu(
 
 export async function showSettingsMenu(
   ctx: ExtensionCommandContext,
-  modelOptions: string[],
 ): Promise<void> {
   // Items refresh per iteration so the routing row reflects live state.
   const buildItems = (): SelectItem[] => {
     const routing = getStore().routing;
     return [
       { value: "routing", label: "Model routing", description: routing.enabled ? "ON · provider and Agent model access" : "OFF · exact parent only" },
-      { value: "concurrency", label: "Concurrency settings", description: "Set per-model slot limits" },
+      { value: "concurrency", label: "Concurrency settings", description: `${getStore().concurrency.default} slots per model` },
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
@@ -70,7 +69,7 @@ export async function showSettingsMenu(
   await runSelectMenu(ctx, "Settings", buildItems, async (choice) => {
     switch (choice) {
       case "routing": await showModelRoutingMenu(ctx); break;
-      case "concurrency": await showConcurrencySettingsMenu(ctx, modelOptions); break;
+      case "concurrency": await showConcurrencySettingsMenu(ctx); break;
       case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
       case "systemprompt": await showSystemPromptMenu(ctx); break;
       // Keep the widget-settings function/file name to avoid a history-only rename; the menu now means display settings.
@@ -81,7 +80,6 @@ export async function showSettingsMenu(
 
 export async function showAgentsMainMenu(
   ctx: ExtensionCommandContext,
-  modelOptions: string[],
 ): Promise<void> {
   const items: SelectItem[] = [
     { value: "settings", label: "Settings", description: "Model, concurrency, and display settings" },
@@ -90,7 +88,7 @@ export async function showAgentsMainMenu(
 
   await runSelectMenu(ctx, "Agents", items, async (choice) => {
     switch (choice) {
-      case "settings": await showSettingsMenu(ctx, modelOptions); break;
+      case "settings": await showSettingsMenu(ctx); break;
       case "debug": await showDebugMenu(ctx); break;
     }
   });

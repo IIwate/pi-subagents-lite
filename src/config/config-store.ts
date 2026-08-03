@@ -57,17 +57,17 @@ export interface ResolvedAgentSettings {
   readonly loadExtensionsImplicitly: boolean;
   /** Whether to skip built-in default agents at registration. */
   readonly disableDefaultAgents: boolean;
-  /** Whether to show toolUses count in widget stats line. */
+  /** Whether to show toolUses count in list stats. */
   readonly showTools: boolean;
-  /** Whether to show turn count in widget stats line. */
+  /** Whether to show turn count in list stats. */
   readonly showTurns: boolean;
-  /** Whether to show input tokens in widget stats line. */
+  /** Whether to show input tokens in list stats. */
   readonly showInput: boolean;
-  /** Whether to show output tokens in widget stats line. */
+  /** Whether to show output tokens in list stats. */
   readonly showOutput: boolean;
-  /** Whether to show context percent and compactions in widget stats line. */
+  /** Whether to show context percent and compactions in list stats. */
   readonly showContext: boolean;
-  /** Whether to show elapsed time in widget stats line. */
+  /** Whether to show elapsed time in list stats. */
   readonly showTime: boolean;
 }
 

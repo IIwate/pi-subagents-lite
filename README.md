@@ -20,10 +20,10 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list current and completed agents without polling or waiting.
 
-Progress appears in the below-editor list, capped at six visible entries and scrolled around the focused row. Status follows the agent name in parentheses; model, provider, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
+Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
-› ● Main
+› ● Main (1 running · 0 queued · 3 total)
   ○ Security (Needs input)  Audit authentication       anthropic · claude-sonnet-4 · high · 81 calls · 36m
   ○ Explore (Running)  Inspect the project              openai-codex · gpt-5.4 · high · 4 calls · 25s
   ◇ Reviewer (Done)  Preserve this review               openai-codex · gpt-5.4 · high · 12 calls · 2m
@@ -32,6 +32,7 @@ Progress appears in the below-editor list, capped at six visible entries and scr
 - `›` marks the keyboard-highlighted row.
 - `○` and `●` mark inactive and active unpinned transcripts.
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
+- Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason instead of notifying in Main's transcript area.
 - Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`.
 - With an empty editor, press `↓` to focus the list. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
 - Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
@@ -164,12 +165,20 @@ Current Agent types, Parent default, and effective model access are added automa
 
 The selected model, parent model, thinking selection, and scoped-model state are locked when the Agent call is accepted. Running and queued agents retain that invocation snapshot; later settings changes affect only future Agent calls.
 
+## Concurrency
+
+The fallback ceiling is 4 concurrent runs per model. An explicit Model limit replaces that per-model fallback, while a Provider limit is an independent shared hard ceiling across every model from that Provider. A run starts only when both ceilings have room; Model limits may sum above the Provider limit so idle capacity remains shareable.
+
+New Agent calls beyond either ceiling enter `Queued`. Continuing a settled child does not queue: the input remains in the editor and Main shows `Blocked: provider/model concurrency limit reached` until a later successful send or Agent switch.
+
+The Concurrency menu shows only the parent model, currently authorized alternates, and models retained by existing child sessions. Limits outside that actionable inventory remain saved under **Saved inactive limits**, reappear automatically when their prerequisite returns, and are removed only through an explicit user action.
+
 ## Settings
 
 Run `/agents` to configure:
 
 - Parent default inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
-- default, per-provider, and per-model concurrency limits;
+- the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
 - background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;

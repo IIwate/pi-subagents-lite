@@ -7,12 +7,11 @@
  * globals.
  *
  * index.ts populates the shell at session_start; handler modules import
- * getManager() / getWidget() / etc.
+ * getManager() / getNavigator() / etc.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "./agents/agent-manager.js";
-import type { AgentWidget } from "./ui/agent-widget.js";
 import type { AgentNavigator } from "./ui/agent-navigator.js";
 import type { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { ConfigStore } from "./config/config-store.js";
@@ -25,7 +24,6 @@ interface Shell {
   pi: ExtensionAPI;
   sessionCtx: ExtensionContext;
   manager: AgentManager | null;
-  widget: AgentWidget | null;
   navigator: AgentNavigator | null;
   store: ConfigStore;
   coordinator: SpawnCoordinator | null;
@@ -39,7 +37,6 @@ const shell: Shell = {
   pi: null!,
   sessionCtx: null!,
   manager: null,
-  widget: null,
   navigator: null,
   store: new ConfigStore(),
   coordinator: null,
@@ -62,11 +59,6 @@ export function getSessionCtx(): ExtensionContext {
 /** The current AgentManager, or null if not yet created. */
 export function getManager(): AgentManager | null {
   return shell.manager;
-}
-
-/** The current AgentWidget, or null if not yet created. */
-export function getWidget(): AgentWidget | null {
-  return shell.widget;
 }
 
 /** The current keyboard-driven agent navigator, or null if not yet created. */
@@ -98,10 +90,6 @@ export function setSessionCtx(ctx: ExtensionContext): void {
 
 export function setManager(m: AgentManager | null): void {
   shell.manager = m;
-}
-
-export function setWidget(w: AgentWidget | null): void {
-  shell.widget = w;
 }
 
 export function setNavigator(navigator: AgentNavigator | null): void {

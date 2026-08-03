@@ -15,6 +15,7 @@ export const mockModules = {
     armDebugFault: vi.fn(),
     clearDebugFault: vi.fn(),
     debugDiagnostics: vi.fn(() => ({ agents: [] })),
+    listAgents: vi.fn(() => []),
   },
 };
 
@@ -49,6 +50,7 @@ vi.mock("../src/ui/format.js", () => ({ getDisplayName: vi.fn((type: string) => 
 vi.mock("../src/config/config-io.js", () => ({
   saveConfigAtomic: vi.fn(),
   DEFAULT_GRACE_TURNS: 6,
+  DEFAULT_CONCURRENCY: { default: 4 },
   CUSTOM_PROMPT_PATH: "/home/test/.pi/agent/subagents-lite-prompt.md",
   DEFAULT_CONFIG: {
     modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} },

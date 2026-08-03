@@ -2,20 +2,17 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
 import { AgentManager } from "./agents/agent-manager.js";
-import { AgentWidget, type UICtx } from "./ui/agent-widget.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { modelKey, scopedModelKeys } from "./models/model-scope.js";
 import { buildCurrentAgentGuidance } from "./prompt/agent-guidance.js";
 import {
   getManager,
-  getWidget,
   getNavigator,
   getCoordinator,
   getStore,
   setSessionCtx,
   setManager,
-  setWidget,
   setNavigator,
   setCoordinator,
 } from "./shell.js";
@@ -25,12 +22,11 @@ import {
 // ============================================================================
 
 /**
- * Ensure the manager and widget singletons exist.
+ * Ensure the manager, coordinator, and navigator exist.
  * Idempotent — safe to call on every session_start.
  */
-export function ensureManagerAndWidget(): void {
+export function ensureManagerAndNavigator(): void {
   const currentManager = getManager();
-  const currentWidget = getWidget();
   const currentNavigator = getNavigator();
 
   // Create manager if missing
@@ -54,33 +50,21 @@ export function ensureManagerAndWidget(): void {
       // Delegate completion side-effects to coordinator
       coordinator.onAgentComplete(record);
 
-      // Refresh the status count and the agent list below the editor.
-      getWidget()?.update();
       getNavigator()?.update();
     });
-  }
-
-  // Create widget (status-bar badge) if missing
-  if (!currentWidget) {
-    setWidget(new AgentWidget(getManager()!));
   }
 
   if (!currentNavigator) {
     const newNavigator = new AgentNavigator(
       getManager()!,
-      async (agentId, text) => getCoordinator()?.interact(agentId, text) ?? false,
+      async (agentId, text) => getCoordinator()?.interact(agentId, text)
+        ?? { accepted: false, reason: "unavailable" },
     );
     setNavigator(newNavigator);
-    // ConfigStore synchronizes list stats visibility through the same injection pattern as the widget.
+    // ConfigStore synchronizes list stats visibility through dependency injection.
     getStore().setDeps({ navigator: newNavigator });
   }
-  getManager()?.setOnRemove(() => {
-    // Refresh the status badge before tearing down the selector so footer and list shrink
-    // in one TUI pass. Waiting for the 1 Hz badge poll races powerline/Working redraws and
-    // can briefly duplicate footer rows when the final agent is removed.
-    getWidget()?.update();
-    getNavigator()?.update();
-  });
+  getManager()?.setOnRemove(() => getNavigator()?.update());
 }
 
 /**
@@ -103,10 +87,9 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
 }
 
 export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
-  // ConfigStore is authoritative for config + session overrides + widget/manager
-  // side effects.
+  // ConfigStore is authoritative for config, session overrides, and manager/UI side effects.
   getStore().reload();
-  ensureManagerAndWidget();
+  ensureManagerAndNavigator();
   await scanAndRegisterAgents(ctx);
 }
 
@@ -136,7 +119,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
   });
 
-  pi.on("input", async (event, ctx) => {
+  pi.on("input", async (event, _ctx) => {
     if (event.source !== "interactive") return;
     const selectedAgentId = getNavigator()?.selectedId();
     const text = event.text.trim();
@@ -146,25 +129,15 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       || text.startsWith("!")
     ) return;
 
-    const accepted = await getCoordinator()?.interact(
+    const navigator = getNavigator();
+    const requestId = navigator?.beginInteraction(selectedAgentId) ?? -1;
+    const result = await getCoordinator()?.interact(
       selectedAgentId,
       event.text,
       event.images,
-    ) ?? false;
-    if (!accepted) {
-      ctx.ui.setEditorText(event.text);
-      ctx.ui.notify("Selected subagent is not available for interaction", "warning");
-    }
+    ) ?? { accepted: false as const, reason: "unavailable" as const };
+    navigator?.completeInteraction(requestId, selectedAgentId, event.text, result);
     return { action: "handled" as const };
-  });
-
-  pi.on("tool_execution_start", async (_event, ctx) => {
-    // Set UI context on first tool execution
-    if (!getWidget()) {
-      ensureManagerAndWidget();
-    }
-    getWidget()?.setUICtx(ctx.ui as unknown as UICtx);
-    getWidget()?.update();
   });
 
   // Main session run ended — Working row is gone; force reflow so Pi's
@@ -215,9 +188,6 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       try { getCoordinator()?.dispose(); } finally { setCoordinator(null); }
     });
     await cleanup(() => getStore().dispose());
-    await cleanup(() => {
-      try { getWidget()?.dispose(); } finally { setWidget(null); }
-    });
     await cleanup(async () => {
       try { await getManager()?.dispose(); } finally { setManager(null); }
     });

@@ -49,7 +49,6 @@ const { mockPi, mockGetPiInstance } = vi.hoisted(() => ({
 vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
   getSessionCtx: () => ({ isIdle: () => true }),
-  getWidget: () => null,
   getNavigator: () => null,
 }));
 
@@ -79,7 +78,7 @@ function makeMockManager() {
     listAgents: vi.fn(() => [...records.values()]),
     abort: vi.fn(() => true),
     steer: vi.fn(async () => true),
-    interact: vi.fn(async () => true),
+    interact: vi.fn(async () => ({ accepted: true as const })),
     dispose: vi.fn(),
     onComplete: undefined as any,
   };
@@ -150,9 +149,9 @@ describe("SpawnCoordinator", () => {
     });
 
     const images = [{ type: "image", data: "abc", mimeType: "image/png" }] as any;
-    const accepted = await coordinator.interact(result.agentId, "focus on tests", images);
+    const interaction = await coordinator.interact(result.agentId, "focus on tests", images);
 
-    expect(accepted).toBe(true);
+    expect(interaction).toEqual({ accepted: true });
     expect(manager.interact).toHaveBeenCalledWith(result.agentId, "focus on tests", images);
   });
 

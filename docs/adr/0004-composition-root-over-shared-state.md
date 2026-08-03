@@ -1,10 +1,10 @@
 # Composition root over module-level shared state
 
 Shared runtime state (config, session overrides, the activity store, the manager,
-widget, pi instance, and session context) lives on a single composition-root
+pi instance, and session context) lives on a single composition-root
 **shell** object that PI's fixed-signature callbacks capture by closure, rather
 than as module-level mutable `let`/`Map` bindings exported from `state.ts`.
-Per-session services (config store, agent manager, spawn coordinator, widget)
+Per-session services (config store, agent manager, spawn coordinator, navigator)
 are constructed at `session_start` and mounted onto the shell; `session_shutdown`
 disposes them. Owned domain state moves into the module that owns the concern:
 config into the ConfigStore, the activity store and **Nudge** into the spawn
@@ -19,7 +19,7 @@ parameters, so dependencies must be reachable from inside them somehow. A shell
 captured by closure is the cleanest way and reaches every callback.
 
 Second, `state.ts`'s own header warns that the PI runtime does not propagate
-ESM live-binding reassignments, so `manager` and `widget` already use holder
+ESM live-binding reassignments, so manager and UI state already used holder
 objects rather than `let` re-exports. But `__config` *was* a `let` re-export
 reassigned on every `setConfig()` — the exact stale-reference footgun the header
 describes. A shell with fields removes live-binding reassignment entirely; the
@@ -64,8 +64,8 @@ process, the shell would need to become per-instance.
 ## Decision change (2026-02)
 
 The implementation landed as a module-level mutable holder singleton
-(`shell.ts`: `getStore()` / `setManager()` and 11 sibling getter/setters,
-13 accessors total), not the closure-captured composition root described
+(`shell.ts`: `getStore()` / `setManager()` and sibling getter/setters), not the
+closure-captured composition root described
 above. Tests still
 `vi.mock` the whole `shell.js` module (`test/fixtures.ts` `shellMock`,
 `test/menu-mock-setup.ts`).

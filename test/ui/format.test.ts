@@ -206,7 +206,6 @@ describe("buildStatsParts — cost behavior", () => {
   });
 });
 
-// Moved from agent-widget.test.ts because formatMs belongs to format.ts.
 describe("formatMs", () => {
   it("formats hours, minutes, and seconds", () => {
     expect(formatMs(3661000)).toBe("1h 1m 1s");

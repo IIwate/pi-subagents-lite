@@ -214,6 +214,14 @@ describe("AgentNavigator", () => {
     vi.useRealTimers();
   });
 
+  it("stays hidden before any subagent exists", () => {
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([]));
+    navigator.setUICtx(ui.ctx as any);
+
+    expect(ui.widgets.size).toBe(0);
+  });
+
   it("registers a below-editor selector containing Main and subagents", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
@@ -234,6 +242,44 @@ describe("AgentNavigator", () => {
       expect.any(Function),
       { placement: "belowEditor" },
     );
+  });
+
+  it("keeps Main sticky with complete counts and six visible subagents", () => {
+    const records = Array.from({ length: 8 }, (_, index) => {
+      const status = index < 2 ? "running" : index === 2 ? "queued" : "completed";
+      const record = makeRecord(`agent-${index}`, status);
+      record.display.description = `Task ${index}`;
+      return record;
+    });
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    let lines = selector.render(120);
+    expect(lines[0]).toContain("● Main (2 running · 1 queued · 8 total)");
+    expect(lines.filter((line: string) => line.includes("Task "))).toHaveLength(6);
+
+    navigator.handleTerminalInput("\x1b[B");
+    for (let index = 0; index < 8; index++) navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    lines = selector.render(120);
+    expect(lines.find((line: string) => line.includes("Main"))).toContain(
+      "○ Main (2 running · 1 queued · 8 total)",
+    );
+    expect(lines.filter((line: string) => line.includes("Task "))).toHaveLength(6);
+  });
+
+  it("shows zero running and queued counts when only terminal records remain", () => {
+    const records = [makeRecord("done-1", "completed"), makeRecord("done-2", "completed")];
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager(records));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120)[0]).toContain("0 running · 0 queued · 2 total");
   });
 
   it("keeps continuable status adjacent to its stats", () => {
@@ -537,7 +583,7 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager(records));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    mountSelector(ui, tui);
+    const { selector } = mountSelector(ui, tui);
 
     expect(tui.getClearOnShrink()).toBe(true);
     tui.requestRender.mockClear();
@@ -552,11 +598,11 @@ describe("AgentNavigator", () => {
     records.length = 0;
     navigator.update();
 
-    // The component stays registered but contributes zero rows. Keeping the component
-    // identity stable prevents the next idle editor update from reusing stale row offsets.
+    // Keep the component identity stable while contributing no visible rows.
     expect(ui.widgets.get("agent-navigator-selector")).toBeTypeOf("function");
     expect(tui.getClearOnShrink()).toBe(true);
     expect(tui.requestRender).toHaveBeenCalledWith(false);
+    expect(selector.render(120)).toEqual([]);
 
     tui.requestRender.mockClear();
     navigator.forceLayoutReflow();
@@ -812,7 +858,7 @@ describe("AgentNavigator", () => {
   it("routes ordinary editor submits before Pi can queue them on Main", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    const routeInput = vi.fn().mockResolvedValue(true);
+    const routeInput = vi.fn().mockResolvedValue({ accepted: true });
     navigator = new AgentNavigator(makeManager([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
@@ -840,6 +886,100 @@ describe("AgentNavigator", () => {
 
     (ui.baseEditor as any).onSubmit("/agents");
     expect(parentSubmit).toHaveBeenCalledWith("/agents");
+  });
+
+  it("renders interaction blocks on Main and restores counts after a successful retry", async () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const routeInput = vi.fn()
+      .mockResolvedValueOnce({
+        accepted: false,
+        reason: "concurrency",
+        modelKey: "cliproxyapi/gpt-5.6-sol",
+      })
+      .mockResolvedValueOnce({ accepted: true });
+    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    editor.onSubmit = vi.fn();
+
+    (ui.baseEditor as any).onSubmit("continue the child");
+    await vi.waitFor(() => {
+      expect(selector.render(120).join("\n")).toContain(
+        "Blocked: cliproxyapi/gpt-5.6-sol concurrency limit reached",
+      );
+    });
+    expect(ui.ctx.setEditorText).toHaveBeenCalledWith("continue the child");
+    expect(ui.ctx.notify).not.toHaveBeenCalledWith(
+      "Selected subagent is not available for interaction",
+      "warning",
+    );
+
+    (ui.baseEditor as any).onSubmit("retry");
+    await vi.waitFor(() => {
+      expect(selector.render(120).join("\n")).toContain("1 running · 0 queued · 1 total");
+    });
+    expect(editor).toBeDefined();
+  });
+
+  it("ignores an older failed interaction after a newer success", async () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    let resolveFirst!: (result: any) => void;
+    const first = new Promise<any>((resolve) => { resolveFirst = resolve; });
+    const routeInput = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce({ accepted: true });
+    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    editor.onSubmit = vi.fn();
+
+    (ui.baseEditor as any).onSubmit("first");
+    (ui.baseEditor as any).onSubmit("second");
+    await vi.waitFor(() => expect(routeInput).toHaveBeenCalledTimes(2));
+    ui.baseEditor.setText("new draft");
+    resolveFirst({ accepted: false, reason: "concurrency", modelKey: "test/model" });
+    await Promise.resolve();
+
+    expect(selector.render(120).join("\n")).not.toContain("Blocked:");
+    expect(ui.baseEditor.getText()).toBe("new draft");
+  });
+
+  it("ignores a failed interaction after switching back to Main", async () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    let resolveInteraction!: (result: any) => void;
+    const pending = new Promise<any>((resolve) => { resolveInteraction = resolve; });
+    navigator = new AgentNavigator(makeManager([record]), vi.fn(() => pending));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    editor.onSubmit = vi.fn();
+    (ui.baseEditor as any).onSubmit("continue");
+
+    navigator.handleTerminalInput("\x1b[A");
+    navigator.handleTerminalInput("\r");
+    ui.baseEditor.setText("main draft");
+    resolveInteraction({ accepted: false, reason: "concurrency", modelKey: "test/model" });
+    await Promise.resolve();
+
+    expect(selector.render(120).join("\n")).not.toContain("Blocked:");
+    expect(ui.baseEditor.getText()).toBe("main draft");
   });
 
   it("does not enter the selector when the editor contains text", () => {

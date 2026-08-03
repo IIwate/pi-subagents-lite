@@ -234,7 +234,7 @@ describe("AgentManager", () => {
       deferred3.resolve(mockRunResult());
     });
 
-    it("per-model limit overrides per-provider limit", () => {
+    it("enforces a model ceiling inside the shared Provider ceiling", () => {
       const config: ConcurrencyConfig = {
         default: 4,
         providers: { llamacpp: 2 },
@@ -256,6 +256,45 @@ describe("AgentManager", () => {
       expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(1);
 
       deferred.resolve(mockRunResult());
+    });
+
+    it("enforces the Provider ceiling across models even when their individual limits are higher", async () => {
+      manager = new AgentManager(onComplete, {
+        default: 4,
+        providers: { llamacpp: 2 },
+        models: { "llamacpp/4b": 4, "llamacpp/27b": 4 },
+      });
+      const first = makeResolvablePromise();
+      const second = makeResolvablePromise();
+      const third = makeResolvablePromise();
+      mockModules.mockRunAgent
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise)
+        .mockReturnValueOnce(third.promise);
+
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        modelKey: "llamacpp/4b",
+      });
+      manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        modelKey: "llamacpp/27b",
+      });
+      const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "third", {
+        description: "third",
+        modelKey: "llamacpp/4b",
+      });
+
+      expect(manager.getRecord(queuedId)?.lifecycle.status).toBe("queued");
+      expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
+
+      first.resolve(mockRunResult());
+      await manager.getRecord(firstId)!.execution.promise;
+      expect(manager.getRecord(queuedId)?.lifecycle.status).toBe("running");
+      expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(3);
+
+      second.resolve(mockRunResult());
+      third.resolve(mockRunResult());
     });
 
     it("applies new limit when setConcurrency is called", () => {
@@ -406,7 +445,7 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       record.execution.session = session;
 
-      await expect(manager.interact(id, "new direction")).resolves.toBe(true);
+      await expect(manager.interact(id, "new direction")).resolves.toEqual({ accepted: true });
       expect(session.steer).toHaveBeenCalledWith("new direction", undefined);
 
       deferred.resolve(mockRunResult({ session }));
@@ -425,7 +464,7 @@ describe("AgentManager", () => {
       });
       manager.getRecord(id)!.execution.session = session;
 
-      await expect(manager.interact(id, "inspect this", images)).resolves.toBe(true);
+      await expect(manager.interact(id, "inspect this", images)).resolves.toEqual({ accepted: true });
       expect(session.steer).toHaveBeenCalledWith("inspect this", images);
 
       deferred.resolve(mockRunResult({ session }));
@@ -448,7 +487,7 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
 
-      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      await expect(manager.interact(id, "continue")).resolves.toEqual({ accepted: true });
       await record.execution.promise;
 
       expect(mockModules.mockContinueAgentSession).toHaveBeenCalledWith(
@@ -490,7 +529,7 @@ describe("AgentManager", () => {
       const abortCatch = vi.spyOn(abortPromise, "catch");
       session.abort = vi.fn(() => abortPromise);
 
-      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      await expect(manager.interact(id, "continue")).resolves.toEqual({ accepted: true });
       expect(manager.abort(id, "user")).toBe(true);
       expect(session.abort).toHaveBeenCalled();
       expect(abortCatch).toHaveBeenCalled();
@@ -518,7 +557,7 @@ describe("AgentManager", () => {
       await record.execution.promise;
 
       expect(record.lifecycle.status).toBe("error");
-      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toBe(true);
+      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toEqual({ accepted: true });
       expect(record.lifecycle.status).toBe("running");
       expect(mockModules.mockContinueAgentSession).toHaveBeenCalledWith(
         session,
@@ -550,7 +589,7 @@ describe("AgentManager", () => {
       record.execution.session = session;
       manager.abort(id, "user");
 
-      await expect(manager.interact(id, "resume too early")).resolves.toBe(false);
+      await expect(manager.interact(id, "resume too early")).resolves.toEqual({ accepted: false, reason: "unavailable" });
       expect(mockModules.mockContinueAgentSession).not.toHaveBeenCalled();
 
       deferred.resolve(mockRunResult({ session, aborted: true }));
@@ -578,7 +617,11 @@ describe("AgentManager", () => {
         modelKey: "test/model",
       });
 
-      await expect(manager.interact(firstId, "resume")).resolves.toBe(false);
+      await expect(manager.interact(firstId, "resume")).resolves.toEqual({
+        accepted: false,
+        reason: "concurrency",
+        modelKey: "test/model",
+      });
       expect(mockModules.mockContinueAgentSession).not.toHaveBeenCalled();
 
       secondDeferred.resolve(mockRunResult({ session: secondSession }));
@@ -611,7 +654,11 @@ describe("AgentManager", () => {
         modelKey: "test/model",
       });
 
-      await expect(manager.interact(failedId, "continue")).resolves.toBe(false);
+      await expect(manager.interact(failedId, "continue")).resolves.toEqual({
+        accepted: false,
+        reason: "concurrency",
+        modelKey: "test/model",
+      });
       expect(failedRecord.execution.recoveryTtlMs).toBe(10_000);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(manager.getRecord(failedId)).toBeUndefined();
@@ -637,7 +684,7 @@ describe("AgentManager", () => {
         modelKey: "test/model",
       });
 
-      await expect(manager.interact(queuedId, "hello")).resolves.toBe(false);
+      await expect(manager.interact(queuedId, "hello")).resolves.toEqual({ accepted: false, reason: "queued" });
       deferred.resolve(mockRunResult());
     });
   });
@@ -1037,7 +1084,7 @@ describe("AgentManager", () => {
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
-      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toBe(true);
+      await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toEqual({ accepted: true });
       expect(record.execution.recoveryTtlMs).toBeUndefined();
       expect(record.execution.debugFaultKind).toBe("output_blocked");
 
@@ -1068,7 +1115,7 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
 
-      await expect(manager.interact(id, "continue")).resolves.toBe(true);
+      await expect(manager.interact(id, "continue")).resolves.toEqual({ accepted: true });
       await record.execution.promise;
       expect(record.lifecycle.status).toBe("error");
       expect(record.execution.debugFaultKind).toBe("output_blocked");

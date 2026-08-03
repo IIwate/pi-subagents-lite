@@ -4,7 +4,6 @@ import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
 import { showAgentsMainMenu } from "./ui/menu/menus.js";
-import { listModelOptionsForMenus } from "./models/model-scope.js";
 
 // Subagent state belongs to the below-editor list. Results still reach the LLM,
 // but all three tools render zero chat rows so Pi's default tool cards cannot leak back in.
@@ -79,9 +78,7 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerCommand("agents", {
     description: "Manage subagents: model access, concurrency, diagnostics, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      // Restrict menu picks to the active Model scope when one is set.
-      const modelOptions = listModelOptionsForMenus(ctx);
-      await showAgentsMainMenu(ctx, modelOptions);
+      await showAgentsMainMenu(ctx);
     },
   });
 }

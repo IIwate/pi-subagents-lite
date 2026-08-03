@@ -119,10 +119,6 @@ vi.mock("../src/agents/default-agents.js", () => ({
   DEFAULT_AGENTS: new Map(),
 }));
 
-vi.mock("../src/ui/agent-widget.js", () => ({
-  AgentWidget: class {},
-}));
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
@@ -329,12 +325,10 @@ describe("event listener registration", () => {
     const shell = await import("../src/shell.js");
     const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
     const coordinator = { dispose: vi.fn() };
-    const widget = { dispose: vi.fn() };
     const manager = { listAgents: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
     const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
     shell.setNavigator(navigator as any);
     shell.setCoordinator(coordinator as any);
-    shell.setWidget(widget as any);
     shell.setManager(manager as any);
 
     try {
@@ -343,17 +337,14 @@ describe("event listener registration", () => {
 
       expect(coordinator.dispose).toHaveBeenCalledTimes(1);
       expect(storeDispose).toHaveBeenCalledTimes(1);
-      expect(widget.dispose).toHaveBeenCalledTimes(1);
       expect(manager.dispose).toHaveBeenCalledTimes(1);
       expect(shell.getNavigator()).toBeNull();
       expect(shell.getCoordinator()).toBeNull();
-      expect(shell.getWidget()).toBeNull();
       expect(shell.getManager()).toBeNull();
     } finally {
       storeDispose.mockRestore();
       shell.setNavigator(null);
       shell.setCoordinator(null);
-      shell.setWidget(null);
       shell.setManager(null);
     }
   });

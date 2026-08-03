@@ -1,10 +1,10 @@
-import { getNavigator, getPiInstance, getSessionCtx, getWidget } from "../shell.js";
+import { getNavigator, getPiInstance, getSessionCtx } from "../shell.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord, SpawnConfig } from "../types.js";
-import type { AgentManager } from "../agents/agent-manager.js";
+import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
 import { formatResultContent } from "../agents/tool-execution.js";
 
 /**
@@ -79,12 +79,6 @@ export class SpawnCoordinator {
 
     const agentId = this.manager.spawn(pi, ctx, type, prompt, spawnOptions);
 
-    // Ensure widget timer is running so it displays the new agent
-    // (menu path calls this explicitly, but tool path doesn't)
-    const widget = getWidget();
-    if (widget) {
-      widget.ensureTimer();
-    }
     getNavigator()?.ensureTimer();
 
     // Track background agents + capture ctx for fallback notification
@@ -109,9 +103,9 @@ export class SpawnCoordinator {
   }
 
   /** Route user input to a running or settled subagent session. */
-  async interact(agentId: string, message: string, images?: ImageContent[]): Promise<boolean> {
+  async interact(agentId: string, message: string, images?: ImageContent[]): Promise<InteractionResult> {
     const record = this.manager.getRecord(agentId);
-    if (!record) return false;
+    if (!record) return { accepted: false, reason: "unavailable" };
 
     // Deliver the completed background result before mutating the same record
     // for an interactive continuation.
@@ -119,12 +113,9 @@ export class SpawnCoordinator {
       this.emitIndividualNudge(agentId);
     }
 
-    const accepted = await this.manager.interact(agentId, message, images);
-    if (accepted) {
-      getWidget()?.ensureTimer();
-      getNavigator()?.ensureTimer();
-    }
-    return accepted;
+    const result = await this.manager.interact(agentId, message, images);
+    if (result.accepted) getNavigator()?.ensureTimer();
+    return result;
   }
 
   /**

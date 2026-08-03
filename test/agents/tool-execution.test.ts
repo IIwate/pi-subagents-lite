@@ -100,10 +100,6 @@ vi.mock("../../src/shell.js", () => ({
     listAgents: vi.fn(() => []),
     abort: vi.fn(() => false),
   }),
-  getWidget: () => ({
-    ensureTimer: vi.fn(),
-    update: vi.fn(),
-  }),
   getCoordinator: () => ({
     spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
       // Delegate to the mocked manager.spawn
