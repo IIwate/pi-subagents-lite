@@ -42,20 +42,23 @@ describe("buildCurrentAgentGuidance", () => {
     expect(guidance).toContain("run_in_background: true");
     expect(guidance).toContain("Do not poll");
     expect(guidance).toContain("worktree_path");
+    expect(guidance).toContain("pass one exact model key listed below");
     expect(guidance).toContain("Never silently replace");
   });
 
-  it("advertises all-model rules as wildcards and exact effective keys only", () => {
+  it("expands all-model rules into exact effective model keys", () => {
     const guidance = build();
-    expect(guidance).toContain("openai/*");
+    expect(guidance).toContain("Explore alternate models:");
+    expect(guidance).toContain("openai/gpt-5");
     expect(guidance).toContain("google/gemini-pro");
+    expect(guidance).not.toContain("openai/*");
     expect(guidance).not.toContain("openai/o3");
     expect(guidance).not.toContain("google/missing");
   });
 
   it("does not advertise catalogue-only models", () => {
     const guidance = build({ availableKeys: new Set(["anthropic/sonnet"]) });
-    expect(guidance).not.toContain("openai/*");
+    expect(guidance).not.toContain("openai/gpt-5");
     expect(guidance).not.toContain("google/gemini-pro");
     expect(guidance).toContain("No effective alternate model access");
   });
@@ -65,13 +68,14 @@ describe("buildCurrentAgentGuidance", () => {
       routing: { enabled: false, enabledProviders: [], agentAccess: {} },
     });
     expect(guidance).toContain("Model routing is OFF");
-    expect(guidance).not.toContain("alternate access:");
+    expect(guidance).not.toContain("alternate models:");
   });
 
   it("handles a missing parent while retaining explicit alternate guidance", () => {
     const guidance = build({ parentModelKey: "" });
     expect(guidance).toContain("No parent default is active");
-    expect(guidance).toContain("openai/*");
+    expect(guidance).toContain("openai/gpt-5");
+    expect(guidance).not.toContain("openai/*");
   });
 
   it("advertises parent-provider alternates without widening their other gates", () => {

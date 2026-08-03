@@ -36,7 +36,8 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     "- Agents start with a fresh conversation.",
     "- For background work, set `run_in_background: true`; results are delivered automatically. Do not poll, sleep, or timeout-wait.",
     "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
-    "- Omit `model` to use the exact parent model. Pass `model` only for an authorized alternate.",
+    "- Omit `model` to use the exact parent model.",
+    "- For an alternate, pass one exact model key listed below; do not invent or abbreviate model IDs.",
     "- Never silently replace a rejected explicit model.",
     "",
     "Model access:",
@@ -55,33 +56,16 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
 
   let advertised = false;
   for (const agent of agents) {
-    const agentAccess = Object.hasOwn(routing.agentAccess, agent.name)
-      ? routing.agentAccess[agent.name]
-      : undefined;
-    const rules = agentAccess?.providers;
-    if (!rules) continue;
-    const entries: string[] = [];
-    for (const provider of Object.keys(rules).sort()) {
-      const rule = rules[provider];
-      const effective = effectiveAlternateModelKeys(
-        agent.name,
-        {
-          enabled: routing.enabled,
-          enabledProviders: routing.enabledProviders,
-          agentAccess: {
-            [agent.name]: { providers: { [provider]: rule } },
-          },
-        },
-        availableKeys,
-        scopedKeys,
-        parentModelKey,
-      );
-      if (effective.length === 0) continue;
-      if (!rule.models) entries.push(`${provider}/*`); else entries.push(...effective);
-    }
-    if (entries.length === 0) continue;
+    const effective = effectiveAlternateModelKeys(
+      agent.name,
+      routing,
+      availableKeys,
+      scopedKeys,
+      parentModelKey,
+    );
+    if (effective.length === 0) continue;
     advertised = true;
-    lines.push("", `${agent.name} alternate access:`, ...[...new Set(entries)].sort().map((key) => `- ${key}`));
+    lines.push("", `${agent.name} alternate models:`, ...effective.map((key) => `- ${key}`));
   }
 
   lines.push("", advertised

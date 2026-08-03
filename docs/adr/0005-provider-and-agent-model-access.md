@@ -179,10 +179,11 @@ configuration, `getAvailable()` keys, and scope before each parent run. It does
 not create a session message, trigger an extra turn, or require reload/manual
 briefing.
 
-Specific rules list exact available model keys; all-model rules use
-`provider/*` only when that provider has an effective available model. The
-current parent provider bypasses only the global provider set in this guidance,
-matching runtime authorization. Routing-OFF, missing Agent/provider rules,
+Every effective alternate is listed as an exact canonical `provider/model` key,
+including models admitted by an all-model rule. Wildcards are never advertised
+because the Agent tool requires a concrete model argument. The current parent
+provider bypasses only the global provider set in this guidance, matching
+runtime authorization. Routing-OFF, missing Agent/provider rules,
 model-denied, catalogue-only, provider-unavailable, implicit alternate, and
 out-of-scope models are not advertised as callable.
 The guidance states that alternate models require an explicit `model` argument

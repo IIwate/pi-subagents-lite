@@ -41,9 +41,8 @@ tool is active. It includes:
 
 - available agent types and the critical Agent invocation rules;
 - the exact parent model, selected by omitting `model`;
-- exact alternate model keys for restricted rules;
-- `provider/*` for all-model rules;
-- the requirement to pass `model` for alternate access;
+- exact effective alternate model keys for restricted and all-model rules;
+- the requirement to pass one listed canonical key as `model` for alternate access;
 - the rule that rejected explicit models are never replaced silently.
 
 Disabled providers, unavailable models, and out-of-scope models are not
@@ -62,9 +61,11 @@ must be byte-stable.
 ## Trade-off
 
 The minimal tool schema still requires system-prompt guidance for reliable use.
-Automatic per-run injection adds a small prompt suffix, but removes stale manual
-briefings and user refresh steps. All-model rules use a compact wildcard instead
-of enumerating an entire provider catalogue.
+Automatic per-run injection adds a prompt suffix, but removes stale manual
+briefings and user refresh steps. All-model rules enumerate the current effective
+`getAvailable()` and scope intersection because the Agent tool requires a
+concrete model key; catalogue-only and otherwise unauthorized models remain
+excluded.
 
 The Debug menu keeps agent-type and runtime diagnostics but has no Agent
 briefing action. Guidance is runtime behavior, not a user-maintained message.

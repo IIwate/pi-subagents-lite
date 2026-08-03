@@ -15,7 +15,7 @@ A named configuration (general-purpose, Explore, or custom) defining a subagent'
 _Avoid_: Agent kind, agent class
 
 **Agent guidance**:
-A compact deterministic system-prompt block added automatically with `before_agent_start`. It teaches the parent LLM the available agent types, critical Agent tool rules, the exact parent default model, and currently effective alternate model access. It is not a session message and requires no manual refresh.
+A compact deterministic system-prompt block added automatically with `before_agent_start`. It teaches the parent LLM the available agent types, critical Agent tool rules, the exact parent default model, and every currently effective alternate as an exact canonical model key. It never substitutes wildcard policy summaries for callable arguments, is not a session message, and requires no manual refresh.
 _Avoid_: Agent briefing, agent documentation, tool description
 
 **Stealth tool**:
