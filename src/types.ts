@@ -15,9 +15,6 @@ import type { SubagentType, AgentInvocation } from "./agents/types.js";
  */
 export type ThinkingLevel = string;
 
-/** How background results are handed back to the parent session. */
-export type BackgroundDeliveryMode = "auto" | "next-turn";
-
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
   model?: Model<any>;
@@ -70,8 +67,6 @@ export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
   worktreePath?: string;
-  /** Background result delivery snapshot for accepted work. */
-  backgroundDelivery?: BackgroundDeliveryMode;
   /** Parent session and branch anchor captured when background work is accepted. */
   resultSessionId?: string;
   resultOriginEntryId?: string | null;
@@ -139,8 +134,6 @@ interface AgentExecutionState {
   modelKey?: string;
   /** Grace turns retained for direct follow-up prompts. */
   graceTurns?: number;
-  /** Delivery mode captured when the background invocation was accepted. */
-  backgroundDelivery?: BackgroundDeliveryMode;
   /** Parent session and branch anchor captured with the accepted invocation. */
   resultSessionId?: string;
   resultOriginEntryId?: string | null;

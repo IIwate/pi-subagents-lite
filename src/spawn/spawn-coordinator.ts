@@ -8,7 +8,7 @@ import {
 } from "../shell.js";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord, BackgroundDeliveryMode, SpawnConfig } from "../types.js";
+import type { AgentRecord, SpawnConfig } from "../types.js";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
 import { formatResultContent } from "../agents/tool-execution.js";
 import {
@@ -35,11 +35,6 @@ export interface SpawnResult {
   record: AgentRecord;
 }
 
-export interface PendingResultUiState {
-  count: number;
-  label: "pending" | "next-turn";
-}
-
 function isParentRunSuccessful(
   messages: readonly { role: string; stopReason?: string; errorMessage?: string }[],
 ): boolean {
@@ -50,7 +45,7 @@ function isParentRunSuccessful(
     && last.errorMessage === undefined;
 }
 
-function storedResult(record: AgentRecord, delivery: BackgroundDeliveryMode): PendingResult | undefined {
+function storedResult(record: AgentRecord): PendingResult | undefined {
   const result = formatResultContent(record).trim() || "(no output)";
   const parentSessionId = record.execution.resultSessionId;
   if (!parentSessionId) return undefined;
@@ -66,9 +61,8 @@ function storedResult(record: AgentRecord, delivery: BackgroundDeliveryMode): Pe
     error: record.error?.trim() || null,
     provider: sessionModel?.provider ?? invocation?.providerName,
     model: sessionModel?.id ?? invocation?.modelName,
-    createdAt: Date.now(),
+    createdAt: record.lifecycle.completedAt ?? Date.now(),
     deliveryId: randomUUID(),
-    delivery,
   };
 }
 
@@ -90,16 +84,14 @@ export class SpawnCoordinator {
   private parentWakeActive = false;
   /** Result IDs presented by the currently active parent turn. */
   private parentTurnResultIds = new Set<string>();
-  /** Source of the active parent turn, used to keep auto and next-turn modes isolated. */
-  private parentWakeMode: "auto" | "natural" | undefined;
-  /** Monotonic Auto-completion version and the snapshot carried by the active parent turn. */
-  private autoCompletionVersion = 0;
-  private parentWakeAutoCompletionVersion = 0;
+  /** Monotonic persisted-completion version and the snapshot carried by the active parent turn. */
+  private completionVersion = 0;
+  private parentWakeCompletionVersion = 0;
   /** Latest parent run outcome, consumed at agent_settled. */
   private parentRunSucceeded = true;
   /** Last wake failed; used only to bound automatic retry at settlement. */
   private lastWakeFailed = false;
-  /** Delivery failures stay attached to their result instead of leaking across modes. */
+  /** Delivery failures stay attached to their result. */
   private failedResultIds = new Set<string>();
   /** Results restored once from the parent session, then maintained incrementally. */
   private pendingResults = new Map<string, PendingResult>();
@@ -140,7 +132,6 @@ export class SpawnCoordinator {
         ? { ...spawnOptions, resultSessionId, resultOriginEntryId }
         : {
             ...spawnOptions,
-            backgroundDelivery: undefined,
             resultSessionId: undefined,
             resultOriginEntryId: undefined,
           },
@@ -169,27 +160,26 @@ export class SpawnCoordinator {
 
   /** Persist a background completion and let that completion request a wake-up. */
   onAgentComplete(record: AgentRecord): void {
-    const delivery = record.execution?.backgroundDelivery;
     // Manual clear and manager shutdown remove the record before the async run
     // settles. Those completions are intentionally discarded, not re-enqueued.
-    if (!delivery || this.disposed || !this.manager.getRecord(record.id)) return;
+    if (!record.execution.resultSessionId || this.disposed || !this.manager.getRecord(record.id)) return;
 
-    const result = storedResult(record, delivery);
+    const result = storedResult(record);
     if (!result) return;
 
     this.fallbackResults.set(result.deliveryId, result);
     record.execution.resultDeliveryId = result.deliveryId;
+    const completionVersion = this.completionVersion;
     this.flushFallbackResults();
     if (this.fallbackResults.has(result.deliveryId)) {
       this.lastWakeFailed = true;
+      if (this.completionVersion > completionVersion) this.requestParentWake();
       getNavigator()?.update();
       return;
     }
 
-    if (delivery === "auto") {
-      this.lastWakeFailed = false;
-      this.requestParentWake();
-    }
+    this.lastWakeFailed = false;
+    this.requestParentWake();
     getNavigator()?.update();
   }
 
@@ -198,15 +188,12 @@ export class SpawnCoordinator {
     if (this.disposed) return undefined;
     this.parentRunPhase = "preflight";
     this.flushFallbackResults();
-    const autoOnly = this.parentWakeActive && this.parentWakeMode === "auto";
-    const results = this.eligiblePendingResults()
-      .filter(result => !autoOnly || result.delivery === "auto");
+    const results = this.eligiblePendingResults();
     const message = buildResultMessage(results);
     if (!message) return undefined;
 
     this.parentWakeActive = true;
-    this.parentWakeMode = autoOnly ? "auto" : "natural";
-    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.parentWakeCompletionVersion = this.completionVersion;
     this.parentRunSucceeded = false;
     this.parentTurnResultIds = new Set(results.map(result => result.deliveryId));
     this.lastWakeFailed = false;
@@ -233,22 +220,20 @@ export class SpawnCoordinator {
     const ids = [...this.parentTurnResultIds];
     const succeeded = this.parentRunSucceeded;
     const deliveryFailed = this.lastWakeFailed;
-    const hasNewAutoCompletion = this.autoCompletionVersion > this.parentWakeAutoCompletionVersion;
-    const hasAutoPending = this.eligiblePendingResults().some(result => result.delivery === "auto");
-    const hasNewWakeOpportunity = hasNewAutoCompletion && hasAutoPending;
+    const hasNewCompletion = this.completionVersion > this.parentWakeCompletionVersion;
+    const hasPending = this.eligiblePendingResults().length > 0;
+    const hasNewWakeOpportunity = hasNewCompletion && hasPending;
     this.parentRunPhase = "idle";
     this.parentWakeActive = false;
-    this.parentWakeMode = undefined;
     this.parentTurnResultIds.clear();
 
     let wakeAfterSettle = false;
     if (succeeded) {
       this.lastWakeFailed = false;
       const acknowledged = ids.length === 0 || this.acknowledge(ids);
-      const failedAutoPending = this.pendingState().some(result => result.delivery === "auto");
-      this.lastWakeFailed ||= deliveryFailed && failedAutoPending;
-      // A successful acknowledgement drains Auto results completed while this
-      // turn ran. A failed delivery needs another persisted Auto completion or
+      this.lastWakeFailed ||= deliveryFailed && this.pendingState().length > 0;
+      // A successful acknowledgement drains results completed while this turn
+      // ran. A failed delivery needs another persisted completion or
       // an explicit lifecycle recovery event before it can try again.
       wakeAfterSettle = (!deliveryFailed && acknowledged) || hasNewWakeOpportunity;
     } else {
@@ -256,7 +241,7 @@ export class SpawnCoordinator {
       for (const deliveryId of ids) {
         if (this.pendingResults.has(deliveryId)) this.failedResultIds.add(deliveryId);
       }
-      // Do not retry the same failed delivery by itself. An Auto completion
+      // Do not retry the same failed delivery by itself. A completion
       // during that failed turn is a new event and may request one later wake.
       wakeAfterSettle = hasNewWakeOpportunity;
     }
@@ -282,16 +267,15 @@ export class SpawnCoordinator {
     this.refreshActiveBranch();
     this.parentRunPhase = "idle";
     this.parentWakeActive = false;
-    this.parentWakeMode = undefined;
     this.parentTurnResultIds.clear();
-    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.parentWakeCompletionVersion = this.completionVersion;
     this.lastWakeFailed = false;
     this.activateEligiblePending();
     getNavigator()?.update();
   }
 
-  /** Return only exceptional Auto state or intentional next-turn waiting state. */
-  pendingResultUiState(): PendingResultUiState | undefined {
+  /** Return only exceptional pending state; normal in-flight delivery stays hidden. */
+  pendingResultCount(): number | undefined {
     const visible = this.pendingState()
       .filter(result => !this.parentTurnResultIds.has(result.deliveryId));
     if (visible.length === 0) return undefined;
@@ -300,18 +284,28 @@ export class SpawnCoordinator {
       this.failedResultIds.has(result.deliveryId)
       || this.fallbackResults.has(result.deliveryId)
     );
-    if (hasFailedDelivery) return { count: visible.length, label: "pending" };
-
-    const nextTurnWaiting = visible.filter(result => result.delivery === "next-turn");
-    return nextTurnWaiting.length > 0
-      ? { count: nextTurnWaiting.length, label: "next-turn" }
-      : undefined;
+    return hasFailedDelivery ? visible.length : undefined;
   }
 
-  /** Read a durable result after its volatile AgentManager record was removed. */
+  /** Read the record's current completion, or the latest durable result after record cleanup. */
   getStoredResult(agentId: string): PendingResult | undefined {
-    const fallback = [...this.fallbackResults.values()].filter(result => result.agentId === agentId).at(-1);
-    return fallback ?? this.latestResults.get(agentId);
+    const deliveryId = this.manager.getRecord(agentId)?.execution.resultDeliveryId;
+    const latest = this.latestResults.get(agentId);
+    if (deliveryId) {
+      return this.fallbackResults.get(deliveryId)
+        ?? this.pendingResults.get(deliveryId)
+        ?? (latest?.deliveryId === deliveryId ? latest : undefined);
+    }
+
+    const fallback = [...this.fallbackResults.values()]
+      .filter(result => result.agentId === agentId)
+      .reduce<PendingResult | undefined>(
+        (newest, result) => !newest || result.createdAt >= newest.createdAt ? result : newest,
+        undefined,
+      );
+    if (!fallback) return latest;
+    if (!latest || fallback.createdAt >= latest.createdAt) return fallback;
+    return latest;
   }
 
   /** Include an explicitly read durable result in the current parent turn's acknowledgement. */
@@ -356,9 +350,7 @@ export class SpawnCoordinator {
 
   private activateEligiblePending(): void {
     this.flushFallbackResults();
-    if (this.eligiblePendingResults().some(result => result.delivery === "auto")) {
-      this.requestParentWake();
-    }
+    if (this.eligiblePendingResults().length > 0) this.requestParentWake();
   }
 
   private flushFallbackResults(): void {
@@ -369,11 +361,10 @@ export class SpawnCoordinator {
         continue;
       }
       this.fallbackResults.delete(deliveryId);
-      // Recovered Auto persistence is still blocked until an Auto event re-arms its wake.
-      if (result.delivery === "next-turn") this.failedResultIds.delete(deliveryId);
-      if (result.delivery === "auto") this.autoCompletionVersion++;
+      this.completionVersion++;
       this.pendingResults.set(deliveryId, result);
-      this.latestResults.set(result.agentId, result);
+      const latest = this.latestResults.get(result.agentId);
+      if (!latest || result.createdAt >= latest.createdAt) this.latestResults.set(result.agentId, result);
       const record = this.manager.getRecord(result.agentId);
       if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultPersisted = true;
     }
@@ -389,20 +380,17 @@ export class SpawnCoordinator {
     ) return;
     this.flushFallbackResults();
     const pi = getPiInstance();
-    const autoPending = this.eligiblePendingResults()
-      .filter(result => result.delivery === "auto");
-    const message = buildResultMessage(autoPending);
+    const pending = this.eligiblePendingResults();
+    const message = buildResultMessage(pending);
     if (!message) return;
     const previousTurnIds = this.parentTurnResultIds;
-    const previousWakeMode = this.parentWakeMode;
     const previousRunSucceeded = this.parentRunSucceeded;
     this.parentWakeActive = true;
-    this.parentWakeMode = "auto";
-    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.parentWakeCompletionVersion = this.completionVersion;
     this.parentRunSucceeded = false;
     this.parentTurnResultIds = new Set([
       ...previousTurnIds,
-      ...autoPending.map(result => result.deliveryId),
+      ...pending.map(result => result.deliveryId),
     ]);
     this.lastWakeFailed = false;
 
@@ -414,10 +402,9 @@ export class SpawnCoordinator {
       }
     } catch {
       this.parentWakeActive = false;
-      this.parentWakeMode = previousWakeMode;
       this.parentRunSucceeded = previousRunSucceeded;
       this.parentTurnResultIds = previousTurnIds;
-      for (const result of autoPending) this.failedResultIds.add(result.deliveryId);
+      for (const result of pending) this.failedResultIds.add(result.deliveryId);
       this.lastWakeFailed = true;
       getNavigator()?.update();
     }

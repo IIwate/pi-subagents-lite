@@ -76,7 +76,6 @@ describe("durable result delivery integration", () => {
     const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
       description: "review",
       modelKey: "test/model",
-      backgroundDelivery: "next-turn",
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
       invocation: { providerName: "test", modelName: "model" },
@@ -105,11 +104,10 @@ describe("durable result delivery integration", () => {
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
   });
 
-  it("preserves next-turn delivery and creates a new delivery ID after continuation", async () => {
+  it("preserves background delivery identity and creates a new delivery ID after continuation", async () => {
     const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
       description: "review",
       modelKey: "test/model",
-      backgroundDelivery: "next-turn",
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
     });
@@ -130,7 +128,11 @@ describe("durable result delivery integration", () => {
     await expect(state.coordinator.interact(id, "continue")).resolves.toEqual({ accepted: true });
     await record.execution.promise;
 
-    expect(record.execution.backgroundDelivery).toBe("next-turn");
+    expect(record.execution).toMatchObject({
+      resultSessionId: "parent-session",
+      resultOriginEntryId: "origin-a",
+    });
+    expect(record.execution).not.toHaveProperty("backgroundDelivery");
     expect(record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
     expect(readResultEntries(state.ctx).pending.get(record.execution.resultDeliveryId)?.result)
       .toBe("continued result");
@@ -154,7 +156,8 @@ describe("durable result delivery integration", () => {
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
 
-    expect(spawned.record.execution.backgroundDelivery).toBeUndefined();
+    expect(spawned.record.execution.resultSessionId).toBeUndefined();
+    expect(spawned.record.execution).not.toHaveProperty("backgroundDelivery");
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
   });
 });

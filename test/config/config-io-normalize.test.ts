@@ -21,12 +21,15 @@ function writeConfig(value: unknown): void {
 describe("config-io model access normalization", () => {
   beforeEach(() => files.clear());
 
-  it("defaults background delivery to auto", () => {
-    expect(loadConfig().agent.backgroundDelivery).toBe("auto");
-    writeConfig({ agent: { backgroundDelivery: "next-turn" } });
-    expect(loadConfig().agent.backgroundDelivery).toBe("next-turn");
-    writeConfig({ agent: { backgroundDelivery: "invalid" } });
-    expect(loadConfig().agent.backgroundDelivery).toBe("auto");
+  it("drops the retired background delivery policy from canonical settings", () => {
+    writeConfig({ agent: { backgroundDelivery: "next-turn", graceTurns: 9 } });
+    const config = loadConfig();
+
+    expect(config.agent.graceTurns).toBe(9);
+    expect(config.agent).not.toHaveProperty("backgroundDelivery");
+
+    saveConfigAtomic(config);
+    expect(JSON.parse(files.get(CONFIG_PATH)!).agent).not.toHaveProperty("backgroundDelivery");
   });
 
   it("returns fresh routing defaults for missing and malformed blocks", () => {

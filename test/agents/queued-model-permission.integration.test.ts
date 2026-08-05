@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
       defaultThinking: undefined,
       graceTurns: 2,
       forceBackground: false,
-      backgroundDelivery: "auto",
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       includeContextFiles: false,

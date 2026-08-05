@@ -53,7 +53,7 @@ export function ensureManagerAndNavigator(): void {
       getManager()!,
       async (agentId, text) => getCoordinator()?.interact(agentId, text)
         ?? { accepted: false, reason: "unavailable" },
-      () => getCoordinator()?.pendingResultUiState(),
+      () => getCoordinator()?.pendingResultCount(),
     );
     setNavigator(newNavigator);
     // ConfigStore synchronizes list stats visibility through dependency injection.

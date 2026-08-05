@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentStatus, BackgroundDeliveryMode } from "../types.js";
+import type { AgentStatus } from "../types.js";
 
 export const PENDING_RESULT_ENTRY = "subagents-lite:pending-result";
 export const RESULT_ACK_ENTRY = "subagents-lite:result-ack";
@@ -20,7 +20,6 @@ export interface PendingResult {
   provider?: string;
   model?: string;
   createdAt: number;
-  delivery: BackgroundDeliveryMode;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -41,10 +40,6 @@ function validStatus(value: unknown): value is AgentStatus {
     || value === "error";
 }
 
-function validDelivery(value: unknown): value is BackgroundDeliveryMode {
-  return value === "auto" || value === "next-turn";
-}
-
 function parsePendingResult(data: unknown): PendingResult | undefined {
   if (!isRecord(data)) return undefined;
   const deliveryId = stringValue(data.deliveryId);
@@ -63,7 +58,6 @@ function parsePendingResult(data: unknown): PendingResult | undefined {
     || !result
     || error === undefined
     || !validStatus(data.status)
-    || !validDelivery(data.delivery)
     || typeof data.createdAt !== "number"
   ) return undefined;
   return {
@@ -78,7 +72,6 @@ function parsePendingResult(data: unknown): PendingResult | undefined {
     provider: stringValue(data.provider),
     model: stringValue(data.model),
     createdAt: data.createdAt,
-    delivery: data.delivery,
   };
 }
 
@@ -106,7 +99,8 @@ export function readResultEntries(ctx: ExtensionContext): {
     if (entry.customType === PENDING_RESULT_ENTRY) {
       const result = parsePendingResult(entry.data);
       if (!result || result.parentSessionId !== parentSessionId) continue;
-      latest.set(result.agentId, result);
+      const currentLatest = latest.get(result.agentId);
+      if (!currentLatest || result.createdAt >= currentLatest.createdAt) latest.set(result.agentId, result);
       pending.set(result.deliveryId, result);
       continue;
     }

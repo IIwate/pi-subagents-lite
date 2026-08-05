@@ -7,7 +7,7 @@
  */
 
 import type { SystemPromptMode } from "../agents/types.js";
-import type { BackgroundDeliveryMode, ThinkingLevel } from "../types.js";
+import type { ThinkingLevel } from "../types.js";
 
 export interface ProviderModelAccess {
   /** Omitted = all current provider models; non-empty = exact model IDs. */
@@ -29,7 +29,6 @@ export interface ModelRoutingConfig {
 
 export interface AgentSettings {
   forceBackground: boolean;
-  backgroundDelivery: BackgroundDeliveryMode;
   graceTurns?: number;
   showCost?: boolean;
   /** System prompt mode: replace (default), inherit parent, or custom file. */

@@ -959,7 +959,8 @@ describe("AgentManager", () => {
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
         modelKey: "test/model",
-        backgroundDelivery: "auto",
+        resultSessionId: "parent-session",
+        resultOriginEntryId: "origin-a",
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;

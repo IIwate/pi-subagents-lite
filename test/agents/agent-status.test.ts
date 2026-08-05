@@ -270,7 +270,7 @@ describe("AgentStatus tool execute behavior", () => {
       {} as any,
     );
 
-    expect(result.content[0].text).toContain("Don't poll, sleep, or timeout-wait — background results follow the configured delivery mode.");
+    expect(result.content[0].text).toContain("Don't poll, sleep, or timeout-wait — background results are delivered automatically.");
   });
 
   it("keeps the full internal ID for follow-up tool calls", async () => {

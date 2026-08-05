@@ -18,7 +18,6 @@ function result(agentId: string, text: string, parentSessionId = "session-a") {
     result: text,
     error: null,
     createdAt: 1,
-    delivery: "auto" as const,
   };
 }
 
@@ -77,6 +76,19 @@ describe("result inbox", () => {
     const read = readResultEntries(context(entries));
     expect(read.pending.get("a-2")?.result).toBe("second");
     expect(read.latest.get("a")?.deliveryId).toBe("a-2");
+  });
+
+  it("keeps the newest completion when an older result is persisted later", () => {
+    const newer = { ...result("a", "newer"), deliveryId: "a-2", createdAt: 2 };
+    const older = { ...result("a", "older"), deliveryId: "a-1", createdAt: 1 };
+    const entries = [
+      { type: "custom", customType: "subagents-lite:pending-result", data: newer },
+      { type: "custom", customType: "subagents-lite:pending-result", data: older },
+    ];
+
+    const read = readResultEntries(context(entries));
+    expect(read.latest.get("a")).toMatchObject({ deliveryId: "a-2", result: "newer" });
+    expect([...read.pending.keys()]).toEqual(["a-2", "a-1"]);
   });
 
   it("ignores pending results and acknowledgements copied from another session", () => {

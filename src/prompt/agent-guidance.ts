@@ -34,7 +34,7 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     "",
     "Agent tool rules:",
     "- Agents start with a fresh conversation.",
-    "- For background work, set `run_in_background: true`; results follow the configured background delivery mode. Do not poll, sleep, or timeout-wait.",
+    "- For background work, set `run_in_background: true`; results are delivered automatically. Do not poll, sleep, or timeout-wait.",
     "- Prefer background for independent work; use foreground when the result gates the next parent action.",
     "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
     "- Omit `model` to use the exact parent model.",

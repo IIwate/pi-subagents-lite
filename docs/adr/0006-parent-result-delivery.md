@@ -18,11 +18,11 @@ The coordinator normalizes an otherwise empty terminal payload to `(no output)`
 defensively; the runner's existing no-output failure classification is unchanged. Explicit Clear and runtime
 teardown remove volatile work intentionally and do not create a new result
 entry; results already persisted or staged for same-session handoff remain. An automatic wake directly
-carries the current Auto pending set as one hidden `subagent-result` message;
-a natural prompt injects pending results through `before_agent_start`. An Auto
+carries the current eligible pending set as one hidden `subagent-result` message;
+a natural prompt injects pending results through `before_agent_start`. A
 result that completes after preflight is queued as a follow-up at `agent_start`
 when no result delivery is already active. If the natural turn already carries
-a result delivery, the Auto result starts a fresh turn after settlement instead.
+a result delivery, the new result starts a fresh turn after settlement instead.
 A completion in the `agent_end` to `agent_settled` gap also waits for full
 settlement and starts a fresh turn. This avoids treating both idle-looking gaps
 as the same lifecycle state. A result is acknowledged only after the parent turn
@@ -30,18 +30,16 @@ carrying it settles successfully.
 An exact `AgentStatus` read adds that result to the current parent turn's
 presented IDs and follows the same successful-settlement acknowledgement rule.
 
-The default background delivery mode is `Auto continue`. Every successfully
-persisted Auto completion rechecks pending Auto results whose origin remains on
-the active branch, so a later Auto completion may re-arm delivery for an older
-eligible Auto result. A successfully persisted Auto completion that arrives
-during a failed parent turn provides one new wake opportunity after that turn
-settles; the failed result alone never retries itself automatically. Next-turn
-completions never trigger or retry Auto delivery. Explicit session reload or
-`/tree` navigation back to the origin subtree is a separate lifecycle recovery
-event and re-arms eligible Auto delivery. Navigating away keeps unrelated
-results silent. An automatic wake injects only eligible Auto results;
-`Next natural turn` results remain pending until an eligible natural parent
-prompt.
+The delivery policy is automatic. Every successfully persisted
+completion rechecks pending results whose origin remains on the active branch,
+so a later completion may re-arm delivery for older eligible results. A
+completion persisted during a failed parent turn provides one new wake
+opportunity after that turn settles; the failed result alone never retries
+itself automatically. Explicit session reload or `/tree` navigation back to
+the origin subtree is a separate lifecycle recovery event and re-arms eligible
+delivery. Navigating away keeps unrelated results silent. The next natural
+parent prompt injects eligible pending results during preflight, including
+after an automatic wake failed.
 
 ## Why
 
@@ -61,9 +59,8 @@ failed parent run.
 
 - Pending entries are stored across the current parent session file, but
   automatic delivery and UI state are local to the origin-entry subtree. Normal
-  in-flight Auto delivery adds no pending UI text; `results pending` appears only
-  after delivery is blocked or fails, while `results waiting for next turn` is
-  the intentional Next-turn state.
+  in-flight delivery adds no pending UI text; `results pending` appears only
+  after delivery is blocked or fails.
 - New and forked sessions ignore copied entries with a different parent session
   ID.
 - They persist final result text and metadata, not prompts, full transcripts,
@@ -85,4 +82,4 @@ failed parent run.
   its result is acknowledged only if that parent turn settles successfully.
   Implicit delivery never crosses into an unrelated branch.
 - Foreground calls still return directly and are unaffected by background
-  delivery mode.
+  result persistence.

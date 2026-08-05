@@ -25,7 +25,6 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
-import type { PendingResultUiState } from "../spawn/spawn-coordinator.js";
 import { needsUserInput, recoverableFailureKind } from "../agents/failure-state.js";
 import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
@@ -64,9 +63,7 @@ type NavigatorUICtx = Pick<
 
 type NavigationEntry = { id: string | null; record?: AgentRecord };
 
-function pendingLabel(state: PendingResultUiState): string {
-  const count = state.count;
-  if (state.label === "next-turn") return `${count} ${count === 1 ? "result" : "results"} waiting for next turn`;
+function pendingLabel(count: number): string {
   return `${count} ${count === 1 ? "result" : "results"} pending`;
 }
 
@@ -495,12 +492,12 @@ export class AgentNavigator {
   constructor(
     private manager: AgentManager,
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
-    private getPendingResultUiState?: () => PendingResultUiState | undefined,
+    private getPendingResultCount?: () => number | undefined,
   ) {}
 
-  private pendingResultState(): PendingResultUiState | undefined {
-    const state = this.getPendingResultUiState?.();
-    return state && state.count > 0 ? state : undefined;
+  private pendingResultState(): number | undefined {
+    const count = this.getPendingResultCount?.();
+    return count && count > 0 ? count : undefined;
   }
 
   setUICtx(ctx: NavigatorUICtx): void {
@@ -1544,7 +1541,7 @@ export class AgentNavigator {
       this.confirmingClearId ?? "",
       this.interactionNotice ?? "",
       this.listExpanded ? "1" : "0",
-      pending ? `${pending.label}:${pending.count}` : "",
+      pending ? String(pending) : "",
     ].join("#");
   }
 

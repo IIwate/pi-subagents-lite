@@ -329,7 +329,6 @@ export class AgentManager {
         settled: false,
         modelKey: options.modelKey,
         graceTurns: options.graceTurns,
-        backgroundDelivery: options.backgroundDelivery,
         resultSessionId: options.resultSessionId,
         resultOriginEntryId: options.resultOriginEntryId,
       },
@@ -668,7 +667,7 @@ export class AgentManager {
         record.result = responseText;
         record.stats.contextPercent = getSessionContextPercent(session);
         record.lifecycle.completedAt ??= Date.now();
-        if (!record.execution.backgroundDelivery) record.lifecycle.resultConsumed = true;
+        if (!record.execution.resultSessionId) record.lifecycle.resultConsumed = true;
         return responseText;
       })
       .catch((err) => {
@@ -678,7 +677,7 @@ export class AgentManager {
         record.result = undefined;
         record.error = errorMessage(err);
         record.lifecycle.completedAt ??= Date.now();
-        if (!record.execution.backgroundDelivery) record.lifecycle.resultConsumed = true;
+        if (!record.execution.resultSessionId) record.lifecycle.resultConsumed = true;
         return "";
       })
       .finally(() => {

@@ -208,7 +208,6 @@ export async function executeAgentTool(
     thinkingLevel,
     thinkingResolved: true,
     graceTurns: store.agent.graceTurns,
-    backgroundDelivery: store.agent.backgroundDelivery,
     worktreePath: validatedWorktreePath,
     invocation: { modelName, providerName, thinkingLevel },
     runInBackground,
@@ -217,11 +216,7 @@ export async function executeAgentTool(
   const { agentId, record } = result;
 
   if (runInBackground) {
-    // Background: return immediately. Delivery mode is captured with the accepted invocation.
-    const delivery = record.execution.backgroundDelivery === "next-turn"
-      ? "The result will be added to the next natural parent turn."
-      : "The result will be delivered automatically when the parent can accept a turn.";
-    const suffix = `${delivery} Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${agentId}`;
+    const suffix = `The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
     return successResult(`[${label}] ${suffix}`);
   }

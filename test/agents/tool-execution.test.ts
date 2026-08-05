@@ -29,7 +29,7 @@ const {
   mockScopedModelKeys,
   mockRouting,
   mockForceBackground,
-  mockBackgroundDelivery,
+  mockSpawnIntents,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
@@ -42,7 +42,7 @@ const {
     agentAccess: {} as Record<string, { providers: Record<string, { models?: string[] }> }>,
   },
   mockForceBackground: { value: false },
-  mockBackgroundDelivery: { value: "auto" as "auto" | "next-turn" },
+  mockSpawnIntents: [] as any[],
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -90,7 +90,6 @@ vi.mock("../../src/shell.js", () => ({
       return {
         graceTurns: 5,
         forceBackground: mockForceBackground.value,
-        backgroundDelivery: mockBackgroundDelivery.value,
       };
     },
     get routing() {
@@ -107,6 +106,7 @@ vi.mock("../../src/shell.js", () => ({
   }),
   getCoordinator: () => ({
     spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
+      mockSpawnIntents.push(intent);
       // Delegate to the mocked manager.spawn
       const manager = {
         spawn: mockSpawn,
@@ -123,7 +123,6 @@ vi.mock("../../src/shell.js", () => ({
         modelKey: intent.modelKey,
         graceTurns: intent.graceTurns,
         worktreePath: intent.worktreePath,
-        backgroundDelivery: intent.backgroundDelivery,
         invocation: intent.invocation,
       });
       const record = mockGetRecord(id);
@@ -146,7 +145,7 @@ beforeEach(() => {
   mockRouting.enabledProviders = [];
   mockRouting.agentAccess = {};
   mockForceBackground.value = false;
-  mockBackgroundDelivery.value = "auto";
+  mockSpawnIntents.length = 0;
 });
 
 /* ------------------------------------------------------------------ */
@@ -396,7 +395,7 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
       id: "agent-id-bg",
       display: { type: "general-purpose", description: "Test agent" },
       lifecycle: { status: "running", startedAt: Date.now() },
-      execution: { backgroundDelivery: mockBackgroundDelivery.value },
+      execution: { resultSessionId: "parent-session" },
       stats: {
         lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
         toolUses: 0,
@@ -420,26 +419,9 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     );
 
     expect(mockValidateWorktreePath).toHaveBeenCalledTimes(1);
+    expect(mockSpawnIntents.at(-1)).not.toHaveProperty("backgroundDelivery");
     expect(result.content[0].text).toContain("running");
     expect(result.content[0].text).toContain("delivered automatically");
-  });
-
-  it("reports next-turn delivery for background spawns", async () => {
-    mockBackgroundDelivery.value = "next-turn";
-    mockGetRecord.mockReturnValue({
-      ...mockGetRecord(),
-      execution: { backgroundDelivery: "next-turn" },
-    });
-
-    const result = await executeAgentTool(
-      "tc-bg-next",
-      makeParams({ run_in_background: true }),
-      undefined,
-      undefined,
-      ctx,
-    );
-
-    expect(result.content[0].text).toContain("next natural parent turn");
   });
 
   it("returns error for invalid worktree_path in background spawn", async () => {

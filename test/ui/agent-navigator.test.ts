@@ -256,7 +256,7 @@ describe("AgentNavigator", () => {
   });
 
   it("shows nonzero pending results inline and hides zero", () => {
-    let pending: any = { count: 3, label: "pending" };
+    let pending = 3;
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]), undefined, () => pending);
@@ -265,11 +265,7 @@ describe("AgentNavigator", () => {
 
     expect(selector.render(120).join("\n")).toContain("3 results pending");
 
-    pending = { count: 2, label: "next-turn" };
-    navigator.update();
-    expect(selector.render(120).join("\n")).toContain("2 results waiting for next turn");
-
-    pending = { count: 0, label: "pending" };
+    pending = 0;
     navigator.update();
     expect(selector.render(120).join("\n")).not.toContain("pending result");
     expect(selector.render(120).join("\n")).not.toContain("results pending");
@@ -284,7 +280,7 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(
       makeManager([record]),
       undefined,
-      () => ({ count: 1, label: "pending" }),
+      () => 1,
     );
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);

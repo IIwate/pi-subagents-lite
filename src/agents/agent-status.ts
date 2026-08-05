@@ -61,7 +61,7 @@ export async function executeAgentStatusTool(
 ): Promise<any> {
   const manager = getManager()!;
   const requestedId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
-  const nudge = "Don't poll, sleep, or timeout-wait — background results follow the configured delivery mode.";
+  const nudge = "Don't poll, sleep, or timeout-wait — background results are delivered automatically.";
 
   if (requestedId) {
     const record = manager.getRecord(requestedId);
