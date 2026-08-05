@@ -15,6 +15,9 @@ import type { SubagentType, AgentInvocation } from "./agents/types.js";
  */
 export type ThinkingLevel = string;
 
+/** How background results are handed back to the parent session. */
+export type BackgroundDeliveryMode = "auto" | "next-turn";
+
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
   model?: Model<any>;
@@ -50,7 +53,9 @@ export interface EnvInfo {
 /** Internal runner events consumed by AgentManager record tracking. */
 export interface RunCallbacks {
   onToolUse?: () => void;
-  onSessionCreated?: (session: AgentSession) => void;
+  onSessionSetupStarted?: () => void;
+  onSessionSetupFinished?: () => void;
+  onSessionCreated?: (session: AgentSession) => void | Promise<void>;
   onTurnEnd?: (turnCount: number) => void;
   onAssistantUsage?: (usage: LifetimeUsage) => void;
   onCompaction?: () => void;
@@ -65,6 +70,11 @@ export interface SpawnConfig extends RunTunables {
   description: string;
   modelKey?: string;
   worktreePath?: string;
+  /** Background result delivery snapshot for accepted work. */
+  backgroundDelivery?: BackgroundDeliveryMode;
+  /** Parent session and branch anchor captured when background work is accepted. */
+  resultSessionId?: string;
+  resultOriginEntryId?: string | null;
   invocation?: AgentInvocation;
 }
 
@@ -94,10 +104,12 @@ export interface AgentLifecycle {
   pinnedAt?: number;
   /** Terminal cleanup time already spent paused by completed pin intervals. */
   cleanupExpiryPausedMs?: number;
+  /** True once the final result is safely persisted in the parent session. */
+  resultPersisted?: boolean;
   /**
-   * Whether the result has been read by the LLM (foreground return or background nudge).
-   * cleanup() preserves terminal records until this is set, so a completed background
-   * agent whose nudge hasn't fired yet isn't evicted before the LLM reads the result.
+   * Whether the parent has received the result through a foreground return
+   * or a successfully settled background turn.
+   * Cleanup preserves terminal records until this is set or the result is persisted.
    */
   resultConsumed?: boolean;
 }
@@ -127,6 +139,13 @@ interface AgentExecutionState {
   modelKey?: string;
   /** Grace turns retained for direct follow-up prompts. */
   graceTurns?: number;
+  /** Delivery mode captured when the background invocation was accepted. */
+  backgroundDelivery?: BackgroundDeliveryMode;
+  /** Parent session and branch anchor captured with the accepted invocation. */
+  resultSessionId?: string;
+  resultOriginEntryId?: string | null;
+  /** Unique final-result identity currently represented by the record. */
+  resultDeliveryId?: string;
   /** Debug fault assigned after the real child session is configured. */
   debugFaultKind?: DebugFaultKind;
   /** One-shot Debug recovery window for a fault-injected failure. */

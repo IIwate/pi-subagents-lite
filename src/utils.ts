@@ -125,23 +125,5 @@ export function unknownModelError(modelRef: string): string {
   );
 }
 
-/**
- * Find a model in the registry by "provider/model-id" or bare model id.
- * Returns the found model, or the fallback if not found / empty input.
- *
- * Prefer resolveExactModel() for explicit LLM-provided model args (no silent fallback).
- */
-export function findModelInRegistry(
-  modelStr: string | undefined,
-  registry: ModelLookupRegistry,
-  fallback: Model<any> | undefined,
-): Model<any> | undefined {
-  if (!modelStr) return fallback;
-
-  const trimmed = modelStr.trim();
-  if (!trimmed) return fallback;
-
-  return resolveExactModel(trimmed, registry, fallback?.provider) ?? fallback;
-}
 /** Timeout for git commands (ms). Shared by agent-runner and worktree-validator. */
 export const GIT_EXEC_TIMEOUT_MS = 5000;

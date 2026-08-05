@@ -45,13 +45,7 @@ export function ensureManagerAndNavigator(): void {
     const coordinator = new SpawnCoordinator(newManager);
     setCoordinator(coordinator);
 
-    // Wire the manager's onComplete to the coordinator
-    newManager.setOnComplete((record) => {
-      // Delegate completion side-effects to coordinator
-      coordinator.onAgentComplete(record);
-
-      getNavigator()?.update();
-    });
+    newManager.setOnComplete(record => coordinator.onAgentComplete(record));
   }
 
   if (!currentNavigator) {
@@ -59,6 +53,7 @@ export function ensureManagerAndNavigator(): void {
       getManager()!,
       async (agentId, text) => getCoordinator()?.interact(agentId, text)
         ?? { accepted: false, reason: "unavailable" },
+      () => getCoordinator()?.pendingResultUiState(),
     );
     setNavigator(newNavigator);
     // ConfigStore synchronizes list stats visibility through dependency injection.
@@ -100,7 +95,10 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event, ctx) => {
-    if (!event.systemPromptOptions.selectedTools?.includes("Agent")) return;
+    const resultMessage = getCoordinator()?.prepareBeforeAgentStart();
+    if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
+      return resultMessage ? { message: resultMessage } : undefined;
+    }
     const guidance = buildCurrentAgentGuidance({
       agents: getAvailableTypes().flatMap((name) => {
         const config = getAgentConfig(name);
@@ -116,7 +114,10 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       availableKeys: new Set(ctx.modelRegistry.getAvailable().map(modelKey)),
       scopedKeys: scopedModelKeys(ctx.scopedModels),
     });
-    return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+    return {
+      message: resultMessage,
+      systemPrompt: `${event.systemPrompt}\n\n${guidance}`,
+    };
   });
 
   pi.on("input", async (event, _ctx) => {
@@ -140,14 +141,26 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     return { action: "handled" as const };
   });
 
+  pi.on("agent_start", () => {
+    getCoordinator()?.onParentAgentStart();
+  });
+
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
   // setTimeout(0) lets Pi remove the Working row before relayout on the next event-loop turn.
-  pi.on("agent_end", (_event, ctx) => {
+  pi.on("agent_end", (event, ctx) => {
+    getCoordinator()?.onParentAgentEnd(event.messages);
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
   });
 
+  pi.on("agent_settled", () => {
+    getCoordinator()?.onParentSettled();
+  });
+
+  pi.on("session_tree", () => {
+    getCoordinator()?.onSessionTree();
+  });
 
   // session_start — load config and refresh the Agent catalogue used by guidance.
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
@@ -156,6 +169,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }
+    getCoordinator()?.restorePending();
   });
 
   // session_shutdown — abort all, dispose manager
@@ -184,13 +198,16 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     await cleanup(() => {
       try { getNavigator()?.dispose(); } finally { setNavigator(null); }
     });
+    // Let the manager abort and settle its runs while the coordinator can still
+    // receive legitimate completion callbacks. The coordinator is disposed
+    // afterwards so its durable fallback handoff is not cut off first.
+    await cleanup(async () => {
+      try { await getManager()?.dispose(); } finally { setManager(null); }
+    });
     await cleanup(() => {
       try { getCoordinator()?.dispose(); } finally { setCoordinator(null); }
     });
     await cleanup(() => getStore().dispose());
-    await cleanup(async () => {
-      try { await getManager()?.dispose(); } finally { setManager(null); }
-    });
 
     if (failures.length > 0) throw failures[0];
   });

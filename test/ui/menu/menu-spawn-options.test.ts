@@ -99,6 +99,30 @@ describe("showSpawnOptionsMenu — force background", () => {
   });
 });
 
+describe("showSpawnOptionsMenu — background delivery", () => {
+  beforeEach(() => {
+    mockModules.mockConfig.agent = { forceBackground: false };
+    vi.clearAllMocks();
+    settingsListCalls = [];
+    inputInstances = [];
+  });
+
+  it("defaults to AUTO", async () => {
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const delivery = settingsListCalls[0].items.find((item: any) => item.id === "backgroundDelivery");
+    expect(delivery.currentValue).toBe("AUTO");
+  });
+
+  it("persists NEXT TURN", async () => {
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    settingsListCalls[0].onChange("backgroundDelivery", "NEXT TURN");
+    expect(mockModules.mockConfig.agent.backgroundDelivery).toBe("next-turn");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Background delivery set to NEXT TURN", "info");
+  });
+});
+
 describe("showSpawnOptionsMenu — grace turns", () => {
   beforeEach(() => {
     mockModules.mockConfig.agent = { forceBackground: false };

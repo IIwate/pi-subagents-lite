@@ -21,6 +21,14 @@ function writeConfig(value: unknown): void {
 describe("config-io model access normalization", () => {
   beforeEach(() => files.clear());
 
+  it("defaults background delivery to auto", () => {
+    expect(loadConfig().agent.backgroundDelivery).toBe("auto");
+    writeConfig({ agent: { backgroundDelivery: "next-turn" } });
+    expect(loadConfig().agent.backgroundDelivery).toBe("next-turn");
+    writeConfig({ agent: { backgroundDelivery: "invalid" } });
+    expect(loadConfig().agent.backgroundDelivery).toBe("auto");
+  });
+
   it("returns fresh routing defaults for missing and malformed blocks", () => {
     for (const value of [{}, { modelRouting: null }, { modelRouting: [] }, { modelRouting: "on" }]) {
       writeConfig(value);

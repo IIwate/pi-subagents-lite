@@ -7,8 +7,8 @@ than as module-level mutable `let`/`Map` bindings exported from `state.ts`.
 Per-session services (config store, agent manager, spawn coordinator, navigator)
 are constructed at `session_start` and mounted onto the shell; `session_shutdown`
 disposes them. Owned domain state moves into the module that owns the concern:
-config into the ConfigStore, the activity store and **Nudge** into the spawn
-coordinator.
+config into the ConfigStore, result persistence and parent wake coordination
+into the spawn coordinator.
 
 ## Why
 
@@ -70,14 +70,16 @@ above. Tests still
 `vi.mock` the whole `shell.js` module (`test/fixtures.ts` `shellMock`,
 `test/menu-mock-setup.ts`).
 
-Why: pi's extension factory and event callbacks are registered once per
-process at module scope, so there is no per-session point where a
-closure-captured shell could be constructed without module-level state
-anyway. The holder singleton keeps the stale-`let` footgun fixed (fields are
-read through getters, never re-exported bindings) while accepting the
-15-mock test pattern the original decision rejected.
+Why: pi's callback signatures still require a holder reachable from module
+scope. Pi loads extensions through Jiti with module caching disabled, so that
+holder is per imported runtime rather than one permanent process module.
+Fields are read through getters, never re-exported bindings, while tests accept
+the whole-module shell mock pattern the original decision rejected.
 
-Effect: the shell stays small and owns nothing; per-session services are
-still constructed at `session_start` and disposed at `session_shutdown`.
-The "composition root" wording in this ADR should be read as "single
-module-level holder for per-session services", not closure injection.
+Effect: the shell stays small and owns no domain state; per-session services are
+constructed at `session_start` and disposed at `session_shutdown`. The two
+pieces that must cross a Jiti reload are explicitly process-local instead: the
+same-session result fallback and an `AsyncLocalStorage` child-spawn marker. The
+marker follows only the child async chain, so a concurrent parent reload is not
+made inert. The "composition root" wording in this ADR should be read as
+"single holder for one imported session runtime", not closure injection.

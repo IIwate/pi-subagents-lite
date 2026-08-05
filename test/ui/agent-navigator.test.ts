@@ -247,10 +247,51 @@ describe("AgentNavigator", () => {
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
-    expect(selector.render(120).join("\n")).toContain(
+    const rendered = selector.render(120).join("\n");
+    expect(rendered).toContain(
       "● Main (1 running · 0 queued · 1 total · Alt+A collapse)",
     );
+    expect(rendered).not.toContain(record.id);
     expect(ui.statuses.has("subagents-lite")).toBe(false);
+  });
+
+  it("shows nonzero pending results inline and hides zero", () => {
+    let pending: any = { count: 3, label: "pending" };
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]), undefined, () => pending);
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120).join("\n")).toContain("3 results pending");
+
+    pending = { count: 2, label: "next-turn" };
+    navigator.update();
+    expect(selector.render(120).join("\n")).toContain("2 results waiting for next turn");
+
+    pending = { count: 0, label: "pending" };
+    navigator.update();
+    expect(selector.render(120).join("\n")).not.toContain("pending result");
+    expect(selector.render(120).join("\n")).not.toContain("results pending");
+    expect(selector.render(120).join("\n")).not.toContain("waiting for next turn");
+  });
+
+  it("shows Needs input and an undelivered failure result independently", () => {
+    const record = makeRecord("agent-needs-input", "error");
+    record.execution.settled = true;
+    record.error = "temporary provider failure";
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(
+      makeManager([record]),
+      undefined,
+      () => ({ count: 1, label: "pending" }),
+    );
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+
+    const text = selector.render(120).join("\n");
+    expect(text).toContain("1 needs input");
+    expect(text).toContain("1 result pending");
   });
 
   it("lets the user collapse and expand the list", () => {
@@ -518,7 +559,8 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     const transcript = stripAnsi(tui.children[tui.chatIndex].render(120).join("\n"));
-    expect(transcript).toContain("Explore [DEBUG] (Needs input) · agent-de");
+    expect(transcript).toContain("Explore [DEBUG] (Needs input)");
+    expect(transcript).not.toContain("agent-de");
   });
 
   it.each([
@@ -1212,7 +1254,8 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\r");
 
     const text = tui.children[tui.chatIndex].render(120).join("\n");
-    expect(text).toContain("Explore (Queued) · agent-12");
+    expect(text).toContain("Explore (Queued)");
+    expect(text).not.toContain("agent-12");
     expect(text).toContain("Waiting in queue…");
     expect(text).not.toContain("Starting agent session…");
   });
@@ -1234,7 +1277,8 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\r");
 
     const text = tui.children[tui.chatIndex].render(120).join("\n");
-    expect(text).toContain("Explore (Error) · agent-12");
+    expect(text).toContain("Explore (Error)");
+    expect(text).not.toContain("agent-12");
     expect(text).toContain("Error: Automatic model override is no longer authorized");
     expect(text).not.toContain("Starting agent session…");
   });
@@ -1256,7 +1300,8 @@ describe("AgentNavigator", () => {
 
     const lines = tui.children[tui.chatIndex].render(120);
     const text = lines.join("\n");
-    expect(text).toContain("Explore (Needs input) · agent-12");
+    expect(text).toContain("Explore (Needs input)");
+    expect(text).not.toContain("agent-12");
     expect(text).toContain("Inspect the project");
     expect(text).toContain("I should inspect files.");
     expect(text).toContain("read");

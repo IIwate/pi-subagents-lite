@@ -17,7 +17,7 @@ import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
-import type { ThinkingLevel } from "../types.js";
+import type { BackgroundDeliveryMode, ThinkingLevel } from "../types.js";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
 
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
@@ -43,6 +43,7 @@ export const fileConfigIO: ConfigIO = {
 /** Agent settings with all scalar defaults resolved. */
 export interface ResolvedAgentSettings {
   readonly forceBackground: boolean;
+  readonly backgroundDelivery: BackgroundDeliveryMode;
   readonly showCost: boolean;
   readonly graceTurns: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
@@ -100,6 +101,7 @@ export class ConfigStore {
 
     return {
       forceBackground: a.forceBackground === true,
+      backgroundDelivery: a.backgroundDelivery,
       showCost: a.showCost === true,
       graceTurns: a.graceTurns ?? 6,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
@@ -216,6 +218,10 @@ export class ConfigStore {
     agent: {
       setForceBackground: (enabled: boolean): void => {
         this.config.agent.forceBackground = enabled;
+        this.persist();
+      },
+      setBackgroundDelivery: (mode: BackgroundDeliveryMode): void => {
+        this.config.agent.backgroundDelivery = mode;
         this.persist();
       },
       setShowCost: (enabled: boolean): void => {

@@ -14,13 +14,23 @@ import { shellMock } from "../fixtures.ts";
 /* ------------------------------------------------------------------ */
 
 const mockListAgents = vi.fn();
+const mockGetRecord = vi.fn();
+const mockGetStoredResult = vi.fn();
+const mockMarkResultPresented = vi.fn();
 
 /* ------------------------------------------------------------------ */
 /*  Global mocks                                                      */
 /* ------------------------------------------------------------------ */
 
 vi.mock("../../src/shell.js", () => shellMock({
-  manager: { listAgents: mockListAgents },
+  manager: {
+    listAgents: mockListAgents,
+    getRecord: mockGetRecord,
+  },
+  coordinator: {
+    getStoredResult: mockGetStoredResult,
+    markResultPresented: mockMarkResultPresented,
+  },
 }));
 
 /* ------------------------------------------------------------------ */
@@ -30,6 +40,98 @@ vi.mock("../../src/shell.js", () => shellMock({
 describe("AgentStatus tool execute behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetRecord.mockReturnValue(undefined);
+    mockGetStoredResult.mockReturnValue(undefined);
+  });
+
+  it("looks up one exact result without polling", async () => {
+    mockGetRecord.mockReturnValue({
+      id: "agent-12345678",
+      display: { type: "reviewer", invocation: { providerName: "openai", modelName: "gpt-test" } },
+      lifecycle: { status: "completed" },
+      execution: {},
+      result: "Review-Result: PASS",
+    });
+
+    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
+    const result = await executeAgentStatusTool(
+      "call_exact",
+      { agent_id: "agent-12345678" },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(result.content[0].text).toContain("Agent agent-12345678: completed");
+    expect(result.content[0].text).toContain("Provider: openai");
+    expect(result.content[0].text).toContain("Model: gpt-test");
+    expect(result.content[0].text).toContain("Review-Result: PASS");
+    expect(result.content[0].text).toContain("Needs input: no");
+  });
+
+  it("rejects an ID prefix instead of resolving it", async () => {
+    mockGetRecord.mockImplementation((id: string) => id === "agent-12345678" ? {
+      id,
+      display: { type: "reviewer", invocation: {} },
+      lifecycle: { status: "completed" },
+      execution: {},
+      result: "done",
+    } : undefined);
+
+    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
+    const result = await executeAgentStatusTool(
+      "call_prefix",
+      { agent_id: "agent-1234" },
+      undefined,
+      undefined,
+      {
+        sessionManager: {
+          getSessionId: () => "test-session",
+          getEntries: () => [],
+        },
+      } as any,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Unknown agent: agent-1234");
+  });
+
+  it("uses the durable result when a live record has no result text", async () => {
+    mockGetRecord.mockReturnValue({
+      id: "agent-12345678",
+      display: { type: "reviewer", invocation: {} },
+      lifecycle: { status: "error" },
+      execution: {},
+      result: undefined,
+      error: "temporary failure",
+    });
+    mockGetStoredResult.mockReturnValue({
+      agentId: "agent-12345678",
+      type: "reviewer",
+      status: "error",
+      result: "durable final result",
+      error: null,
+      provider: "cliproxyapi",
+      model: "gpt-test",
+      deliveryId: "delivery-1",
+      parentSessionId: "test-session",
+      originEntryId: "origin-a",
+      createdAt: 1,
+      delivery: "auto",
+    });
+
+    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
+    const result = await executeAgentStatusTool(
+      "call_durable",
+      { agent_id: "agent-12345678" },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(result.content[0].text).toContain("durable final result");
+    expect(result.content[0].text).toContain("Provider: cliproxyapi");
+    expect(mockMarkResultPresented).toHaveBeenCalledWith("delivery-1");
   });
 
   it("returns empty state message when no agents exist", async () => {
@@ -51,7 +153,7 @@ describe("AgentStatus tool execute behavior", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it("formats each agent as {shortId} ({type}) {status}", async () => {
+  it("formats each agent as {id} ({type}) {status}", async () => {
     mockListAgents.mockReturnValue([
       { id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "running" } },
     ]);
@@ -68,8 +170,7 @@ describe("AgentStatus tool execute behavior", () => {
     );
 
     const text = result.content[0].text;
-    // Contract: agent entries use "id (type) status" format, short ID is 8 chars
-    expect(text).toMatch(/[a-z0-9]{8} \(builder\) running/);
+    expect(text).toContain("abc123def456ghi (builder) running");
     expect(text).toContain("Don't poll");
   });
 
@@ -91,8 +192,9 @@ describe("AgentStatus tool execute behavior", () => {
     );
 
     const text = result.content[0].text;
-    // Contract: multiple agents comma-separated, each matching the format
-    expect(text).toMatch(/[a-z0-9]{8} \(builder\) running, [a-z0-9]{8} \(reviewer\) completed/);
+    expect(text).toContain(
+      "aaa111bbb222ccc (builder) running, ddd333eee444fff (reviewer) completed",
+    );
     expect(text).toContain("Don't poll");
   });
 
@@ -119,7 +221,7 @@ describe("AgentStatus tool execute behavior", () => {
 
     const text = result.content[0].text;
     const lowerText = text.toLowerCase();
-    expect(text).toContain("abc123de (builder) error");
+    expect(text).toContain("abc123def456ghi (builder) error");
     expect(lowerText).not.toContain("debug");
     expect(lowerText).not.toContain("output_blocked");
     expect(lowerText).not.toContain("recovery");
@@ -168,10 +270,10 @@ describe("AgentStatus tool execute behavior", () => {
       {} as any,
     );
 
-    expect(result.content[0].text).toContain("Don't poll, sleep, or timeout-wait — you'll receive notifications when agents complete and the task advances automatically.");
+    expect(result.content[0].text).toContain("Don't poll, sleep, or timeout-wait — background results follow the configured delivery mode.");
   });
 
-  it("truncates long IDs to 8 characters", async () => {
+  it("keeps the full internal ID for follow-up tool calls", async () => {
     mockListAgents.mockReturnValue([
       { id: "a-very-long-agent-id-that-exceeds-short-length", display: { type: "reviewer" }, lifecycle: { status: "completed" } },
     ]);
@@ -187,8 +289,9 @@ describe("AgentStatus tool execute behavior", () => {
       {} as any,
     );
 
-    // Contract: short ID is always 8 characters
-    expect(result.content[0].text).toMatch(/[a-z0-9-]{8} \(reviewer\) completed/);
+    expect(result.content[0].text).toContain(
+      "a-very-long-agent-id-that-exceeds-short-length (reviewer) completed",
+    );
   });
 
   it("returns no error flag on success", async () => {

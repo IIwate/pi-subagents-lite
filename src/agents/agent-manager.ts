@@ -34,8 +34,8 @@ const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
 /** Recovery window for ordinary failed live sessions still available for user input. */
 const NORMAL_RECOVERY_TTL_MS = 30 * 60_000;
 
-/** Maximum wait for child shutdown handlers; disposal continues after this timeout (milliseconds). */
-const SESSION_SHUTDOWN_TIMEOUT_MS = 15_000;
+/** Maximum wait for child setup or shutdown during manager disposal (milliseconds). */
+const SESSION_TEARDOWN_TIMEOUT_MS = 15_000;
 
 /** UUID prefix length for agent IDs stored in the agents map (uniqueness). */
 const AGENT_ID_PREFIX_LENGTH = 17;
@@ -131,6 +131,10 @@ export class AgentManager {
 
   /** In-flight child session teardowns, awaited by dispose() so cleanup is not cut short. */
   private closing = new Set<Promise<void>>();
+  /** Session setup phases, awaited without waiting for the agent's full prompt run. */
+  private pendingSetups = new Set<Promise<void>>();
+  /** Prevent a clear/dispose race from emitting shutdown twice for one session. */
+  private closedSessions = new WeakSet<AgentSession>();
 
   /** One-shot fault used by the session-local Debug menu. */
   private armedDebugFault?: ArmedDebugFault;
@@ -291,6 +295,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    if (this.disposing) throw new Error("Agent manager is disposed.");
     const id = randomUUID().slice(0, AGENT_ID_PREFIX_LENGTH);
     const abortController = new AbortController();
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
@@ -324,6 +329,9 @@ export class AgentManager {
         settled: false,
         modelKey: options.modelKey,
         graceTurns: options.graceTurns,
+        backgroundDelivery: options.backgroundDelivery,
+        resultSessionId: options.resultSessionId,
+        resultOriginEntryId: options.resultOriginEntryId,
       },
       stats: {
         lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
@@ -385,6 +393,19 @@ export class AgentManager {
     record.lifecycle.startedAt = Date.now();
     record.execution.settled = false;
 
+    let resolveSetup!: () => void;
+    let setupStarted = false;
+    const setupFinished = new Promise<void>(resolve => { resolveSetup = resolve; });
+    const markSetupStarted = () => {
+      setupStarted = true;
+      this.pendingSetups.add(setupFinished);
+    };
+    const markSetupFinished = () => {
+      if (!setupStarted) return;
+      this.pendingSetups.delete(setupFinished);
+      resolveSetup();
+    };
+
     const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
@@ -397,11 +418,17 @@ export class AgentManager {
       graceTurns: options.graceTurns,
       signal: record.execution.abortController!.signal,
       debugFault: debugFault?.kind,
+      onSessionSetupStarted: markSetupStarted,
+      onSessionSetupFinished: markSetupFinished,
       ...this.createRecordCallbacks(record),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
       },
-      onSessionCreated: (session) => {
+      onSessionCreated: async (session) => {
+        if (this.disposing || this.agents.get(id) !== record) {
+          await this.closeSession(session);
+          return;
+        }
         record.execution.session = session;
         if (debugFault) {
           record.execution.debugFaultKind = debugFault.kind;
@@ -426,6 +453,10 @@ export class AgentManager {
       },
     })
       .then(({ responseText, session, aborted, turnLimited }) => {
+        if (this.disposing || this.agents.get(id) !== record) {
+          void this.closeSession(session);
+          return responseText;
+        }
         record.execution.session = session;
         // Don't overwrite status if externally stopped via abort()
         if (record.lifecycle.status !== "stopped") {
@@ -610,7 +641,9 @@ export class AgentManager {
     record.lifecycle.startedAt = Date.now();
     record.lifecycle.completedAt = undefined;
     record.lifecycle.cleanupExpiryPausedMs = undefined;
+    record.lifecycle.resultPersisted = undefined;
     record.lifecycle.resultConsumed = undefined;
+    record.execution.resultDeliveryId = undefined;
     record.result = undefined;
     record.error = undefined;
 
@@ -635,7 +668,7 @@ export class AgentManager {
         record.result = responseText;
         record.stats.contextPercent = getSessionContextPercent(session);
         record.lifecycle.completedAt ??= Date.now();
-        record.lifecycle.resultConsumed = true;
+        if (!record.execution.backgroundDelivery) record.lifecycle.resultConsumed = true;
         return responseText;
       })
       .catch((err) => {
@@ -645,7 +678,7 @@ export class AgentManager {
         record.result = undefined;
         record.error = errorMessage(err);
         record.lifecycle.completedAt ??= Date.now();
-        record.lifecycle.resultConsumed = true;
+        if (!record.execution.backgroundDelivery) record.lifecycle.resultConsumed = true;
         return "";
       })
       .finally(() => {
@@ -687,7 +720,7 @@ export class AgentManager {
     if (!record) return false;
 
     if (!isTerminalStatus(record.lifecycle.status)) {
-      this.stopAgent(record, stoppedBy);
+      this.stopAgent(record, stoppedBy, false);
     }
     this.removeRecord(id, record);
     return true;
@@ -697,7 +730,7 @@ export class AgentManager {
    * Stop an agent by aborting its session or removing it from the queue.
    * Returns true if the agent was stopped, false if it wasn't running/queued.
    */
-  private stopAgent(record: AgentRecord, stoppedBy?: StopInitiator): boolean {
+  private stopAgent(record: AgentRecord, stoppedBy?: StopInitiator, notify = true): boolean {
     const wasQueued = record.lifecycle.status === "queued";
     if (wasQueued) {
       this.queue = this.queue.filter(q => q.id !== record.id);
@@ -712,7 +745,7 @@ export class AgentManager {
     if (wasQueued) {
       record.execution.settled = true;
       this.settleQueued(record.id);
-      this.safeNotifyComplete(record);
+      if (notify) this.safeNotifyComplete(record);
     }
     return true;
   }
@@ -819,13 +852,15 @@ export class AgentManager {
    * inside child sessions do not register session_shutdown, so this emit cannot recurse into dispose().
    */
   private closeSession(session: AgentSession): Promise<void> {
+    if (this.closedSessions.has(session)) return Promise.resolve();
+    this.closedSessions.add(session);
     const done = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }),
           new Promise<void>(resolve => {
-            timer = setTimeout(resolve, SESSION_SHUTDOWN_TIMEOUT_MS);
+            timer = setTimeout(resolve, SESSION_TEARDOWN_TIMEOUT_MS);
             timer.unref?.();
           }),
         ]);
@@ -856,9 +891,9 @@ export class AgentManager {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
       if (record.lifecycle.pinnedAt != null) continue;
       const waitingForInput = needsUserInput(record);
-      // Ordinary terminal results stay until the LLM has read them. A failed live
-      // session has a finite recovery deadline instead, even if its nudge failed.
-      if (!waitingForInput && !record.lifecycle.resultConsumed) continue;
+      // A background result may leave the volatile record once the parent session
+      // has safely persisted it. The session entry remains the recovery source.
+      if (!waitingForInput && !record.lifecycle.resultPersisted && !record.lifecycle.resultConsumed) continue;
       if (waitingForInput) {
         if (record.execution.recoveryExpiryPausedRemainingMs != null) continue;
         if (this.recoveryExpiresAt(record) >= now) continue;
@@ -877,6 +912,11 @@ export class AgentManager {
     this.disposing = true;
     clearInterval(this.cleanupInterval);
     for (const id of [...this.recoveryExpiryTimers.keys()]) this.clearRecoveryExpiry(id);
+    // Abort before clearing records so a run still in session setup cannot
+    // create an orphan child session after the parent has been replaced.
+    for (const record of this.agents.values()) {
+      if (record.lifecycle.status === "running") record.execution.abortController?.abort();
+    }
     for (const record of this.agents.values()) {
       if (record.lifecycle.status !== "queued") continue;
       record.lifecycle.status = "error";
@@ -893,6 +933,22 @@ export class AgentManager {
       if (session) void this.closeSession(session);
     }
     this.agents.clear();
-    await Promise.all(this.closing);
+    if (this.pendingSetups.size > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.all([...this.pendingSetups]),
+          new Promise<void>(resolve => {
+            timer = setTimeout(resolve, SESSION_TEARDOWN_TIMEOUT_MS);
+            timer.unref?.();
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    while (this.closing.size > 0) {
+      await Promise.all([...this.closing]);
+    }
   }
 }

@@ -1,26 +1,23 @@
-import { getNavigator, getPiInstance, getSessionCtx } from "../shell.js";
-import { SHORT_ID_LENGTH } from "../types.js";
-
+import { randomUUID } from "node:crypto";
+import {
+  getNavigator,
+  getPiInstance,
+  getSessionCtx,
+  setFallbackResults,
+  takeFallbackResults,
+} from "../shell.js";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord, SpawnConfig } from "../types.js";
+import type { AgentRecord, BackgroundDeliveryMode, SpawnConfig } from "../types.js";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
 import { formatResultContent } from "../agents/tool-execution.js";
-
-/**
- * spawn-coordinator.ts — Spawn-and-track coordination for subagents.
- *
- * Single entry point for both LLM tool and menu spawn paths.
- * Owns: Nudge system (schedule/batch/emit), background agent tracking.
- * Delegates concurrency and record lifecycle to AgentManager (peers, not ownership).
- *
- * Decision refs: D4 (stats on record only), D6 (Nudge owned here),
- * D2 (peers with AgentManager).
- */
-
-// ============================================================================
-// Types
-// ============================================================================
+import {
+  appendPendingResult,
+  appendResultAck,
+  buildResultMessage,
+  readResultEntries,
+  type PendingResult,
+} from "./result-inbox.js";
 
 /** Input for spawn(). Built by each caller from its own validation. */
 export interface SpawnIntent extends SpawnConfig {
@@ -38,67 +35,123 @@ export interface SpawnResult {
   record: AgentRecord;
 }
 
-// ============================================================================
-// Constants
-// ============================================================================
+export interface PendingResultUiState {
+  count: number;
+  label: "pending" | "next-turn";
+}
 
-/** Batch delay for nudges — only emit one update per batch window (ms). */
-const NUDGE_DELAY_MS = 200;
+function isParentRunSuccessful(
+  messages: readonly { role: string; stopReason?: string; errorMessage?: string }[],
+): boolean {
+  const last = messages.filter(message => message.role === "assistant").at(-1);
+  return !!last
+    && last.stopReason !== "error"
+    && last.stopReason !== "aborted"
+    && last.errorMessage === undefined;
+}
 
-// ============================================================================
-// SpawnCoordinator
-// ============================================================================
+function storedResult(record: AgentRecord, delivery: BackgroundDeliveryMode): PendingResult | undefined {
+  const result = formatResultContent(record).trim() || "(no output)";
+  const parentSessionId = record.execution.resultSessionId;
+  if (!parentSessionId) return undefined;
+  const sessionModel = record.execution.session?.model;
+  const invocation = record.display.invocation;
+  return {
+    agentId: record.id,
+    parentSessionId,
+    originEntryId: record.execution.resultOriginEntryId ?? null,
+    type: record.display.type,
+    status: record.lifecycle.status,
+    result,
+    error: record.error?.trim() || null,
+    provider: sessionModel?.provider ?? invocation?.providerName,
+    model: sessionModel?.id ?? invocation?.modelName,
+    createdAt: Date.now(),
+    deliveryId: randomUUID(),
+    delivery,
+  };
+}
+
+/**
+ * Single spawn-and-delivery coordinator.
+ *
+ * Completion persistence and parent wake-up are deliberately separate. Every
+ * background completion is durable, while concurrent completions share one
+ * parent wake-up so a provider error cannot turn into N queued parent turns.
+ */
+function parentSessionId(): string {
+  return getSessionCtx().sessionManager.getSessionId();
+}
 
 export class SpawnCoordinator {
-  /** Agent IDs spawned as background — only these trigger a nudge on completion. */
-  private backgroundAgentIds = new Set<string>();
-
-  /** Captured ExtensionContext per background agent, bound to the spawning session. */
-  private backgroundContexts = new Map<string, ExtensionContext>();
-
-  /** Pending nudge agent IDs, batched within the delay window. */
-  private pendingNudges = new Set<string>();
-
-  /** Active nudge timer. */
-  private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** Set during dispose to prevent nudge emission after session replacement. */
+  /** Parent lifecycle phase distinguishes idle preflight from settled-idle gaps. */
+  private parentRunPhase: "idle" | "preflight" | "running" | "settling" = "idle";
+  /** True while one parent turn is carrying a result delivery request. */
+  private parentWakeActive = false;
+  /** Result IDs presented by the currently active parent turn. */
+  private parentTurnResultIds = new Set<string>();
+  /** Source of the active parent turn, used to keep auto and next-turn modes isolated. */
+  private parentWakeMode: "auto" | "natural" | undefined;
+  /** Monotonic Auto-completion version and the snapshot carried by the active parent turn. */
+  private autoCompletionVersion = 0;
+  private parentWakeAutoCompletionVersion = 0;
+  /** Latest parent run outcome, consumed at agent_settled. */
+  private parentRunSucceeded = true;
+  /** Last wake failed; used only to bound automatic retry at settlement. */
+  private lastWakeFailed = false;
+  /** Delivery failures stay attached to their result instead of leaking across modes. */
+  private failedResultIds = new Set<string>();
+  /** Results restored once from the parent session, then maintained incrementally. */
+  private pendingResults = new Map<string, PendingResult>();
+  private latestResults = new Map<string, PendingResult>();
+  /** Active branch ancestry, refreshed only on session start/tree navigation. */
+  private activeBranchIds = new Set<string>();
+  /** Results retained in memory while the parent session append is unavailable. */
+  private fallbackResults = new Map<string, PendingResult>();
+  /** Set during dispose to prevent stale pi usage after session replacement. */
   private disposed = false;
 
-  constructor(private manager: AgentManager) {}
+  constructor(private manager: AgentManager) {
+    const entries = readResultEntries(getSessionCtx());
+    this.pendingResults = entries.pending;
+    this.latestResults = entries.latest;
+    this.refreshActiveBranch();
+    for (const result of takeFallbackResults(parentSessionId())) {
+      this.fallbackResults.set(result.deliveryId, result);
+    }
+  }
 
-  /**
-   * Spawn + wire tracking + (foreground) await.
-   * Single entry point for LLM tool executor and menu wizard.
-   */
+  /** Spawn + wire tracking + (foreground) await. */
   async spawn(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
     intent: SpawnIntent,
   ): Promise<SpawnResult> {
-    // Shared config fields pass through unchanged; coordinator-only fields are removed.
     const { type, prompt, runInBackground, ...spawnOptions } = intent;
-
-    const agentId = this.manager.spawn(pi, ctx, type, prompt, spawnOptions);
+    const resultSessionId = runInBackground ? ctx.sessionManager.getSessionId() : undefined;
+    const resultOriginEntryId = runInBackground ? ctx.sessionManager.getLeafId() : undefined;
+    if (resultOriginEntryId) this.activeBranchIds.add(resultOriginEntryId);
+    const agentId = this.manager.spawn(
+      pi,
+      ctx,
+      type,
+      prompt,
+      runInBackground
+        ? { ...spawnOptions, resultSessionId, resultOriginEntryId }
+        : {
+            ...spawnOptions,
+            backgroundDelivery: undefined,
+            resultSessionId: undefined,
+            resultOriginEntryId: undefined,
+          },
+    );
 
     getNavigator()?.ensureTimer();
 
-    // Track background agents + capture ctx for fallback notification
-    if (runInBackground) {
-      this.backgroundAgentIds.add(agentId);
-      this.backgroundContexts.set(agentId, ctx);
-    }
-
     const record = this.manager.getRecord(agentId)!;
-
     if (!runInBackground) {
-      // Foreground: await completion
       await record.execution.promise;
-
-      // Only a concrete result or diagnostic is safe to treat as delivered.
-      if (formatResultContent(record).trim()) {
-        record.lifecycle.resultConsumed = true;
-      }
+      record.lifecycle.resultConsumed = true;
     }
 
     return { agentId, record };
@@ -109,119 +162,281 @@ export class SpawnCoordinator {
     const record = this.manager.getRecord(agentId);
     if (!record) return { accepted: false, reason: "unavailable" };
 
-    // Deliver the completed background result before mutating the same record
-    // for an interactive continuation.
-    if (this.pendingNudges.delete(agentId)) {
-      this.emitIndividualNudge(agentId);
-    }
-
     const result = await this.manager.interact(agentId, message, images);
     if (result.accepted) getNavigator()?.ensureTimer();
     return result;
   }
 
-  /**
-   * Schedule a nudge for a background agent.
-   * Batches with NUDGE_DELAY_MS window to coalesce rapid completions.
-   */
-  scheduleNudge(agentId: string): void {
-    this.pendingNudges.add(agentId);
-
-    if (this.nudgeTimer) return;
-
-    this.nudgeTimer = setTimeout(() => {
-      this.nudgeTimer = null;
-      const batch = [...this.pendingNudges];
-      this.pendingNudges.clear();
-
-      for (const id of batch) {
-        this.emitIndividualNudge(id);
-      }
-    }, NUDGE_DELAY_MS);
-  }
-
-  /**
-   * Called by AgentManager's onComplete callback (wired at session_start).
-   * Owns the completion side-effects: nudge scheduling.
-   */
+  /** Persist a background completion and let that completion request a wake-up. */
   onAgentComplete(record: AgentRecord): void {
-    // Schedule nudge for background agents
-    if (this.backgroundAgentIds.has(record.id)) {
-      this.scheduleNudge(record.id);
-      this.backgroundAgentIds.delete(record.id);
+    const delivery = record.execution?.backgroundDelivery;
+    // Manual clear and manager shutdown remove the record before the async run
+    // settles. Those completions are intentionally discarded, not re-enqueued.
+    if (!delivery || this.disposed || !this.manager.getRecord(record.id)) return;
+
+    const result = storedResult(record, delivery);
+    if (!result) return;
+
+    this.fallbackResults.set(result.deliveryId, result);
+    record.execution.resultDeliveryId = result.deliveryId;
+    this.flushFallbackResults();
+    if (this.fallbackResults.has(result.deliveryId)) {
+      this.lastWakeFailed = true;
+      getNavigator()?.update();
+      return;
     }
+
+    if (delivery === "auto") {
+      this.lastWakeFailed = false;
+      this.requestParentWake();
+    }
+    getNavigator()?.update();
   }
 
-  /** Dispose: clear timer and background tracking. */
-  dispose(): void {
-    if (this.nudgeTimer) {
-      clearTimeout(this.nudgeTimer);
-      this.nudgeTimer = null;
+  /** Inject pending results into a normal parent prompt. */
+  prepareBeforeAgentStart(): ReturnType<typeof buildResultMessage> {
+    if (this.disposed) return undefined;
+    this.parentRunPhase = "preflight";
+    this.flushFallbackResults();
+    const autoOnly = this.parentWakeActive && this.parentWakeMode === "auto";
+    const results = this.eligiblePendingResults()
+      .filter(result => !autoOnly || result.delivery === "auto");
+    const message = buildResultMessage(results);
+    if (!message) return undefined;
+
+    this.parentWakeActive = true;
+    this.parentWakeMode = autoOnly ? "auto" : "natural";
+    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.parentRunSucceeded = false;
+    this.parentTurnResultIds = new Set(results.map(result => result.deliveryId));
+    this.lastWakeFailed = false;
+    return message;
+  }
+
+  /** Flush a completion that landed after preflight but before the run started. */
+  onParentAgentStart(): void {
+    if (this.disposed) return;
+    this.parentRunPhase = "running";
+    this.requestParentWake();
+  }
+
+  /** Track the outcome of the current parent agent run. */
+  onParentAgentEnd(messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]): void {
+    this.parentRunPhase = "settling";
+    this.parentRunSucceeded = isParentRunSuccessful(messages);
+  }
+
+  /** Finalize delivery after Pi has exhausted retries and queued continuations. */
+  onParentSettled(): void {
+    if (this.disposed) return;
+
+    const ids = [...this.parentTurnResultIds];
+    const succeeded = this.parentRunSucceeded;
+    const deliveryFailed = this.lastWakeFailed;
+    const hasNewAutoCompletion = this.autoCompletionVersion > this.parentWakeAutoCompletionVersion;
+    const hasAutoPending = this.eligiblePendingResults().some(result => result.delivery === "auto");
+    const hasNewWakeOpportunity = hasNewAutoCompletion && hasAutoPending;
+    this.parentRunPhase = "idle";
+    this.parentWakeActive = false;
+    this.parentWakeMode = undefined;
+    this.parentTurnResultIds.clear();
+
+    let wakeAfterSettle = false;
+    if (succeeded) {
+      this.lastWakeFailed = false;
+      const acknowledged = ids.length === 0 || this.acknowledge(ids);
+      const failedAutoPending = this.pendingState().some(result => result.delivery === "auto");
+      this.lastWakeFailed ||= deliveryFailed && failedAutoPending;
+      // A successful acknowledgement drains Auto results completed while this
+      // turn ran. A failed delivery needs another persisted Auto completion or
+      // an explicit lifecycle recovery event before it can try again.
+      wakeAfterSettle = (!deliveryFailed && acknowledged) || hasNewWakeOpportunity;
+    } else {
+      this.lastWakeFailed = true;
+      for (const deliveryId of ids) {
+        if (this.pendingResults.has(deliveryId)) this.failedResultIds.add(deliveryId);
+      }
+      // Do not retry the same failed delivery by itself. An Auto completion
+      // during that failed turn is a new event and may request one later wake.
+      wakeAfterSettle = hasNewWakeOpportunity;
     }
-    this.pendingNudges.clear();
-    this.backgroundAgentIds.clear();
-    this.backgroundContexts.clear();
+    if (wakeAfterSettle) {
+      queueMicrotask(() => {
+        this.requestParentWake();
+        getNavigator()?.update();
+      });
+    }
+    getNavigator()?.update();
+  }
+
+  /** Re-arm eligible delivery after a session reload without resuming child sessions. */
+  restorePending(): void {
+    if (this.disposed) return;
+    this.activateEligiblePending();
+    getNavigator()?.update();
+  }
+
+  /** Refresh branch-local visibility after /tree navigation. */
+  onSessionTree(): void {
+    if (this.disposed) return;
+    this.refreshActiveBranch();
+    this.parentRunPhase = "idle";
+    this.parentWakeActive = false;
+    this.parentWakeMode = undefined;
+    this.parentTurnResultIds.clear();
+    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.lastWakeFailed = false;
+    this.activateEligiblePending();
+    getNavigator()?.update();
+  }
+
+  /** Return only exceptional Auto state or intentional next-turn waiting state. */
+  pendingResultUiState(): PendingResultUiState | undefined {
+    const visible = this.pendingState()
+      .filter(result => !this.parentTurnResultIds.has(result.deliveryId));
+    if (visible.length === 0) return undefined;
+
+    const hasFailedDelivery = visible.some(result =>
+      this.failedResultIds.has(result.deliveryId)
+      || this.fallbackResults.has(result.deliveryId)
+    );
+    if (hasFailedDelivery) return { count: visible.length, label: "pending" };
+
+    const nextTurnWaiting = visible.filter(result => result.delivery === "next-turn");
+    return nextTurnWaiting.length > 0
+      ? { count: nextTurnWaiting.length, label: "next-turn" }
+      : undefined;
+  }
+
+  /** Read a durable result after its volatile AgentManager record was removed. */
+  getStoredResult(agentId: string): PendingResult | undefined {
+    const fallback = [...this.fallbackResults.values()].filter(result => result.agentId === agentId).at(-1);
+    return fallback ?? this.latestResults.get(agentId);
+  }
+
+  /** Include an explicitly read durable result in the current parent turn's acknowledgement. */
+  markResultPresented(deliveryId: string): void {
+    this.flushFallbackResults();
+    if (this.pendingResults.has(deliveryId)) this.parentTurnResultIds.add(deliveryId);
+  }
+
+  /** Dispose delivery state; parent session entries remain durable. */
+  dispose(): void {
+    // Give a stale runtime one final chance to persist results before the
+    // composition root drops its in-memory fallback. There is no second store
+    // to write after the parent session itself is being replaced.
+    this.flushFallbackResults();
+    // Keep unsuccessful fallbacks in the composition-root shell so an
+    // in-process session reload can retry them with the new coordinator.
+    setFallbackResults(parentSessionId(), [...this.fallbackResults.values()]);
     this.disposed = true;
   }
 
-  // ── Private ──
+  private pendingState(): PendingResult[] {
+    return [
+      ...this.pendingResults.values(),
+      ...this.fallbackResults.values(),
+    ].filter(result => this.belongsToActiveBranch(result));
+  }
 
-  /** Emit an individual nudge for a completed background agent. */
-  private emitIndividualNudge(agentId: string): void {
-    // Skip if disposed — prevents stale pi usage after session replacement
-    if (this.disposed) return;
+  private refreshActiveBranch(): void {
+    this.activeBranchIds = new Set(
+      getSessionCtx().sessionManager.getBranch().map(entry => entry.id),
+    );
+  }
 
-    // Read pi from shell at call time so we get a fresh reference after reload.
+  private belongsToActiveBranch(result: PendingResult): boolean {
+    return result.parentSessionId === parentSessionId()
+      && (result.originEntryId === null || this.activeBranchIds.has(result.originEntryId));
+  }
+
+  private eligiblePendingResults(): PendingResult[] {
+    return [...this.pendingResults.values()].filter(result => this.belongsToActiveBranch(result));
+  }
+
+  private activateEligiblePending(): void {
+    this.flushFallbackResults();
+    if (this.eligiblePendingResults().some(result => result.delivery === "auto")) {
+      this.requestParentWake();
+    }
+  }
+
+  private flushFallbackResults(): void {
     const pi = getPiInstance();
-    if (!pi) return;
+    for (const [deliveryId, result] of this.fallbackResults) {
+      if (!appendPendingResult(pi, result)) {
+        this.failedResultIds.add(deliveryId);
+        continue;
+      }
+      this.fallbackResults.delete(deliveryId);
+      // Recovered Auto persistence is still blocked until an Auto event re-arms its wake.
+      if (result.delivery === "next-turn") this.failedResultIds.delete(deliveryId);
+      if (result.delivery === "auto") this.autoCompletionVersion++;
+      this.pendingResults.set(deliveryId, result);
+      this.latestResults.set(result.agentId, result);
+      const record = this.manager.getRecord(result.agentId);
+      if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultPersisted = true;
+    }
+  }
 
-    const record = this.manager.getRecord(agentId);
-    if (!record) return;
+  /** One idempotent wake request; later completions only add to the session inbox. */
+  private requestParentWake(): void {
+    if (
+      this.disposed
+      || this.parentWakeActive
+      || this.parentRunPhase === "preflight"
+      || this.parentRunPhase === "settling"
+    ) return;
+    this.flushFallbackResults();
+    const pi = getPiInstance();
+    const autoPending = this.eligiblePendingResults()
+      .filter(result => result.delivery === "auto");
+    const message = buildResultMessage(autoPending);
+    if (!message) return;
+    const previousTurnIds = this.parentTurnResultIds;
+    const previousWakeMode = this.parentWakeMode;
+    const previousRunSucceeded = this.parentRunSucceeded;
+    this.parentWakeActive = true;
+    this.parentWakeMode = "auto";
+    this.parentWakeAutoCompletionVersion = this.autoCompletionVersion;
+    this.parentRunSucceeded = false;
+    this.parentTurnResultIds = new Set([
+      ...previousTurnIds,
+      ...autoPending.map(result => result.deliveryId),
+    ]);
+    this.lastWakeFailed = false;
 
     try {
-      // Pick delivery mode based on parent session state:
-      // - steer: queues while running, delivers before next LLM call
-      // - followUp: waits for agent to finish, then delivers
-      const ctx = getSessionCtx();
-      const parentIdle = ctx?.isIdle?.() ?? true;
-      const deliverAs = parentIdle ? "followUp" : "steer";
-
-      const resultContent = formatResultContent(record);
-      if (!resultContent.trim()) return;
-
-      pi.sendMessage(
-        {
-          customType: "subagent-result",
-          content: `[Subagent "${record.display.type}" ${record.id.slice(0, SHORT_ID_LENGTH)} ${record.lifecycle.status}]\n\n${resultContent}`,
-          // Keep the TUI silent: users see completion in the list below the editor,
-          // while the LLM still receives the full result text.
-          display: false,
-        },
-        {
-          deliverAs,
-          triggerTurn: true,
-        },
-      );
-
-      // Full result delivered to the LLM — record is now safe for the cleanup
-      // timer to evict once it ages out.
-      record.lifecycle.resultConsumed = true;
-    } catch (error) {
-      // sendMessage failed (shared runtime overwritten by subagent bindCore).
-      // Fall back to UI notification using the captured spawning-session context.
-      const spawnCtx = this.backgroundContexts.get(agentId);
-      if (spawnCtx?.ui?.notify) {
-        try {
-          spawnCtx.ui.notify(
-            `[Subagent "${record.display.type}" ${record.lifecycle.status}] Result available`,
-            "info",
-          );
-        } catch {
-          // ctx may also be stale if session was replaced
-        }
+      if (this.parentRunPhase === "running" || !getSessionCtx().isIdle()) {
+        pi.sendMessage(message, { deliverAs: "followUp" });
+      } else {
+        pi.sendMessage(message, { triggerTurn: true });
       }
-    } finally {
-      this.backgroundContexts.delete(agentId);
+    } catch {
+      this.parentWakeActive = false;
+      this.parentWakeMode = previousWakeMode;
+      this.parentRunSucceeded = previousRunSucceeded;
+      this.parentTurnResultIds = previousTurnIds;
+      for (const result of autoPending) this.failedResultIds.add(result.deliveryId);
+      this.lastWakeFailed = true;
+      getNavigator()?.update();
     }
+  }
+
+  private acknowledge(ids: readonly string[]): boolean {
+    const pi = getPiInstance();
+    if (!appendResultAck(pi, parentSessionId(), ids)) {
+      for (const deliveryId of ids) this.failedResultIds.add(deliveryId);
+      this.lastWakeFailed = true;
+      return false;
+    }
+    for (const deliveryId of ids) {
+      const result = this.pendingResults.get(deliveryId);
+      this.pendingResults.delete(deliveryId);
+      this.failedResultIds.delete(deliveryId);
+      const record = result ? this.manager.getRecord(result.agentId) : undefined;
+      if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultConsumed = true;
+    }
+    return true;
   }
 }

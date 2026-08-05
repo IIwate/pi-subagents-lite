@@ -18,9 +18,9 @@ The extension registers three tools for the LLM:
 
 - `Agent` — start a subagent. Foreground runs wait for completion; `run_in_background: true` returns immediately.
 - `StopAgent` — stop a running or queued agent by ID.
-- `AgentStatus` — list current and completed agents without polling or waiting.
+- `AgentStatus` — list agents, or read one exact result by `agent_id` without polling or waiting.
 
-Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the record count temporarily reaches zero. With no records, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
+Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
 › ● Main (1 needs input · 1 running · 0 queued · 3 total · Alt+A collapse)
@@ -33,16 +33,16 @@ Once a subagent exists, progress appears in the below-editor list with a sticky 
 - `○` and `●` mark inactive and active unpinned transcripts.
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
 - Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
-- While expanded, sticky Main owns the needs-input count, running/queued/total counts, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Both forms follow reading order: needs input, counts, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
+- While expanded, sticky Main owns the needs-input count, running/queued/total counts, exceptional `results pending` or intentional `results waiting for next turn` state for the active branch, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status in the normal path. Normal in-flight Auto delivery does not show pending text. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Zero pending results are hidden. Both forms follow reading order: needs input, counts, delivery state when nonzero, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
 - Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`. The list label, expanded Main count, and folded Footer count use the same orange emphasis without changing list visibility.
 - With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
 - Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
 - Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
 - Foreground Agent calls honor Pi's interrupt signal: `Esc` from the editor stops every running or queued foreground Agent in the interrupted parent turn, while background Agents continue. If the list has focus, `Esc` only returns to the editor; press it again there to interrupt.
 - While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
-- Consumed terminal results are normally removed after 10 minutes. `Needs input` means the run failed after a live child session already existed and instead has a 30-minute recovery window. Select it and send another prompt to continue the same in-memory session. Viewing or pinning it pauses the remaining recovery time; the countdown resumes only after both pause reasons are released. Pins and recovery state are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
+- Persisted terminal results are normally removed from the volatile Agent list after 10 minutes; the parent session result entry remains the recovery source. Automatic delivery is limited to branches that retain the Agent call's origin entry; explicit `AgentStatus({ agent_id })` lookup remains session-wide. `Needs input` means the run failed after a live child session already existed and instead has a 30-minute recovery window. Select it and send another prompt to continue the same in-memory session. Viewing or pinning it pauses the remaining recovery time; the countdown resumes only after both pause reasons are released. Pins and child recovery state are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
-Each new subagent starts without the parent's conversation history. Background results are delivered to the parent LLM silently when ready; do not poll, sleep, or repeatedly call `AgentStatus` while waiting.
+Each new subagent starts without the parent's conversation history. Background results are persisted in the parent Pi session with the Agent call's session ID and origin entry. They are delivered only while that origin remains on the active branch: `Auto continue` (default) wakes the parent when possible, while `Next natural turn` waits for the next ordinary parent prompt. An Auto result completed and persisted during a failed parent turn provides one later automatic wake opportunity; the failed result alone does not retry itself automatically, and Next-turn completions never trigger Auto delivery. Explicit reload or `/tree` return to the origin is a separate recovery event that re-arms eligible Auto results; forked or new sessions ignore copied entries from the old session. Do not poll, sleep, or repeatedly call `AgentStatus` while waiting. Use `AgentStatus({ agent_id })` only for explicit session-wide result recovery; that read is acknowledged only after its parent turn settles successfully.
 
 ## Built-in Agents
 
@@ -165,7 +165,7 @@ The normal Agent model picker shows only actionable alternates: Provider models 
 
 Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
 
-The selected model, parent model, thinking selection, and scoped-model state are locked when the Agent call is accepted. Running and queued agents retain that invocation snapshot; later settings changes affect only future Agent calls.
+The selected model, parent model, thinking selection, scoped-model state, and background delivery mode are locked when the Agent call is accepted. Running and queued agents retain that invocation snapshot; later settings changes affect only future Agent calls.
 
 ## Concurrency
 
@@ -181,7 +181,7 @@ Run `/agents` to configure:
 
 - Parent default inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
 - the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
-- background mode, grace turns, and default thinking;
+- background mode, Background delivery (`Auto continue` or `Next natural turn`), grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, and visible list statistics;
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;

@@ -30,7 +30,6 @@ vi.mock("../../src/spawn/worktree-validator.js", () => ({
   validateWorktreePath: async () => ({ ok: false, error: "unused" }),
 }));
 vi.mock("../../src/utils.js", () => ({
-  findModelInRegistry: () => undefined,
   parseThinkingLevel: () => undefined,
   parseModelSpec: () => ({ modelRef: undefined }),
   resolveExactModel: () => undefined,

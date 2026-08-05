@@ -35,8 +35,9 @@ import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
 import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
 import type { SubagentType, SystemPromptMode } from "./types.js";
-import { getStore, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
+import { getStore, withSubagentSpawn } from "../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
+import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "../spawn/result-inbox.js";
 import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
@@ -441,7 +442,13 @@ function inheritCustomSessionEntries(
 ): void {
   const latestEntries = new Map<string, unknown>();
   for (const entry of parentEntries) {
-    if (entry.type !== "custom" || typeof entry.customType !== "string" || !entry.customType.trim()) {
+    if (
+      entry.type !== "custom"
+      || typeof entry.customType !== "string"
+      || !entry.customType.trim()
+      || entry.customType === PENDING_RESULT_ENTRY
+      || entry.customType === RESULT_ACK_ENTRY
+    ) {
       continue;
     }
     latestEntries.delete(entry.customType);
@@ -531,7 +538,30 @@ async function createAndConfigureSession(
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
   );
-  await session.bindExtensions({});
+  let setupAborted = options.signal?.aborted === true;
+  let abortDisposal: Promise<void> | undefined;
+  const disposeOnAbort = () => {
+    setupAborted = true;
+    if (abortDisposal) return;
+    try {
+      abortDisposal = Promise.resolve(session.dispose()).catch(() => {});
+    } catch {
+      abortDisposal = Promise.resolve();
+    }
+  };
+  if (setupAborted) disposeOnAbort();
+  else options.signal?.addEventListener("abort", disposeOnAbort, { once: true });
+  try {
+    await session.bindExtensions({});
+  } catch (error) {
+    if (!setupAborted) throw error;
+  } finally {
+    options.signal?.removeEventListener("abort", disposeOnAbort);
+  }
+  if (setupAborted) {
+    await abortDisposal;
+    throw new Error("Agent session setup aborted");
+  }
   const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
   const filteredTools = resolveVisibleTools({
     activeTools: session.getAllTools().map(tool => tool.name),
@@ -541,7 +571,7 @@ async function createAndConfigureSession(
     notify,
   });
   if (filteredTools) session.setActiveToolsByName(filteredTools);
-  options.onSessionCreated?.(session);
+  await options.onSessionCreated?.(session);
   return session;
 }
 
@@ -660,14 +690,9 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
-  // Bracket the whole subagent lifecycle so the extension factory can detect
-  // it's being re-loaded inside a subagent and avoid clobbering the parent shell.
-  enterSubagentSpawn();
-  try {
-    return await runAgentImpl(ctx, type, prompt, options);
-  } finally {
-    exitSubagentSpawn();
-  }
+  // Keep the marker in this async chain across Jiti reloads and cwd cache swaps
+  // without making unrelated parent reloads inert.
+  return withSubagentSpawn(() => runAgentImpl(ctx, type, prompt, options));
 }
 
 async function runAgentImpl(
@@ -693,20 +718,26 @@ async function runAgentImpl(
   }
 
   const effectiveCwd = options.cwd ?? ctx.cwd;
-  const env = await detectEnv(options.pi, effectiveCwd);
+  options.onSessionSetupStarted?.();
+  let session: AgentSession;
+  try {
+    const env = await detectEnv(options.pi, effectiveCwd);
 
-  // Resolve system prompt mode + source prompts + context files
-  const { mode, extras: promptExtras } = resolveSystemPromptSources(ctx, effectiveCwd, bufferNotify);
+    // Resolve system prompt mode + source prompts + context files
+    const { mode, extras: promptExtras } = resolveSystemPromptSources(ctx, effectiveCwd, bufferNotify);
 
-  const systemPrompt = buildPrompt(
-    type, agentConfig, config, effectiveCwd, env,
-    mode, promptExtras,
-  );
-  const { loader, reload } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
-  await reload();
-  const session = await createAndConfigureSession(
-    ctx, options, agentConfig, type, effectiveCwd, loader, bufferNotify,
-  );
+    const systemPrompt = buildPrompt(
+      type, agentConfig, config, effectiveCwd, env,
+      mode, promptExtras,
+    );
+    const { loader, reload } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
+    await reload();
+    session = await createAndConfigureSession(
+      ctx, options, agentConfig, type, effectiveCwd, loader, bufferNotify,
+    );
+  } finally {
+    options.onSessionSetupFinished?.();
+  }
   if (options.debugFault) {
     throw new Error(debugFaultMessage(options.debugFault));
   }

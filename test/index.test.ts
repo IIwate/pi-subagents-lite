@@ -238,6 +238,12 @@ describe("tool registration", () => {
     expect(names).toEqual(["Agent", "StopAgent", "AgentStatus"]);
   });
 
+  it("allows AgentStatus to look up one exact agent result", () => {
+    const tool = findTool(api, "AgentStatus");
+    expect(hasParam(tool?.parameters, "agent_id")).toBe(true);
+    expect(tool?.parameters.additionalProperties).toBe(false);
+  });
+
   it("keeps every subagent tool out of the chat feed", () => {
     for (const tool of api.tools) {
       expect(tool.renderShell).toBe("self");
@@ -333,8 +339,9 @@ describe("event listener registration", () => {
     expect(api.listeners.some((l) => l.event === "session_start")).toBe(true);
   });
 
-  it("registers session_shutdown and automatic guidance listeners", () => {
+  it("registers session lifecycle and automatic guidance listeners", () => {
     expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(true);
+    expect(api.listeners.some((l) => l.event === "session_tree")).toBe(true);
     expect(api.listeners.some((l) => l.event === "before_agent_start")).toBe(true);
   });
 
@@ -422,14 +429,11 @@ describe("Agent tool schema — worktree_path", () => {
 /* ------------------------------------------------------------------ */
 
 describe("subagent spawn guard", () => {
-  // The real shell module is used here (index.test.ts does not mock shell.js),
-  // so toggling the spawn flag drives the same counter the factory reads.
+  // The real shell module is used here (index.test.ts does not mock shell.js).
   let shell: typeof import("../src/shell.js");
 
   beforeEach(async () => {
     shell = await import("../src/shell.js");
-    // Defensive: start every test from a clean depth.
-    while (shell.isInsideSubagentSpawn()) shell.exitSubagentSpawn();
   });
 
   it("registers tools and listeners for the parent session", async () => {
@@ -442,37 +446,41 @@ describe("subagent spawn guard", () => {
   });
 
   it("stays inert when loaded inside a subagent spawn", async () => {
-    shell.enterSubagentSpawn();
-    try {
+    await shell.withSubagentSpawn(async () => {
       const api = createMockExtensionAPI();
       await loadExtension(api.api);
 
-      // No tools, no event handlers: the subagent must not clobber the parent shell
-      // (setPiInstance/setSessionCtx happen via the factory + session_start handler).
+      // No tools, no event handlers: the subagent must not clobber the parent shell.
       expect(api.tools).toHaveLength(0);
       expect(api.listeners).toHaveLength(0);
       expect(api.shortcuts).toHaveLength(0);
-    } finally {
-      shell.exitSubagentSpawn();
-    }
+    });
     expect(shell.isInsideSubagentSpawn()).toBe(false);
   });
 
-  it("is inert for nested spawns and recovers when depth returns to 0", async () => {
-    shell.enterSubagentSpawn();
-    shell.enterSubagentSpawn(); // nested
-    try {
+  it("is inert for nested spawns and restores the parent async context", async () => {
+    await shell.withSubagentSpawn(() => shell.withSubagentSpawn(async () => {
       const api = createMockExtensionAPI();
       await loadExtension(api.api);
       expect(api.tools).toHaveLength(0);
-    } finally {
-      shell.exitSubagentSpawn();
-      shell.exitSubagentSpawn();
-    }
+    }));
 
-    // Parent load works again once no subagent is in flight
     const api = createMockExtensionAPI();
     await loadExtension(api.api);
     expect(api.tools.length).toBeGreaterThan(0);
+  });
+
+  it("does not make unrelated parent work inert while a child context is active", async () => {
+    let release!: () => void;
+    const child = shell.withSubagentSpawn(() => new Promise<void>((resolve) => { release = resolve; }));
+    await Promise.resolve();
+
+    expect(shell.isInsideSubagentSpawn()).toBe(false);
+    const api = createMockExtensionAPI();
+    await loadExtension(api.api);
+    expect(api.tools.length).toBeGreaterThan(0);
+
+    release();
+    await child;
   });
 });

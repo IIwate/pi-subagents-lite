@@ -30,6 +30,13 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
       description: "Spawn every agent in the background by default (no foreground wait).",
     },
     {
+      id: "backgroundDelivery",
+      label: "Background delivery",
+      currentValue: store.agent.backgroundDelivery === "next-turn" ? "NEXT TURN" : "AUTO",
+      values: ["AUTO", "NEXT TURN"],
+      description: "Auto-continue the parent or wait for its next natural turn.",
+    },
+    {
       id: "graceTurns",
       label: "Grace turns",
       currentValue: String(store.agent.graceTurns),
@@ -60,6 +67,10 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
       case "forceBackground":
         store.mutate.agent.setForceBackground(newValue === "ON");
         ctx.ui.notify(`Force background set to ${newValue}`, "info");
+        break;
+      case "backgroundDelivery":
+        store.mutate.agent.setBackgroundDelivery(newValue === "NEXT TURN" ? "next-turn" : "auto");
+        ctx.ui.notify(`Background delivery set to ${newValue}`, "info");
         break;
       case "defaultThinking":
         store.mutate.agent.setDefaultThinking(newValue === "inherit" ? undefined : newValue as ThinkingLevel);

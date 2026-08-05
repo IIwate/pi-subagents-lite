@@ -25,6 +25,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
+import type { PendingResultUiState } from "../spawn/spawn-coordinator.js";
 import { needsUserInput, recoverableFailureKind } from "../agents/failure-state.js";
 import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
@@ -62,6 +63,12 @@ type NavigatorUICtx = Pick<
 >;
 
 type NavigationEntry = { id: string | null; record?: AgentRecord };
+
+function pendingLabel(state: PendingResultUiState): string {
+  const count = state.count;
+  if (state.label === "next-turn") return `${count} ${count === 1 ? "result" : "results"} waiting for next turn`;
+  return `${count} ${count === 1 ? "result" : "results"} pending`;
+}
 
 /** UI-only preview values exposed through /agents → Debug. */
 export type DebugStatusPreview = AgentRecord["lifecycle"]["status"] | "needs_input";
@@ -488,7 +495,13 @@ export class AgentNavigator {
   constructor(
     private manager: AgentManager,
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
+    private getPendingResultUiState?: () => PendingResultUiState | undefined,
   ) {}
+
+  private pendingResultState(): PendingResultUiState | undefined {
+    const state = this.getPendingResultUiState?.();
+    return state && state.count > 0 ? state : undefined;
+  }
 
   setUICtx(ctx: NavigatorUICtx): void {
     if (ctx === this.uiCtx) return;
@@ -521,7 +534,7 @@ export class AgentNavigator {
   }
 
   toggleList(): void {
-    if (this.manager.listAgents().length === 0) return;
+    if (this.manager.listAgents().length === 0 && !this.pendingResultState()) return;
     this.listExpanded = !this.listExpanded;
     if (!this.listExpanded) {
       this.listFocused = false;
@@ -1041,7 +1054,8 @@ export class AgentNavigator {
   private updateFooterStatus(records: AgentRecord[]): void {
     const ctx = this.uiCtx;
     if (!ctx) return;
-    if (records.length === 0 || this.listExpanded) {
+    const pending = this.pendingResultState();
+    if ((records.length === 0 && !pending) || this.listExpanded) {
       if (this.footerStatus !== undefined) ctx.setStatus(STATUS_KEY, undefined);
       this.footerStatus = undefined;
       return;
@@ -1065,6 +1079,7 @@ export class AgentNavigator {
       parts.push(ctx.theme.fg("dim", `${running} running`));
       parts.push(ctx.theme.fg("dim", `${queued} queued`));
       parts.push(ctx.theme.fg("dim", `${records.length} total`));
+      if (pending) parts.push(ctx.theme.fg("warning", pendingLabel(pending)));
     }
     parts.push(ctx.theme.fg("dim", "Alt+A expand"));
     if (this.selectedAgentId) parts.push(ctx.theme.fg("dim", "Alt+M main"));
@@ -1088,7 +1103,8 @@ export class AgentNavigator {
     // whole below-editor widget corrupts Pi's differential row cache when the next editor
     // update arrives; an empty render preserves identity while contributing zero height.
     const records = this.manager.listAgents();
-    if (records.length === 0 || !this.listExpanded) return [];
+    const pending = this.pendingResultState();
+    if ((records.length === 0 && !pending) || !this.listExpanded) return [];
 
     const entries = this.navigationEntries();
     const agentEntries = entries.slice(1);
@@ -1152,6 +1168,7 @@ export class AgentNavigator {
       summaryParts.push(theme.fg("dim", `${running} running`));
       summaryParts.push(theme.fg("dim", `${queued} queued`));
       summaryParts.push(theme.fg("dim", `${records.length} total`));
+      if (pending) summaryParts.push(theme.fg("warning", pendingLabel(pending)));
     }
     summaryParts.push(theme.fg("dim", "Alt+A collapse"));
     if (this.selectedAgentId) summaryParts.push(theme.fg("dim", "Alt+M main"));
@@ -1260,12 +1277,11 @@ export class AgentNavigator {
   }
 
   private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
-    const shortId = record.id.slice(0, 8);
     const status = plainAgentStatus(record);
     const debugLabel = record.execution.debugFaultKind ? " [DEBUG]" : "";
     const lines: string[] = [
       theme.fg("accent", theme.bold(
-        `${getDisplayName(record.display.type)}${debugLabel} (${status}) · ${shortId}`,
+        `${getDisplayName(record.display.type)}${debugLabel} (${status})`,
       )),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
     ];
@@ -1370,8 +1386,9 @@ export class AgentNavigator {
     if (!this.uiCtx) return;
 
     const records = this.manager.listAgents();
+    const pending = this.pendingResultState();
     if (this.screenSwap) this.syncExternalFooter(this.screenSwap);
-    if (records.length === 0) {
+    if (records.length === 0 && !pending) {
       this.updateFooterStatus(records);
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
@@ -1518,6 +1535,7 @@ export class AgentNavigator {
         record.stats.compactionCount,
       ].join(":");
     });
+    const pending = this.pendingResultState();
     return [
       parts.join("|"),
       this.selectedAgentId ?? "",
@@ -1526,6 +1544,7 @@ export class AgentNavigator {
       this.confirmingClearId ?? "",
       this.interactionNotice ?? "",
       this.listExpanded ? "1" : "0",
+      pending ? `${pending.label}:${pending.count}` : "",
     ].join("#");
   }
 

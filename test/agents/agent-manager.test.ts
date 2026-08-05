@@ -379,6 +379,102 @@ describe("AgentManager", () => {
     await manager.getRecord(blockerId)?.execution.promise;
   });
 
+  it("aborts a running setup before disposing the manager", async () => {
+    const deferred = makeResolvablePromise();
+    let signal: AbortSignal | undefined;
+    mockModules.mockRunAgent.mockImplementationOnce((_ctx: any, _type: string, _prompt: string, options: any) => {
+      signal = options.signal;
+      return deferred.promise;
+    });
+
+    manager = new AgentManager(onComplete);
+    manager.spawn(fakePi(), fakeCtx(), "general-purpose", "running", {
+      description: "running",
+      modelKey: "test/model",
+    });
+
+    await manager.dispose();
+    expect(signal?.aborted).toBe(true);
+    deferred.resolve(mockRunResult());
+  });
+
+  it("stops waiting when child session setup never settles", async () => {
+    vi.useFakeTimers();
+    mockModules.mockRunAgent.mockImplementationOnce(async (_ctx: any, _type: string, _prompt: string, options: any) => {
+      options.onSessionSetupStarted();
+      await new Promise(() => {});
+      return mockRunResult();
+    });
+
+    manager = new AgentManager(onComplete);
+    manager.spawn(fakePi(), fakeCtx(), "general-purpose", "stuck setup", {
+      description: "stuck setup",
+      modelKey: "test/model",
+    });
+
+    let disposed = false;
+    const disposal = manager.dispose().then(() => { disposed = true; });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(disposed).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await disposal;
+    expect(disposed).toBe(true);
+  });
+
+  it("closes a child session that finishes setup after disposal", async () => {
+    const setup = makeResolvablePromise();
+    const session = mockAgentSession();
+    mockModules.mockRunAgent.mockImplementationOnce(async (_ctx: any, _type: string, _prompt: string, options: any) => {
+      options.onSessionSetupStarted();
+      await setup.promise;
+      await options.onSessionCreated(session);
+      options.onSessionSetupFinished();
+      return mockRunResult({ session });
+    });
+
+    manager = new AgentManager(onComplete);
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "late setup", {
+      description: "late setup",
+      modelKey: "test/model",
+    });
+    const run = manager.getRecord(id)!.execution.promise!;
+
+    const disposal = manager.dispose();
+    setup.resolve(undefined);
+    await disposal;
+    await run;
+
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(manager.getRecord(id)).toBeUndefined();
+  });
+
+  it("closes a child session that finishes setup after the record is cleared", async () => {
+    const setup = makeResolvablePromise();
+    const session = mockAgentSession();
+    mockModules.mockRunAgent.mockImplementationOnce(async (_ctx: any, _type: string, _prompt: string, options: any) => {
+      options.onSessionSetupStarted();
+      await setup.promise;
+      await options.onSessionCreated(session);
+      options.onSessionSetupFinished();
+      return mockRunResult({ session });
+    });
+
+    manager = new AgentManager(onComplete);
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "cleared setup", {
+      description: "cleared setup",
+      modelKey: "test/model",
+    });
+    const run = manager.getRecord(id)!.execution.promise!;
+
+    expect(manager.clear(id)).toBe(true);
+    setup.resolve(undefined);
+    await run;
+
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(manager.getRecord(id)).toBeUndefined();
+  });
+
   it("settles a foreground wait when a queued agent is stopped", async () => {
     manager = new AgentManager(onComplete, {
       default: 1,
@@ -852,6 +948,28 @@ describe("AgentManager", () => {
       (manager as any).cleanup();
 
       expect(manager.getRecord(id)).toBeDefined();
+    });
+
+    it("evicts persisted background records older than the cutoff", async () => {
+      manager = new AgentManager(onComplete);
+      const onRemove = vi.fn();
+      manager.setOnRemove(onRemove);
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+        backgroundDelivery: "auto",
+      });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      record.lifecycle.resultPersisted = true;
+      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
+      (manager as any).cleanup();
+
+      expect(manager.getRecord(id)).toBeUndefined();
+      expect(onRemove).toHaveBeenCalledWith(record);
     });
 
     it("evicts consumed completed records older than the cutoff", async () => {

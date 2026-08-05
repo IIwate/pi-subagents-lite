@@ -10,10 +10,12 @@
  * getManager() / getNavigator() / etc.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "./agents/agent-manager.js";
 import type { AgentNavigator } from "./ui/agent-navigator.js";
 import type { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
+import type { PendingResult } from "./spawn/result-inbox.js";
 import { ConfigStore } from "./config/config-store.js";
 
 // ============================================================================
@@ -28,6 +30,17 @@ interface Shell {
   store: ConfigStore;
   coordinator: SpawnCoordinator | null;
 }
+
+interface ProcessState {
+  /** Process-local handoff when a stale runtime rejects parent-session append. */
+  fallbackResults?: { sessionId: string; results: PendingResult[] };
+  /** Async context survives Jiti module reloads without blocking unrelated parent work. */
+  subagentSpawn: AsyncLocalStorage<boolean>;
+}
+
+const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")] ??= {
+  subagentSpawn: new AsyncLocalStorage<boolean>(),
+}) as ProcessState;
 
 // ============================================================================
 // Mutable module-level shell (populated by index.ts at session_start)
@@ -100,30 +113,28 @@ export function setCoordinator(c: SpawnCoordinator | null): void {
   shell.coordinator = c;
 }
 
+/** Transfer unpersisted final results only within the same parent session. */
+export function takeFallbackResults(sessionId: string): PendingResult[] {
+  const handoff = processState.fallbackResults;
+  processState.fallbackResults = undefined;
+  if (!handoff || handoff.sessionId !== sessionId) return [];
+  return handoff.results;
+}
+
+export function setFallbackResults(sessionId: string, results: readonly PendingResult[]): void {
+  processState.fallbackResults = results.length > 0 ? { sessionId, results: [...results] } : undefined;
+}
+
 // ============================================================================
 // Subagent spawn context
 // ============================================================================
 
-/**
- * Nesting depth of in-flight subagent spawns.
- *
- * Subagents are created via runAgent(), which re-loads this extension fresh
- * (new runtime, new pi/ctx). Without protection those re-loads clobber the
- * parent-owned shell singletons below, so the nudge would later route to a
- * dead subagent session instead of the parent. The factory checks this flag
- * and stays inert while a subagent is spawning.
- */
-let subagentSpawnDepth = 0;
-
-export function enterSubagentSpawn(): void {
-  subagentSpawnDepth++;
+/** Run child setup/execution in a context visible to freshly imported extension modules. */
+export function withSubagentSpawn<T>(operation: () => Promise<T>): Promise<T> {
+  return processState.subagentSpawn.run(true, operation);
 }
 
-export function exitSubagentSpawn(): void {
-  if (subagentSpawnDepth > 0) subagentSpawnDepth--;
-}
-
-/** True while a subagent is being spawned (factory/session_start run in subagent context). */
+/** True only in the async chain that is loading or running a subagent. */
 export function isInsideSubagentSpawn(): boolean {
-  return subagentSpawnDepth > 0;
+  return processState.subagentSpawn.getStore() === true;
 }

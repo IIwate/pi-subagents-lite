@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
-import { fakeCtx, fakePi as makeFakePi } from "../fixtures.ts";
+import { fakeCtx, fakePi as makeFakePi, makeResolvablePromise } from "../fixtures.ts";
 
 const fakePi = makeFakePi();
 
@@ -46,8 +46,7 @@ const mockModules = vi.hoisted(() => ({
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
   clearLoaderExtensions: () => { _loaderGetExtensionsResult.extensions = []; },
-  mockEnterSubagentSpawn: vi.fn(),
-  mockExitSubagentSpawn: vi.fn(),
+  mockWithSubagentSpawn: vi.fn((operation: () => Promise<unknown>) => operation()),
 }));
 
 vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
@@ -84,8 +83,7 @@ vi.mock("../../src/shell.js", () => ({
       defaultThinking: mockModules.mockDefaultThinking,
     },
   }),
-  enterSubagentSpawn: mockModules.mockEnterSubagentSpawn,
-  exitSubagentSpawn: mockModules.mockExitSubagentSpawn,
+  withSubagentSpawn: mockModules.mockWithSubagentSpawn,
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -185,6 +183,7 @@ function createMockSession() {
     // handling pass unnoticed — keep these promise-shaped.
     steer: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
+    dispose: vi.fn(async () => {}),
     messages: [],
     _getListeners: () => listeners,
   };
@@ -214,6 +213,8 @@ describe("runAgent — session state inheritance", () => {
       getBranch: () => [
         { type: "custom", customType: "cliproxyapi-fast-mode", data: { enabled: false } },
         { type: "custom", customType: "other-extension", data: { value: 1 } },
+        { type: "custom", customType: "subagents-lite:pending-result", data: { deliveryId: "pending-1" } },
+        { type: "custom", customType: "subagents-lite:result-ack", data: { deliveryIds: ["pending-1"] } },
         { type: "message", message: {} },
         { type: "custom", customType: "cliproxyapi-fast-mode", data: latestFastData },
       ],
@@ -232,33 +233,32 @@ describe("runAgent — session state inheritance", () => {
       "cliproxyapi-fast-mode",
       latestFastData,
     );
+    expect(childSessionManager.appendCustomEntry).not.toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.anything(),
+    );
+    expect(childSessionManager.appendCustomEntry).not.toHaveBeenCalledWith(
+      "subagents-lite:result-ack",
+      expect.anything(),
+    );
     const inheritedFastData = childSessionManager.appendCustomEntry.mock.calls[1][1];
     inheritedFastData.nested.value = 2;
     expect(latestFastData).toEqual({ enabled: true, nested: { value: 1 } });
   });
 
-  it("aborts a session when the parent signal was already aborted", async () => {
+  it("disposes setup immediately when the parent signal was already aborted", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
     const controller = new AbortController();
     controller.abort();
 
-    // forwardAbortSignal fires abort() from a signal listener, so a rejection
-    // escapes the run. See "attaches rejection handlers to steer and abort"
-    // for why this is a .catch spy and not an unhandledRejection assertion.
-    const abortPromise = Promise.reject(new Error("already aborting"));
-    abortPromise.catch(() => {});
-    const abortCatch = vi.spyOn(abortPromise, "catch");
-    session.abort = vi.fn(() => abortPromise);
-
-    await runAgent(fakeCtx(), "test-agent", "do something", {
+    await expect(runAgent(fakeCtx(), "test-agent", "do something", {
       pi: fakePi,
       signal: controller.signal,
-    });
+    })).rejects.toThrow("Agent session setup aborted");
 
-    expect(session.abort).toHaveBeenCalled();
-    expect(abortCatch).toHaveBeenCalled();
+    expect(session.dispose).toHaveBeenCalledTimes(1);
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
@@ -315,6 +315,27 @@ describe("runAgent — tool visibility wiring", () => {
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("disposes a session when setup is aborted while extension binding is stuck", async () => {
+    const bind = makeResolvablePromise<void>();
+    const session = createMockSession();
+    session.bindExtensions.mockReturnValue(bind.promise);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const controller = new AbortController();
+
+    const run = runAgent(fakeCtx(), "test-agent", "task", {
+      pi: fakePi,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(session.bindExtensions).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await vi.waitFor(() => expect(session.dispose).toHaveBeenCalledTimes(1));
+
+    bind.resolve(undefined);
+    await expect(run).rejects.toThrow("Agent session setup aborted");
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(session.prompt).not.toHaveBeenCalled();
   });
 
   it("includes extension tools registered during session_start before applying visibility", async () => {

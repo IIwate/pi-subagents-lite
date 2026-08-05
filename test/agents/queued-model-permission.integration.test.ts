@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   state.reset = () => {
     state.firstPrompt = new Promise<void>((resolve) => { state.releaseFirst = resolve; });
     state.created = 0;
+    state.fallbackResults = [];
   };
   state.reset();
   state.routing = {
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => {
       defaultThinking: undefined,
       graceTurns: 2,
       forceBackground: false,
+      backgroundDelivery: "auto",
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       includeContextFiles: false,
@@ -98,9 +100,12 @@ vi.mock("../../src/shell.js", () => ({
   getManager: () => mocks.manager,
   getNavigator: () => undefined,
   getPiInstance: () => mocks.pi,
+  takeFallbackResults: (_sessionId?: string) => mocks.fallbackResults.splice(0),
+  setFallbackResults: (_sessionId: string | undefined, results: any[]) => {
+    mocks.fallbackResults.splice(0, mocks.fallbackResults.length, ...results);
+  },
   getSessionCtx: () => mocks.ctx,
-  enterSubagentSpawn: vi.fn(),
-  exitSubagentSpawn: vi.fn(),
+  withSubagentSpawn: (operation: () => Promise<unknown>) => operation(),
 }));
 
 import { AgentManager } from "../../src/agents/agent-manager.js";
@@ -149,7 +154,12 @@ describe("queued invocation snapshots", () => {
         { model: models[0] },
         { model: models[2], thinkingLevel: "high" },
       ],
-      sessionManager: { getBranch: () => [] },
+      sessionManager: {
+        getBranch: () => [{ id: "origin-a" }],
+        getEntries: () => [],
+        getLeafId: () => "origin-a",
+        getSessionId: () => "test-session",
+      },
       getSystemPrompt: () => "Parent prompt",
       ui: { notify: vi.fn() },
     };

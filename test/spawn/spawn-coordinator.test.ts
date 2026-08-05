@@ -1,14 +1,6 @@
-/**
- * spawn-coordinator.test.ts — Tests for SpawnCoordinator.
-
- * Verifies foreground/background spawn, nudge batching, completion, and disposal.
- */
-
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord } from "../../src/types.js";
-
-// --- Mock modules ---
 
 vi.mock("../../src/agents/agent-types.js", () => ({
   resolveType: vi.fn((name: string) => name),
@@ -22,17 +14,15 @@ vi.mock("../../src/spawn/worktree-validator.js", () => ({
 
 vi.mock("../../src/utils.js", () => ({
   parseModelKey: vi.fn(() => null),
-  findModelInRegistry: vi.fn(() => undefined),
   parseThinkingLevel: vi.fn(() => undefined),
 }));
 
 vi.mock("../../src/config/config-io.js", () => ({
-  loadConfig: vi.fn(() => ({ modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } })),
+  loadConfig: vi.fn(() => ({ modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false, backgroundDelivery: "auto" }, concurrency: { default: 4 } })),
   saveConfigAtomic: vi.fn(),
-  DEFAULT_CONFIG: { modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } },
+  DEFAULT_CONFIG: { modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false, backgroundDelivery: "auto" }, concurrency: { default: 4 } },
 }));
 
-// Result formatting has its own tests; coordinator only owns delivery and scheduling.
 vi.mock("../../src/agents/tool-execution.js", () => ({
   formatResultContent: (record: AgentRecord) =>
     record.lifecycle.status === "error"
@@ -40,28 +30,80 @@ vi.mock("../../src/agents/tool-execution.js", () => ({
       : record.result ?? "",
 }));
 
-// Hoist mock pi so shell mock can return it
-const { mockPi, mockGetPiInstance } = vi.hoisted(() => ({
-  mockPi: { sendMessage: vi.fn(), sendUserMessage: vi.fn(), exec: vi.fn(), registerTool: vi.fn(), registerCommand: vi.fn(), on: vi.fn() } as unknown as ExtensionAPI,
+const {
+  mockPi,
+  mockGetPiInstance,
+  mockGetBranch,
+  mockGetEntries,
+  sessionEntries,
+  activeBranchEntries,
+  fallbackResults,
+  fallbackMeta,
+} = vi.hoisted(() => ({
+  fallbackResults: [] as any[],
+  fallbackMeta: {
+    sessionId: undefined as string | undefined,
+    currentSessionId: "test-session",
+    currentLeafId: "origin-a" as string | null,
+    idle: true,
+  },
+  mockPi: {
+    sendMessage: vi.fn(),
+    appendEntry: vi.fn((customType: string, data: unknown) => {
+      sessionEntries.push({ type: "custom", customType, data });
+    }),
+    sendUserMessage: vi.fn(),
+    exec: vi.fn(),
+    registerTool: vi.fn(),
+    registerCommand: vi.fn(),
+  } as unknown as ExtensionAPI,
   mockGetPiInstance: vi.fn(() => null as unknown as ExtensionAPI),
+  mockGetBranch: vi.fn(() => activeBranchEntries),
+  mockGetEntries: vi.fn(() => sessionEntries),
+  sessionEntries: [] as any[],
+  activeBranchEntries: [{ id: "origin-a" }] as any[],
 }));
 
 vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
-  getSessionCtx: () => ({ isIdle: () => true }),
+  takeFallbackResults: (session: string) => {
+    const results = session === fallbackMeta.sessionId ? fallbackResults.splice(0) : [];
+    fallbackResults.length = 0;
+    return results;
+  },
+  setFallbackResults: (session: string, results: any[]) => {
+    fallbackMeta.sessionId = session;
+    fallbackResults.splice(0, fallbackResults.length, ...results);
+  },
+  getSessionCtx: () => ({
+    isIdle: () => fallbackMeta.idle,
+    sessionManager: {
+      getBranch: mockGetBranch,
+      getEntries: mockGetEntries,
+      getLeafId: () => fallbackMeta.currentLeafId,
+      getSessionId: () => fallbackMeta.currentSessionId,
+    },
+    ui: { notify: vi.fn() },
+  }),
   getNavigator: () => null,
 }));
 
 function makeMockManager() {
   const records = new Map<string, any>();
   return {
-    spawn: vi.fn((pi: any, ctx: any, type: string, prompt: string, options: any) => {
+    spawn: vi.fn((_pi: any, _ctx: any, type: string, _prompt: string, options: any) => {
       const id = `agent-${records.size}`;
       const record: any = {
         id,
-        display: { type, description: options.description },
+        display: { type, description: options.description, invocation: options.invocation },
         lifecycle: { status: "running", startedAt: Date.now() },
-        execution: { promise: Promise.resolve("done") },
+        execution: {
+          promise: Promise.resolve("done"),
+          backgroundDelivery: options.backgroundDelivery,
+          resultSessionId: options.resultSessionId,
+          resultOriginEntryId: options.resultOriginEntryId,
+          session: undefined,
+        },
         stats: {
           lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
           toolUses: 0,
@@ -76,437 +118,883 @@ function makeMockManager() {
     }),
     getRecord: vi.fn((id: string) => records.get(id)),
     listAgents: vi.fn(() => [...records.values()]),
-    abort: vi.fn(() => true),
-    steer: vi.fn(async () => true),
     interact: vi.fn(async () => ({ accepted: true as const })),
+    setRecord: (id: string, record: any) => records.set(id, record),
+    deleteRecord: (id: string) => records.delete(id),
     dispose: vi.fn(),
-    onComplete: undefined as any,
   };
 }
 
 function makeMockCtx() {
-  return { cwd: "/test", model: undefined, modelRegistry: {} } as unknown as ExtensionContext;
+  return {
+    cwd: "/test",
+    model: undefined,
+    modelRegistry: {},
+    sessionManager: {
+      getLeafId: () => fallbackMeta.currentLeafId,
+      getSessionId: () => fallbackMeta.currentSessionId,
+    },
+  } as unknown as ExtensionContext;
 }
 
-// --- Tests ---
+function complete(record: any, status = "completed", result = "result") {
+  record.lifecycle.status = status;
+  record.lifecycle.completedAt = Date.now();
+  record.result = result;
+}
 
 describe("SpawnCoordinator", () => {
-  // Dynamically import after mocks are set up
   let SpawnCoordinator: typeof import("../../src/spawn/spawn-coordinator.js").SpawnCoordinator;
   let manager: ReturnType<typeof makeMockManager>;
   let ctx: ExtensionContext;
 
   beforeEach(async () => {
-    vi.useFakeTimers();
     manager = makeMockManager();
     ctx = makeMockCtx();
+    sessionEntries.length = 0;
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
+    fallbackResults.length = 0;
+    fallbackMeta.sessionId = undefined;
+    fallbackMeta.currentSessionId = "test-session";
+    fallbackMeta.currentLeafId = "origin-a";
+    fallbackMeta.idle = true;
     mockPi.sendMessage.mockReset();
+    mockPi.appendEntry.mockClear();
+    mockGetBranch.mockClear();
+    mockGetEntries.mockClear();
     mockGetPiInstance.mockReturnValue(mockPi);
     const mod = await import("../../src/spawn/spawn-coordinator.js");
     SpawnCoordinator = mod.SpawnCoordinator;
   });
 
-
-  it("spawns a background agent and returns result", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
+  async function spawnBackground(
+    coordinator: InstanceType<typeof SpawnCoordinator>,
+    backgroundDelivery: "auto" | "next-turn" = "auto",
+  ) {
+    return coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
       description: "Test spawn",
       graceTurns: 6,
       runInBackground: true,
+      backgroundDelivery,
     });
+  }
 
-    expect(result.agentId).toBeTruthy();
-    expect(manager.spawn).toHaveBeenCalledTimes(1);
-    expect(manager.spawn.mock.calls[0][2]).toBe("builder");
-    expect(manager.spawn.mock.calls[0][3]).toBe("do something");
+  it("captures background delivery mode at spawn time", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+
+    expect(result.record.execution).toMatchObject({
+      backgroundDelivery: "next-turn",
+      resultSessionId: "test-session",
+      resultOriginEntryId: "origin-a",
+    });
     expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("runInBackground");
   });
 
-  it("spawns a foreground agent, forwards its signal, and awaits its promise", async () => {
+  it("awaits foreground work and marks its direct result consumed", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
-    const controller = new AbortController();
     const result = await coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
       description: "Test foreground",
-      signal: controller.signal,
       graceTurns: 6,
       runInBackground: false,
     });
 
-    expect(result.agentId).toBeTruthy();
-    expect(result.record).toBeTruthy();
-    expect(manager.spawn.mock.calls[0][4].signal).toBe(controller.signal);
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(result.record.execution.backgroundDelivery).toBeUndefined();
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("routes direct interaction through the manager", async () => {
+  it("marks an empty foreground result consumed", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
+    const pending = coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
-      description: "Test",
+      description: "Test foreground",
       graceTurns: 6,
-      runInBackground: true,
+      runInBackground: false,
     });
+    manager.listAgents()[0].result = "";
 
-    const images = [{ type: "image", data: "abc", mimeType: "image/png" }] as any;
-    const interaction = await coordinator.interact(result.agentId, "focus on tests", images);
+    const result = await pending;
 
-    expect(interaction).toEqual({ accepted: true });
-    expect(manager.interact).toHaveBeenCalledWith(result.agentId, "focus on tests", images);
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
   });
 
-  it("delivers a pending background nudge before interactive continuation", async () => {
+  it("persists a background result and requests one parent wake immediately", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
-    const result = await coordinator.spawn(mockPi, ctx, {
-      type: "builder",
-      prompt: "do something",
-      description: "Test",
-      graceTurns: 6,
-      runInBackground: true,
-    });
-    const record = manager.getRecord(result.agentId);
-    record.lifecycle.status = "completed";
-    record.result = "original result";
-    coordinator.onAgentComplete(record);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "original result");
 
-    await coordinator.interact(result.agentId, "continue");
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.objectContaining({ agentId: result.agentId, result: "original result", error: null }),
+    );
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "subagent-result", content: expect.stringContaining("original result") }),
+      { triggerTurn: true },
+    );
+    expect(mockPi.appendEntry.mock.invocationCallOrder[0])
+      .toBeLessThan(mockPi.sendMessage.mock.invocationCallOrder[0]);
+    expect(result.record.lifecycle.resultPersisted).toBe(true);
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
+  });
+
+  it("persists an empty background completion as a terminal event", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "");
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.objectContaining({ agentId: result.agentId, result: "(no output)", status: "completed" }),
+    );
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["error", "provider failed"],
+    ["aborted", null],
+    ["turn_limited", null],
+    ["stopped", null],
+  ] as const)("persists %s terminal metadata before wake", async (status, error) => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    result.record.display.invocation = { providerName: "test-provider", modelName: "test-model" };
+    complete(result.record, status, status === "error" ? "" : "partial output");
+    result.record.error = error ?? undefined;
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.objectContaining({
+        agentId: result.agentId,
+        type: "builder",
+        status,
+        error,
+        provider: "test-provider",
+        model: "test-model",
+      }),
+    );
+    expect(mockPi.appendEntry.mock.invocationCallOrder[0])
+      .toBeLessThan(mockPi.sendMessage.mock.invocationCallOrder[0]);
+  });
+
+  it("uses follow-up when Auto completes after natural preflight but before the run becomes non-idle", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
+    expect(fallbackMeta.idle).toBe(true);
+
+    const result = await spawnBackground(coordinator, "auto");
+    complete(result.record, "completed", "preflight result");
+    coordinator.onAgentComplete(result.record);
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+
+    coordinator.onParentAgentStart();
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("preflight result") }),
+      { deliverAs: "followUp" },
+    );
+  });
+
+  it("defers an Auto completion from the settled-idle gap until settlement", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    coordinator.prepareBeforeAgentStart();
+    coordinator.onParentAgentStart();
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+
+    const result = await spawnBackground(coordinator, "auto");
+    complete(result.record, "completed", "settled gap result");
+    coordinator.onAgentComplete(result.record);
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+
+    coordinator.onParentSettled();
+    await Promise.resolve();
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("settled gap result") }),
+      { triggerTurn: true },
+    );
+  });
+
+  it("does not issue another wake while a parent wake is active", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator);
+    const second = await spawnBackground(coordinator);
+    complete(first.record, "completed", "first");
+    complete(second.record, "completed", "second");
+
+    coordinator.onAgentComplete(first.record);
+    coordinator.onAgentComplete(second.record);
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-    expect(mockPi.sendMessage.mock.calls[0][0].content).toContain("completed");
-    expect(mockPi.sendMessage.mock.calls[0][0].content).toContain("original result");
-    expect(manager.interact).toHaveBeenCalled();
+    expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(2);
   });
 
-  describe("nudge scheduling", () => {
-    it("emits individual nudge after delay window", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
+  it("restores the session inbox once and maintains pending state in memory", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "cached result");
 
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder",
-        prompt: "do something",
-        description: "Test",
-        graceTurns: 6,
-        runInBackground: true,
-      });
+    coordinator.onAgentComplete(result.record);
+    coordinator.pendingResultUiState();
+    coordinator.pendingResultUiState();
+    coordinator.getStoredResult(result.agentId);
 
-      coordinator.scheduleNudge(result.agentId);
-
-      // Not yet emitted — timer pending
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-
-      // Advance past the 200ms batch window
-      vi.advanceTimersByTime(200);
-
-      // Now the nudge should have been emitted
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-    });
-
-    it("batches multiple nudges within the delay window", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      const r1 = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task 1", description: "Test 1", graceTurns: 6, runInBackground: true,
-      });
-      const r2 = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task 2", description: "Test 2", graceTurns: 6, runInBackground: true,
-      });
-
-      coordinator.scheduleNudge(r1.agentId);
-      coordinator.scheduleNudge(r2.agentId);
-
-      // Advance past the batch window
-      vi.advanceTimersByTime(200);
-
-      // Both should be emitted as individual messages
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
-    });
-
-    it("does not emit nudge for agent without record", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      // agent-999 doesn't exist in the mock manager
-      coordinator.scheduleNudge("agent-999");
-
-      vi.advanceTimersByTime(200);
-
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("starts new batch window for nudges arriving after the previous window", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      const r1 = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task 1", description: "Test 1", graceTurns: 6, runInBackground: true,
-      });
-      const r2 = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task 2", description: "Test 2", graceTurns: 6, runInBackground: true,
-      });
-
-      coordinator.scheduleNudge(r1.agentId);
-
-      vi.advanceTimersByTime(200);
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-
-      // New nudge after the window
-      coordinator.scheduleNudge(r2.agentId);
-
-      // Not yet emitted
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-
-      vi.advanceTimersByTime(200);
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
-    });
+    expect(mockGetEntries).toHaveBeenCalledTimes(1);
   });
 
-  describe("onAgentComplete", () => {
-    it("schedules nudge for background agents", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
+  it("waits off-branch and wakes when navigation returns to the origin subtree", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
 
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
+    fallbackMeta.currentLeafId = "other-branch";
+    coordinator.onSessionTree();
+    complete(result.record, "completed", "branch-local result");
+    coordinator.onAgentComplete(result.record);
 
-      // Simulate completion
-      coordinator.onAgentComplete({ id: result.agentId } as AgentRecord);
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.objectContaining({ originEntryId: "origin-a", parentSessionId: "test-session" }),
+    );
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
 
-      // Nudge should be scheduled
-      vi.advanceTimersByTime(200);
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" }, { id: "descendant" });
+    fallbackMeta.currentLeafId = "descendant";
+    coordinator.onSessionTree();
 
-    });
-
-    it("does not schedule nudge for foreground agents", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      // Not in backgroundAgentIds
-
-      coordinator.onAgentComplete({ id: "agent-1" } as AgentRecord);
-
-      vi.advanceTimersByTime(200);
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("catches sendMessage errors silently (stale pi)", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
-
-      // Make sendMessage throw (simulates stale pi)
-      mockPi.sendMessage.mockImplementation(() => { throw new Error("stale context"); });
-
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
-
-      // sendMessage was attempted
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-    });
-
-    it("skips nudge emission when disposed", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
-
-      coordinator.scheduleNudge(result.agentId);
-
-      // Dispose before timer fires — should prevent emission
-      coordinator.dispose();
-
-      vi.advanceTimersByTime(500);
-
-      // No sendMessage because disposed
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("branch-local result") }),
+      { triggerTurn: true },
+    );
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
   });
 
-  describe("dispose", () => {
-    it("clears nudge timer", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
+  it("re-arms a failed Auto result only after explicit tree navigation returns to its origin", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "auto");
+    complete(result.record, "completed", "retry on return");
+    coordinator.onAgentComplete(result.record);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
-      coordinator.scheduleNudge(result.agentId);
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
+    fallbackMeta.currentLeafId = "other-branch";
+    coordinator.onSessionTree();
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
-      coordinator.dispose();
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
+    fallbackMeta.currentLeafId = "origin-a";
+    coordinator.onSessionTree();
 
-      // Timer should be cleared — advancing time should not emit
-      vi.advanceTimersByTime(500);
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  describe("stale pi protection", () => {
-    it("reads pi from shell at nudge time, not from spawn", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
+  it("keeps next-turn results silent until their origin subtree is active", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
 
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
+    fallbackMeta.currentLeafId = "other-branch";
+    coordinator.onSessionTree();
+    complete(result.record, "completed", "wait for origin");
+    coordinator.onAgentComplete(result.record);
 
-      // Coordinator no longer stores pi
-      expect((coordinator as any).pi).toBeUndefined();
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
 
-      // Nudge still works because it reads from shell at call time
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-    });
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
+    fallbackMeta.currentLeafId = "origin-a";
+    coordinator.onSessionTree();
 
-    it("uses fresh shell pi when shell is updated between spawn and nudge", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
-
-      // Simulate shell being updated (e.g. after reload)
-      const freshPi = { ...mockPi, sendMessage: vi.fn() } as unknown as ExtensionAPI;
-      mockGetPiInstance.mockReturnValue(freshPi);
-
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
-
-      // Fresh pi was used, not the original mockPi
-      expect(freshPi.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("skips nudge silently when shell has no pi", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-
-      // Simulate shell having no pi
-      mockGetPiInstance.mockReturnValue(null);
-
-      coordinator.scheduleNudge("agent-999");
-      vi.advanceTimersByTime(200);
-
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("constructor does not store pi", () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      expect(coordinator).toBeDefined();
-      expect((coordinator as any).pi).toBeUndefined();
-    });
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "next-turn" });
   });
 
-  describe("nudge message status", () => {
-    it("uses lifecycle status in the nudge message", async () => {
-      const statuses: Array<{ status: string; expected: string }> = [
-        { status: "completed", expected: "completed" },
-        { status: "error", expected: "error" },
-        { status: "aborted", expected: "aborted" },
-        { status: "stopped", expected: "stopped" },
-        { status: "turn_limited", expected: "turn_limited" },
-      ];
+  it("acknowledges only the result IDs delivered by a successful parent turn", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator);
+    const second = await spawnBackground(coordinator);
+    complete(first.record, "completed", "first");
+    complete(second.record, "completed", "second");
 
-      for (const { status, expected } of statuses) {
-        mockPi.sendMessage.mockClear();
-        const coordinator = new SpawnCoordinator(manager as any);
+    coordinator.onAgentComplete(first.record);
+    coordinator.onAgentComplete(second.record);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
 
-        const result = await coordinator.spawn(mockPi, ctx, {
-          type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-        });
-
-        manager.getRecord(result.agentId).lifecycle.status = status;
-        manager.getRecord(result.agentId).result = "Result text";
-
-        coordinator.scheduleNudge(result.agentId);
-        vi.advanceTimersByTime(200);
-
-        expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-        const content = mockPi.sendMessage.mock.calls[0][0].content;
-        const shortId = result.agentId.slice(0, 8);
-        expect(content).toContain(`[Subagent "builder" ${shortId} ${expected}]`);
-      }
-    });
-
-    it("delivers the recorded diagnostic for background errors", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test", graceTurns: 6, runInBackground: true,
-      });
-      const record = manager.getRecord(result.agentId);
-      record.lifecycle.status = "error";
-      record.result = undefined;
-      record.error = "503 service_unavailable";
-
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
-
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockPi.sendMessage.mock.calls[0][0].content).toContain(
-        "Agent failed: 503 service_unavailable",
-      );
-      expect(record.lifecycle.resultConsumed).toBe(true);
-    });
+    expect(first.record.lifecycle.resultConsumed).toBe(true);
+    expect(second.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(sessionEntries.some(entry =>
+      entry.customType === "subagents-lite:result-ack"
+      && entry.data.deliveryIds.includes(first.record.execution.resultDeliveryId),
+    )).toBe(true);
   });
 
-  describe("result consumption", () => {
-    it("foreground spawn marks the result as consumed before returning", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "do something", description: "Test fg", graceTurns: 6, runInBackground: false,
-      });
+  it("does not let an old wake ack a newer continuation result", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "first result");
+    coordinator.onAgentComplete(result.record);
+    const firstDeliveryId = result.record.execution.resultDeliveryId;
 
-      expect(result.record.lifecycle.resultConsumed).toBe(true);
+    complete(result.record, "completed", "continuation result");
+    coordinator.onAgentComplete(result.record);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(result.record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.getStoredResult(result.agentId)?.result).toContain("continuation result");
+  });
+
+  it("keeps next-turn results out of an auto wake", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const waited = await spawnBackground(coordinator, "next-turn");
+    complete(waited.record, "completed", "waited");
+    coordinator.onAgentComplete(waited.record);
+
+    const auto = await spawnBackground(coordinator, "auto");
+    complete(auto.record, "completed", "automatic");
+    coordinator.onAgentComplete(auto.record);
+
+    const message = mockPi.sendMessage.mock.calls.find((call: any[]) => call[1]?.triggerTurn === true)?.[0];
+    expect(message?.content).toContain("automatic");
+    expect(message?.content).not.toContain("waited");
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    expect(auto.record.lifecycle.resultConsumed).toBe(true);
+    expect(waited.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "next-turn" });
+  });
+
+  it("does not acknowledge results after an aborted parent turn", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record);
+    coordinator.onAgentComplete(result.record);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "aborted" }]);
+    coordinator.onParentSettled();
+
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("keeps results pending when acknowledgement persistence fails", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "ack me");
+    coordinator.onAgentComplete(result.record);
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      if (customType === "subagents-lite:result-ack") throw new Error("stale session");
+      sessionEntries.push({ type: "custom", customType, data });
     });
 
-    it("background nudge emission marks the result as consumed", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test bg", graceTurns: 6, runInBackground: true,
-      });
-      const record = manager.getRecord(result.agentId);
-      // Reset any sendMessage impl leaked from other tests so this test exercises
-      // the success path (default: returns without throwing).
-      mockPi.sendMessage.mockReset();
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
 
-      expect(record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+  });
 
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
+  it("retries persistence when a later parent prompt can append entries", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "retry me");
+    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
 
-      // sendMessage delivered the full result to the LLM — record is safe to evict.
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-      expect(record.lifecycle.resultConsumed).toBe(true);
+    coordinator.onAgentComplete(result.record);
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      sessionEntries.push({ type: "custom", customType, data });
     });
+    const message = coordinator.prepareBeforeAgentStart();
+    expect(message?.content).toContain("retry me");
+    expect(result.record.lifecycle.resultPersisted).toBe(true);
+  });
 
-    it("does not deliver or consume an empty background result", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test bg", graceTurns: 6, runInBackground: true,
-      });
-      const record = manager.getRecord(result.agentId);
-      record.result = "";
-
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
-
-      expect(mockPi.sendMessage).not.toHaveBeenCalled();
-      expect(record.lifecycle.resultConsumed).toBeUndefined();
+  it("returns recovered next-turn append failures to intentional waiting state", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator, "next-turn");
+    complete(first.record, "completed", "first");
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      sessionEntries.push({ type: "custom", customType, data });
     });
+    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
 
-    it("does not mark consumed when nudge delivery fails", async () => {
-      const coordinator = new SpawnCoordinator(manager as any);
-      const result = await coordinator.spawn(mockPi, ctx, {
-        type: "builder", prompt: "task", description: "Test bg", graceTurns: 6, runInBackground: true,
-      });
-      const record = manager.getRecord(result.agentId);
+    coordinator.onAgentComplete(first.record);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
 
-      // sendMessage throws — LLM never received the result. The record must stay
-      // unconsumed so cleanup() keeps it around rather than wiping it silently.
-      mockPi.sendMessage.mockImplementation(() => { throw new Error("stale context"); });
-      coordinator.scheduleNudge(result.agentId);
-      vi.advanceTimersByTime(200);
+    const second = await spawnBackground(coordinator, "next-turn");
+    complete(second.record, "completed", "second");
+    coordinator.onAgentComplete(second.record);
 
-      expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-      expect(record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "next-turn" });
+    expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result"))
+      .toHaveLength(2);
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps results after a failed parent turn and lets a later completion retry", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator);
+    complete(first.record, "completed", "first");
+    coordinator.onAgentComplete(first.record);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+
+    const second = await spawnBackground(coordinator);
+    complete(second.record, "completed", "second");
+    coordinator.onAgentComplete(second.record);
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a completion during a failed parent turn provide the next wake opportunity", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator);
+    const second = await spawnBackground(coordinator);
+    complete(first.record, "completed", "first");
+    coordinator.onAgentComplete(first.record);
+
+    complete(second.record, "completed", "second");
+    coordinator.onAgentComplete(second.record);
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(mockPi.sendMessage.mock.calls[1][0].content).toContain("first");
+    expect(mockPi.sendMessage.mock.calls[1][0].content).toContain("second");
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "pending" });
+  });
+
+  it("allows one new wake per later persisted Auto completion and then stops", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator, "auto");
+    const second = await spawnBackground(coordinator, "auto");
+    const third = await spawnBackground(coordinator, "auto");
+
+    complete(first.record, "completed", "first");
+    coordinator.onAgentComplete(first.record);
+    complete(second.record, "completed", "second");
+    coordinator.onAgentComplete(second.record);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
+
+    complete(third.record, "completed", "third");
+    coordinator.onAgentComplete(third.record);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(3);
+    expect(mockPi.sendMessage.mock.calls[2][0].content).toContain("third");
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not let an unpersisted Auto completion retrigger a failed wake", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const first = await spawnBackground(coordinator, "auto");
+    complete(first.record, "completed", "first");
+    coordinator.onAgentComplete(first.record);
+
+    const second = await spawnBackground(coordinator, "auto");
+    complete(second.record, "completed", "second");
+    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
+    coordinator.onAgentComplete(second.record);
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "pending" });
+  });
+
+  it("does not let a pre-existing next-turn result retrigger a failed Auto wake", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const waited = await spawnBackground(coordinator, "next-turn");
+    complete(waited.record, "completed", "next turn");
+    coordinator.onAgentComplete(waited.record);
+
+    const auto = await spawnBackground(coordinator, "auto");
+    complete(auto.record, "completed", "automatic");
+    coordinator.onAgentComplete(auto.record);
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "pending" });
+  });
+
+  it("does not let a next-turn completion during an Auto wake trigger a retry", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const auto = await spawnBackground(coordinator, "auto");
+    complete(auto.record, "completed", "automatic");
+    coordinator.onAgentComplete(auto.record);
+
+    const waited = await spawnBackground(coordinator, "next-turn");
+    complete(waited.record, "completed", "next turn");
+    coordinator.onAgentComplete(waited.record);
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "pending" });
+  });
+
+  it("does not let a later next-turn completion wake an older blocked Auto result", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const auto = await spawnBackground(coordinator, "auto");
+    complete(auto.record, "completed", "auto retry");
+    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
+    coordinator.onAgentComplete(auto.record);
+
+    const waited = await spawnBackground(coordinator, "next-turn");
+    complete(waited.record, "completed", "next turn");
+    coordinator.onAgentComplete(waited.record);
+
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 2, label: "pending" });
+  });
+
+  it("waits for the next natural parent prompt without triggering or queuing a notice", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+    complete(result.record, "completed", "waited result");
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "next-turn" });
+  });
+
+  it("injects next-turn results on the next parent prompt and clears them after success", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+    complete(result.record, "completed", "waited result");
+    coordinator.onAgentComplete(result.record);
+
+    const message = coordinator.prepareBeforeAgentStart();
+    expect(message?.customType).toBe("subagent-result");
+    expect(message?.content).toContain("waited result");
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
+  });
+
+  it("keeps a failed next-turn result pending across unrelated Auto delivery and tree refresh", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const waiting = await spawnBackground(coordinator, "next-turn");
+    complete(waiting.record, "completed", "waited result");
+    coordinator.onAgentComplete(waiting.record);
+    coordinator.prepareBeforeAgentStart();
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+
+    const automatic = await spawnBackground(coordinator, "auto");
+    complete(automatic.record, "completed", "automatic result");
+    coordinator.onAgentComplete(automatic.record);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+
+    coordinator.onSessionTree();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("changes next-turn waiting to pending after its natural parent turn fails", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+    complete(result.record, "completed", "waited result");
+    coordinator.onAgentComplete(result.record);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "next-turn" });
+
+    coordinator.prepareBeforeAgentStart();
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("acknowledges an explicitly read result only after the parent turn succeeds", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+    complete(result.record, "completed", "explicit result");
+    coordinator.onAgentComplete(result.record);
+    const deliveryId = result.record.execution.resultDeliveryId;
+
+    coordinator.markResultPresented(deliveryId);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(coordinator.pendingResultUiState()).toBeUndefined();
+  });
+
+  it("acknowledges an explicitly read result alongside a concurrent Auto follow-up", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const explicit = await spawnBackground(coordinator, "next-turn");
+    complete(explicit.record, "completed", "explicit result");
+    coordinator.onAgentComplete(explicit.record);
+    coordinator.markResultPresented(explicit.record.execution.resultDeliveryId);
+
+    fallbackMeta.idle = false;
+    const automatic = await spawnBackground(coordinator, "auto");
+    complete(automatic.record, "completed", "automatic result");
+    coordinator.onAgentComplete(automatic.record);
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("automatic result") }),
+      { deliverAs: "followUp" },
+    );
+
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+
+    expect(explicit.record.lifecycle.resultConsumed).toBe(true);
+    expect(automatic.record.lifecycle.resultConsumed).toBe(true);
+    const ack = sessionEntries.findLast(entry => entry.customType === "subagents-lite:result-ack");
+    expect(ack?.data.deliveryIds).toEqual(expect.arrayContaining([
+      explicit.record.execution.resultDeliveryId,
+      automatic.record.execution.resultDeliveryId,
+    ]));
+  });
+
+  it("keeps an explicitly read result pending when the parent turn fails", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator, "next-turn");
+    complete(result.record, "completed", "explicit result");
+    coordinator.onAgentComplete(result.record);
+
+    coordinator.markResultPresented(result.record.execution.resultDeliveryId);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
+    coordinator.onParentSettled();
+
+    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("reads a stored result after the manager record is removed", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "durable result");
+    coordinator.onAgentComplete(result.record);
+    manager.deleteRecord(result.agentId);
+
+    expect(coordinator.getStoredResult(result.agentId)?.result).toContain("durable result");
+  });
+
+  it("does not re-enqueue a result after the manager record was cleared", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "cleared result");
+    manager.deleteRecord(result.agentId);
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not stage foreground completion or continuation results", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await coordinator.spawn(mockPi, ctx, {
+      type: "builder",
+      prompt: "do something",
+      description: "Test foreground",
+      graceTurns: 6,
+      runInBackground: false,
     });
+    complete(result.record, "completed", "continuation result");
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("retains staged results when the pi runtime rejects delivery", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record);
+    mockPi.sendMessage.mockImplementation(() => { throw new Error("stale context"); });
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.any(Object),
+    );
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("does not retry a failed running-parent follow-up at settlement without a new Auto completion", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    fallbackMeta.idle = false;
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "failed follow-up");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
+
+    coordinator.onAgentComplete(result.record);
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+    await Promise.resolve();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("keeps append failure visible across tree refresh and same-session reload", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "unpersisted");
+    mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
+
+    coordinator.onAgentComplete(result.record);
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+    coordinator.onSessionTree();
+    expect(coordinator.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+    coordinator.dispose();
+
+    const replacement = new SpawnCoordinator(manager as any);
+    replacement.restorePending();
+    expect(replacement.pendingResultUiState()).toEqual({ count: 1, label: "pending" });
+  });
+
+  it("flushes an in-memory fallback before disposal", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "flush before dispose");
+    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
+    coordinator.onAgentComplete(result.record);
+
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      sessionEntries.push({ type: "custom", customType, data });
+    });
+    coordinator.dispose();
+
+    expect(sessionEntries.some(entry =>
+      entry.customType === "subagents-lite:pending-result"
+      && entry.data.result === "flush before dispose",
+    )).toBe(true);
+  });
+
+  it("transfers an unpersisted fallback to a replacement coordinator", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "reload result");
+    mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
+
+    coordinator.onAgentComplete(result.record);
+    coordinator.dispose();
+    expect(fallbackResults).toHaveLength(1);
+
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      sessionEntries.push({ type: "custom", customType, data });
+    });
+    const replacement = new SpawnCoordinator(manager as any);
+    const message = replacement.prepareBeforeAgentStart();
+
+    expect(message?.content).toContain("reload result");
+    expect(result.record.lifecycle.resultPersisted).toBe(true);
+  });
+
+  it("re-arms restored Auto pending on explicit session reload", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
+    fallbackMeta.currentLeafId = "other-branch";
+    coordinator.onSessionTree();
+    complete(result.record, "completed", "restore me");
+    coordinator.onAgentComplete(result.record);
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    coordinator.dispose();
+
+    activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
+    fallbackMeta.currentLeafId = "origin-a";
+    const replacement = new SpawnCoordinator(manager as any);
+    replacement.restorePending();
+
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("restore me") }),
+      { triggerTurn: true },
+    );
+  });
+
+  it("does not transfer a fallback to a different parent session", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    complete(result.record, "completed", "old session result");
+    mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
+
+    coordinator.onAgentComplete(result.record);
+    coordinator.dispose();
+    fallbackMeta.currentSessionId = "new-session";
+
+    const replacement = new SpawnCoordinator(manager as any);
+    expect(replacement.prepareBeforeAgentStart()).toBeUndefined();
+    expect(fallbackResults).toHaveLength(0);
+  });
+
+  it("does not wake after disposal", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    coordinator.dispose();
+    complete(result.record);
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });
 });

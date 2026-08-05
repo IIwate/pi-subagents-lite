@@ -65,12 +65,14 @@ export function registerTools(pi: ExtensionAPI): void {
     ...SILENT_TOOL_RENDERING,
   });
 
-  // AgentStatus tool — stealth schema, list all agents and their statuses
+  // AgentStatus tool — stealth schema, list all agents or read one exact result.
   // @ts-expect-error — description removed to save prompt tokens
   pi.registerTool({
     name: "AgentStatus",
     label: "AgentStatus",
-    parameters: Type.Object({}, { additionalProperties: false }),
+    parameters: Type.Object({
+      agent_id: Type.Optional(Type.String()),
+    }, { additionalProperties: false }),
     execute: executeAgentStatusTool,
     ...SILENT_TOOL_RENDERING,
   });

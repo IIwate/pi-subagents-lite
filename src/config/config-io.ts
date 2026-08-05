@@ -35,6 +35,7 @@ function defaultModelRouting(): ModelRoutingConfig {
 /** Default agent settings — merged into loaded config so callers get a complete shape. */
 const DEFAULT_AGENT: AgentSettings = {
   forceBackground: false,
+  backgroundDelivery: "auto",
   graceTurns: DEFAULT_GRACE_TURNS,
   systemPromptMode: "replace",
   includeContextFiles: true,
@@ -56,6 +57,7 @@ const DEFAULT_AGENT: AgentSettings = {
  */
 const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
   "forceBackground",
+  "backgroundDelivery",
   "graceTurns",
   "showCost",
   "systemPromptMode",
@@ -152,9 +154,10 @@ export function loadConfig(): SubagentsConfig {
     const value = agentRaw[key];
     if (value !== undefined) (agent as unknown as Record<string, unknown>)[key] = value;
   }
+  const backgroundDelivery = agent.backgroundDelivery === "next-turn" ? "next-turn" : "auto";
   return {
     modelRouting: normalizeModelRouting(raw.modelRouting),
-    agent: { ...DEFAULT_AGENT, ...agent },
+    agent: { ...DEFAULT_AGENT, ...agent, backgroundDelivery },
     concurrency: {
       ...concurrencyRaw,
       default: typeof concurrencyRaw.default === "number" ? concurrencyRaw.default : 4,

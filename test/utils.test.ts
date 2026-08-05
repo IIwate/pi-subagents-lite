@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   isUnsafeName,
-  findModelInRegistry,
   parseModelKey,
   parseModelSpec,
   parseThinkingLevel,
@@ -59,7 +58,7 @@ describe("isUnsafeName", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  parseModelKey / findModelInRegistry                               */
+/*  parseModelKey / resolveExactModel                                 */
 /* ------------------------------------------------------------------ */
 
 describe("parseModelKey", () => {
@@ -165,35 +164,6 @@ describe("resolveExactModel", () => {
   });
 });
 
-describe("findModelInRegistry", () => {
-  const parent = { provider: "test", id: "parent-model" };
-  const grok = { provider: "cpa-responses", id: "grok-4.5" };
-
-  const registry = {
-    find: (provider: string, modelId: string) => {
-      if (provider === "cpa-responses" && modelId === "grok-4.5") return grok;
-      if (provider === "test" && modelId === "parent-model") return parent;
-      return undefined;
-    },
-    getAvailable: () => [grok, parent],
-  };
-
-  it("returns fallback when modelStr is undefined", () => {
-    expect(findModelInRegistry(undefined, registry, parent)).toBe(parent);
-  });
-
-  it("resolves provider/model-id via find", () => {
-    expect(findModelInRegistry("cpa-responses/grok-4.5", registry, parent)).toBe(grok);
-  });
-
-  it("resolves bare model id via getAvailable", () => {
-    expect(findModelInRegistry("grok-4.5", registry, parent)).toBe(grok);
-  });
-
-  it("falls back when bare id is unknown", () => {
-    expect(findModelInRegistry("unknown-model", registry, parent)).toBe(parent);
-  });
-});
 
 describe("unknownModelError", () => {
   it("mentions the unknown id and list-models guidance", () => {

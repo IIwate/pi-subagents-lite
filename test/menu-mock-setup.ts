@@ -86,6 +86,7 @@ vi.mock("../src/shell.js", () => {
       const agent = mockModules.mockConfig.agent;
       return {
         forceBackground: agent.forceBackground === true,
+        backgroundDelivery: agent.backgroundDelivery === "next-turn" ? "next-turn" : "auto",
         showCost: agent.showCost === true,
         graceTurns: agent.graceTurns ?? 6,
         systemPromptMode: agent.systemPromptMode ?? "replace",
@@ -156,6 +157,7 @@ vi.mock("../src/shell.js", () => {
       },
       agent: {
         setForceBackground(value: boolean) { mockModules.mockConfig.agent.forceBackground = value; },
+        setBackgroundDelivery(value: "auto" | "next-turn") { mockModules.mockConfig.agent.backgroundDelivery = value; },
         setShowCost(value: boolean) { mockModules.mockConfig.agent.showCost = value; },
         setGraceTurns(value: number) { mockModules.mockConfig.agent.graceTurns = value; },
         setSystemPromptMode(value: string) { mockModules.mockConfig.agent.systemPromptMode = value; },
