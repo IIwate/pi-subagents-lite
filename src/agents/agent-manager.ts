@@ -508,8 +508,12 @@ export class AgentManager {
     resolve("");
   }
 
-  /** Notify completion callback, ignoring any errors. */
-  private safeNotifyComplete(record: AgentRecord): void {
+  /**
+   * A live failed session needs a human continuation, not a second delegated
+   * task. Notify only after it resolves or its recovery window expires.
+   */
+  private safeNotifyComplete(record: AgentRecord, includeRecoverable = false): void {
+    if (!includeRecoverable && needsUserInput(record)) return;
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
 
@@ -828,7 +832,7 @@ export class AgentManager {
         this.scheduleRecoveryExpiry(record);
         return;
       }
-      this.removeRecord(record.id, record);
+      this.expireRecovery(record);
     }, Math.max(0, expiresAt - Date.now()));
     timer.unref?.();
     this.recoveryExpiryTimers.set(record.id, timer);
@@ -884,6 +888,14 @@ export class AgentManager {
     try { this.onRemove?.(record); } catch { /* ignore */ }
   }
 
+  /** Make an unrecovered live failure visible once its continuation window closes. */
+  private expireRecovery(record: AgentRecord): void {
+    const lastError = record.error?.trim() || "unknown error";
+    record.error = `Agent recovery expired without continuation. Last error: ${lastError}`;
+    this.safeNotifyComplete(record, true);
+    this.removeRecord(record.id, record);
+  }
+
   private cleanup() {
     const now = Date.now();
     for (const [id, record] of this.agents) {
@@ -902,7 +914,8 @@ export class AgentManager {
           + (record.lifecycle.cleanupExpiryPausedMs ?? 0);
         if (cleanupExpiresAt >= now) continue;
       }
-      this.removeRecord(id, record);
+      if (waitingForInput) this.expireRecovery(record);
+      else this.removeRecord(id, record);
     }
   }
 

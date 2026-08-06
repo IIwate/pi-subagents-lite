@@ -669,6 +669,34 @@ describe("AgentManager", () => {
       expect(record.lifecycle.status).toBe("error");
       expect(record.error).toBe("503 service_unavailable");
       expect(record.result).toBeUndefined();
+      expect(onComplete).toHaveBeenCalledWith(record);
+    });
+
+    it("waits to notify a recoverable failure until its recovery window expires", async () => {
+      vi.useFakeTimers();
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated(session);
+        throw new Error("stream_read_error: response closed");
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      await manager.getRecord(id)!.execution.promise;
+
+      expect(onComplete).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({
+        id,
+        lifecycle: expect.objectContaining({ status: "error" }),
+        error: expect.stringContaining("Agent recovery expired without continuation"),
+      }));
+      expect(manager.getRecord(id)).toBeUndefined();
     });
   });
 

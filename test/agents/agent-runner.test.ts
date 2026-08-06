@@ -505,7 +505,7 @@ describe("runAgent — tool visibility wiring", () => {
 /*  runAgent — Codex stream disconnect retry                           */
 /* ------------------------------------------------------------------ */
 
-describe("runAgent — Codex stream disconnect retry", () => {
+describe("runAgent — transient transport retry", () => {
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
@@ -530,6 +530,8 @@ describe("runAgent — Codex stream disconnect retry", () => {
       "Codex error: stream disconnected before completion",
       "Codex error: stream closed before response.completed",
       "Codex error: invalid SSE data JSON: truncated payload",
+      "stream_read_error: upstream closed the response",
+      'Codex error: Post "https://chatgpt.com/backend-api/codex/responses": EOF',
       "existing retryable error",
     ]) {
       expect(classifyRetryableError({ stopReason: "error", errorMessage })).toBe(true);
@@ -539,7 +541,7 @@ describe("runAgent — Codex stream disconnect retry", () => {
       stopReason: "stop",
       errorMessage: "stream disconnected before completion",
     })).toBe(false);
-    expect(originalClassifier).toHaveBeenCalledTimes(6);
+    expect(originalClassifier).toHaveBeenCalledTimes(8);
     expect(originalClassifier.mock.contexts.every((context) => context === session)).toBe(true);
   });
 });

@@ -87,15 +87,15 @@ interface RetryClassifierMessage {
   errorMessage?: string;
 }
 
-const CODEX_RETRYABLE_STREAM_ERROR_PATTERN =
-  /stream disconnected before completion|stream closed before response\.completed|invalid SSE data JSON/i;
+const TRANSIENT_TRANSPORT_ERROR_PATTERN =
+  /\b(?:stream|socket|network|transport)(?:[_\s-]+(?:read|write|connect(?:ion)?|disconnect(?:ed|ion)?|closed?|reset|lost|timeout))(?:[_\s-]+error)?\b|\b(?:EOF|ECONNRESET|ETIMEDOUT|EPIPE)\b|invalid SSE data JSON/i;
 
 /**
  * Pi has no public hook for extending per-session retry classification, so wrap
  * its private classifier while preserving the original result and `this` binding.
  * Missing or renamed internals degrade to Pi's default behavior instead of breaking sessions.
  */
-function enableCodexStreamErrorRetry(session: AgentSession): void {
+function enableTransientTransportErrorRetry(session: AgentSession): void {
   const retrySession = session as unknown as {
     _isRetryableError?: (message: RetryClassifierMessage) => boolean;
   };
@@ -106,7 +106,7 @@ function enableCodexStreamErrorRetry(session: AgentSession): void {
     classifyRetryableError.call(retrySession, message) ||
     (message.stopReason === "error" &&
       typeof message.errorMessage === "string" &&
-      CODEX_RETRYABLE_STREAM_ERROR_PATTERN.test(message.errorMessage));
+      TRANSIENT_TRANSPORT_ERROR_PATTERN.test(message.errorMessage));
 }
 
 /**
@@ -504,7 +504,7 @@ async function initSession(
     sessionOpts.thinkingLevel = thinkingLevel as typeof sessionOpts.thinkingLevel;
   }
   const result = await createAgentSession(sessionOpts);
-  enableCodexStreamErrorRetry(result.session);
+  enableTransientTransportErrorRetry(result.session);
 
   // Inject the agent frontmatter max_tokens into provider request payloads.
   const maxTokens = agentConfig?.maxTokens;
