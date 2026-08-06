@@ -71,10 +71,8 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
   const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
-  // Store scan dirs for on-demand discovery (agents added during the session)
-  setAgentScanDirs(userAgentDir, projectAgentDir);
-
   const disableDefaults = getStore().agent.disableDefaultAgents;
+  setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);
   const merged = await scanAndMerge({ disableDefaultAgents: disableDefaults });
 
   // Register into the type registry (skip re-adding defaults)

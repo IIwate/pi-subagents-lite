@@ -23,11 +23,12 @@ export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "g
 const agents = new Map<string, AgentConfig>();
 
 /**
- * Directories to scan for agent .md files at startup and on-demand.
- * Set by setAgentScanDirs() during session_start.
+ * Directories and current default-agent policy used by on-demand discovery.
+ * Initialized at session_start and updated when the setting changes.
  */
 let userAgentDir = "";
 let projectAgentDir = "";
+let defaultAgentsDisabled = false;
 
 /** Options for registerAgents. */
 export interface RegisterAgentsOptions {
@@ -58,12 +59,37 @@ export function registerAgents(userAgents: Map<string, AgentConfig>, options?: R
 }
 
 /**
- * Set the agent scan directories for on-demand discovery.
+ * Set the session's agent scan directories and default-agent policy.
  * Called during session_start alongside scanAndRegisterAgents.
  */
-export function setAgentScanDirs(userDir: string, projectDir: string): void {
+export function setAgentScanDirs(
+  userDir: string,
+  projectDir: string,
+  disableDefaultAgents = false,
+): void {
   userAgentDir = userDir;
   projectAgentDir = projectDir;
+  defaultAgentsDisabled = disableDefaultAgents;
+}
+
+/** Built-ins have no source; every merged global/project definition has one. */
+function isBuiltinDefault(name: string, config: AgentConfig): boolean {
+  return DEFAULT_AGENTS.has(name) && config.source === undefined;
+}
+
+/** Apply the default-agent policy to future agent lookups without stopping accepted work. */
+export function setDefaultAgentsDisabled(disabled: boolean): void {
+  defaultAgentsDisabled = disabled;
+  if (disabled) {
+    for (const [name, config] of agents) {
+      if (isBuiltinDefault(name, config)) agents.delete(name);
+    }
+    return;
+  }
+
+  for (const [name, config] of DEFAULT_AGENTS) {
+    if (!agents.has(name)) agents.set(name, { ...config });
+  }
 }
 
 /** Scan user and project agent directories, merge with defaults. Returns the merged Map. */
@@ -85,7 +111,7 @@ export async function scanAndMerge(options?: { disableDefaultAgents?: boolean })
  *   parsing and name-uniqueness rules as the parent's project scan.
  */
 export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
-  const merged = await scanAndMerge();
+  const merged = await scanAndMerge({ disableDefaultAgents: defaultAgentsDisabled });
 
   let count = 0;
   for (const [name, config] of merged) {

@@ -4,6 +4,7 @@
  * Verifies:
  *   - When disableDefaultAgents is true, registerAgents skips DEFAULT_AGENTS
  *   - When disableDefaultAgents is false (default), DEFAULT_AGENTS are included
+ *   - discoverNewAgents preserves the session's default-agent policy
  *   - User agents overriding a default by name still work when setting is on
  *   - getConfig falls back to generic config when defaults disabled and no user agents
  */
@@ -15,10 +16,12 @@ import {
   resolveType,
   getAgentConfig,
   setAgentScanDirs,
+  setDefaultAgentsDisabled,
+  discoverNewAgents,
   getConfig,
 } from "../../src/agents/agent-types.js";
-import { DEFAULT_AGENTS } from "../../src/agents/default-agents.js";
 import type { AgentConfig } from "../../src/agents/types.js";
+import { makeAgentMd, tempDirWithFiles } from "../fixtures.ts";
 
 /* ------------------------------------------------------------------ */
 /*  registerAgents with disableDefaultAgents                          */
@@ -70,9 +73,58 @@ describe("registerAgents — disableDefaultAgents", () => {
     expect(config!.description).toBe("My custom general-purpose agent");
   });
 
+  it("applies immediately without removing a custom default-name override", () => {
+    registerAgents(new Map([[
+      "general-purpose",
+      {
+        name: "general-purpose",
+        description: "Custom general-purpose agent",
+        systemPrompt: "custom",
+        source: "project",
+      },
+    ]]));
+
+    setDefaultAgentsDisabled(true);
+    expect(getAvailableTypes()).toEqual(["general-purpose"]);
+    expect(getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
+
+    setDefaultAgentsDisabled(false);
+    expect(getAvailableTypes()).toContain("general-purpose");
+    expect(getAvailableTypes()).toContain("Explore");
+    expect(getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
+  });
+
   it("returns empty types when defaults disabled and no user agents", () => {
     registerAgents(new Map(), { disableDefaultAgents: true });
     expect(getAvailableTypes()).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  On-demand discovery                                                */
+/* ------------------------------------------------------------------ */
+
+describe("discoverNewAgents - disableDefaultAgents", () => {
+  beforeEach(() => {
+    registerAgents(new Map());
+    setAgentScanDirs("", "");
+  });
+
+  it("preserves the session policy while discovering a custom agent", async () => {
+    const { dir: projectDir, cleanup } = tempDirWithFiles([
+      { name: "custom.md", content: makeAgentMd({ name: "custom", description: "Custom" }) },
+    ], "project-agents");
+
+    try {
+      setAgentScanDirs("", projectDir, true);
+      registerAgents(new Map(), { disableDefaultAgents: true });
+
+      await discoverNewAgents();
+
+      expect(getAvailableTypes()).toEqual(["custom"]);
+    } finally {
+      cleanup();
+    }
   });
 });
 

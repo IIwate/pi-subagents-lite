@@ -17,6 +17,7 @@ import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { ThinkingLevel } from "../../types.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-io.js";
 import { getStore } from "../../shell.js";
+import { setDefaultAgentsDisabled } from "../../agents/agent-types.js";
 
 export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
@@ -51,7 +52,7 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
       label: "Disable default agents",
       currentValue: store.agent.disableDefaultAgents ? "ON" : "OFF",
       values: ["ON", "OFF"],
-      description: "Skip auto-loading built-in agent types next session; only .pi/agents types load.",
+      description: "Block new uses of built-in agent types; existing agents continue.",
     },
   ];
 
@@ -65,10 +66,13 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
         store.mutate.agent.setDefaultThinking(newValue === "inherit" ? undefined : newValue as ThinkingLevel);
         ctx.ui.notify(`Default thinking level set to ${newValue}`, "info");
         break;
-      case "disableDefaultAgents":
-        store.mutate.agent.setDisableDefaultAgents(newValue === "ON");
-        ctx.ui.notify(`Disable default agents ${newValue} (takes effect on next session)`, "info");
+      case "disableDefaultAgents": {
+        const disabled = newValue === "ON";
+        store.mutate.agent.setDisableDefaultAgents(disabled);
+        setDefaultAgentsDisabled(disabled);
+        ctx.ui.notify(`Default agents ${disabled ? "disabled" : "enabled"}`, "info");
         break;
+      }
     }
   };
 

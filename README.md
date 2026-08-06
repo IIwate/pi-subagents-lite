@@ -49,7 +49,7 @@ Each new subagent starts without the parent's conversation history. Background r
 - `general-purpose` — general task execution using the configured session tools.
 - `Explore` — read-only codebase exploration.
 
-Built-ins can be overridden by custom agents or disabled from `/agents`.
+Built-ins can be overridden by custom agents or disabled from `/agents`. Disabling them takes effect immediately for future `Agent` calls and on-demand discovery; running and queued agents continue, and same-name custom definitions remain available.
 
 ## Custom Agents
 

@@ -55,7 +55,7 @@ export interface ResolvedAgentSettings {
   readonly loadSkillsImplicitly: boolean;
   /** Global default for extensions loading: true (load all) or false (none). */
   readonly loadExtensionsImplicitly: boolean;
-  /** Whether to skip built-in default agents at registration. */
+  /** Whether built-in default agent types are available for new calls. */
   readonly disableDefaultAgents: boolean;
   /** Whether to show toolUses count in list stats. */
   readonly showTools: boolean;
