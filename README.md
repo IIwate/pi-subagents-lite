@@ -23,7 +23,7 @@ The extension registers three tools for the LLM:
 Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. `Needs input` agents sort first and `Done` agents last:
 
 ```text
-› ● Main (1 needs input · 1 running · 0 queued · 3 total · Alt+A collapse)
+› ● Main (1 needs input · 1 running · 3 total · Alt+A collapse)
   ○ Security (Needs input)  Audit authentication       anthropic · claude-sonnet-4 · high · 81 calls · 36m
   ○ Explore (Running)  Inspect the project              openai-codex · gpt-5.4 · high · 4 calls · 25s
   ◇ Reviewer (Done)  Preserve this review               openai-codex · gpt-5.4 · high · 12 calls · 2m
@@ -32,7 +32,7 @@ Once a subagent exists, progress appears in the below-editor list with a sticky 
 - `›` marks the keyboard-highlighted row.
 - `○` and `●` mark inactive and active unpinned transcripts.
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
-- Main always shows complete `running`, `queued`, and total list counts, including zero values. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
+- Main shows nonzero `running` and `queued` counts plus the total list count. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
 - While expanded, sticky Main owns the needs-input count, running/queued/total counts, exceptional `results pending` state for the active branch, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status in the normal path. Normal in-flight automatic delivery does not show pending text. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Zero pending results are hidden. Both forms follow reading order: needs input, counts, delivery state when nonzero, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
 - Status values include `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, `Error`, and `Needs input`. The list label, expanded Main count, and folded Footer count use the same orange emphasis without changing list visibility.
 - With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.

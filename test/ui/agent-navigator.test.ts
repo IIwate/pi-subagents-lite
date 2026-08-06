@@ -249,7 +249,7 @@ describe("AgentNavigator", () => {
 
     const rendered = selector.render(120).join("\n");
     expect(rendered).toContain(
-      "● Main (1 running · 0 queued · 1 total · Alt+A collapse)",
+      "● Main (1 running · 1 total · Alt+A collapse)",
     );
     expect(rendered).not.toContain(record.id);
     expect(ui.statuses.has("subagents-lite")).toBe(false);
@@ -352,7 +352,7 @@ describe("AgentNavigator", () => {
     expect(navigator.selectedId()).toBeNull();
     expect(selector.render(120)).toEqual([]);
     expect(ui.statuses.get("subagents-lite")).toBe(
-      "Subagent (1 running · 0 queued · 1 total · Alt+A expand)",
+      "Subagent (1 running · 1 total · Alt+A expand)",
     );
   });
 
@@ -373,7 +373,7 @@ describe("AgentNavigator", () => {
     navigator.update();
     expect(selector.render(120)).toEqual([]);
     expect(ui.statuses.get("subagents-lite")).toBe(
-      "Subagent (1 running · 0 queued · 1 total · Alt+A expand)",
+      "Subagent (1 running · 1 total · Alt+A expand)",
     );
   });
 
@@ -396,7 +396,8 @@ describe("AgentNavigator", () => {
     const status = ui.statuses.get("subagents-lite")!;
     expect(status).toContain("1 needs input");
     expect(status).toContain("Alt+A expand");
-    expect(status.indexOf("1 needs input")).toBeLessThan(status.indexOf("0 running"));
+    expect(status).not.toContain("0 running");
+    expect(status).not.toContain("0 queued");
     expect(status.indexOf("1 total")).toBeLessThan(status.indexOf("Alt+A expand"));
     expect(status).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)m1 needs input/);
     expect(selector.render(120)).toEqual([]);
@@ -463,7 +464,7 @@ describe("AgentNavigator", () => {
     expect(lines.filter((line: string) => line.includes("Task "))).toHaveLength(6);
   });
 
-  it("shows zero running and queued counts when only terminal records remain", () => {
+  it("hides zero running and queued counts when only terminal records remain", () => {
     const records = [makeRecord("done-1", "completed"), makeRecord("done-2", "completed")];
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager(records));
@@ -471,7 +472,10 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
 
-    expect(selector.render(120)[0]).toContain("0 running · 0 queued · 2 total");
+    const summary = selector.render(120)[0];
+    expect(summary).toContain("2 total");
+    expect(summary).not.toContain("0 running");
+    expect(summary).not.toContain("0 queued");
   });
 
   it("keeps continuable status adjacent to its stats", () => {
@@ -1123,7 +1127,7 @@ describe("AgentNavigator", () => {
 
     (ui.baseEditor as any).onSubmit("retry");
     await vi.waitFor(() => {
-      expect(selector.render(120).join("\n")).toContain("1 running · 0 queued · 1 total");
+      expect(selector.render(120).join("\n")).toContain("1 running · 1 total");
     });
     expect(editor).toBeDefined();
   });
@@ -1162,7 +1166,7 @@ describe("AgentNavigator", () => {
     (ui.baseEditor as any).onSubmit("retry");
     await vi.waitFor(() => {
       expect(ui.statuses.get("subagents-lite")).toBe(
-        "Subagent (1 running · 0 queued · 1 total · Alt+A expand · Alt+M main)",
+        "Subagent (1 running · 1 total · Alt+A expand · Alt+M main)",
       );
     });
   });

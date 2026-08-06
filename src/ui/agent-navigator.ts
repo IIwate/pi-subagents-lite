@@ -1073,8 +1073,8 @@ export class AgentNavigator {
           ctx.theme,
         ));
       }
-      parts.push(ctx.theme.fg("dim", `${running} running`));
-      parts.push(ctx.theme.fg("dim", `${queued} queued`));
+      if (running > 0) parts.push(ctx.theme.fg("dim", `${running} running`));
+      if (queued > 0) parts.push(ctx.theme.fg("dim", `${queued} queued`));
       parts.push(ctx.theme.fg("dim", `${records.length} total`));
       if (pending) parts.push(ctx.theme.fg("warning", pendingLabel(pending)));
     }
@@ -1162,8 +1162,8 @@ export class AgentNavigator {
           theme,
         ));
       }
-      summaryParts.push(theme.fg("dim", `${running} running`));
-      summaryParts.push(theme.fg("dim", `${queued} queued`));
+      if (running > 0) summaryParts.push(theme.fg("dim", `${running} running`));
+      if (queued > 0) summaryParts.push(theme.fg("dim", `${queued} queued`));
       summaryParts.push(theme.fg("dim", `${records.length} total`));
       if (pending) summaryParts.push(theme.fg("warning", pendingLabel(pending)));
     }
