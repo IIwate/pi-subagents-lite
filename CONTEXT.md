@@ -1,6 +1,6 @@
 # pi-subagents-lite
 
-A lightweight pi extension that lets the LLM spawn autonomous child agents for complex tasks. Focused fork of pi-subagents with reduced surface area — no scheduling, no join modes.
+A lightweight pi extension that lets the LLM spawn autonomous child agents for complex tasks without scheduling or join modes.
 
 ## Language
 
@@ -75,17 +75,21 @@ _Avoid_: Grace period, extra turns
 ### Worktrees
 
 **Worktree**:
-A linked git worktree of the same repository as the parent, distinguished by its `--git-dir` pointing outside the worktree root. The target of the `worktree_path` Agent tool param.
-_Avoid_: Git worktree, sibling worktree
+The parent repository's main checkout or one of its linked git worktrees, identified by sharing the same resolved `--git-common-dir`. A valid target of the `worktree_path` Agent tool param.
+_Avoid_: Arbitrary checkout, sibling repository
 
 **Worktree path**:
-The resolved absolute filesystem path passed through `worktree_path`. Used as the subagent's working directory for its session, resource loader, and system prompt.
+The resolved absolute filesystem path passed through `worktree_path`. It must identify a Worktree of the parent's repository and becomes the subagent's working directory for its session, resource loader, and system prompt.
 
 ### Runtime
 
 **Accepted run policy**:
-The deep-copied Agent definition, resolved tool/skill/extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, and grace turns locked after an Agent call passes authorization. Running and queued agents use this snapshot; later registry, configuration, parent-model, or scope changes affect only future calls. `inherit` captures its mode while Pi supplies the parent prompt text at actual start time.
+The deep-copied Agent definition, resolved tool/skill/extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns locked after an Agent call passes authorization. Running and queued agents use this snapshot; later registry, configuration, parent-model, or scope changes affect only future calls. `inherit` captures its mode while Pi supplies the parent prompt text at actual start time.
 _Avoid_: Queue revalidation, live assignment
+
+**Child screen**:
+The selected Subagent transcript and input route displayed in place of Main's chat region. Pi 0.84 regular and fullscreen renderers reuse the same document and dock components, so runtime mode switching keeps the Child screen active. Main's pending and status regions are suppressed by temporarily replacing their render methods, while the footer container remains owned by Pi and other extensions.
+_Avoid_: Child TUI, replacement session, alternate Main
 
 **Background result delivery**:
 A terminal background result is persisted with the parent session ID and Agent-call origin entry before one automatic wake opportunity. Concurrent wake requests are coalesced. A completion persisted during a failed parent turn provides one later wake opportunity after settlement; the failed delivery alone never retries itself. A later persisted completion can carry older eligible pending results. Delivery is allowed only while the origin entry remains on the active branch. Explicit session reload or `/tree` navigation back to that origin is a separate restoration event. The next natural parent prompt injects eligible pending results during preflight, including after a failed automatic wake. Exact AgentStatus reads join the current parent turn's successful-settlement acknowledgement.
@@ -104,6 +108,7 @@ _Avoid_: Session-global injection, 200ms debounce, logical task batch, join mode
 - Scope-excluded exact rules remain dormant and hidden; changing visible checkboxes must preserve them
 - An **Unavailable model rule** can be batch-cleaned only from a reliable **Model catalogue**; credential loss and out-of-scope rules cannot
 - Accepted running and queued work uses an **Accepted run policy**
+- Selecting a **Subagent** activates its **Child screen** without changing that Subagent's lifecycle
 - **Agent guidance** communicates current effective access to the parent LLM before each run
 - A **Subagent** may run in a **Worktree** of the parent's repository
 - A **Background result delivery** entry is persisted when a background agent completes or errors, and is automatically eligible only inside its origin-entry subtree
@@ -120,7 +125,7 @@ _Avoid_: Session-global injection, 200ms debounce, logical task batch, join mode
 - Persisted terminal subagents are normally removed from the volatile list after 10 minutes; their parent-session result entries remain available for origin-subtree delivery and explicit session-wide AgentStatus lookup. An explicit result read is acknowledged only after its parent turn settles successfully. New/forked sessions ignore copied entries whose parent session ID does not match. Append failures are held in process-local buckets keyed by parent session ID; reading, replacing, or clearing one bucket never affects another. Space toggles independent session-local pins on highlighted subagents; pins pause automatic cleanup, do not change status ordering, and never block explicit Ctrl+D removal. Unpinning resumes the prior remaining duration rather than granting a fresh window.
 - A failed subagent is an ordinary `Error` terminal result and is immediately sent through persistence and parent delivery. If its settled child session remains in memory, the selected child view may send another prompt during the ordinary 10-minute retention period. The continuation creates a new terminal result without retracting or duplicating the first. Pinning pauses ordinary cleanup; opening the child view does not. This is not persisted resume, and the parent LLM does not receive a continuation tool.
 - Debug may arm a session-local, one-shot fault for the next Agent that actually starts. Queued records do not reserve or consume it. Injected records show a separate accent-colored `[DEBUG]` provenance badge before the ordinary status in the list and child header. Injection happens after the real child session is configured and before its first provider prompt. Debug is UI-only, is not persisted across reload, does not create a provider probe or second spawn path, and exposes neither diagnostics nor lifecycle control to the parent LLM.
-- The child screen removes Pi's built-in Main cwd and model-usage footer rows, retaining extension status rows needed for navigation and preserving custom footers owned by other extensions. Detailed child usage remains available in the expanded Agent row rather than a duplicate child-only footer.
+- The **Child screen** supports Pi 0.84 regular and fullscreen renderers and remains selected across runtime mode switches. It replaces only the document chat child, temporarily renders pending/status containers empty, and wraps the footer-container render while preserving the component instances held by fullscreen's ScrollView and dock. Built-in Main cwd and model-usage footer rows are removed while extension status rows remain; custom footers and replacements made by other extensions are rendered intact. Returning to Main, disposal, or `/reload` restores only references still owned by this extension. An unknown root/document layout or a conflicting render replacement fails closed before any partial screen mutation.
 - Error presentation is local-only. Parent-session result entries are the only durable handoff; external transports such as webhooks, Telegram, and email are deferred until a concrete consumer exists. Future notifications must not include prompts, transcripts, source code, or findings by default.
 - Concurrency is hierarchical rather than precedence-based: every run must satisfy an explicit Model ceiling or the fallback per-model ceiling, plus any shared Provider ceiling. New runs queue when either is full; settled-session continuation stays synchronous and reports one local concurrency block. Normal menus show only actionable/current-session limits, while inactive limits remain saved behind an explicit management row.
 - Input usage accumulates provider-reported values without a vLLM-specific delta heuristic. Revisit only when a supported backend demonstrably reports cumulative prompt tokens without usable cache accounting.

@@ -39,7 +39,7 @@ Once a subagent exists, progress appears in the below-editor list or its folded 
 - Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
 - Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
 - Foreground Agent calls honor Pi's interrupt signal: `Esc` from the editor stops every running or queued foreground Agent in the interrupted parent turn, while background Agents continue. If the list has focus, `Esc` only returns to the editor; press it again there to interrupt.
-- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
+- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. Switching Pi between regular and fullscreen TUI modes preserves the selected child, transcript, and input route because both renderers reuse the same component tree. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved, including replacements made while the child is active. If Pi exposes an unsupported host layout, child activation fails closed with one warning instead of partially replacing Main.
 - Persisted terminal results are normally removed from the volatile Agent list after 10 minutes; the parent session result entry remains available for later delivery and exact lookup. Automatic delivery is limited to branches that retain the Agent call's origin entry; explicit `AgentStatus({ agent_id })` lookup remains session-wide. An `Error` record with a retained live session can accept another prompt through the selected child view during the same ordinary retention period. That interaction produces a new terminal result and never retracts or duplicates the first delivery. Pinning extends ordinary retention; viewing does not. Child sessions and pins are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background terminal results, including errors, are immediately persisted in the parent Pi session with the Agent call's session ID and origin entry before one automatic wake opportunity. They are delivered only while that origin remains on the active branch. A completion persisted during a failed parent turn provides one later wake opportunity after settlement; the failed result alone does not retry itself. A later persisted completion may carry older eligible pending results, while the next natural parent prompt injects them during preflight even after an automatic wake failed. Explicit reload or `/tree` return to the origin is a separate restoration event; forked or new sessions ignore copied entries from the old session. Do not poll, sleep, or repeatedly call `AgentStatus` while waiting. Use `AgentStatus({ agent_id })` only for explicit session-wide result lookup; that read is acknowledged only after its parent turn settles successfully.
@@ -85,13 +85,7 @@ Supported frontmatter fields:
 - Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
 - Runtime: `thinking`, `max_turns`, `max_tokens`.
 
-Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents.
-
-## Upgrading to 2.0
-
-Version 2.0 replaces fixed Agent model assignments with the access policy below. Legacy `allowCrossProvider`, `allowedProviders`, `agentModels`, dynamic `agent.<type>` model keys, `agent.default`, and session assignments are not read or migrated. Agent frontmatter `model` is also ignored; omit the Agent tool's `model` argument for the exact parent model, or pass an explicitly authorized alternate.
-
-A missing or legacy `modelRouting` block starts with routing OFF and no alternate access. Other Agent and concurrency settings continue to load. The next explicit settings save rewrites the file with only the canonical 2.0 routing schema.
+Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. A positive `max_tokens` is applied to a child-only copy of the selected model through Pi's native `model.maxTokens`; Pi remains responsible for provider-specific request fields, thinking budgets, and context-window clamping. Omitting `max_tokens` or setting it to a non-positive value preserves the model's configured limit, and the parent model and Pi's `onPayload` chain are not modified. Subagents cannot spawn further subagents.
 
 ## Agent Options
 
@@ -165,7 +159,7 @@ The normal Agent model picker shows only actionable alternates: Provider models 
 
 Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
 
-The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts.
+The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts.
 
 ## Concurrency
 
@@ -183,7 +177,7 @@ Run `/agents` to configure:
 - the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
 - force-background mode, grace turns, and default thinking;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
-- implicit skill and extension loading, built-in agents, and visible list statistics;
+- implicit skill and extension loading, built-in agents, initial list expansion, and visible list statistics;
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
 - one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 

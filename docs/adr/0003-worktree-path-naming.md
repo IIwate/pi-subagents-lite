@@ -1,9 +1,10 @@
 # Worktree path param naming
 
-The `Agent` tool exposes a `worktree_path` parameter (a path inside a sibling git
-worktree of the parent) rather than a generic `cwd` parameter. The schema name
-encodes the validation constraint: the path must share `git-common-dir` with
-the parent and must not be the main checkout.
+The `Agent` tool exposes a `worktree_path` parameter for the parent repository's
+main checkout or one of its linked git worktrees, rather than a generic `cwd`
+parameter. The schema name encodes the validation constraint: the target must
+share the parent's resolved `git-common-dir` and cannot be an arbitrary
+directory or a checkout from another repository.
 
 ## Why
 

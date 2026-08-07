@@ -58,6 +58,13 @@
 - `deliverAs: "steer"` only queues while the parent agent is running. If the agent is idle when the message arrives, pi drops it silently.
 - `deliverAs: "followUp"` waits for the agent to finish, then delivers. Use this for notifications that must arrive regardless of agent state.
 - Check `ctx.isIdle()` at call time to pick the right delivery mode. Don't assume agent state from caller context.
+- Apply per-agent output caps to a child-only model copy as `model.maxTokens` before `createAgentSession()`. Do not patch `onPayload`: Pi already maps API-specific fields, adjusts thinking budgets, and clamps to context.
+
+### Pi 0.84 TUI lifecycle
+- Pi 0.84 mounts seven root components; header, loaded resources, and chat are the three children of `documentContainer`, with chat at index 2.
+- Fullscreen's ScrollView and dock hold direct references to the same components remounted by regular/fullscreen renderer switches. Preserve those component objects; replace the document chat child and temporarily override pending/status/footer-container `render` methods instead of replacing root entries.
+- `ctx.ui.setFooter()` replaces `footerContainer.children`, not the root footer container. Read the current child at render time, strip only the first two rows of the built-in footer, and preserve custom footer output unchanged.
+- Renderer-switch tests must model Pi's stable TUI Proxy and direct fullscreen component references; changing only a `mode` string does not test runtime migration.
 
 ### Subagent session lifecycle
 - Subagents are built with `createAgentSession`, which runs its own `DefaultResourceLoader.reload()` and `session.bindExtensions()`. That re-executes EVERY extension factory and re-fires `session_start`/`session_shutdown` in the subagent's context, NOT just the parent's.

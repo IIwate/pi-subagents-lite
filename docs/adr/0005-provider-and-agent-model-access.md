@@ -197,7 +197,7 @@ diagnostics remain UI-only.
 The Agent call validates policy, Pi availability, and scope before accepting work, then
 locks a deep-copied Agent definition, resolved tool/skill/extension policy,
 system prompt mode, context-file setting, selected model, parent model, thinking
-selection, scoped-model state, and grace turns. Running and queued agents use
+selection, scoped-model state, output-token limit, and grace turns. Running and queued agents use
 that accepted run policy without consulting the mutable registry or config
 store at start time. `inherit` captures the mode while Pi supplies the parent
 system prompt text at actual start. Later policy edits, provider disablement,
@@ -205,23 +205,19 @@ rule deletion, parent-model changes, or scope changes apply only to future
 Agent calls. Real provider credential or API failures may still fail accepted
 work normally.
 
-## Migration
+## Per-agent output limit
 
-Pre-2.0 and assignment-based routing shapes are not supported. The following
-fields are neither read nor migrated:
+Agent frontmatter `max_tokens` is a runtime limit, not a model assignment or
+routing permission. After authorization selects the model, a positive limit is
+applied to a shallow child-only copy as `model.maxTokens` before
+`createAgentSession()`. The registry or parent model object is never mutated.
+Omitted and non-positive values preserve the selected model's configured limit.
 
-- `allowCrossProvider`;
-- `allowedProviders`;
-- `agentModels`;
-- dynamic `agent[<type>]` model keys;
-- `agent.default`;
-- session model assignments;
-- Agent frontmatter `model`.
-
-A missing or malformed `modelRouting` block falls back to routing OFF with no
-enabled providers or agent access. Non-model agent and concurrency settings
-continue to load normally. The next explicit save writes only the canonical
-schema.
+Pi's native stream path remains responsible for mapping the limit to each API,
+adjusting thinking budgets, and clamping it to the available context window.
+The extension does not wrap `Agent.onPayload` or inject provider-specific
+`max_tokens`, `max_completion_tokens`, or `max_output_tokens` fields, so other
+extensions retain the original `before_provider_request` chain.
 
 ## Consequences
 
