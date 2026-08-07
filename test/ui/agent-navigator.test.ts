@@ -7,6 +7,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }));
 
+import { ScrollView, VStack } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../../src/agents/agent-manager.js";
 import { registerAgents } from "../../src/agents/agent-types.js";
 import { AgentNavigator } from "../../src/ui/agent-navigator.js";
@@ -106,17 +107,32 @@ function makeChatContainer(text: string): any {
   };
 }
 
-function makeTui(prefixCount = 2): any {
+function makeLiveContainer(children: any[]): any {
+  return {
+    children,
+    render(width: number) {
+      return this.children.flatMap((child: any) => child.render(width));
+    },
+    invalidate: vi.fn(),
+  };
+}
+
+function makeTui(mode: "regular" | "fullscreen" = "regular"): any {
   let clearOnShrink = false;
   const originalChat = makeChatContainer("parent chat");
   const originalPending = makeContainer("parent pending");
   const originalStatus = makeContainer("parent status");
-  const chatIndex = prefixCount;
-  const pendingIndex = chatIndex + 1;
-  const statusIndex = chatIndex + 2;
-  const editorIndex = chatIndex + 4;
-  const belowIndex = chatIndex + 5;
-  const footerIndex = chatIndex + 6;
+  const document = makeLiveContainer([
+    makeContainer("header"),
+    makeContainer("loaded resources"),
+    originalChat,
+  ]);
+  const chatIndex = 2;
+  const pendingIndex = 1;
+  const statusIndex = 2;
+  const editorIndex = 4;
+  const belowIndex = 5;
+  const footerIndex = 6;
   const originalFooter = {
     session: {
       getContextUsage: vi.fn(),
@@ -128,10 +144,13 @@ function makeTui(prefixCount = 2): any {
     render: () => ["parent cwd", "parent stats"],
     invalidate: vi.fn(),
   };
+  const footerContainer = makeLiveContainer([originalFooter]);
   Object.defineProperty(originalFooter, "constructor", {
     value: { name: "FooterComponent" },
   });
   return {
+    mode,
+    document,
     chatIndex,
     pendingIndex,
     statusIndex,
@@ -142,15 +161,15 @@ function makeTui(prefixCount = 2): any {
     originalPending,
     originalStatus,
     originalFooter,
+    footerContainer,
     children: [
-      ...Array.from({ length: prefixCount }, (_, index) => makeContainer(`header ${index}`)),
-      originalChat,
+      document,
       originalPending,
       originalStatus,
       makeContainer("above widgets"),
       makeContainer("editor"),
       makeContainer("below widgets"),
-      originalFooter,
+      footerContainer,
     ],
     terminal: {
       columns: 120,
@@ -160,6 +179,61 @@ function makeTui(prefixCount = 2): any {
     getClearOnShrink: () => clearOnShrink,
     setClearOnShrink: vi.fn((enabled: boolean) => { clearOnShrink = enabled; }),
     requestRender: vi.fn(),
+  };
+}
+
+function makeSwitchableTui() {
+  const regular = makeTui("regular");
+  const rootComponents = [...regular.children];
+  const transcript = new ScrollView(regular.document, {
+    follow: "end",
+    primary: true,
+    overscroll: "chain",
+  });
+  const dock = new VStack([
+    { component: regular.originalPending, shrink: 1, minSize: 0 },
+    { component: regular.originalStatus, shrink: 1, minSize: 0 },
+    { component: rootComponents[3], shrink: 1, minSize: 0 },
+    { component: rootComponents[4], shrink: 1, minSize: 3 },
+    { component: rootComponents[5], shrink: 1, minSize: 0 },
+    { component: regular.footerContainer, shrink: 1, minSize: 1 },
+  ]);
+  const fullscreen = {
+    ...regular,
+    mode: "fullscreen",
+    children: [] as any[],
+    requestRender: vi.fn(),
+  };
+  let renderer = regular;
+  const tui = new Proxy({}, {
+    get: (_target, property) => {
+      const value = Reflect.get(renderer, property, renderer);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => Reflect.apply(
+        Reflect.get(renderer, property, renderer),
+        renderer,
+        args,
+      );
+    },
+    set: (_target, property, value) => Reflect.set(renderer, property, value, renderer),
+  }) as any;
+
+  return {
+    tui,
+    regular,
+    fullscreen,
+    switchMode(mode: "regular" | "fullscreen") {
+      if (renderer.mode === mode) return;
+      const components = [...renderer.children];
+      renderer.children = [];
+      renderer = mode === "regular" ? regular : fullscreen;
+      renderer.children = components;
+    },
+    renderCurrent(width = 120) {
+      return renderer.mode === "fullscreen"
+        ? [...transcript.render(width), ...dock.render(width)]
+        : renderer.children.flatMap((child: any) => child.render(width));
+    },
   };
 }
 
@@ -328,7 +402,7 @@ describe("AgentNavigator", () => {
 
     navigator.activateMain();
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
     const mainText = selector.render(120).join("\n");
     expect(mainText).toContain("● Main");
     expect(mainText).not.toContain("Alt+M main");
@@ -550,7 +624,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
-    const transcript = stripAnsi(tui.children[tui.chatIndex].render(120).join("\n"));
+    const transcript = stripAnsi(tui.document.children[tui.chatIndex].render(120).join("\n"));
     expect(transcript).toContain("Explore [DEBUG] (Error)");
     expect(transcript).not.toContain("agent-de");
   });
@@ -928,15 +1002,18 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
 
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
 
     navigator.handleTerminalInput("\r");
 
     expect(navigator.selectedId()).toBe(record.id);
-    expect(tui.children[tui.chatIndex]).not.toBe(tui.originalChat);
-    expect(tui.children[tui.pendingIndex]).not.toBe(tui.originalPending);
-    expect(tui.children[tui.statusIndex]).not.toBe(tui.originalStatus);
-    expect(tui.children[tui.footerIndex]).not.toBe(tui.originalFooter);
+    expect(tui.document.children[tui.chatIndex]).not.toBe(tui.originalChat);
+    expect(tui.children[tui.pendingIndex]).toBe(tui.originalPending);
+    expect(tui.children[tui.pendingIndex].render(120)).toEqual([]);
+    expect(tui.children[tui.statusIndex]).toBe(tui.originalStatus);
+    expect(tui.children[tui.statusIndex].render(120)).toEqual([]);
+    expect(tui.children[tui.footerIndex]).toBe(tui.footerContainer);
+    expect(tui.children[tui.footerIndex].render(120)).toEqual([]);
     expect(tui.terminal.write).toHaveBeenCalledWith("\x1b[3J");
   });
 
@@ -1005,7 +1082,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b");
 
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
   });
 
   it("restores the parent chat, pending, and status regions after confirmation", () => {
@@ -1027,10 +1104,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\r");
 
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
     expect(tui.children[tui.pendingIndex]).toBe(tui.originalPending);
+    expect(tui.children[tui.pendingIndex].render(120)).toEqual(["parent pending"]);
     expect(tui.children[tui.statusIndex]).toBe(tui.originalStatus);
-    expect(tui.children[tui.footerIndex]).toBe(tui.originalFooter);
+    expect(tui.children[tui.statusIndex].render(120)).toEqual(["parent status"]);
+    expect(tui.children[tui.footerIndex]).toBe(tui.footerContainer);
+    expect(tui.footerContainer.children).toEqual([tui.originalFooter]);
   });
 
   it("decorates the editor and forwards printable input after leaving the list", () => {
@@ -1243,7 +1323,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    const text = tui.children[tui.chatIndex].render(120).join("\n");
+    const text = tui.document.children[tui.chatIndex].render(120).join("\n");
     expect(text).toContain("Explore (Queued)");
     expect(text).not.toContain("agent-12");
     expect(text).toContain("Waiting in queue…");
@@ -1266,7 +1346,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    const text = tui.children[tui.chatIndex].render(120).join("\n");
+    const text = tui.document.children[tui.chatIndex].render(120).join("\n");
     expect(text).toContain("Explore (Error)");
     expect(text).not.toContain("agent-12");
     expect(text).toContain("Error: Automatic model override is no longer authorized");
@@ -1288,7 +1368,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    const lines = tui.children[tui.chatIndex].render(120);
+    const lines = tui.document.children[tui.chatIndex].render(120);
     const text = lines.join("\n");
     expect(text).toContain("Explore (Error)");
     expect(text).not.toContain("agent-12");
@@ -1318,7 +1398,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    expect(tui.children[tui.footerIndex].render(120)).toEqual([
+    expect(tui.footerContainer.render(120)).toEqual([
       "Subagent (Alt+A collapse · Alt+M main)",
     ]);
   });
@@ -1337,21 +1417,21 @@ describe("AgentNavigator", () => {
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
-    tui.children[tui.footerIndex] = new FooterComponent();
+    tui.footerContainer.children = [new FooterComponent()];
     mountSelector(ui, tui);
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
-    expect(tui.children[tui.footerIndex].render(120)).toEqual([
+    expect(tui.footerContainer.render(120)).toEqual([
       "custom row 1",
       "custom row 2",
       "custom row 3",
     ]);
   });
 
-  it("adopts a footer replaced by another extension while Main is selected", () => {
+  it("keeps a footer replaced by another extension while Main is selected", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -1362,7 +1442,7 @@ describe("AgentNavigator", () => {
       render: () => ["replacement cwd", "replacement stats"],
       invalidate: vi.fn(),
     };
-    tui.children[tui.footerIndex] = replacementFooter;
+    tui.footerContainer.children = [replacementFooter];
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
@@ -1371,10 +1451,11 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[A");
     navigator.handleTerminalInput("\r");
 
-    expect(tui.children[tui.footerIndex]).toBe(replacementFooter);
+    expect(tui.footerContainer.children).toEqual([replacementFooter]);
+    expect(tui.footerContainer.render(120)).toEqual(["replacement cwd", "replacement stats"]);
   });
 
-  it("reconciles a footer appended by another extension on the child screen", () => {
+  it("renders a footer replaced by another extension on the child screen", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -1388,19 +1469,14 @@ describe("AgentNavigator", () => {
       render: () => ["replacement cwd", "replacement stats"],
       invalidate: vi.fn(),
     };
-    const staleChildFooter = tui.children[tui.footerIndex];
-    tui.children.push(replacementFooter);
-    tui.originalFooter.render = () => { throw new Error("disposed footer rendered"); };
+    tui.footerContainer.children = [replacementFooter];
 
-    expect(staleChildFooter.render(120)).toEqual([]);
-    expect(tui.children).toHaveLength(tui.footerIndex + 1);
-    expect(tui.children[tui.footerIndex]).not.toBe(replacementFooter);
-    expect(tui.requestRender).toHaveBeenCalled();
+    expect(tui.footerContainer.render(120)).toEqual(["replacement cwd", "replacement stats"]);
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[A");
     navigator.handleTerminalInput("\r");
-    expect(tui.children[tui.footerIndex]).toBe(replacementFooter);
+    expect(tui.footerContainer.children).toEqual([replacementFooter]);
   });
 
   it("keeps footer reconciliation active while a completed child is selected", () => {
@@ -1465,7 +1541,7 @@ describe("AgentNavigator", () => {
     navigator.update();
 
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
     expect(ui.widgets.size).toBe(1);
     expect(selector.render(120)).toEqual([]);
   });
@@ -1486,8 +1562,9 @@ describe("AgentNavigator", () => {
     navigator.dispose();
     navigator = undefined;
 
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
-    expect(tui.children[tui.footerIndex]).toBe(tui.originalFooter);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.children[tui.footerIndex]).toBe(tui.footerContainer);
+    expect(tui.footerContainer.children).toEqual([tui.originalFooter]);
     expect(tui.terminal.write).not.toHaveBeenCalled();
     expect(tui.requestRender).toHaveBeenCalledWith(true);
   });
@@ -1516,31 +1593,150 @@ describe("AgentNavigator", () => {
     navigator = undefined;
   });
 
-  it("supports the Pi 0.83 root layout", () => {
+  it("keeps the active child and dynamic footer across Pi 0.84 renderer switches", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    const tui = makeTui(2);
-    tui.originalChat.children = [];
-    const firstHeader = tui.children[0];
-    const loadedResources = tui.children[1];
-    mountSelector(ui, tui);
+    const fixture = makeSwitchableTui();
+    mountSelector(ui, fixture.tui);
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
 
     expect(navigator.selectedId()).toBe(record.id);
-    expect(tui.children[tui.chatIndex]).not.toBe(tui.originalChat);
-    expect(tui.children[0]).toBe(firstHeader);
-    expect(tui.children[1]).toBe(loadedResources);
-    expect(ui.ctx.notify).not.toHaveBeenCalledWith(
+    let text = fixture.renderCurrent().join("\n");
+    expect(text).toContain("Explore (Running)");
+    expect(text).not.toContain("parent chat");
+    expect(text).not.toContain("parent pending");
+    expect(text).not.toContain("parent status");
+    expect(text).not.toContain("parent cwd");
+    expect(text).not.toContain("parent stats");
+
+    fixture.switchMode("fullscreen");
+    expect(fixture.tui.mode).toBe("fullscreen");
+    text = fixture.renderCurrent().join("\n");
+    expect(text).toContain("Explore (Running)");
+    expect(text).not.toContain("parent pending");
+    expect(text).not.toContain("parent status");
+    expect(text).not.toContain("parent cwd");
+    expect(text).not.toContain("parent stats");
+
+    const replacementFooter = {
+      render: () => ["replacement footer"],
+      invalidate: vi.fn(),
+    };
+    fixture.tui.footerContainer.children = [replacementFooter];
+    expect(fixture.renderCurrent().join("\n")).toContain("replacement footer");
+
+    fixture.switchMode("regular");
+    expect(fixture.tui.mode).toBe("regular");
+    expect(fixture.renderCurrent().join("\n")).toContain("replacement footer");
+    expect(navigator.selectedId()).toBe(record.id);
+
+    navigator.handleTerminalInput("\x1b[A");
+    navigator.handleTerminalInput("\r");
+
+    expect(navigator.selectedId()).toBeNull();
+    text = fixture.renderCurrent().join("\n");
+    expect(text).toContain("parent chat");
+    expect(text).toContain("parent pending");
+    expect(text).toContain("parent status");
+    expect(text).toContain("replacement footer");
+    expect(fixture.regular.children).toHaveLength(7);
+    expect(fixture.fullscreen.children).toHaveLength(0);
+  });
+
+  it("rejects a document container with an unexpected child count", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const tui = makeTui();
+    tui.document.children.push(makeContainer("unexpected document region"));
+    mountSelector(ui, tui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    expect(navigator.selectedId()).toBeNull();
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(ui.ctx.notify).toHaveBeenCalledWith(
       "Subagent screen switching is unavailable: unsupported Pi TUI layout",
       "warning",
     );
   });
+
+  it("rejects a document whose chat child is not a container", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const tui = makeTui();
+    const invalidChat = makeComponent("invalid chat");
+    tui.document.children[tui.chatIndex] = invalidChat;
+    mountSelector(ui, tui);
+
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    expect(navigator.selectedId()).toBeNull();
+    expect(tui.document.children[tui.chatIndex]).toBe(invalidChat);
+    expect(ui.ctx.notify).toHaveBeenCalledWith(
+      "Subagent screen switching is unavailable: unsupported Pi TUI layout",
+      "warning",
+    );
+  });
+
+  it.each(["pending", "status", "footer"] as const)(
+    "rejects switching after another extension replaces the %s render method",
+    (region) => {
+      const record = makeRecord();
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const tui = makeTui();
+      mountSelector(ui, tui);
+      const originalPendingRender = tui.originalPending.render;
+      const originalStatusRender = tui.originalStatus.render;
+      const originalFooterRender = tui.footerContainer.render;
+      const container = region === "pending"
+        ? tui.originalPending
+        : region === "status"
+          ? tui.originalStatus
+          : tui.footerContainer;
+      const replacementRender = () => [`replacement ${region}`];
+      container.render = replacementRender;
+
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\r");
+
+      expect(navigator.selectedId()).toBeNull();
+      expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
+      expect(tui.originalPending.render).toBe(
+        region === "pending" ? replacementRender : originalPendingRender,
+      );
+      expect(tui.originalStatus.render).toBe(
+        region === "status" ? replacementRender : originalStatusRender,
+      );
+      expect(tui.footerContainer.render).toBe(
+        region === "footer" ? replacementRender : originalFooterRender,
+      );
+      expect(tui.footerContainer.children).toEqual([tui.originalFooter]);
+      expect(ui.ctx.notify).toHaveBeenCalledWith(
+        "Subagent screen switching is unavailable: unsupported Pi TUI layout",
+        "warning",
+      );
+    },
+  );
 
   it("rejects an unknown root region inserted between status and widgets", () => {
     const record = makeRecord();
@@ -1559,7 +1755,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\r");
 
     expect(navigator.selectedId()).toBeNull();
-    expect(tui.children[tui.chatIndex]).toBe(tui.originalChat);
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
     expect(ui.ctx.notify).toHaveBeenCalledWith(
       "Subagent screen switching is unavailable: unsupported Pi TUI layout",
       "warning",

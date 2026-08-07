@@ -1327,19 +1327,20 @@ describe("runAgent — grace turns", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  runAgent — maxTokens: front matter → provider payload             */
+/*  runAgent — maxTokens: front matter → native model limit           */
 /* ------------------------------------------------------------------ */
 
-describe("runAgent — maxTokens: front matter to provider payload", () => {
-  let session: ReturnType<typeof createMockSession>;
+describe("runAgent — maxTokens: front matter to native model limit", () => {
+  let session: ReturnType<typeof createMockSession> & { agent: { onPayload: unknown } };
+  let originalOnPayload: unknown;
 
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
 
-    session = createMockSession();
+    session = Object.assign(createMockSession(), { agent: { onPayload: vi.fn() } });
+    originalOnPayload = session.agent.onPayload;
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
-    session.agent = { onPayload: undefined };
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
   });
 
@@ -1348,69 +1349,37 @@ describe("runAgent — maxTokens: front matter to provider payload", () => {
       id: "test-model",
       name: "Test Model",
       provider: "openai",
-      api: "openai-completions",
+      api: "openai-responses",
       baseUrl: "https://test.api/v1",
       reasoning: false,
       input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128000,
       maxTokens: 16384,
+      samplingParams: { temperature: 0.2 },
       ...overrides,
     };
   }
 
-  it("max_tokens in agent config ends up in the provider request payload", async () => {
+  it("applies max_tokens to the child model without mutating the source model", async () => {
     mockModules.mockGetAgentConfig.mockReturnValue({
       ...defaultAgentConfig,
       maxTokens: 4096,
     });
 
-    const model = makeMockModel({
-      id: "llama-3.1-8b",
-      name: "Llama 3.1 8B",
-      provider: "vllm",
-      baseUrl: "http://localhost:8000/v1",
-      compat: { maxTokensField: "max_tokens" },
-    });
-
+    const model = makeMockModel();
     const ctx = fakeCtx();
     ctx.model = model;
     await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
 
-    const rawPayload = {
-      model: "llama-3.1-8b",
-      messages: [{ role: "user", content: "do something" }],
-      stream: true,
-    };
-    const finalPayload = await session.agent.onPayload(rawPayload, model);
-
-    expect(finalPayload.max_tokens).toBe(4096);
-    expect(finalPayload.model).toBe("llama-3.1-8b");
-    expect(finalPayload.stream).toBe(true);
+    const childModel = mockModules.mockCreateAgentSession.mock.calls[0][0].model;
+    expect(childModel).not.toBe(model);
+    expect(childModel).toEqual({ ...model, maxTokens: 4096 });
+    expect(model.maxTokens).toBe(16384);
+    expect(session.agent.onPayload).toBe(originalOnPayload);
   });
 
-  it("uses max_completion_tokens when the provider requires it", async () => {
-    mockModules.mockGetAgentConfig.mockReturnValue({
-      ...defaultAgentConfig,
-      maxTokens: 8192,
-    });
-
-    const model = makeMockModel({ compat: { maxTokensField: "max_completion_tokens" } });
-    const ctx = fakeCtx();
-    ctx.model = model;
-
-    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
-
-    const finalPayload = await session.agent.onPayload(
-      { model: "some-model", messages: [{ role: "user", content: "do something" }] },
-      model,
-    );
-
-    expect(finalPayload.max_completion_tokens).toBe(8192);
-    expect(finalPayload.max_tokens).toBeUndefined();
-  });
-
-  it("no max_tokens injected when agent config omits it", async () => {
+  it("preserves the model limit when max_tokens is omitted", async () => {
     mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
     const model = makeMockModel();
     const ctx = fakeCtx();
@@ -1418,7 +1387,20 @@ describe("runAgent — maxTokens: front matter to provider payload", () => {
 
     await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
 
-    expect(session.agent.onPayload).toBeUndefined();
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].model.maxTokens).toBe(16384);
+    expect(session.agent.onPayload).toBe(originalOnPayload);
+  });
+
+  it("ignores a zero max_tokens override", async () => {
+    mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig, maxTokens: 0 });
+    const model = makeMockModel();
+    const ctx = fakeCtx();
+    ctx.model = model;
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi, model });
+
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].model.maxTokens).toBe(16384);
+    expect(session.agent.onPayload).toBe(originalOnPayload);
   });
 });
 

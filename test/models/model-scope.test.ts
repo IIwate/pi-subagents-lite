@@ -1,5 +1,5 @@
 /**
- * model-scope.test.ts — Pi 0.83 resolved Model scope helpers.
+ * model-scope.test.ts — Pi 0.84 resolved Model scope helpers.
  */
 
 import { describe, expect, it, vi } from "vitest";

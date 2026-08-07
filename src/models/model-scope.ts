@@ -1,7 +1,7 @@
 /**
  * Model-scope helpers backed by Pi's resolved session scope.
  *
- * Pi 0.83 exposes the exact scope on ExtensionContext, including unsaved
+ * Pi 0.84 exposes the exact scope on ExtensionContext, including unsaved
  * session changes and per-pattern thinking levels. Keep that as the only
  * source of truth instead of re-parsing CLI arguments and settings here.
  */

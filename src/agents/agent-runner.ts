@@ -454,8 +454,12 @@ async function initSession(
   loader: DefaultResourceLoader,
 ) {
   const policy = options.acceptedPolicy;
-  const model = options.model ?? ctx.model;
-  if (!model) throw new Error(missingSubagentModelError());
+  const sourceModel = options.model ?? ctx.model;
+  if (!sourceModel) throw new Error(missingSubagentModelError());
+  const maxTokens = policy.definition.maxTokens;
+  const model = maxTokens != null && maxTokens > 0
+    ? { ...sourceModel, maxTokens }
+    : sourceModel;
 
   // Agent-tool calls pass invocation snapshots. The fallback keeps direct
   // internal runAgent callers working without weakening accepted-call locks.
@@ -489,19 +493,6 @@ async function initSession(
   }
   const result = await createAgentSession(sessionOpts);
   enableTransientTransportErrorRetry(result.session);
-
-  // Inject the agent frontmatter max_tokens into provider request payloads.
-  const maxTokens = policy.definition.maxTokens;
-  if (maxTokens != null && maxTokens > 0 && model) {
-    const field = (model.compat as any)?.maxTokensField ?? "max_tokens";
-    const origOnPayload = result.session.agent.onPayload;
-    result.session.agent.onPayload = async (payload, m) => {
-      const applied = origOnPayload ? (await origOnPayload(payload, m)) ?? payload : payload;
-      const obj = typeof applied === "object" && applied && !Array.isArray(applied) ? applied : {};
-      return { ...obj, [field]: maxTokens };
-    };
-  }
-
   return result;
 }
 

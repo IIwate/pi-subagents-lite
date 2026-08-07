@@ -32,7 +32,7 @@ export interface AgentConfig {
   preloadSkills?: string[] | false;
   thinkingLevel?: ThinkingLevel;
   maxTurns?: number;
-  /** Max output tokens per LLM response. Passed to provider as max_tokens or max_completion_tokens. */
+  /** Max output tokens per LLM response. Applied through Pi's native model limit. */
   maxTokens?: number;
   systemPrompt: string;
 

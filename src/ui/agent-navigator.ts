@@ -40,8 +40,8 @@ const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
 const STATUS_KEY = "subagents-lite";
 const REFRESH_INTERVAL_MS = 1000;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
-const PI_ROOT_CHILDREN = 9;
-const ROOT_REGIONS_AFTER_CHAT = 6;
+const PI_ROOT_CHILDREN = 7;
+const PI_DOCUMENT_CHILDREN = 3;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_GAP = 2;
 const MIN_LEFT_COLUMN_WIDTH = 18;
@@ -80,19 +80,18 @@ type MessageLike = {
 
 interface ScreenSwapState {
   tui: TUI;
-  rootChildren: Component[];
+  documentChildren: Component[];
   chatIndex: number;
-  pendingIndex: number;
-  statusIndex: number;
-  footerIndex: number;
   originalChat: Component;
-  originalPending: Component;
-  originalStatus: Component;
-  originalFooter: Component;
+  pendingContainer: Component;
+  statusContainer: Component;
+  footerContainer: Component & { children: Component[] };
+  originalPendingRender: Component["render"];
+  originalStatusRender: Component["render"];
+  originalFooterRender: Component["render"];
+  emptyRender: Component["render"];
+  childFooterRender: Component["render"];
   transcript: Component;
-  emptyPending: Component;
-  emptyStatus: Component;
-  childFooter: Component;
   active: boolean;
 }
 
@@ -235,13 +234,6 @@ function containsComponent(root: Component & { children: Component[] }, target: 
     if (isContainerLike(child) && containsComponent(child, target)) return true;
   }
   return false;
-}
-
-function emptyComponent(): Component {
-  return {
-    render: () => [],
-    invalidate: () => {},
-  };
 }
 
 /** Visible list window, capped near six rows and scrolled around the focused row. */
@@ -831,38 +823,29 @@ export class AgentNavigator {
     if (this.restoreMainScreen()) this.clearScrollbackAndRender();
 
     const rootChildren = tui.children;
-    const belowMatches = rootChildren
-      .map((child, index) => ({ child, index }))
-      .filter(({ child }) => isContainerLike(child) && containsComponent(child, selector));
-    const widgetBelowIndex = belowMatches[0]?.index ?? -1;
-    const knownRootLength = rootChildren.length === PI_ROOT_CHILDREN;
-    const chatIndex = rootChildren.length - ROOT_REGIONS_AFTER_CHAT - 1;
-    const pendingIndex = chatIndex + 1;
-    const statusIndex = chatIndex + 2;
-    const widgetAboveIndex = chatIndex + 3;
-    const editorIndex = chatIndex + 4;
-    const originalChat = rootChildren[chatIndex];
-    const originalPending = rootChildren[pendingIndex];
-    const originalStatus = rootChildren[statusIndex];
-    const widgetAbove = rootChildren[widgetAboveIndex];
-    const editorContainer = rootChildren[editorIndex];
-    const widgetBelow = rootChildren[widgetBelowIndex];
-    const footerIndex = widgetBelowIndex + 1;
-    const originalFooter = rootChildren[footerIndex];
+    const documentContainer = rootChildren[0];
+    const pendingContainer = rootChildren[1];
+    const statusContainer = rootChildren[2];
+    const widgetAbove = rootChildren[3];
+    const editorContainer = rootChildren[4];
+    const widgetBelow = rootChildren[5];
+    const footerContainer = rootChildren[6];
+    const documentChildren = isContainerLike(documentContainer) ? documentContainer.children : [];
+    const chatIndex = 2;
+    const originalChat = documentChildren[chatIndex];
     if (
-      !knownRootLength
-      || belowMatches.length !== 1
-      || widgetBelowIndex !== rootChildren.length - 2
-      || chatIndex < 1
+      rootChildren.length !== PI_ROOT_CHILDREN
+      || documentChildren.length !== PI_DOCUMENT_CHILDREN
       || !isContainerLike(originalChat)
-      || !isContainerLike(originalPending)
-      || !isContainerLike(originalStatus)
+      || !isContainerLike(pendingContainer)
+      || !isContainerLike(statusContainer)
       || !isContainerLike(widgetAbove)
       || !isContainerLike(editorContainer)
       || !isContainerLike(widgetBelow)
+      || !containsComponent(widgetBelow, selector)
       || !this.navigationEditor
       || !containsComponent(editorContainer, this.navigationEditor)
-      || !isComponent(originalFooter)
+      || !isContainerLike(footerContainer)
     ) {
       this.screenSwap = undefined;
       this.warnUnsupportedLayout();
@@ -873,98 +856,47 @@ export class AgentNavigator {
       render: (width) => this.renderActiveTranscript(width),
       invalidate: () => {},
     };
-    const childFooter = this.createChildFooter(originalFooter);
+    const originalFooterRender = footerContainer.render;
     this.screenSwap = {
       tui,
-      rootChildren,
+      documentChildren,
       chatIndex,
-      pendingIndex,
-      statusIndex,
-      footerIndex,
       originalChat,
-      originalPending,
-      originalStatus,
-      originalFooter,
+      pendingContainer,
+      statusContainer,
+      footerContainer,
+      originalPendingRender: pendingContainer.render,
+      originalStatusRender: statusContainer.render,
+      originalFooterRender,
+      emptyRender: () => [],
+      childFooterRender: (width) => this.renderChildFooter(
+        footerContainer,
+        originalFooterRender,
+        width,
+      ),
       transcript,
-      emptyPending: emptyComponent(),
-      emptyStatus: emptyComponent(),
-      childFooter,
       active: false,
     };
-  }
-
-  private createChildFooter(originalFooter: Component): Component {
-    let childFooter: Component;
-    childFooter = {
-      render: (width) => {
-        const screen = this.screenSwap;
-        if (screen?.active && screen.childFooter === childFooter) {
-          this.syncExternalFooter(screen);
-          if (screen.childFooter !== childFooter) {
-            screen.tui.requestRender();
-            return [];
-          }
-        }
-        return this.renderChildFooter(originalFooter, width);
-      },
-      invalidate: () => originalFooter.invalidate(),
-    };
-    return childFooter;
-  }
-
-  private adoptFooter(screen: ScreenSwapState, originalFooter: Component): void {
-    screen.originalFooter = originalFooter;
-    screen.childFooter = this.createChildFooter(originalFooter);
-  }
-
-  /** Keep footer ownership correct when another extension calls setFooter(). */
-  private syncExternalFooter(screen: ScreenSwapState): void {
-    const children = screen.rootChildren;
-    if (
-      screen.active
-      && children[screen.footerIndex] === screen.childFooter
-      && children.length === screen.footerIndex + 2
-      && isComponent(children[screen.footerIndex + 1])
-    ) {
-      children.splice(screen.footerIndex, 1);
-      this.adoptFooter(screen, children[screen.footerIndex]);
-      children[screen.footerIndex] = screen.childFooter;
-      return;
-    }
-
-    if (children.length !== screen.footerIndex + 1) return;
-    const currentFooter = children[screen.footerIndex];
-    if (!isComponent(currentFooter)) return;
-
-    if (screen.active) {
-      if (currentFooter !== screen.childFooter) {
-        this.adoptFooter(screen, currentFooter);
-        children[screen.footerIndex] = screen.childFooter;
-      }
-    } else if (currentFooter !== screen.originalFooter) {
-      this.adoptFooter(screen, currentFooter);
-    }
   }
 
   private swapToSubagentScreen(): boolean {
     const screen = this.screenSwap;
     if (!screen) return false;
-    this.syncExternalFooter(screen);
 
-    const currentChat = screen.rootChildren[screen.chatIndex];
-    const currentPending = screen.rootChildren[screen.pendingIndex];
-    const currentStatus = screen.rootChildren[screen.statusIndex];
-    const currentFooter = screen.rootChildren[screen.footerIndex];
+    const currentChat = screen.documentChildren[screen.chatIndex];
     const chatCompatible = currentChat === screen.originalChat || currentChat === screen.transcript;
-    const pendingCompatible = currentPending === screen.originalPending || currentPending === screen.emptyPending;
-    const statusCompatible = currentStatus === screen.originalStatus || currentStatus === screen.emptyStatus;
-    const footerCompatible = currentFooter === screen.originalFooter || currentFooter === screen.childFooter;
+    const pendingCompatible = screen.pendingContainer.render === screen.originalPendingRender
+      || screen.pendingContainer.render === screen.emptyRender;
+    const statusCompatible = screen.statusContainer.render === screen.originalStatusRender
+      || screen.statusContainer.render === screen.emptyRender;
+    const footerCompatible = screen.footerContainer.render === screen.originalFooterRender
+      || screen.footerContainer.render === screen.childFooterRender;
     if (!chatCompatible || !pendingCompatible || !statusCompatible || !footerCompatible) return false;
 
-    screen.rootChildren[screen.chatIndex] = screen.transcript;
-    screen.rootChildren[screen.pendingIndex] = screen.emptyPending;
-    screen.rootChildren[screen.statusIndex] = screen.emptyStatus;
-    screen.rootChildren[screen.footerIndex] = screen.childFooter;
+    screen.documentChildren[screen.chatIndex] = screen.transcript;
+    screen.pendingContainer.render = screen.emptyRender;
+    screen.statusContainer.render = screen.emptyRender;
+    screen.footerContainer.render = screen.childFooterRender;
     screen.active = true;
     return true;
   }
@@ -972,23 +904,22 @@ export class AgentNavigator {
   private restoreMainScreen(): boolean {
     const screen = this.screenSwap;
     if (!screen?.active) return false;
-    this.syncExternalFooter(screen);
 
     let restored = false;
-    if (screen.rootChildren[screen.chatIndex] === screen.transcript) {
-      screen.rootChildren[screen.chatIndex] = screen.originalChat;
+    if (screen.documentChildren[screen.chatIndex] === screen.transcript) {
+      screen.documentChildren[screen.chatIndex] = screen.originalChat;
       restored = true;
     }
-    if (screen.rootChildren[screen.pendingIndex] === screen.emptyPending) {
-      screen.rootChildren[screen.pendingIndex] = screen.originalPending;
+    if (screen.pendingContainer.render === screen.emptyRender) {
+      screen.pendingContainer.render = screen.originalPendingRender;
       restored = true;
     }
-    if (screen.rootChildren[screen.statusIndex] === screen.emptyStatus) {
-      screen.rootChildren[screen.statusIndex] = screen.originalStatus;
+    if (screen.statusContainer.render === screen.emptyRender) {
+      screen.statusContainer.render = screen.originalStatusRender;
       restored = true;
     }
-    if (screen.rootChildren[screen.footerIndex] === screen.childFooter) {
-      screen.rootChildren[screen.footerIndex] = screen.originalFooter;
+    if (screen.footerContainer.render === screen.childFooterRender) {
+      screen.footerContainer.render = screen.originalFooterRender;
       restored = true;
     }
     screen.active = false;
@@ -1202,9 +1133,16 @@ export class AgentNavigator {
     return lines;
   }
 
-  private renderChildFooter(originalFooter: Component, width: number): string[] {
-    const originalLines = originalFooter.render(width);
-    return isBuiltinFooter(originalFooter) ? originalLines.slice(2) : originalLines;
+  private renderChildFooter(
+    footerContainer: Component & { children: Component[] },
+    originalRender: Component["render"],
+    width: number,
+  ): string[] {
+    const footer = footerContainer.children.length === 1 ? footerContainer.children[0] : undefined;
+    const lines = footer
+      ? footer.render(width)
+      : originalRender.call(footerContainer, width);
+    return footer && isBuiltinFooter(footer) ? lines.slice(2) : lines;
   }
 
   private renderActiveTranscript(width: number): string[] {
@@ -1330,7 +1268,6 @@ export class AgentNavigator {
 
     const records = this.manager.listAgents();
     const pending = this.pendingResultState();
-    if (this.screenSwap) this.syncExternalFooter(this.screenSwap);
     if (records.length === 0 && !pending) {
       this.updateFooterStatus(records);
       this.selectedAgentId = null;
