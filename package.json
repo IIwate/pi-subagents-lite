@@ -1,6 +1,6 @@
 {
   "name": "@iiwate/pi-subagents-lite",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Lightweight sub-agents for pi — spawn specialized agents with isolated sessions, tools, and models.",
   "keywords": [
     "pi-package",
