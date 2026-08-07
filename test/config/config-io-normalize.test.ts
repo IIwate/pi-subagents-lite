@@ -32,6 +32,14 @@ describe("config-io model access normalization", () => {
     expect(JSON.parse(files.get(CONFIG_PATH)!).agent).not.toHaveProperty("backgroundDelivery");
   });
 
+  it("defaults list expansion on and preserves explicit off", () => {
+    writeConfig({});
+    expect(loadConfig().agent.expandListByDefault).toBe(true);
+
+    writeConfig({ agent: { expandListByDefault: false } });
+    expect(loadConfig().agent.expandListByDefault).toBe(false);
+  });
+
   it("returns fresh routing defaults for missing and malformed blocks", () => {
     for (const value of [{}, { modelRouting: null }, { modelRouting: [] }, { modelRouting: "on" }]) {
       writeConfig(value);

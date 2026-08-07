@@ -434,7 +434,7 @@ export class AgentNavigator {
   /** Debug-only display override; never changes agent lifecycle or session state. */
   private debugStatusPreview: DebugStatusPreview | undefined;
   /** User-controlled list visibility for this extension runtime. */
-  private listExpanded = true;
+  private listExpanded: boolean;
   private listFocused = false;
   private footerStatus: string | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -462,7 +462,10 @@ export class AgentNavigator {
     private manager: AgentManager,
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
     private getPendingResultCount?: () => number | undefined,
-  ) {}
+    initialListExpanded = true,
+  ) {
+    this.listExpanded = initialListExpanded;
+  }
 
   private pendingResultState(): number | undefined {
     const count = this.getPendingResultCount?.();

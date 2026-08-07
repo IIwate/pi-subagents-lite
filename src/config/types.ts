@@ -43,6 +43,8 @@ export interface AgentSettings {
   loadExtensionsImplicitly?: boolean;
   /** When true, block new uses of built-in agent types (general-purpose, Explore). */
   disableDefaultAgents?: boolean;
+  /** Whether new conversations start with the subagent list expanded. Default: true. */
+  expandListByDefault?: boolean;
   /** Whether to show toolUses count in widget stats line. Default: true. */
   showTools?: boolean;
   /** Whether to show turn count in widget stats line. Default: true. */

@@ -62,7 +62,7 @@ export async function showAgentsMenu(
       { value: "concurrency", label: "Concurrency settings", description: `${getStore().concurrency.default} slots per model` },
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
-      { value: "display", label: "Display settings", description: "Stats visibility and log display options" },
+      { value: "display", label: "Display settings", description: "List defaults and stats visibility" },
       { value: "debug", label: "Debug", description: "Agent types, diagnostics, and fault injection" },
     ];
   };
