@@ -44,6 +44,8 @@ describe("buildCurrentAgentGuidance", () => {
     expect(guidance).toContain("worktree_path");
     expect(guidance).toContain("pass one exact model key listed below");
     expect(guidance).toContain("Never silently replace");
+    expect(guidance).toContain("A background Agent error is final");
+    expect(guidance).toContain("unless the user explicitly asks to retry");
   });
 
   it("expands all-model rules into exact effective model keys", () => {

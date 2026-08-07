@@ -234,7 +234,7 @@ export class SpawnCoordinator {
       this.lastWakeFailed ||= deliveryFailed && this.pendingState().length > 0;
       // A successful acknowledgement drains results completed while this turn
       // ran. A failed delivery needs another persisted completion or
-      // an explicit lifecycle recovery event before it can try again.
+      // an explicit lifecycle restoration event before it can try again.
       wakeAfterSettle = (!deliveryFailed && acknowledged) || hasNewWakeOpportunity;
     } else {
       this.lastWakeFailed = true;

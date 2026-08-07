@@ -22,6 +22,30 @@ describe("process-local shell state", () => {
     shell.takeFallbackResults("session-b");
   });
 
+  it("keeps another session's fallback until that session consumes it", async () => {
+    const shell = await import("../src/shell.js");
+    shell.setFallbackResults("session-a", [pendingResult]);
+
+    expect(shell.takeFallbackResults("session-b")).toEqual([]);
+    expect(shell.takeFallbackResults("session-a")).toEqual([pendingResult]);
+    expect(shell.takeFallbackResults("session-a")).toEqual([]);
+  });
+
+  it("stores fallback results for multiple sessions independently", async () => {
+    const shell = await import("../src/shell.js");
+    const sessionBResult = {
+      ...pendingResult,
+      deliveryId: "delivery-2",
+      parentSessionId: "session-b",
+    };
+    shell.setFallbackResults("session-a", [pendingResult]);
+    shell.setFallbackResults("session-b", [sessionBResult]);
+
+    expect(shell.takeFallbackResults("session-a")).toEqual([pendingResult]);
+    shell.setFallbackResults("session-a", []);
+    expect(shell.takeFallbackResults("session-b")).toEqual([sessionBResult]);
+  });
+
   it("keeps same-session fallback results across a module reload", async () => {
     const first = await import("../src/shell.js");
     first.setFallbackResults("session-a", [pendingResult]);

@@ -672,7 +672,7 @@ describe("AgentManager", () => {
       expect(onComplete).toHaveBeenCalledWith(record);
     });
 
-    it("waits to notify a recoverable failure until its recovery window expires", async () => {
+    it("notifies a live provider failure immediately and only once", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
@@ -685,18 +685,21 @@ describe("AgentManager", () => {
         description: "task",
         modelKey: "test/model",
       });
-      await manager.getRecord(id)!.execution.promise;
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
 
-      expect(onComplete).not.toHaveBeenCalled();
+      expect(record).toMatchObject({
+        lifecycle: { status: "error" },
+        execution: { settled: true, session },
+        error: "stream_read_error: response closed",
+      });
+      expect(onComplete).toHaveBeenCalledOnce();
+      expect(onComplete).toHaveBeenCalledWith(record);
 
-      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
 
-      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({
-        id,
-        lifecycle: expect.objectContaining({ status: "error" }),
-        error: expect.stringContaining("Agent recovery expired without continuation"),
-      }));
-      expect(manager.getRecord(id)).toBeUndefined();
+      expect(onComplete).toHaveBeenCalledOnce();
+      expect(record.error).toBe("stream_read_error: response closed");
     });
   });
 
@@ -898,7 +901,7 @@ describe("AgentManager", () => {
       secondDeferred.resolve(mockRunResult({ session: secondSession }));
     });
 
-    it("keeps a fault-bound expiry when a full model slot rejects continuation", async () => {
+    it("keeps a settled error when concurrency rejects continuation", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete, {
         default: 1,
@@ -930,9 +933,9 @@ describe("AgentManager", () => {
         reason: "concurrency",
         modelKey: "test/model",
       });
-      expect(failedRecord.execution.recoveryTtlMs).toBe(10_000);
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(manager.getRecord(failedId)).toBeUndefined();
+      expect(failedRecord.lifecycle.status).toBe("error");
+      expect(failedRecord.error).toBe("debug injected: content was flagged");
+      expect(manager.getRecord(failedId)).toBe(failedRecord);
 
       blocker.resolve(mockRunResult());
       await manager.getRecord(blockerId)!.execution.promise;
@@ -1088,7 +1091,7 @@ describe("AgentManager", () => {
       expect(manager.getRecord(id)).toBeUndefined();
     });
 
-    it("retains failed live sessions within the 30-minute recovery window", async () => {
+    it("retains a failed live session within the ordinary cleanup window", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -1102,9 +1105,8 @@ describe("AgentManager", () => {
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
-      // Past the normal 10-minute cutoff, still inside the 30-minute recovery window.
-      record.lifecycle.completedAt = Date.now() - 20 * 60_000;
-      record.execution.recoveryExpiresAt = undefined;
+      record.lifecycle.resultPersisted = true;
+      record.lifecycle.completedAt = Date.now() - 9 * 60_000;
 
       (manager as any).cleanup();
 
@@ -1113,7 +1115,7 @@ describe("AgentManager", () => {
       expect(record.execution.session).toBe(session);
     });
 
-    it("evicts failed live sessions after the 30-minute recovery window", async () => {
+    it("evicts a persisted failed live session after the ordinary cleanup window", async () => {
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -1127,8 +1129,8 @@ describe("AgentManager", () => {
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
-      record.lifecycle.completedAt = Date.now() - 31 * 60_000;
-      record.execution.recoveryExpiresAt = undefined;
+      record.lifecycle.resultPersisted = true;
+      record.lifecycle.completedAt = Date.now() - 11 * 60_000;
 
       (manager as any).cleanup();
 
@@ -1161,7 +1163,6 @@ describe("AgentManager", () => {
       expect(runOptions[1].debugFault).toBeUndefined();
       expect(manager.getRecord(firstId)!.execution).toMatchObject({
         debugFaultKind: "output_blocked",
-        recoveryTtlMs: 10_000,
       });
       expect(manager.debugDiagnostics().armedFault).toBeUndefined();
     });
@@ -1260,107 +1261,10 @@ describe("AgentManager", () => {
       await manager.getRecord(id)!.execution.promise;
 
       expect(manager.getRecord(id)!.execution.debugFaultKind).toBeUndefined();
-      expect(manager.getRecord(id)!.execution.recoveryTtlMs).toBeUndefined();
       expect(manager.debugDiagnostics().armedFault).toBeUndefined();
     });
 
-    it("starts a fault-injected recovery TTL when the failure completes", async () => {
-      vi.useFakeTimers();
-      manager = new AgentManager(onComplete);
-      const session = mockAgentSession();
-      let rejectRun!: (error: Error) => void;
-      mockModules.mockRunAgent.mockImplementation((_ctx, _type, _prompt, options) => {
-        options.onSessionCreated(session);
-        return new Promise((_resolve, reject) => {
-          rejectRun = reject;
-        });
-      });
-      manager.armDebugFault("output_blocked");
-
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
-        description: "task",
-        modelKey: "test/model",
-      });
-      const record = manager.getRecord(id)!;
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(record.lifecycle.status).toBe("running");
-      rejectRun(new Error("debug injected: content was flagged"));
-      await manager.getRecord(id)!.execution.promise;
-
-      await vi.advanceTimersByTimeAsync(9_999);
-      expect(manager.getRecord(id)).toBeDefined();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(manager.getRecord(id)).toBeUndefined();
-    });
-
-    it("pauses a recoverable expiry while its child view is active", async () => {
-      vi.useFakeTimers();
-      manager = new AgentManager(onComplete);
-      const session = mockAgentSession();
-      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
-        options.onSessionCreated(session);
-        throw new Error("debug injected: content was flagged");
-      });
-      manager.armDebugFault("output_blocked");
-
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
-        description: "task",
-        modelKey: "test/model",
-      });
-      await manager.getRecord(id)!.execution.promise;
-      await vi.advanceTimersByTimeAsync(4_000);
-
-      expect(manager.pauseRecoveryExpiry(id)).toBe(true);
-      expect(manager.debugDiagnostics().agents[0]).toMatchObject({
-        debugFaultKind: "output_blocked",
-        recoveryPaused: true,
-        recoveryRemainingMs: 6_000,
-      });
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(manager.getRecord(id)).toBeDefined();
-      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
-
-      expect(manager.resumeRecoveryExpiry(id)).toBe(true);
-      expect(manager.debugDiagnostics().agents[0].recoveryPaused).toBe(false);
-      await vi.advanceTimersByTimeAsync(5_999);
-      expect(manager.getRecord(id)).toBeDefined();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(manager.getRecord(id)).toBeUndefined();
-    });
-
-    it("keeps recovery paused until both view and pin pauses are released", async () => {
-      vi.useFakeTimers();
-      manager = new AgentManager(onComplete);
-      const session = mockAgentSession();
-      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
-        options.onSessionCreated(session);
-        throw new Error("debug injected: content was flagged");
-      });
-      manager.armDebugFault("output_blocked");
-
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
-        description: "task",
-        modelKey: "test/model",
-      });
-      await manager.getRecord(id)!.execution.promise;
-      await vi.advanceTimersByTimeAsync(4_000);
-
-      expect(manager.togglePinned(id)).toBe(true);
-      expect(manager.pauseRecoveryExpiry(id)).toBe(true);
-      expect(manager.togglePinned(id)).toBe(false);
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(manager.getRecord(id)).toBeDefined();
-      expect(manager.debugDiagnostics().agents[0].recoveryRemainingMs).toBe(6_000);
-
-      expect(manager.resumeRecoveryExpiry(id)).toBe(true);
-      await vi.advanceTimersByTimeAsync(5_999);
-      expect(manager.getRecord(id)).toBeDefined();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(manager.getRecord(id)).toBeUndefined();
-    });
-
-    it("cancels a fault-bound expiry when the user continues the session", async () => {
+    it("continues a delivered Debug error as a new terminal result", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
@@ -1379,8 +1283,9 @@ describe("AgentManager", () => {
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       await expect(manager.interact(id, "Provide a defensive-only summary")).resolves.toEqual({ accepted: true });
-      expect(record.execution.recoveryTtlMs).toBeUndefined();
       expect(record.execution.debugFaultKind).toBe("output_blocked");
+      expect(record.lifecycle.status).toBe("running");
+      expect(onComplete).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(10_000);
       expect(manager.getRecord(id)).toBe(record);
@@ -1389,9 +1294,10 @@ describe("AgentManager", () => {
       continuation.resolve({ responseText: "defensive summary", aborted: false, turnLimited: false });
       await record.execution.promise;
       expect(record.lifecycle.status).toBe("completed");
+      expect(onComplete).toHaveBeenCalledTimes(2);
     });
 
-    it("uses the normal recovery window for a real failure after continuation", async () => {
+    it("delivers a continuation error immediately and applies ordinary retention", async () => {
       vi.useFakeTimers();
       manager = new AgentManager(onComplete);
       const session = mockAgentSession();
@@ -1413,11 +1319,12 @@ describe("AgentManager", () => {
       await record.execution.promise;
       expect(record.lifecycle.status).toBe("error");
       expect(record.execution.debugFaultKind).toBe("output_blocked");
-      expect(record.execution.recoveryTtlMs).toBeUndefined();
+      expect(record.error).toBe("provider internal error");
+      expect(onComplete).toHaveBeenCalledTimes(2);
 
-      await vi.advanceTimersByTimeAsync(30 * 60_000 - 1);
-      expect(manager.getRecord(id)).toBe(record);
-      await vi.advanceTimersByTimeAsync(1);
+      record.lifecycle.resultPersisted = true;
+      record.lifecycle.completedAt = Date.now() - 11 * 60_000;
+      (manager as any).cleanup();
       expect(manager.getRecord(id)).toBeUndefined();
     });
 

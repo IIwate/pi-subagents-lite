@@ -10,7 +10,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
-import { resolveType, getAgentConfig, discoverNewAgents } from "./agent-types.js";
+import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
@@ -116,10 +116,8 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);
   const requestedBackground = params.run_in_background as boolean | undefined;
-  const agentConfig = getAgentConfig(resolvedType);
-  const maxTurns = agentConfig?.maxTurns;
-  const scopedModels = [...ctx.scopedModels];
   const store = getStore();
+  const scopedModels = structuredClone(ctx.scopedModels);
   const runInBackground = requestedBackground === true || store.agent.forceBackground;
   const routing = store.routing;
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
@@ -181,16 +179,28 @@ export async function executeAgentTool(
   }
   if (!model) return errorResult(unknownModelError(modelRef!));
 
+  const acceptedPolicy = resolveAcceptedRunPolicy(resolvedType, {
+    loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
+    loadExtensionsImplicitly: store.agent.loadExtensionsImplicitly,
+    systemPromptMode: store.agent.systemPromptMode,
+    includeContextFiles: store.agent.includeContextFiles,
+    parentModelKey: parentModelRef,
+  });
+  if (!acceptedPolicy) return errorResult(`Unknown agent type: ${type}`);
+  const maxTurns = acceptedPolicy.definition.maxTurns;
+
+  const acceptedModel = structuredClone(model);
+
   // Capture the predicted model/provider for queued-agent display.
-  const modelName = model?.id;
-  const providerName = model?.provider;
+  const modelName = acceptedModel.id;
+  const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
   const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
   const thinkingLevel = explicitThinkingLevel
     ?? thinkingFromModel
     ?? scopedThinkingLevel(scopedModels, model)
-    ?? agentConfig?.thinkingLevel
+    ?? acceptedPolicy.definition.thinkingLevel
     ?? store.agent.defaultThinking
     ?? ctx.thinkingLevel;
 
@@ -201,7 +211,8 @@ export async function executeAgentTool(
     prompt,
     description,
     signal: runInBackground ? undefined : signal,
-    model,
+    acceptedPolicy,
+    model: acceptedModel,
     modelKey: resolvedModelKey,
     scopedModels,
     maxTurns,

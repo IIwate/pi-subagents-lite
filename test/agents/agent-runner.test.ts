@@ -97,7 +97,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 
 // --- Import the module under test ---
 
-import { continueAgentSession, runAgent, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";
+import { continueAgentSession, runAgent as runAgentWithPolicy, subscribeToSessionEvents } from "../../src/agents/agent-runner.js";
 
 const defaultConfig = {
   displayName: "Agent",
@@ -115,6 +115,25 @@ const defaultAgentConfig = {
   systemPrompt: "You are a test agent.",
   tools: undefined as (true | string[] | false | undefined),
 };
+
+function runAgent(ctx: any, type: string, prompt: string, options: any) {
+  const definition = structuredClone(mockModules.mockGetAgentConfig() ?? defaultAgentConfig);
+  const config = mockModules.mockGetConfig();
+  return runAgentWithPolicy(ctx, type, prompt, {
+    ...options,
+    acceptedPolicy: {
+      definition,
+      registeredTools: [...mockModules.mockGetToolNamesForType(type)],
+      restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
+      tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
+      extensions: Array.isArray(config.extensions) ? [...config.extensions] : config.extensions,
+      skills: Array.isArray(config.skills) ? [...config.skills] : config.skills,
+      systemPromptMode: mockModules.mockSystemPromptMode,
+      includeContextFiles: mockModules.mockIncludeContextFiles,
+      parentModelKey: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "",
+    },
+  });
+}
 
 /**
  * Reset all mocks to their default state.

@@ -10,9 +10,9 @@ Background Agent completions are written to the parent Pi session as
 session-local custom entries before the extension asks the parent to continue.
 Each entry captures the parent session ID and the Agent call's origin entry.
 The volatile `AgentManager` record remains a UI/execution record; the parent
-session result entry is the recovery source after that record is cleaned.
+session result entry remains the durable source after that record is cleaned.
 
-Each retained terminal background Agent event is persisted and may request a
+Every terminal background Agent event, including `error`, is persisted and may request a
 parent wake; concurrent wake requests are coalesced by the `SpawnCoordinator`.
 The coordinator normalizes an otherwise empty terminal payload to `(no output)`
 defensively; the runner's existing no-output failure classification is unchanged. Explicit Clear and runtime
@@ -36,7 +36,7 @@ so a later completion may re-arm delivery for older eligible results. A
 completion persisted during a failed parent turn provides one new wake
 opportunity after that turn settles; the failed result alone never retries
 itself automatically. Explicit session reload or `/tree` navigation back to
-the origin subtree is a separate lifecycle recovery event and re-arms eligible
+the origin subtree is a separate restoration event and re-arms eligible
 delivery. Navigating away keeps unrelated results silent. The next natural
 parent prompt injects eligible pending results during preflight, including
 after an automatic wake failed.
@@ -65,8 +65,10 @@ failed parent run.
   ID.
 - They persist final result text and metadata, not prompts, full transcripts,
   or child-session state.
-- An append failure has one process-local, parent-session-keyed handoff that
-  survives Pi's Jiti module reload; process exit still drops that fallback.
+- An append failure is kept in a process-local Map keyed by parent session ID.
+  Setting or consuming one session never overwrites, exposes, or deletes another
+  session's bucket. The handoff survives Pi's Jiti module reload; process exit
+  still drops all buckets.
 - Pi exposes no global barrier before cross-extension `before_agent_start` or
   after all `session_start` handlers. Residual ordering windows are an accepted
   upstream lifecycle limitation; revisit after Pi adds a barrier or a production
@@ -75,7 +77,7 @@ failed parent run.
   external notification transport.
 - A failed parent run does not immediately retry itself. A later completion,
   a natural parent turn, or an explicit result lookup provides the next
-  recovery opportunity.
+  delivery opportunity.
 - The fixed 200ms nudge debounce is removed; result aggregation happens when
   the parent turn is prepared.
 - Exact `AgentStatus({ agent_id })` lookup is an explicit session-wide read;
@@ -83,3 +85,10 @@ failed parent run.
   Implicit delivery never crosses into an unrelated branch.
 - Foreground calls still return directly and are unaffected by background
   result persistence.
+- Child provider, quota, authentication, content-filter, configuration, and
+  exhausted transport-retry failures are ordinary one-shot `error` results.
+  The extension does not spawn replacements or add another retry timer. Pi's
+  own transient transport retry loop remains unchanged.
+- A retained settled error session may accept a manual UI continuation during
+  ordinary record retention. The first result remains delivered; continuation
+  produces a distinct terminal result and delivery ID.

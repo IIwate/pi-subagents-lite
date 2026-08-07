@@ -52,6 +52,21 @@ vi.mock("../../src/spawn/worktree-validator.js", () => ({
 vi.mock("../../src/agents/agent-types.js", () => ({
   resolveType: vi.fn((type: string) => type),
   getAgentConfig: vi.fn(() => ({ maxTurns: 25, thinkingLevel: undefined })),
+  resolveAcceptedRunPolicy: vi.fn((_type: string, defaults: any) => ({
+    definition: {
+      name: "general-purpose",
+      description: "Test agent",
+      systemPrompt: "Complete the task.",
+      maxTurns: 25,
+    },
+    registeredTools: ["read", "bash", "edit", "write", "grep", "find"],
+    restrictToRegisteredTools: false,
+    extensions: defaults.loadExtensionsImplicitly ?? true,
+    skills: defaults.loadSkillsImplicitly ?? true,
+    systemPromptMode: defaults.systemPromptMode ?? "replace",
+    includeContextFiles: defaults.includeContextFiles ?? true,
+    parentModelKey: defaults.parentModelKey ?? "test/model",
+  })),
   discoverNewAgents: mockDiscoverNewAgents,
 }));
 
@@ -601,7 +616,8 @@ describe("executeAgentTool — model access", () => {
     ctx.modelRegistry.getAll.mockReturnValue([]);
     ctx.modelRegistry.getAvailable.mockReturnValue([]);
     await executeAgentTool("parent-unregistered", makeParams({ model: "test/parent-model" }), undefined, undefined, ctx);
-    expect(mockSpawn.mock.calls[0][4].model).toBe(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].model).toEqual(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].model).not.toBe(ctx.model);
   });
 
   it("rejects every non-parent explicit model while routing is OFF", async () => {

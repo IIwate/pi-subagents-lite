@@ -66,7 +66,6 @@ describe("AgentStatus tool execute behavior", () => {
     expect(result.content[0].text).toContain("Provider: openai");
     expect(result.content[0].text).toContain("Model: gpt-test");
     expect(result.content[0].text).toContain("Review-Result: PASS");
-    expect(result.content[0].text).toContain("Needs input: no");
   });
 
   it("rejects an ID prefix instead of resolving it", async () => {
@@ -205,8 +204,6 @@ describe("AgentStatus tool execute behavior", () => {
       lifecycle: { status: "error" },
       execution: {
         debugFaultKind: "output_blocked",
-        recoveryTtlMs: 10_000,
-        recoveryExpiryPausedRemainingMs: 8_000,
       },
     }]);
 
@@ -224,7 +221,6 @@ describe("AgentStatus tool execute behavior", () => {
     expect(text).toContain("abc123def456ghi (builder) error");
     expect(lowerText).not.toContain("debug");
     expect(lowerText).not.toContain("output_blocked");
-    expect(lowerText).not.toContain("recovery");
   });
 
   it("renders all status types in the output", async () => {

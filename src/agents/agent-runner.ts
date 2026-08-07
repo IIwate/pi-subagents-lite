@@ -20,9 +20,6 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  getAgentConfig,
-  getConfig,
-  getToolNamesForType,
   resolveSessionAllowedTools,
   resolveVisibleTools,
 } from "./agent-types.js";
@@ -30,12 +27,11 @@ import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 import { missingSubagentModelError, scopedThinkingLevel } from "../models/model-scope.js";
-import { DEFAULT_AGENTS } from "./default-agents.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
-import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
-import type { SubagentType, SystemPromptMode } from "./types.js";
-import { getStore, withSubagentSpawn } from "../shell.js";
+import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
+import type { SubagentType } from "./types.js";
+import { withSubagentSpawn } from "../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "../spawn/result-inbox.js";
 import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
@@ -48,6 +44,7 @@ function normalizeMaxTurns(n: number | undefined): number | undefined {
 
 /** Info about a tool event in the subagent. */
 interface RunOptions extends RunTunables, RunCallbacks {
+  acceptedPolicy: AcceptedRunPolicy;
   /** ExtensionAPI instance — used for pi.exec() for git detection. */
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
@@ -288,14 +285,14 @@ async function detectEnv(pi: ExtensionAPI, cwd: string): Promise<EnvInfo> {
 function resolveSystemPromptSources(
   ctx: ExtensionContext,
   cwd: string,
+  policy: AcceptedRunPolicy,
   notify: (msg: string) => void,
-): { mode: SystemPromptMode; extras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> } {
-  const store = getStore();
-  const mode = store.agent.systemPromptMode;
+): Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> {
   const extras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {};
 
-  // Fetch parent system prompt for inherit mode
-  if (mode === "inherit") {
+  // Inherit snapshots the mode, not the parent's generated prompt text. The
+  // latter remains a runtime value supplied by Pi when the queued run starts.
+  if (policy.systemPromptMode === "inherit") {
     try {
       extras.parentSystemPrompt = ctx.getSystemPrompt();
     } catch (err) {
@@ -303,8 +300,7 @@ function resolveSystemPromptSources(
     }
   }
 
-  // Read custom prompt file for custom mode
-  if (mode === "custom") {
+  if (policy.systemPromptMode === "custom") {
     try {
       const content = fs.readFileSync(CUSTOM_PROMPT_PATH, "utf-8").trim();
       if (content) {
@@ -321,8 +317,7 @@ function resolveSystemPromptSources(
     }
   }
 
-  // Load AGENTS.md context files when the setting is enabled
-  if (store.agent.includeContextFiles) {
+  if (policy.includeContextFiles) {
     try {
       extras.contextFiles = loadProjectContextFiles({ cwd, agentDir: getAgentDir() });
     } catch {
@@ -330,7 +325,7 @@ function resolveSystemPromptSources(
     }
   }
 
-  return { mode, extras };
+  return extras;
 }
 
 /**
@@ -339,27 +334,20 @@ function resolveSystemPromptSources(
  * @param resolverExtras  Partial extras from resolveSystemPromptSources (mode-specific prompts + context files).
  */
 function buildPrompt(
-  type: SubagentType,
-  agentConfig: ReturnType<typeof getAgentConfig>,
-  config: ReturnType<typeof getConfig>,
+  policy: AcceptedRunPolicy,
   cwd: string,
   env: EnvInfo,
-  systemPromptMode: SystemPromptMode = "replace",
   resolverExtras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {},
 ): string {
+  const agentConfig = policy.definition;
   const extras: PromptExtras = { ...resolverExtras };
-  if (Array.isArray(agentConfig?.preloadSkills)) {
+  if (Array.isArray(agentConfig.preloadSkills)) {
     extras.skillBlocks = preloadSkills(agentConfig.preloadSkills, cwd);
   }
-  if (Array.isArray(config.skills)) {
-    extras.skillMetas = loadSkillMeta(config.skills, cwd);
+  if (Array.isArray(policy.skills)) {
+    extras.skillMetas = loadSkillMeta(policy.skills, cwd);
   }
-  if (agentConfig) {
-    return buildAgentPrompt(agentConfig, cwd, env, extras, systemPromptMode);
-  }
-  const fallback = DEFAULT_AGENTS.get("general-purpose");
-  if (!fallback) throw new Error(`No fallback config available for unknown type "${type}"`);
-  return buildAgentPrompt({ ...fallback, name: type }, cwd, env, extras, systemPromptMode);
+  return buildAgentPrompt(agentConfig, cwd, env, extras, policy.systemPromptMode);
 }
 
 /** Build extension name → tool names map from loaded extensions. */
@@ -407,23 +395,22 @@ function buildExtOverride(
  * Returns the loader and its explicit reload step.
  */
 function createResourceLoader(
-  config: ReturnType<typeof getConfig>,
-  agentConfig: ReturnType<typeof getAgentConfig>,
+  policy: AcceptedRunPolicy,
   cwd: string,
   systemPrompt: string,
 ) {
-  const extensions = config.extensions;
-  const noSkills = config.skills === false
-    || Array.isArray(config.skills)
-    || Array.isArray(agentConfig?.preloadSkills);
+  const agentConfig = policy.definition;
+  const noSkills = policy.skills === false
+    || Array.isArray(policy.skills)
+    || Array.isArray(agentConfig.preloadSkills);
   const agentDir = getAgentDir();
   const loaderOpts: ConstructorParameters<typeof DefaultResourceLoader>[0] = {
     cwd, agentDir,
-    noExtensions: extensions === false, noSkills,
+    noExtensions: policy.extensions === false, noSkills,
     noPromptTemplates: true, noThemes: true, noContextFiles: true,
     systemPromptOverride: () => systemPrompt,
     appendSystemPromptOverride: () => [],
-    extensionsOverride: buildExtOverride(extensions, agentConfig?.excludeExtensions),
+    extensionsOverride: buildExtOverride(policy.extensions, agentConfig.excludeExtensions),
   };
   const loader = new DefaultResourceLoader(loaderOpts);
   return { loader, reload: () => loader.reload() };
@@ -463,12 +450,10 @@ function inheritCustomSessionEntries(
 async function initSession(
   ctx: ExtensionContext,
   options: RunOptions,
-  agentConfig: ReturnType<typeof getAgentConfig>,
-  type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
 ) {
-  const store = getStore();
+  const policy = options.acceptedPolicy;
   const model = options.model ?? ctx.model;
   if (!model) throw new Error(missingSubagentModelError());
 
@@ -479,8 +464,7 @@ async function initSession(
     ? options.thinkingLevel
     : options.thinkingLevel
       ?? scopedThinkingLevel(scopedModels, model)
-      ?? agentConfig?.thinkingLevel
-      ?? store.agent.defaultThinking;
+      ?? policy.definition.thinkingLevel;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
@@ -490,9 +474,9 @@ async function initSession(
     settingsManager: SettingsManager.create(cwd, agentDir),
     model,
     tools: resolveSessionAllowedTools({
-      registeredTools: getToolNamesForType(type),
-      restrictToRegisteredTools: Boolean(agentConfig?.registeredTools?.length),
-      tools: agentConfig?.tools,
+      registeredTools: policy.registeredTools,
+      restrictToRegisteredTools: policy.restrictToRegisteredTools,
+      tools: policy.tools,
     }),
     resourceLoader: loader,
     // Use the exact scope snapshot validated against the initial model above.
@@ -507,7 +491,7 @@ async function initSession(
   enableTransientTransportErrorRetry(result.session);
 
   // Inject the agent frontmatter max_tokens into provider request payloads.
-  const maxTokens = agentConfig?.maxTokens;
+  const maxTokens = policy.definition.maxTokens;
   if (maxTokens != null && maxTokens > 0 && model) {
     const field = (model.compat as any)?.maxTokensField ?? "max_tokens";
     const origOnPayload = result.session.agent.onPayload;
@@ -527,14 +511,15 @@ async function initSession(
 async function createAndConfigureSession(
   ctx: ExtensionContext,
   options: RunOptions,
-  agentConfig: ReturnType<typeof getAgentConfig>,
   type: SubagentType,
   cwd: string,
   loader: DefaultResourceLoader,
   notify: (msg: string) => void,
 ): Promise<AgentSession> {
-  const { session } = await initSession(ctx, options, agentConfig, type, cwd, loader);
-  const baseName = agentConfig?.name ?? type;
+  const policy = options.acceptedPolicy;
+  const agentConfig = policy.definition;
+  const { session } = await initSession(ctx, options, cwd, loader);
+  const baseName = agentConfig.name ?? type;
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
   );
@@ -565,8 +550,8 @@ async function createAndConfigureSession(
   const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
   const filteredTools = resolveVisibleTools({
     activeTools: session.getAllTools().map(tool => tool.name),
-    tools: agentConfig?.tools,
-    excludeTools: agentConfig?.excludeTools,
+    tools: policy.tools,
+    excludeTools: agentConfig.excludeTools,
     extToolMap,
     notify,
   });
@@ -701,19 +686,18 @@ async function runAgentImpl(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
-  const store = getStore();
-  const config = getConfig(type, store.agent.loadSkillsImplicitly, store.agent.loadExtensionsImplicitly);
-  const agentConfig = getAgentConfig(type);
+  const policy = options.acceptedPolicy;
+  const agentConfig = policy.definition;
 
   // Buffer warnings during setup to avoid inserting custom_message entries
   // between tool_use and tool_result in the session tree (causes Anthropic 400).
   // Flushed after runTurnLoop completes.
   const warnings: string[] = [];
   const bufferNotify = (msg: string) => { warnings.push(msg); };
-  if (agentConfig?.excludeTools && Array.isArray(agentConfig.tools)) {
+  if (agentConfig.excludeTools && Array.isArray(agentConfig.tools)) {
     bufferNotify(`agent "${type}": both tools and exclude_tools set — tools (whitelist) wins`);
   }
-  if (agentConfig?.excludeExtensions && Array.isArray(agentConfig.extensions)) {
+  if (agentConfig.excludeExtensions && Array.isArray(agentConfig.extensions)) {
     bufferNotify(`agent "${type}": both extensions and exclude_extensions set — extensions (whitelist) wins`);
   }
 
@@ -723,17 +707,18 @@ async function runAgentImpl(
   try {
     const env = await detectEnv(options.pi, effectiveCwd);
 
-    // Resolve system prompt mode + source prompts + context files
-    const { mode, extras: promptExtras } = resolveSystemPromptSources(ctx, effectiveCwd, bufferNotify);
-
-    const systemPrompt = buildPrompt(
-      type, agentConfig, config, effectiveCwd, env,
-      mode, promptExtras,
+    const promptExtras = resolveSystemPromptSources(
+      ctx,
+      effectiveCwd,
+      policy,
+      bufferNotify,
     );
-    const { loader, reload } = createResourceLoader(config, agentConfig, effectiveCwd, systemPrompt);
+
+    const systemPrompt = buildPrompt(policy, effectiveCwd, env, promptExtras);
+    const { loader, reload } = createResourceLoader(policy, effectiveCwd, systemPrompt);
     await reload();
     session = await createAndConfigureSession(
-      ctx, options, agentConfig, type, effectiveCwd, loader, bufferNotify,
+      ctx, options, type, effectiveCwd, loader, bufferNotify,
     );
   } finally {
     options.onSessionSetupFinished?.();
@@ -743,7 +728,7 @@ async function runAgentImpl(
   }
   const { unsubscribe: unsubTurns, getAborted, getTurnLimited } = wireTurnTracking(session, {
     ...options,
-    maxTurns: options.maxTurns ?? agentConfig?.maxTurns,
+    maxTurns: options.maxTurns ?? agentConfig.maxTurns,
   });
 
   const finalMessage = await runTurnLoop(session, prompt, options, unsubTurns);

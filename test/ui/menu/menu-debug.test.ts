@@ -81,23 +81,21 @@ describe("showDebugMenu — SelectList migration", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("creates a SelectList with diagnostics, previews, and recovery tests", async () => {
+  it("creates a SelectList with diagnostics, previews, and fault injection", async () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
     expect(selectListCalls.length).toBe(1);
-    expect(selectListCalls[0].items).toHaveLength(14);
+    expect(selectListCalls[0].items).toHaveLength(13);
     expect(selectListCalls[0].items[0].value).toBe("agent-types");
     expect(selectListCalls[0].items[1].value).toBe("runtime-diagnostics");
     expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
-      value: "preview-needs-input",
-      label: "Preview: Needs input",
+      value: "preview-error",
+      label: "Preview: Error",
     }));
     expect(selectListCalls[0].items).toContainEqual(expect.objectContaining({
-      value: "arm-blocked-10s",
-      label: "Arm: blocked · 10s",
+      value: "arm-blocked",
+      label: "Arm: blocked",
     }));
-    expect(selectListCalls[0].items.map(item => item.value)).not.toContain("arm-blocked-30m");
-    expect(selectListCalls[0].items.map(item => item.value)).not.toContain("arm-provider-30m");
     expect(selectListCalls[0].items.map(item => item.value)).not.toContain("__sep__");
   });
 
@@ -106,20 +104,20 @@ describe("showDebugMenu — SelectList migration", () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
 
-    await selectListCalls[0].onSelect!({ value: "preview-needs-input" });
-    expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith("needs_input");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview set to Needs input", "info");
+    await selectListCalls[0].onSelect!({ value: "preview-error" });
+    expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith("error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview set to Error", "info");
 
     await selectListCalls[0].onSelect!({ value: "preview-clear" });
     expect(mockModules.mockNavigator.setDebugStatusPreview).toHaveBeenCalledWith(undefined);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Status preview cleared", "info");
   });
 
-  it("arms and clears a one-shot recovery test", async () => {
+  it("arms and clears a one-shot fault", async () => {
     const ctx = createMockCtx();
     await showDebugMenu(ctx);
 
-    await selectListCalls[0].onSelect!({ value: "arm-blocked-10s" });
+    await selectListCalls[0].onSelect!({ value: "arm-blocked" });
     expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Armed output_blocked for the next agent", "info");
 
@@ -127,7 +125,7 @@ describe("showDebugMenu — SelectList migration", () => {
     expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
   });
 
-  it("rebuilds recovery controls from manager state after arm and clear", async () => {
+  it("rebuilds fault controls from manager state after arm and clear", async () => {
     mockModules.mockManager.debugDiagnostics
       .mockReset()
       .mockReturnValueOnce({ agents: [] })
@@ -149,7 +147,7 @@ describe("showDebugMenu — SelectList migration", () => {
       );
       const selectList = selectListCalls.at(-1)!;
       if (round === 0) {
-        await selectList.onSelect!(selectList.items.find(item => item.value === "arm-blocked-10s"));
+        await selectList.onSelect!(selectList.items.find(item => item.value === "arm-blocked"));
       } else if (round === 1) {
         await selectList.onSelect!(selectList.items.find(item => item.value === "arm-clear"));
       }
@@ -160,12 +158,12 @@ describe("showDebugMenu — SelectList migration", () => {
     await showDebugMenu(ctx);
 
     expect(selectListCalls).toHaveLength(3);
-    expect(selectListCalls[0].items.find(item => item.value === "arm-blocked-10s")!.label)
-      .toBe("Arm: blocked · 10s");
-    expect(selectListCalls[1].items.find(item => item.value === "arm-blocked-10s")!.label)
-      .toBe("Arm: blocked · 10s (armed)");
-    expect(selectListCalls[2].items.find(item => item.value === "arm-blocked-10s")!.label)
-      .toBe("Arm: blocked · 10s");
+    expect(selectListCalls[0].items.find(item => item.value === "arm-blocked")!.label)
+      .toBe("Arm: blocked");
+    expect(selectListCalls[1].items.find(item => item.value === "arm-blocked")!.label)
+      .toBe("Arm: blocked (armed)");
+    expect(selectListCalls[2].items.find(item => item.value === "arm-blocked")!.label)
+      .toBe("Arm: blocked");
     expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
     expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
   });
@@ -180,10 +178,8 @@ describe("showDebugMenu — SelectList migration", () => {
         session: "live",
         settled: true,
         resultConsumed: false,
-        recoverable: true,
+        resultPersisted: true,
         debugFaultKind: "output_blocked",
-        recoveryPaused: true,
-        recoveryRemainingMs: 8_000,
         error: "content was flagged",
       }],
     });
@@ -192,9 +188,9 @@ describe("showDebugMenu — SelectList migration", () => {
 
     await selectListCalls[0].onSelect!({ value: "runtime-diagnostics" });
     const text = ctx.ui.notify.mock.calls.at(-1)?.[0];
-    expect(text).toContain("Armed fault: output_blocked · next started Agent · 10s recovery");
+    expect(text).toContain("Armed fault: output_blocked · next started Agent");
     expect(text).toContain("Debug fault: output_blocked");
-    expect(text).toContain("Recovery: Needs input · paused · 8s remaining");
+    expect(text).toContain("Persisted: yes · Consumed: no");
   });
 
   it("wraps SelectList in SettingsListWrapper with title 'Debug'", async () => {

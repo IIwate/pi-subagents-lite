@@ -195,11 +195,15 @@ diagnostics remain UI-only.
 ## Accepted-work snapshots
 
 The Agent call validates policy, Pi availability, and scope before accepting work, then
-locks the selected model, parent model, thinking selection, and scope snapshot.
-Running and queued agents use that invocation snapshot. Later policy edits,
-provider disablement, rule deletion, parent-model changes, or scope changes
-apply only to future Agent calls. Real provider credential or API failures may
-still fail accepted work normally.
+locks a deep-copied Agent definition, resolved tool/skill/extension policy,
+system prompt mode, context-file setting, selected model, parent model, thinking
+selection, scoped-model state, and grace turns. Running and queued agents use
+that accepted run policy without consulting the mutable registry or config
+store at start time. `inherit` captures the mode while Pi supplies the parent
+system prompt text at actual start. Later policy edits, provider disablement,
+rule deletion, parent-model changes, or scope changes apply only to future
+Agent calls. Real provider credential or API failures may still fail accepted
+work normally.
 
 ## Migration
 

@@ -16,8 +16,9 @@ import {
   BUILTIN_TOOL_NAMES,
   getConfig,
   registerAgents,
+  resolveAcceptedRunPolicy,
 } from "../../src/agents/agent-types.js";
-import type { AgentConfig } from "../../src/types.ts";
+import type { AgentConfig } from "../../src/agents/types.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */
@@ -404,6 +405,65 @@ describe("resolveVisibleTools — edge cases", () => {
       tools: ["read"],
     });
     expect(result).toEqual(["read"]);
+  });
+});
+
+describe("resolveAcceptedRunPolicy", () => {
+  it("deep-copies the accepted definition and resolves loading defaults", () => {
+    const config: AgentConfig = {
+      name: "snapshot-agent",
+      description: "Snapshot policy",
+      systemPrompt: "Original prompt",
+      registeredTools: ["read"],
+      tools: ["read"],
+      extensions: ["original-extension"],
+      skills: ["original-skill"],
+      excludeExtensions: ["unsafe"],
+      preloadSkills: ["review"],
+      source: "project",
+    };
+    registerAgents(new Map([[config.name, config]]), { disableDefaultAgents: true });
+
+    const policy = resolveAcceptedRunPolicy(config.name, {
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: false,
+      systemPromptMode: "inherit",
+      includeContextFiles: true,
+      parentModelKey: "parent/main",
+    })!;
+
+    config.registeredTools!.push("write");
+    (config.tools as string[]).push("write");
+    (config.extensions as string[]).push("later");
+    (config.skills as string[]).push("later");
+    config.excludeExtensions!.push("later");
+    config.preloadSkills!.push("later");
+    config.systemPrompt = "Mutated prompt";
+    registerAgents(new Map(), { disableDefaultAgents: true });
+
+    expect(policy).toMatchObject({
+      registeredTools: ["read"],
+      restrictToRegisteredTools: true,
+      tools: ["read"],
+      extensions: ["original-extension"],
+      skills: ["original-skill"],
+      systemPromptMode: "inherit",
+      includeContextFiles: true,
+      parentModelKey: "parent/main",
+      definition: {
+        systemPrompt: "Original prompt",
+        excludeExtensions: ["unsafe"],
+        preloadSkills: ["review"],
+        source: "project",
+      },
+    });
+    expect(resolveAcceptedRunPolicy(config.name, {
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: true,
+      systemPromptMode: "replace",
+      includeContextFiles: false,
+      parentModelKey: "parent/next",
+    })).toBeUndefined();
   });
 });
 

@@ -13,7 +13,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   Key,
-  getCapabilities,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -25,7 +24,6 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
-import { needsUserInput, recoverableFailureKind } from "../agents/failure-state.js";
 import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
 import {
@@ -68,7 +66,7 @@ function pendingLabel(count: number): string {
 }
 
 /** UI-only preview values exposed through /agents → Debug. */
-export type DebugStatusPreview = AgentRecord["lifecycle"]["status"] | "needs_input";
+export type DebugStatusPreview = AgentRecord["lifecycle"]["status"];
 
 type MessageLike = {
   role: string;
@@ -160,12 +158,11 @@ function renderAgentRow(
 }
 
 function agentStatusValue(record: AgentRecord, preview?: DebugStatusPreview): DebugStatusPreview {
-  return preview ?? (needsUserInput(record) ? "needs_input" : record.lifecycle.status);
+  return preview ?? record.lifecycle.status;
 }
 
 function agentStatusLabel(status: DebugStatusPreview): string {
   switch (status) {
-    case "needs_input": return "Needs input";
     case "queued": return "Queued";
     case "running": return "Running";
     case "completed": return "Done";
@@ -178,13 +175,6 @@ function agentStatusLabel(status: DebugStatusPreview): string {
 
 function plainAgentStatus(record: AgentRecord, preview?: DebugStatusPreview): string {
   return agentStatusLabel(agentStatusValue(record, preview));
-}
-
-function renderNeedsInput(text: string, theme: Theme): string {
-  const color = getCapabilities().trueColor
-    ? "\x1b[38;2;217;119;87m"
-    : "\x1b[38;5;173m";
-  return theme.bold(`${color}${text}\x1b[39m`);
 }
 
 function renderAgentStatus(
@@ -202,26 +192,13 @@ function renderAgentStatus(
         : statusValue === "error"
           ? "error"
           : "dim";
-  return statusValue === "needs_input"
-    ? renderNeedsInput(agentStatusLabel(statusValue), theme)
-    : theme.fg(color, agentStatusLabel(statusValue));
+  return theme.fg(color, agentStatusLabel(statusValue));
 }
 
 function renderDebugBadge(record: AgentRecord, theme: Theme): string {
   return record.execution.debugFaultKind
     ? theme.bold(theme.fg("accent", "[DEBUG]"))
     : "";
-}
-
-function recoverableFailureHint(record: AgentRecord): string | undefined {
-  const kind = recoverableFailureKind(record);
-  if (kind === "output_blocked") {
-    return "Output blocked by provider · Enter open · type a safer prompt";
-  }
-  if (kind === "provider_error") {
-    return "Session failed after start · Enter open · type another prompt";
-  }
-  return undefined;
 }
 
 function isComponent(value: unknown): value is Component {
@@ -822,12 +799,7 @@ export class AgentNavigator {
 
   private navigationEntries(): NavigationEntry[] {
     const agents = this.manager.listAgents()
-      .map(record => ({ id: record.id, record }))
-      .sort((a, b) => {
-        const priority = (entry: { record: AgentRecord }) =>
-          needsUserInput(entry.record) ? 0 : entry.record.lifecycle.status === "completed" ? 2 : 1;
-        return priority(a) - priority(b);
-      });
+      .map(record => ({ id: record.id, record }));
     return [{ id: null }, ...agents];
   }
 
@@ -835,19 +807,15 @@ export class AgentNavigator {
     if (id === this.selectedAgentId) return true;
     if (id && !this.manager.getRecord(id)) return false;
 
-    const previousId = this.selectedAgentId;
     if (id) {
       if (!this.swapToSubagentScreen()) {
         this.warnUnsupportedLayout();
         return false;
       }
       this.selectedAgentId = id;
-      if (previousId) this.manager.resumeRecoveryExpiry(previousId);
-      this.manager.pauseRecoveryExpiry(id);
     } else {
       this.selectedAgentId = null;
       this.restoreMainScreen();
-      if (previousId) this.manager.resumeRecoveryExpiry(previousId);
     }
 
     this.interactionRequestId++;
@@ -1060,19 +1028,12 @@ export class AgentNavigator {
 
     const running = records.filter(record => record.lifecycle.status === "running").length;
     const queued = records.filter(record => record.lifecycle.status === "queued").length;
-    const needsInput = records.filter(needsUserInput).length;
     const title = records.length === 1 ? "Subagent" : "Subagents";
     const separator = ctx.theme.fg("dim", " · ");
     const parts: string[] = [];
     if (this.interactionNotice) {
       parts.push(ctx.theme.bold(ctx.theme.fg("warning", this.interactionNotice)));
     } else {
-      if (needsInput > 0) {
-        parts.push(renderNeedsInput(
-          `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
-          ctx.theme,
-        ));
-      }
       if (running > 0) parts.push(ctx.theme.fg("dim", `${running} running`));
       if (queued > 0) parts.push(ctx.theme.fg("dim", `${queued} queued`));
       parts.push(ctx.theme.fg("dim", `${records.length} total`));
@@ -1117,7 +1078,6 @@ export class AgentNavigator {
     const cols = tui.terminal.columns;
     const commandWidth = Math.max(1, cols - 2);
     if (this.listFocused) {
-      const failureHint = highlightedRecord ? recoverableFailureHint(highlightedRecord) : undefined;
       if (this.confirmingClearId !== null) {
         const record = this.manager.getRecord(this.confirmingClearId);
         const target = truncateToWidth(record?.display.description ?? "agent", 32);
@@ -1131,17 +1091,10 @@ export class AgentNavigator {
         const pinHint = highlightedRecord
           ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
           : "";
-        if (failureHint) {
-          lines.push(`  ${truncateToWidth(
-            `${theme.fg("warning", failureHint)}${theme.fg("dim", pinHint)}`,
-            commandWidth,
-          )}`);
-        } else {
-          lines.push(`  ${truncateToWidth(
-            theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
-            commandWidth,
-          )}`);
-        }
+        lines.push(`  ${truncateToWidth(
+          theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
+          commandWidth,
+        )}`);
       }
     }
     const mainActive = this.selectedAgentId === null;
@@ -1151,17 +1104,10 @@ export class AgentNavigator {
     const mainLabel = mainActive || mainHighlighted ? theme.bold("Main") : "Main";
     const running = records.filter(record => record.lifecycle.status === "running").length;
     const queued = records.filter(record => record.lifecycle.status === "queued").length;
-    const needsInput = records.filter(needsUserInput).length;
     const summaryParts: string[] = [];
     if (this.interactionNotice) {
       summaryParts.push(theme.bold(theme.fg("warning", this.interactionNotice)));
     } else {
-      if (needsInput > 0) {
-        summaryParts.push(renderNeedsInput(
-          `${needsInput} ${needsInput === 1 ? "needs" : "need"} input`,
-          theme,
-        ));
-      }
       if (running > 0) summaryParts.push(theme.fg("dim", `${running} running`));
       if (queued > 0) summaryParts.push(theme.fg("dim", `${queued} queued`));
       summaryParts.push(theme.fg("dim", `${records.length} total`));
@@ -1463,7 +1409,7 @@ export class AgentNavigator {
 
   private warnOnce(context: string, error: unknown): void {
     // Spawn and interaction events call ensureTimer() again, so stop permanent failure
-    // loops while retaining a concrete retry path after transient host recovery.
+    // loops while retaining a concrete retry path after a transient host failure.
     this.stopRefreshTimer();
     if (this.errorWarningShown) return;
     this.errorWarningShown = true;

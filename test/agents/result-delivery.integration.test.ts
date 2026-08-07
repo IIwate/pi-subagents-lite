@@ -49,6 +49,7 @@ describe("durable result delivery integration", () => {
       turnLimited: false,
     });
     state.ctx = {
+      isIdle: () => true,
       sessionManager: {
         getSessionId: () => "parent-session",
         getLeafId: () => "origin-a",
@@ -102,6 +103,37 @@ describe("durable result delivery integration", () => {
     state.coordinator.onParentSettled();
 
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
+  });
+
+  it.each([
+    "quota exhausted",
+    "invalid API key",
+    "content_filter",
+  ])("persists a live-session error immediately: %s", async (errorText) => {
+    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+      await options.onSessionCreated(state.session);
+      throw new Error(errorText);
+    });
+
+    const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
+      description: "review",
+      modelKey: "test/model",
+      resultSessionId: "parent-session",
+      resultOriginEntryId: "origin-a",
+    });
+    const record = state.manager.getRecord(id)!;
+    await record.execution.promise;
+
+    expect(record).toMatchObject({
+      lifecycle: { status: "error", resultPersisted: true },
+      execution: { settled: true, session: state.session },
+      error: errorText,
+    });
+    const pending = [...readResultEntries(state.ctx).pending.values()];
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ status: "error", error: errorText });
+    expect(pending[0].result).toContain(errorText);
+    expect(state.pi.sendMessage).toHaveBeenCalledOnce();
   });
 
   it("preserves background delivery identity and creates a new delivery ID after continuation", async () => {

@@ -9,7 +9,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord } from "../types.js";
 import { getCoordinator, getManager } from "../shell.js";
 import { findStoredResult } from "../spawn/result-inbox.js";
-import { needsUserInput } from "./failure-state.js";
 import { formatResultContent } from "./tool-execution.js";
 
 function formatAgent(record: AgentRecord): string {
@@ -38,13 +37,11 @@ function resultLookupText(
   const recordModel = record ? modelProvider(record) : {};
   const provider = recordModel.provider ?? stored?.provider;
   const model = recordModel.model ?? stored?.model;
-  const needsInput = record ? needsUserInput(record) : false;
 
   const lines = [
     `Agent ${agentId}: ${status}`,
     `Provider: ${provider ?? "unknown"}`,
     `Model: ${model ?? "unknown"}`,
-    `Needs input: ${needsInput ? "yes" : "no"}`,
   ];
   if (error) lines.push(`Error: ${error}`);
   if (result) lines.push(`Result:\n${result}`);

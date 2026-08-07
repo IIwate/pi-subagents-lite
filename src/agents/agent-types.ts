@@ -7,7 +7,8 @@
 
 import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import type { AgentConfig } from "./types.js";
+import type { AcceptedRunPolicy } from "../types.js";
+import type { AgentConfig, SystemPromptMode } from "./types.js";
 
 /**
  * All tool names that Pi can provide to a session.
@@ -152,6 +153,43 @@ export function resolveType(name: string): string | undefined {
 export function getAgentConfig(name: string): AgentConfig | undefined {
   const key = resolveType(name);
   return key ? agents.get(key) : undefined;
+}
+
+/** Resolve and deep-copy every mutable policy input for an accepted call. */
+export function resolveAcceptedRunPolicy(
+  type: string,
+  defaults: {
+    loadSkillsImplicitly: boolean;
+    loadExtensionsImplicitly: boolean;
+    systemPromptMode: SystemPromptMode;
+    includeContextFiles: boolean;
+    parentModelKey: string;
+  },
+): AcceptedRunPolicy | undefined {
+  const key = resolveType(type);
+  const config = key ? agents.get(key) : undefined;
+  if (!config) return undefined;
+
+  const definition = structuredClone(config);
+  const resolved = applyGlobalDefaults(
+    definition.skills,
+    definition.extensions,
+    defaults.loadSkillsImplicitly,
+    defaults.loadExtensionsImplicitly,
+  );
+  return {
+    definition,
+    registeredTools: definition.registeredTools?.length
+      ? [...definition.registeredTools]
+      : [...BUILTIN_TOOL_NAMES],
+    restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
+    tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
+    extensions: Array.isArray(resolved.extensions) ? [...resolved.extensions] : resolved.extensions,
+    skills: Array.isArray(resolved.skills) ? [...resolved.skills] : resolved.skills,
+    systemPromptMode: defaults.systemPromptMode,
+    includeContextFiles: defaults.includeContextFiles,
+    parentModelKey: defaults.parentModelKey,
+  };
 }
 
 /** Get all visible type names (for spawning and tool descriptions). */

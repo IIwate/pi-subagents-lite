@@ -18,9 +18,7 @@ import {
 import type { SubagentType } from "./types.js";
 import { addUsage, getSessionContextPercent } from "./usage.js";
 import { errorMessage } from "../utils.js";
-import { needsUserInput } from "./failure-state.js";
 import {
-  DEBUG_RECOVERY_TTL_MS,
   type ArmedDebugFault,
   type DebugFaultKind,
 } from "./debug-fault.js";
@@ -30,9 +28,6 @@ const CLEANUP_INTERVAL_MS = 60_000;
 
 /** Age after which a completed agent record is evicted (milliseconds). */
 const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
-
-/** Recovery window for ordinary failed live sessions still available for user input. */
-const NORMAL_RECOVERY_TTL_MS = 30 * 60_000;
 
 /** Maximum wait for child setup or shutdown during manager disposal (milliseconds). */
 const SESSION_TEARDOWN_TIMEOUT_MS = 15_000;
@@ -67,10 +62,8 @@ export interface DebugAgentDiagnostic {
   session: "live" | "none";
   settled: boolean;
   resultConsumed: boolean;
-  recoverable: boolean;
+  resultPersisted: boolean;
   debugFaultKind?: DebugFaultKind;
-  recoveryPaused: boolean;
-  recoveryRemainingMs?: number;
   error?: string;
 }
 
@@ -138,8 +131,6 @@ export class AgentManager {
 
   /** One-shot fault used by the session-local Debug menu. */
   private armedDebugFault?: ArmedDebugFault;
-  /** Exact expiry timers for recoverable failures. */
-  private recoveryExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** In-flight dispose call, preventing reentrant shutdown chains from mutating closing concurrently. */
   private disposing = false;
@@ -177,22 +168,6 @@ export class AgentManager {
     this.armedDebugFault = undefined;
   }
 
-  /** Track the active child view as an independent recovery-expiry pause reason. */
-  pauseRecoveryExpiry(id: string): boolean {
-    const record = this.agents.get(id);
-    if (!record) return false;
-    this.setRecoveryExpiryPause(record, "view", true);
-    return true;
-  }
-
-  /** Release only the active-view pause without granting a fresh recovery window. */
-  resumeRecoveryExpiry(id: string): boolean {
-    const record = this.agents.get(id);
-    if (!record) return false;
-    this.setRecoveryExpiryPause(record, "view", false);
-    return true;
-  }
-
   /** Toggle a session-local pin. Pins pause automatic cleanup but never block manual clear. */
   togglePinned(id: string): boolean | undefined {
     const record = this.agents.get(id);
@@ -201,14 +176,12 @@ export class AgentManager {
     const pinnedAt = record.lifecycle.pinnedAt;
     if (pinnedAt == null) {
       record.lifecycle.pinnedAt = Date.now();
-      this.setRecoveryExpiryPause(record, "pin", true);
       return true;
     }
 
     const now = Date.now();
     if (
       isTerminalStatus(record.lifecycle.status)
-      && !needsUserInput(record)
       && record.lifecycle.completedAt != null
     ) {
       const pausedFrom = Math.max(pinnedAt, record.lifecycle.completedAt);
@@ -216,33 +189,23 @@ export class AgentManager {
         + Math.max(0, now - pausedFrom);
     }
     record.lifecycle.pinnedAt = undefined;
-    this.setRecoveryExpiryPause(record, "pin", false);
     return false;
   }
 
   debugDiagnostics(): DebugDiagnostics {
-    const now = Date.now();
     return {
       armedFault: this.armedDebugFault,
-      agents: this.listAgents().map((record) => {
-        const recoverable = needsUserInput(record);
-        return {
-          id: record.id,
-          type: record.display.type,
-          status: record.lifecycle.status,
-          session: record.execution.session ? "live" : "none",
-          settled: record.execution.settled === true,
-          resultConsumed: record.lifecycle.resultConsumed === true,
-          recoverable,
-          debugFaultKind: record.execution.debugFaultKind,
-          recoveryPaused: recoverable
-            && record.execution.recoveryExpiryPausedRemainingMs != null,
-          recoveryRemainingMs: recoverable
-            ? this.recoveryRemainingMs(record, now)
-            : undefined,
-          error: record.error,
-        };
-      }),
+      agents: this.listAgents().map((record) => ({
+        id: record.id,
+        type: record.display.type,
+        status: record.lifecycle.status,
+        session: record.execution.session ? "live" : "none",
+        settled: record.execution.settled === true,
+        resultConsumed: record.lifecycle.resultConsumed === true,
+        resultPersisted: record.lifecycle.resultPersisted === true,
+        debugFaultKind: record.execution.debugFaultKind,
+        error: record.error,
+      })),
     };
   }
 
@@ -408,6 +371,7 @@ export class AgentManager {
     const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
+      acceptedPolicy: options.acceptedPolicy,
       model: options.model,
       scopedModels: options.scopedModels,
       maxTurns: options.maxTurns,
@@ -429,10 +393,7 @@ export class AgentManager {
           return;
         }
         record.execution.session = session;
-        if (debugFault) {
-          record.execution.debugFaultKind = debugFault.kind;
-          record.execution.recoveryTtlMs = DEBUG_RECOVERY_TTL_MS;
-        }
+        if (debugFault) record.execution.debugFaultKind = debugFault.kind;
         // Replace queued predictions with the session's actual model/thinking.
         const inv = record.display.invocation ?? {};
         if (session.model?.id) inv.modelName = session.model.id;
@@ -481,7 +442,6 @@ export class AgentManager {
         if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
 
         record.execution.settled = true;
-        this.scheduleRecoveryExpiry(record);
         this.safeNotifyComplete(record);
         this.drainQueue();
       });
@@ -508,12 +468,7 @@ export class AgentManager {
     resolve("");
   }
 
-  /**
-   * A live failed session needs a human continuation, not a second delegated
-   * task. Notify only after it resolves or its recovery window expires.
-   */
-  private safeNotifyComplete(record: AgentRecord, includeRecoverable = false): void {
-    if (!includeRecoverable && needsUserInput(record)) return;
+  private safeNotifyComplete(record: AgentRecord): void {
     try { this.onComplete?.(record); } catch { /* ignore */ }
   }
 
@@ -623,13 +578,6 @@ export class AgentManager {
       return { accepted: false, reason: "concurrency", modelKey: reservedModelKey };
     }
 
-    // Do not alter a fault-bound recovery deadline until this continuation is
-    // guaranteed to start. A full concurrency ceiling must leave the exact expiry timer intact.
-    this.clearRecoveryExpiry(id);
-    record.execution.recoveryTtlMs = undefined;
-    record.execution.recoveryExpiresAt = undefined;
-    record.execution.recoveryExpiryPausedRemainingMs = undefined;
-
     const previousTurns = record.stats.turnCount ?? 0;
     const abortController = new AbortController();
     // abort() returns a promise and this runs from an event listener, so an
@@ -688,7 +636,6 @@ export class AgentManager {
         abortController.signal.removeEventListener("abort", abortSession);
         if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
         record.execution.settled = true;
-        this.scheduleRecoveryExpiry(record);
         this.safeNotifyComplete(record);
         this.drainQueue();
       });
@@ -753,91 +700,6 @@ export class AgentManager {
     return true;
   }
 
-  private recoveryWindowMs(record: AgentRecord): number {
-    return record.execution.recoveryTtlMs ?? NORMAL_RECOVERY_TTL_MS;
-  }
-
-  private recoveryExpiresAt(record: AgentRecord): number {
-    return record.execution.recoveryExpiresAt
-      ?? (record.lifecycle.completedAt ?? Date.now()) + this.recoveryWindowMs(record);
-  }
-
-  private recoveryRemainingMs(record: AgentRecord, now = Date.now()): number {
-    return record.execution.recoveryExpiryPausedRemainingMs
-      ?? Math.max(0, this.recoveryExpiresAt(record) - now);
-  }
-
-  private hasRecoveryExpiryPause(record: AgentRecord): boolean {
-    return record.execution.recoveryExpiryPausedByView === true
-      || record.execution.recoveryExpiryPausedByPin === true;
-  }
-
-  private setRecoveryExpiryPause(
-    record: AgentRecord,
-    reason: "view" | "pin",
-    paused: boolean,
-  ): void {
-    const key = reason === "view"
-      ? "recoveryExpiryPausedByView"
-      : "recoveryExpiryPausedByPin";
-    record.execution[key] = paused ? true : undefined;
-
-    if (!needsUserInput(record)) return;
-    if (paused) {
-      if (record.execution.recoveryExpiryPausedRemainingMs == null) {
-        record.execution.recoveryExpiryPausedRemainingMs = this.recoveryRemainingMs(record);
-        record.execution.recoveryExpiresAt = undefined;
-        this.clearRecoveryExpiry(record.id);
-      }
-      return;
-    }
-    if (this.hasRecoveryExpiryPause(record)) return;
-
-    const remaining = record.execution.recoveryExpiryPausedRemainingMs;
-    if (remaining == null) return;
-    record.execution.recoveryExpiryPausedRemainingMs = undefined;
-    record.execution.recoveryExpiresAt = Date.now() + remaining;
-    this.scheduleRecoveryExpiry(record);
-  }
-
-  private clearRecoveryExpiry(id: string): void {
-    const timer = this.recoveryExpiryTimers.get(id);
-    if (!timer) return;
-    clearTimeout(timer);
-    this.recoveryExpiryTimers.delete(id);
-  }
-
-  /** Schedule exact expiry so Debug's 10-second scenario is not delayed by cleanup polling. */
-  private scheduleRecoveryExpiry(record: AgentRecord): void {
-    this.clearRecoveryExpiry(record.id);
-    if (!needsUserInput(record)) return;
-    if (this.hasRecoveryExpiryPause(record)) {
-      record.execution.recoveryExpiryPausedRemainingMs ??= this.recoveryRemainingMs(record);
-      record.execution.recoveryExpiresAt = undefined;
-      return;
-    }
-    if (record.execution.recoveryExpiryPausedRemainingMs != null) {
-      record.execution.recoveryExpiresAt = Date.now()
-        + record.execution.recoveryExpiryPausedRemainingMs;
-      record.execution.recoveryExpiryPausedRemainingMs = undefined;
-    }
-
-    const expiresAt = this.recoveryExpiresAt(record);
-    record.execution.recoveryExpiresAt = expiresAt;
-    const timer = setTimeout(() => {
-      this.recoveryExpiryTimers.delete(record.id);
-      if (this.agents.get(record.id) !== record || !needsUserInput(record)) return;
-      if (record.execution.recoveryExpiryPausedRemainingMs != null) return;
-      if (Date.now() < expiresAt) {
-        this.scheduleRecoveryExpiry(record);
-        return;
-      }
-      this.expireRecovery(record);
-    }, Math.max(0, expiresAt - Date.now()));
-    timer.unref?.();
-    this.recoveryExpiryTimers.set(record.id, timer);
-  }
-
   /**
    * Emit session_shutdown to a child session's extensions, then dispose it.
    *
@@ -880,7 +742,6 @@ export class AgentManager {
   /** Shut down and dispose a record's session, then remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
     this.detachParentAbort(id);
-    this.clearRecoveryExpiry(id);
     const session = record.execution.session;
     record.execution.session = undefined;
     this.agents.delete(id);
@@ -888,34 +749,19 @@ export class AgentManager {
     try { this.onRemove?.(record); } catch { /* ignore */ }
   }
 
-  /** Make an unrecovered live failure visible once its continuation window closes. */
-  private expireRecovery(record: AgentRecord): void {
-    const lastError = record.error?.trim() || "unknown error";
-    record.error = `Agent recovery expired without continuation. Last error: ${lastError}`;
-    this.safeNotifyComplete(record, true);
-    this.removeRecord(record.id, record);
-  }
-
   private cleanup() {
     const now = Date.now();
     for (const [id, record] of this.agents) {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
       if (record.lifecycle.pinnedAt != null) continue;
-      const waitingForInput = needsUserInput(record);
       // A background result may leave the volatile record once the parent session
-      // has safely persisted it. The session entry remains the recovery source.
-      if (!waitingForInput && !record.lifecycle.resultPersisted && !record.lifecycle.resultConsumed) continue;
-      if (waitingForInput) {
-        if (record.execution.recoveryExpiryPausedRemainingMs != null) continue;
-        if (this.recoveryExpiresAt(record) >= now) continue;
-      } else {
-        const cleanupExpiresAt = (record.lifecycle.completedAt ?? 0)
-          + CLEANUP_AGE_CUTOFF_MS
-          + (record.lifecycle.cleanupExpiryPausedMs ?? 0);
-        if (cleanupExpiresAt >= now) continue;
-      }
-      if (waitingForInput) this.expireRecovery(record);
-      else this.removeRecord(id, record);
+      // has safely persisted it. The session entry remains the durable source.
+      if (!record.lifecycle.resultPersisted && !record.lifecycle.resultConsumed) continue;
+      const cleanupExpiresAt = (record.lifecycle.completedAt ?? 0)
+        + CLEANUP_AGE_CUTOFF_MS
+        + (record.lifecycle.cleanupExpiryPausedMs ?? 0);
+      if (cleanupExpiresAt >= now) continue;
+      this.removeRecord(id, record);
     }
   }
 
@@ -923,7 +769,6 @@ export class AgentManager {
     if (this.disposing) return;
     this.disposing = true;
     clearInterval(this.cleanupInterval);
-    for (const id of [...this.recoveryExpiryTimers.keys()]) this.clearRecoveryExpiry(id);
     // Abort before clearing records so a run still in session setup cannot
     // create an orphan child session after the parent has been replaced.
     for (const record of this.agents.values()) {

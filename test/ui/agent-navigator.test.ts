@@ -59,8 +59,6 @@ function makeManager(records: any[]): AgentManager {
   return {
     listAgents: () => records,
     getRecord: (id: string) => records.find(record => record.id === id),
-    pauseRecoveryExpiry: vi.fn(),
-    resumeRecoveryExpiry: vi.fn(),
     togglePinned: vi.fn((id: string) => {
       const record = records.find(candidate => candidate.id === id);
       if (!record) return undefined;
@@ -272,7 +270,7 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).not.toContain("waiting for next turn");
   });
 
-  it("shows Needs input and an undelivered failure result independently", () => {
+  it("shows an error and an undelivered result independently", () => {
     const record = makeRecord("agent-needs-input", "error");
     record.execution.settled = true;
     record.error = "temporary provider failure";
@@ -286,7 +284,8 @@ describe("AgentNavigator", () => {
     const { selector } = mountSelector(ui);
 
     const text = selector.render(120).join("\n");
-    expect(text).toContain("1 needs input");
+    expect(text).toContain("Error");
+    expect(text).not.toContain("needs input");
     expect(text).toContain("1 result pending");
   });
 
@@ -377,7 +376,7 @@ describe("AgentNavigator", () => {
     );
   });
 
-  it("uses the same needs-input orange in the footer and list", () => {
+  it("shows errors without a separate input-waiting count", () => {
     const record = makeRecord();
     record.lifecycle.status = "error";
     record.execution.settled = true;
@@ -386,20 +385,13 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
-    const expandedLines = selector.render(120);
-    const row = expandedLines.find((line: string) => line.includes("Needs input") && !line.includes("Main"))!;
-    const main = expandedLines.find((line: string) => line.includes("Main"))!;
-    expect(row).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)mNeeds input/);
-    expect(main).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)m1 needs input/);
+    const expanded = stripAnsi(selector.render(120).join("\n"));
+    expect(expanded).toContain("Error");
+    expect(expanded).not.toContain("needs input");
     navigator.toggleList();
 
-    const status = ui.statuses.get("subagents-lite")!;
-    expect(status).toContain("1 needs input");
-    expect(status).toContain("Alt+A expand");
-    expect(status).not.toContain("0 running");
-    expect(status).not.toContain("0 queued");
-    expect(status.indexOf("1 total")).toBeLessThan(status.indexOf("Alt+A expand"));
-    expect(status).toMatch(/\x1b\[38;(?:2;217;119;87|5;173)m1 needs input/);
+    const status = stripAnsi(ui.statuses.get("subagents-lite")!);
+    expect(status).toBe("Subagent (1 total · Alt+A expand)");
     expect(selector.render(120)).toEqual([]);
   });
 
@@ -478,7 +470,7 @@ describe("AgentNavigator", () => {
     expect(summary).not.toContain("0 queued");
   });
 
-  it("keeps continuable status adjacent to its stats", () => {
+  it("keeps error status adjacent to its stats", () => {
     const running = makeRecord("agent-running", "running");
     const blocked = makeRecord("agent-blocked", "error");
     running.stats.toolUses = 1;
@@ -497,11 +489,11 @@ describe("AgentNavigator", () => {
     const runningRow = lines.find((line: string) => line.includes("Active task"))!;
     const blockedRow = stripAnsi(lines.find((line: string) => line.includes("Blocked task"))!);
     expect(runningRow).toMatch(/Explore \(Running\) {2}Active task/);
-    expect(blockedRow).toMatch(/Explore \(Needs input\) {2}Blocked task/);
+    expect(blockedRow).toMatch(/Explore \(Error\) {2}Blocked task/);
     expect(runningRow).toMatch(/openai-test · gpt-test · high/);
   });
 
-  it("orders Needs input first and Done last without moving Main", () => {
+  it("preserves manager order without moving Main", () => {
     const done = makeRecord("agent-done", "completed");
     const running = makeRecord("agent-running", "running");
     const blocked = makeRecord("agent-blocked", "error");
@@ -518,10 +510,10 @@ describe("AgentNavigator", () => {
 
     const lines = selector.render(120);
     expect(lines[0]).toContain("Main");
-    expect(lines.findIndex((line: string) => line.includes("Blocked task")))
+    expect(lines.findIndex((line: string) => line.includes("Done task")))
       .toBeLessThan(lines.findIndex((line: string) => line.includes("Running task")));
     expect(lines.findIndex((line: string) => line.includes("Running task")))
-      .toBeLessThan(lines.findIndex((line: string) => line.includes("Done task")));
+      .toBeLessThan(lines.findIndex((line: string) => line.includes("Blocked task")));
   });
 
   it("renders a debug status preview without mutating agent lifecycle", () => {
@@ -532,8 +524,8 @@ describe("AgentNavigator", () => {
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
 
-    navigator.setDebugStatusPreview("needs_input");
-    expect(selector.render(120).join("\n")).toContain("Needs input");
+    navigator.setDebugStatusPreview("error");
+    expect(selector.render(120).join("\n")).toContain("Error");
     expect(record.lifecycle.status).toBe("running");
 
     navigator.setDebugStatusPreview(undefined);
@@ -552,14 +544,14 @@ describe("AgentNavigator", () => {
     const { tui, selector } = mountSelector(ui);
 
     const listText = stripAnsi(selector.render(120).join("\n"));
-    expect(listText).toContain("Explore [DEBUG] (Needs input)");
-    expect(listText).not.toContain("Needs input (Debug)");
+    expect(listText).toContain("Explore [DEBUG] (Error)");
+    expect(listText).not.toContain("Error (Debug)");
 
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     const transcript = stripAnsi(tui.children[tui.chatIndex].render(120).join("\n"));
-    expect(transcript).toContain("Explore [DEBUG] (Needs input)");
+    expect(transcript).toContain("Explore [DEBUG] (Error)");
     expect(transcript).not.toContain("agent-de");
   });
 
@@ -583,7 +575,7 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).toContain(label);
   });
 
-  it("keeps Needs input visible when a narrow terminal truncates other columns", () => {
+  it("keeps Error visible when a narrow terminal truncates other columns", () => {
     const record = makeRecord("agent-blocked", "error");
     record.execution.settled = true;
     record.execution.debugFaultKind = "output_blocked";
@@ -596,8 +588,8 @@ describe("AgentNavigator", () => {
     const { tui, selector } = mountSelector(ui);
     tui.terminal.columns = 42;
 
-    const row = selector.render(42).find((line: string) => line.includes("Needs input"))!;
-    expect(row).toContain("Needs input");
+    const row = selector.render(42).find((line: string) => line.includes("Error"))!;
+    expect(row).toContain("Error");
     expect(row).not.toContain("security audit description");
   });
 
@@ -626,8 +618,8 @@ describe("AgentNavigator", () => {
     expect(rows.join("\n")).toContain("gpt-tes");
   });
 
-  it("shows the recovery reason while a continuable failure is highlighted", () => {
-    const record = makeRecord("agent-blocked", "error");
+  it("shows ordinary navigation controls for highlighted errors", () => {
+    const record = makeRecord("agent-error", "error");
     record.execution.settled = true;
     record.error = "Provider finish_reason: content_filter";
     const ui = makeUI({ value: "" });
@@ -639,9 +631,9 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
 
-    expect(selector.render(120)[0]).toContain("Output blocked by provider");
-    record.error = "provider internal error";
-    expect(selector.render(120)[0]).toContain("Session failed after start");
+    const command = stripAnsi(selector.render(120)[0]);
+    expect(command).toContain("Enter Open");
+    expect(command).not.toContain("provider");
   });
 
   it("shows non-continuable setup failures as errors", () => {
@@ -656,16 +648,15 @@ describe("AgentNavigator", () => {
 
     const row = selector.render(120).find((line: string) => line.includes("Inspect the project"))!;
     expect(row).toContain("Error");
-    expect(row).not.toContain("Needs input");
   });
 
   it("toggles highlighted pins with Space without changing status order", () => {
     const done = makeRecord("agent-done", "completed");
     const running = makeRecord("agent-running", "running");
-    const needsInput = makeRecord("agent-needs-input", "error");
-    needsInput.execution.settled = true;
-    needsInput.error = "provider internal error";
-    const records = [done, running, needsInput];
+    const error = makeRecord("agent-error", "error");
+    error.execution.settled = true;
+    error.error = "provider internal error";
+    const records = [done, running, error];
     const ui = makeUI({ value: "" });
     const manager = makeManager(records) as any;
     navigator = new AgentNavigator(manager);
@@ -677,20 +668,18 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput(" ");
     expect(ui.ctx.notify).toHaveBeenCalledWith("Cannot pin Main agent", "warning");
 
-    navigator.handleTerminalInput("\x1b[B"); // Needs input.
-    navigator.handleTerminalInput("\x1b[B"); // Running.
     navigator.handleTerminalInput("\x1b[B"); // Done.
     navigator.handleTerminalInput(" ");
 
     let lines = selector.render(120);
-    const needsIndex = lines.findIndex((line: string) => line.includes("Needs input"));
-    const runningIndex = lines.findIndex((line: string) => line.includes("Running"));
     const doneIndex = lines.findIndex((line: string) => line.includes("Done"));
+    const runningIndex = lines.findIndex((line: string) => line.includes("Running"));
+    const errorIndex = lines.findIndex((line: string) => line.includes("Error"));
     expect(manager.togglePinned).toHaveBeenCalledWith(done.id);
     expect(lines[doneIndex]).toContain("◇ Explore");
     expect(lines.join("\n")).toContain("Space Unpin");
-    expect(needsIndex).toBeLessThan(runningIndex);
-    expect(runningIndex).toBeLessThan(doneIndex);
+    expect(doneIndex).toBeLessThan(runningIndex);
+    expect(runningIndex).toBeLessThan(errorIndex);
 
     navigator.handleTerminalInput("\r");
     lines = selector.render(120);
@@ -975,8 +964,8 @@ describe("AgentNavigator", () => {
     expect(selector.render(120).join("\n")).toContain("› ○ Main");
   });
 
-  it("pauses recovery while a child view is active and resumes it on Main", () => {
-    const record = makeRecord("agent-recovery", "error");
+  it("switches error views without mutating lifecycle state", () => {
+    const record = makeRecord("agent-error", "error");
     record.execution.settled = true;
     record.error = "content was flagged";
     const manager = makeManager([record]) as any;
@@ -989,12 +978,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
-    expect(manager.pauseRecoveryExpiry).toHaveBeenCalledWith(record.id);
+    expect(navigator.selectedId()).toBe(record.id);
+    expect(record.lifecycle.status).toBe("error");
 
     navigator.handleTerminalInput("\x1b[A");
     navigator.handleTerminalInput("\r");
-    expect(manager.resumeRecoveryExpiry).toHaveBeenCalledWith(record.id);
     expect(navigator.selectedId()).toBeNull();
+    expect(record.lifecycle.status).toBe("error");
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {
@@ -1283,7 +1273,7 @@ describe("AgentNavigator", () => {
     expect(text).not.toContain("Starting agent session…");
   });
 
-  it("uses the same Needs input label in the selected subagent conversation", () => {
+  it("uses the Error label in the selected subagent conversation", () => {
     const record = makeRecord();
     record.lifecycle.status = "error";
     record.execution.settled = true;
@@ -1300,7 +1290,7 @@ describe("AgentNavigator", () => {
 
     const lines = tui.children[tui.chatIndex].render(120);
     const text = lines.join("\n");
-    expect(text).toContain("Explore (Needs input)");
+    expect(text).toContain("Explore (Error)");
     expect(text).not.toContain("agent-12");
     expect(text).toContain("Inspect the project");
     expect(text).toContain("I should inspect files.");

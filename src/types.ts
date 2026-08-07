@@ -6,7 +6,7 @@ import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
-import type { SubagentType, AgentInvocation } from "./agents/types.js";
+import type { SubagentType, AgentConfig, AgentInvocation, SystemPromptMode } from "./agents/types.js";
 
 /**
  * Thinking level for agent models.
@@ -58,12 +58,27 @@ export interface RunCallbacks {
   onCompaction?: () => void;
 }
 
+export interface AcceptedRunPolicy {
+  /** Deep-copied definition resolved when the Agent call is accepted. */
+  definition: AgentConfig;
+  registeredTools: string[];
+  restrictToRegisteredTools: boolean;
+  tools?: true | string[] | false;
+  extensions: true | string[] | false;
+  skills: true | string[] | false;
+  systemPromptMode: SystemPromptMode;
+  includeContextFiles: boolean;
+  /** Canonical parent model identity used when this call was authorized. */
+  parentModelKey: string;
+}
+
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
  * The resolved run params that both the manager and coordinator agree on;
  * extends RunTunables with display/identity fields.
  */
 export interface SpawnConfig extends RunTunables {
+  acceptedPolicy: AcceptedRunPolicy;
   description: string;
   modelKey?: string;
   worktreePath?: string;
@@ -141,16 +156,6 @@ interface AgentExecutionState {
   resultDeliveryId?: string;
   /** Debug fault assigned after the real child session is configured. */
   debugFaultKind?: DebugFaultKind;
-  /** One-shot Debug recovery window for a fault-injected failure. */
-  recoveryTtlMs?: number;
-  /** Absolute expiry for an active recovery window; kept separate from failure time. */
-  recoveryExpiresAt?: number;
-  /** Frozen remaining recovery time while the failed child session has any pause reason. */
-  recoveryExpiryPausedRemainingMs?: number;
-  /** The active child view currently pauses any present or future recovery window. */
-  recoveryExpiryPausedByView?: boolean;
-  /** A user pin currently pauses any present or future recovery window. */
-  recoveryExpiryPausedByPin?: boolean;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
 }

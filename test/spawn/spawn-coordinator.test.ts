@@ -67,11 +67,13 @@ const {
 vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
   takeFallbackResults: (session: string) => {
-    const results = session === fallbackMeta.sessionId ? fallbackResults.splice(0) : [];
-    fallbackResults.length = 0;
-    return results;
+    return session === fallbackMeta.sessionId ? fallbackResults.splice(0) : [];
   },
   setFallbackResults: (session: string, results: any[]) => {
+    if (results.length === 0) {
+      if (session === fallbackMeta.sessionId) fallbackResults.length = 0;
+      return;
+    }
     fallbackMeta.sessionId = session;
     fallbackResults.splice(0, fallbackResults.length, ...results);
   },
@@ -647,7 +649,7 @@ describe("SpawnCoordinator", () => {
     )).toBe(true);
   });
 
-  it("keeps a result pending when its natural recovery turn also fails", async () => {
+  it("keeps a result pending when its natural retry turn also fails", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "retry later");
@@ -923,21 +925,6 @@ describe("SpawnCoordinator", () => {
       expect.objectContaining({ content: expect.stringContaining("restore me") }),
       { triggerTurn: true },
     );
-  });
-
-  it("does not transfer a fallback to a different parent session", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
-    const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "old session result");
-    mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
-
-    coordinator.onAgentComplete(result.record);
-    coordinator.dispose();
-    fallbackMeta.currentSessionId = "new-session";
-
-    const replacement = new SpawnCoordinator(manager as any);
-    expect(replacement.prepareBeforeAgentStart()).toBeUndefined();
-    expect(fallbackResults).toHaveLength(0);
   });
 
   it("does not wake after disposal", async () => {

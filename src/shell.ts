@@ -32,15 +32,25 @@ interface Shell {
 }
 
 interface ProcessState {
-  /** Process-local handoff when a stale runtime rejects parent-session append. */
-  fallbackResults?: { sessionId: string; results: PendingResult[] };
+  /** Process-local handoff buckets when a stale runtime rejects parent-session append. */
+  fallbackResults: Map<string, PendingResult[]>;
   /** Async context survives Jiti module reloads without blocking unrelated parent work. */
   subagentSpawn: AsyncLocalStorage<boolean>;
 }
 
 const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")] ??= {
+  fallbackResults: new Map<string, PendingResult[]>(),
   subagentSpawn: new AsyncLocalStorage<boolean>(),
 }) as ProcessState;
+
+// Preserve a pending single-slot handoff when this version first loads into an
+// already-running Pi process; subsequent reloads use the session-keyed Map.
+if (!(processState.fallbackResults instanceof Map)) {
+  const legacy = processState.fallbackResults as unknown as { sessionId?: string; results?: PendingResult[] } | undefined;
+  processState.fallbackResults = new Map(
+    legacy?.sessionId && legacy.results?.length ? [[legacy.sessionId, legacy.results]] : [],
+  );
+}
 
 // ============================================================================
 // Mutable module-level shell (populated by index.ts at session_start)
@@ -115,14 +125,14 @@ export function setCoordinator(c: SpawnCoordinator | null): void {
 
 /** Transfer unpersisted final results only within the same parent session. */
 export function takeFallbackResults(sessionId: string): PendingResult[] {
-  const handoff = processState.fallbackResults;
-  processState.fallbackResults = undefined;
-  if (!handoff || handoff.sessionId !== sessionId) return [];
-  return handoff.results;
+  const results = processState.fallbackResults.get(sessionId) ?? [];
+  processState.fallbackResults.delete(sessionId);
+  return results;
 }
 
 export function setFallbackResults(sessionId: string, results: readonly PendingResult[]): void {
-  processState.fallbackResults = results.length > 0 ? { sessionId, results: [...results] } : undefined;
+  if (results.length > 0) processState.fallbackResults.set(sessionId, [...results]);
+  else processState.fallbackResults.delete(sessionId);
 }
 
 // ============================================================================
