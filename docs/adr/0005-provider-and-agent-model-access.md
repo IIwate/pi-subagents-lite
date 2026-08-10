@@ -1,5 +1,7 @@
 # Provider and agent model access
 
+> ADR 0008 partially supersedes this decision for unconditional Parent default access, omitted-model behavior, thinking selection, and the current-parent Provider bypass and related Provider-list exception. Explicit Provider access, alternate authorization, Pi availability, Model scope, and accepted-work snapshots remain in force.
+
 Model routing is an access policy, not a default-model or assignment system.
 The configuration enables alternate providers globally, while the current
 parent provider dynamically passes that one gate, then narrows each agent type
