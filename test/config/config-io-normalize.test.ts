@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const files = new Map<string, string>();
@@ -11,7 +12,7 @@ vi.mock("node:fs", () => ({
   mkdirSync: () => {},
 }));
 
-const CONFIG_PATH = `${process.env.HOME || ""}/.pi/agent/subagents-lite.json`;
+const CONFIG_PATH = join(process.env.HOME || "", ".pi", "agent", "subagents-lite.json");
 import { loadConfig, saveConfigAtomic } from "../../src/config/config-io.js";
 
 function writeConfig(value: unknown): void {
