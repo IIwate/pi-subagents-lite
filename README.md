@@ -101,17 +101,17 @@ Frontmatter supports flat values and lists, not nested YAML objects. Extension t
 
 ## Model Routing
 
-By default, every subagent uses the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. It is always available and is never persisted as routing configuration.
+By default, every subagent requests the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. The selected Agent type must have **Parent model access**; that access is an explicit policy and is not bypassed by omitting `model`.
 
 With **Model routing** OFF (`/agents` > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
 
-- its provider is globally enabled for routing, unless it is the current parent provider;
+- its Provider is explicitly enabled for routing, including when it is the current parent Provider;
 - the selected agent type has access to that provider;
 - the agent's provider rule allows all models or the exact model ID;
 - Pi reports the exact model through `modelRegistry.getAvailable()`;
 - the model is inside Pi's active model scope.
 
-The current parent provider bypasses only the global provider switch while it remains the parent. Same-provider alternates still need an explicit Agent tool `model` argument, routing ON, a saved Agent/provider/model rule, Pi availability, and active scope. A rejected explicit choice is never replaced silently with the parent model. The exact parent model remains unconditional.
+The current parent Provider never bypasses an explicit Provider restriction. Same-provider alternates still need an explicit Agent tool `model` argument, routing ON, a saved Agent/provider/model rule, Pi availability, and active scope. A rejected explicit choice is never replaced silently with the Parent model. The exact Parent model remains subject to the Agent type's Parent model access.
 
 The canonical configuration is:
 
@@ -173,9 +173,9 @@ The Concurrency menu shows only the parent model, currently authorized alternate
 
 Run `/agents` to configure:
 
-- Parent default inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
+- Parent model access and inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
 - the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
-- force-background mode, grace turns, and default thinking;
+- force-background mode, grace turns, and exact Agent/model Thinking access overrides;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, initial list expansion, and visible list statistics;
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
