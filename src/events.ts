@@ -4,7 +4,6 @@ import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, sc
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
-import { modelKey, scopedModelKeys } from "./models/model-scope.js";
 import { buildCurrentAgentGuidance } from "./prompt/agent-guidance.js";
 import {
   getManager,
@@ -108,10 +107,11 @@ export function setupEventListeners(pi: ExtensionAPI): void {
           maxTurns: config.maxTurns,
         }] : [];
       }),
-      parentModelKey: ctx.model ? modelKey(ctx.model) : "",
+      parentModel: ctx.model,
+      parentThinkingLevel: ctx.thinkingLevel,
       routing: getStore().routing,
-      availableKeys: new Set(ctx.modelRegistry.getAvailable().map(modelKey)),
-      scopedKeys: scopedModelKeys(ctx.scopedModels),
+      availableModels: ctx.modelRegistry.getAvailable(),
+      scopedModels: structuredClone(ctx.scopedModels),
     });
     return {
       message: resultMessage,

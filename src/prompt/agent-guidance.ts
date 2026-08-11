@@ -1,5 +1,10 @@
+import type { Model } from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRoutingConfig } from "../config/types.js";
 import { effectiveAlternateModelKeys } from "../models/model-access.js";
+import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
+import { resolveThinkingAccess, type ThinkingAccessPolicy } from "../models/thinking-access.js";
+import type { ThinkingLevel } from "../types.js";
 
 export interface GuidanceAgent {
   name: string;
@@ -10,26 +15,90 @@ export interface GuidanceAgent {
 
 export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
-  parentModelKey: string;
+  parentModel: Model<any> | undefined;
+  parentThinkingLevel: ThinkingLevel | undefined;
   routing: Readonly<ModelRoutingConfig>;
-  availableKeys: ReadonlySet<string>;
-  scopedKeys: ReadonlySet<string> | null;
+  availableModels: readonly Model<any>[];
+  scopedModels: ExtensionContext["scopedModels"];
+}
+
+function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function thinkingSummary(policy: ThinkingAccessPolicy): string {
+  return `allowed: ${policy.allowed.join(", ")}; default: ${policy.default}`;
 }
 
 /** Deterministic per-run guidance for the schema-stealth Agent tool. */
 export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string {
-  const { parentModelKey, routing, availableKeys, scopedKeys } = options;
-  const agents = [...options.agents].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-  const lines = ["[Subagent access]", "", "Available agent types:"];
+  const agents = [...options.agents].sort((a, b) => a.name.localeCompare(b.name));
+  const parentModelKey = options.parentModel ? modelKey(options.parentModel) : "";
+  const availableByKey = new Map(options.availableModels.map((model) => [modelKey(model), model]));
+  const availableKeys = new Set(availableByKey.keys());
+  const scopedKeys = scopedModelKeys(options.scopedModels);
+  const callable: string[] = [];
+  const unavailable: string[] = [];
+  const alternateSections: string[] = [];
 
   for (const agent of agents) {
+    const access = ownValue(options.routing.agentAccess, agent.name);
+    const parentPolicy = options.parentModel && access?.parentModelAccess !== false
+      ? resolveThinkingAccess({
+          agentAccess: access,
+          model: options.parentModel,
+          modelKey: parentModelKey,
+          parentModelKey,
+          parentThinkingLevel: options.parentThinkingLevel,
+          scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, options.parentModel),
+        })
+      : null;
+    const alternates = effectiveAlternateModelKeys(
+      agent.name,
+      options.routing,
+      availableKeys,
+      scopedKeys,
+      parentModelKey,
+    ).flatMap((key) => {
+      const model = availableByKey.get(key);
+      if (!model) return [];
+      const policy = resolveThinkingAccess({
+        agentAccess: access,
+        model,
+        modelKey: key,
+        parentModelKey,
+        parentThinkingLevel: options.parentThinkingLevel,
+        scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, model),
+      });
+      return policy ? [{ key, policy }] : [];
+    });
+
     const details: string[] = [];
     if (agent.registeredTools?.length) details.push(`tools: ${[...agent.registeredTools].sort().join(", ")}`);
     if (agent.maxTurns) details.push(`max turns: ${agent.maxTurns}`);
+    if (parentPolicy) {
+      details.push(`parent default: ${parentModelKey}; ${thinkingSummary(parentPolicy)}`);
+    } else if (alternates.length > 0) {
+      details.push("`model` is required");
+    }
     const suffix = details.length ? ` (${details.join("; ")})` : "";
-    lines.push(`- ${agent.name}: ${agent.description}${suffix}`);
+
+    if (parentPolicy || alternates.length > 0) {
+      callable.push(`- ${agent.name}: ${agent.description}${suffix}`);
+    } else {
+      unavailable.push(`- ${agent.name}: no authorized model`);
+    }
+    if (alternates.length > 0) {
+      alternateSections.push(
+        "",
+        `${agent.name} alternate models:`,
+        ...alternates.map(({ key, policy }) => `- ${key} (${thinkingSummary(policy)})`),
+      );
+    }
   }
 
+  const lines = ["[Subagent access]", "", "Available agent types:", ...callable];
+  if (unavailable.length > 0) lines.push("", "Unavailable agent types:", ...unavailable);
   lines.push(
     "",
     "Agent tool rules:",
@@ -38,40 +107,10 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     "- A background Agent error is final. Do not spawn a replacement unless the user explicitly asks to retry.",
     "- Prefer background for independent work; use foreground when the result gates the next parent action.",
     "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
-    "- Omit `model` to use the exact parent model.",
+    "- Omit `model` only when the chosen Agent type has an authorized parent default.",
     "- For an alternate, pass one exact model key listed below; do not invent or abbreviate model IDs.",
-    "- Never silently replace a rejected explicit model.",
-    "",
-    "Model access:",
+    "- Never silently replace a rejected model or Thinking level.",
   );
-
-  if (parentModelKey) {
-    lines.push("Default for every agent:", `- ${parentModelKey}`);
-  } else {
-    lines.push("No parent default is active; omitting `model` cannot start an Agent.");
-  }
-
-  if (!routing.enabled) {
-    lines.push("", "Model routing is OFF. Other models are not authorized.");
-    return lines.join("\n");
-  }
-
-  let advertised = false;
-  for (const agent of agents) {
-    const effective = effectiveAlternateModelKeys(
-      agent.name,
-      routing,
-      availableKeys,
-      scopedKeys,
-      parentModelKey,
-    );
-    if (effective.length === 0) continue;
-    advertised = true;
-    lines.push("", `${agent.name} alternate models:`, ...effective.map((key) => `- ${key}`));
-  }
-
-  lines.push("", advertised
-    ? "All unlisted agents are parent-model only."
-    : "No effective alternate model access is currently available.");
+  lines.push(...alternateSections);
   return lines.join("\n");
 }

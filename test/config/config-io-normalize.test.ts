@@ -137,6 +137,70 @@ describe("config-io model access normalization", () => {
     expect(loadConfig().modelRouting.agentAccess.Explore.providers.openai).toEqual({ models: ["gpt-5"] });
   });
 
+  it("normalizes Parent model access and exact-model thinking overrides", () => {
+    writeConfig({
+      modelRouting: {
+        agentAccess: {
+          Explore: {
+            parentModelAccess: false,
+            providers: {},
+            thinking: {
+              " openai/gpt-5 ": {
+                allowed: [" high ", "low", "high"],
+                default: "low",
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(loadConfig().modelRouting.agentAccess).toEqual({
+      Explore: {
+        parentModelAccess: false,
+        providers: {},
+        thinking: {
+          "openai/gpt-5": { allowed: ["high", "low"], default: "low" },
+        },
+      },
+    });
+  });
+
+  it("drops malformed thinking overrides without deleting other Agent access", () => {
+    writeConfig({
+      modelRouting: {
+        agentAccess: {
+          Explore: {
+            parentModelAccess: false,
+            providers: { openai: {} },
+            thinking: {
+              bare: { allowed: ["low"], default: "low" },
+              "openai/empty": { allowed: [], default: "low" },
+              "openai/unknown": { allowed: ["provider-custom"], default: "provider-custom" },
+              "openai/missing-default": { allowed: ["low"], default: "high" },
+              "openai/malformed": null,
+            },
+          },
+        },
+      },
+    });
+    expect(loadConfig().modelRouting.agentAccess).toEqual({
+      Explore: {
+        parentModelAccess: false,
+        providers: { openai: {} },
+      },
+    });
+  });
+
+  it("silently ignores retired global defaultThinking", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    writeConfig({ agent: { defaultThinking: "xhigh", graceTurns: 9 } });
+    const config = loadConfig();
+    expect(config.agent.graceTurns).toBe(9);
+    expect(config.agent).not.toHaveProperty("defaultThinking");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("ignores assignment-era routing fields without migration", () => {
     writeConfig({
       modelRouting: {

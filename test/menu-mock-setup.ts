@@ -5,7 +5,11 @@ export const mockModules = {
     modelRouting: {
       enabled: false,
       enabledProviders: [] as string[],
-      agentAccess: {} as Record<string, { providers: Record<string, { models?: string[] }> }>,
+      agentAccess: {} as Record<string, {
+        parentModelAccess?: boolean;
+        providers: Record<string, { models?: string[] }>;
+        thinking?: Record<string, { allowed: string[]; default: string }>;
+      }>,
     },
     agent: { forceBackground: false } as Record<string, any>,
     concurrency: { default: 4 } as Record<string, any>,
@@ -66,7 +70,12 @@ vi.mock("../src/agents/tool-execution.js", () => ({
 vi.mock("../src/shell.js", () => {
   const prune = (type: string) => {
     const access = mockModules.mockConfig.modelRouting.agentAccess[type];
-    if (access && Object.keys(access.providers).length === 0) {
+    if (
+      access
+      && Object.keys(access.providers).length === 0
+      && access.parentModelAccess === undefined
+      && Object.keys(access.thinking ?? {}).length === 0
+    ) {
       delete mockModules.mockConfig.modelRouting.agentAccess[type];
     }
   };
@@ -131,9 +140,30 @@ vi.mock("../src/shell.js", () => {
           setAccess(type, provider, models);
         },
         configureAgentProviderAccess(type: string, provider: string, models?: readonly string[]) {
+          if (models && models.length === 0) return;
           mockModules.mockConfig.modelRouting.enabled = true;
           this.setProviderEnabled(provider, true);
           setAccess(type, provider, models);
+        },
+        setParentModelAccess(type: string, allowed: boolean) {
+          const agent = mockModules.mockConfig.modelRouting.agentAccess[type] ??= { providers: {} };
+          if (allowed) delete agent.parentModelAccess;
+          else agent.parentModelAccess = false;
+          prune(type);
+        },
+        setThinkingAccess(type: string, key: string, allowed: readonly string[], defaultLevel: string) {
+          const agent = mockModules.mockConfig.modelRouting.agentAccess[type] ??= { providers: {} };
+          (agent.thinking ??= {})[key] = {
+            allowed: [...new Set(allowed)],
+            default: defaultLevel,
+          };
+        },
+        resetThinkingAccess(type: string, key: string) {
+          const agent = mockModules.mockConfig.modelRouting.agentAccess[type];
+          if (!agent?.thinking) return;
+          delete agent.thinking[key];
+          if (Object.keys(agent.thinking).length === 0) delete agent.thinking;
+          prune(type);
         },
         deleteProviderRules(provider: string) {
           for (const type of Object.keys(mockModules.mockConfig.modelRouting.agentAccess)) {

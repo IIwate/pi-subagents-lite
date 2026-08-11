@@ -200,8 +200,19 @@ describe("Agent tool schema — stealth", () => {
     expect(hasParam(agentTool()!.parameters, "run_in_background")).toBe(true);
   });
 
-  it("includes thinking param (optional, LLM can override thinking level)", () => {
+  it("restricts thinking to Pi canonical levels", () => {
     expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
+    const thinking = agentTool()!.parameters.properties.thinking;
+    expect(thinking.type).toBe("union");
+    expect(thinking.variants.map((variant: any) => variant.const)).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
   });
 
   it("describes worktree_path as a same-repository worktree", () => {
@@ -348,8 +359,9 @@ describe("event listener registration", () => {
   it("injects current guidance only while the Agent tool is active", async () => {
     const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
     const ctx = {
-      model: { provider: "anthropic", id: "sonnet" },
-      modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "sonnet" }] },
+      model: { provider: "anthropic", id: "sonnet", reasoning: true },
+      thinkingLevel: "medium",
+      modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "sonnet", reasoning: true }] },
       scopedModels: [],
     };
     const active = await handler({

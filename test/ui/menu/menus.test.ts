@@ -81,7 +81,7 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
     expect(rendered).not.toContain("Spawn agent");
     expect(rendered).not.toMatch(/^\s+Settings\b/m);
     expect(rendered).toContain("Agents");
-    expect(rendered).toContain("Model routing");
+    expect(rendered).toContain("Model access");
     expect(rendered).toContain("Concurrency settings");
     expect(rendered).toContain("Spawn options");
     expect(rendered).toContain("System prompt");
@@ -91,7 +91,7 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
   });
 
   it.each([
-    ["routing", "Model Routing"],
+    ["routing", "Model Access"],
     ["concurrency", "Concurrency"],
     ["spawnoptions", "Spawn Options"],
     ["systemprompt", "System Prompt"],

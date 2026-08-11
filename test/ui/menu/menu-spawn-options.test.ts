@@ -185,50 +185,19 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   });
 });
 
-describe("showSpawnOptionsMenu — default thinking level", () => {
+describe("showSpawnOptionsMenu — retired thinking default", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    mockModules.mockConfig.agent = { forceBackground: false, defaultThinking: "high" };
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
   });
 
-  it("shows 'Default thinking level · inherit' when no default is set", async () => {
+  it("does not expose the retired global defaultThinking setting", async () => {
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
-    const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
-  });
-
-  it("shows configured thinking level", async () => {
-    mockModules.mockConfig.agent.defaultThinking = "high";
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
-    expect(dt.currentValue).toBe("high");
-  });
-
-  it("offers max thinking level", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
-    expect(dt.values).toContain("max");
-  });
-
-  it("sets thinking level via onChange", async () => {
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    settingsListCalls[0].onChange("defaultThinking", "medium");
-    expect(mockModules.mockConfig.agent.defaultThinking).toBe("medium");
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("sets thinking level to inherit (undefined) via onChange", async () => {
-    mockModules.mockConfig.agent.defaultThinking = "high";
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
-    settingsListCalls[0].onChange("defaultThinking", "inherit");
-    expect(mockModules.mockConfig.agent.defaultThinking).toBeUndefined();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+    expect(settingsListCalls[0].items.find((item: any) => item.id === "defaultThinking"))
+      .toBeUndefined();
   });
 });
 

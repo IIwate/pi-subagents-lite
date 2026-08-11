@@ -7,6 +7,7 @@ export type ModelAuthorizationVerdict =
   | {
       ok: false;
       reason:
+        | "parent-model-denied"
         | "routing-disabled"
         | "provider-disabled"
         | "agent-provider-denied"
@@ -32,27 +33,23 @@ function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
 }
 
-function providerFromModelKey(key: string): string {
-  const slash = key.indexOf("/");
-  return slash > 0 ? key.slice(0, slash) : "";
-}
-
 function providerPassesGlobalGate(
   provider: string,
   routing: Readonly<ModelRoutingConfig>,
-  parentModelKey: string,
 ): boolean {
-  return provider === providerFromModelKey(parentModelKey)
-    || routing.enabledProviders.includes(provider);
+  return routing.enabledProviders.includes(provider);
 }
 
 /** Authorize one already-resolved model key for a new Agent invocation. */
 export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizationVerdict {
   const { agentType, modelKey, parentModelKey, routing, availableKeys, scopedKeys } = ctx;
 
-  // The exact parent is the only implicit capability and remains valid even
-  // when routing, provider access, or the active scope changes around it.
-  if (parentModelKey && modelKey === parentModelKey) return { ok: true };
+  const agentAccess = ownValue(routing.agentAccess, agentType);
+  if (parentModelKey && modelKey === parentModelKey) {
+    return agentAccess?.parentModelAccess === false
+      ? { ok: false, reason: "parent-model-denied" }
+      : { ok: true };
+  }
   if (!routing.enabled) return { ok: false, reason: "routing-disabled" };
 
   const slash = modelKey.indexOf("/");
@@ -60,10 +57,9 @@ export function authorizeModel(ctx: ModelAuthorizationContext): ModelAuthorizati
   const provider = modelKey.slice(0, slash);
   const modelId = modelKey.slice(slash + 1);
 
-  if (!providerPassesGlobalGate(provider, routing, parentModelKey)) {
+  if (!providerPassesGlobalGate(provider, routing)) {
     return { ok: false, reason: "provider-disabled" };
   }
-  const agentAccess = ownValue(routing.agentAccess, agentType);
   const access = agentAccess ? ownValue(agentAccess.providers, provider) : undefined;
   if (!access) return { ok: false, reason: "agent-provider-denied" };
   if (access.models && !access.models.includes(modelId)) {
@@ -88,7 +84,7 @@ export function effectiveAlternateModelKeys(
 
   const result: string[] = [];
   for (const provider of Object.keys(rules).sort()) {
-    if (!providerPassesGlobalGate(provider, routing, parentModelKey)) continue;
+    if (!providerPassesGlobalGate(provider, routing)) continue;
     const access = ownValue(rules, provider)!;
     const keys = access.models
       ? access.models.map((modelId) => `${provider}/${modelId}`)

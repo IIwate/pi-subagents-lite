@@ -30,7 +30,6 @@ export interface AgentConfig {
   skills?: true | string[] | false;
   /** Skills to preload with full content into system prompt. string[] = listed, false/undefined = none */
   preloadSkills?: string[] | false;
-  thinkingLevel?: ThinkingLevel;
   maxTurns?: number;
   /** Max output tokens per LLM response. Applied through Pi's native model limit. */
   maxTokens?: number;

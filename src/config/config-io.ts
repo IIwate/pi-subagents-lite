@@ -12,7 +12,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentModelAccess, AgentSettings, ModelRoutingConfig, ProviderModelAccess, SubagentsConfig } from "./types.js";
+import type { AgentModelAccess, AgentSettings, ModelRoutingConfig, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
+import { CANONICAL_THINKING_LEVELS } from "./types.js";
+import type { ThinkingLevel } from "../types.js";
 
 const CONFIG_DIR = path.join(process.env.HOME || "", ".pi", "agent");
 const CONFIG_PATH = path.join(CONFIG_DIR, "subagents-lite.json");
@@ -61,7 +63,6 @@ const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
   "showCost",
   "systemPromptMode",
   "includeContextFiles",
-  "defaultThinking",
   "loadSkillsImplicitly",
   "loadExtensionsImplicitly",
   "disableDefaultAgents",
@@ -80,6 +81,64 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
+const THINKING_LEVELS = new Set<string>(CANONICAL_THINKING_LEVELS);
+
+function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  if (typeof value !== "string") return undefined;
+  const level = value.trim();
+  return THINKING_LEVELS.has(level) ? level as ThinkingLevel : undefined;
+}
+
+function normalizeModelKey(value: string): string | undefined {
+  const key = value.trim();
+  const slash = key.indexOf("/");
+  return slash > 0 && slash < key.length - 1 ? key : undefined;
+}
+
+function mergeThinkingOverride(
+  existing: ThinkingAccessOverride,
+  incoming: ThinkingAccessOverride,
+): ThinkingAccessOverride {
+  const incomingAllowed = new Set(incoming.allowed);
+  const allowed = existing.allowed.filter((level) => incomingAllowed.has(level));
+  if (allowed.length === 0) return existing;
+  const defaultLevel = allowed.includes(existing.default)
+    ? existing.default
+    : allowed.includes(incoming.default)
+      ? incoming.default
+      : allowed[0];
+  return { allowed, default: defaultLevel };
+}
+
+function normalizeThinkingOverrides(raw: unknown): Record<string, ThinkingAccessOverride> | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const thinking: Record<string, ThinkingAccessOverride> = {};
+  for (const [rawKey, rawOverride] of Object.entries(raw)) {
+    const key = normalizeModelKey(rawKey);
+    if (!key || !isPlainObject(rawOverride) || !Array.isArray(rawOverride.allowed)) continue;
+    const allowed = [...new Set(rawOverride.allowed
+      .map(normalizeThinkingLevel)
+      .filter((level): level is ThinkingLevel => level !== undefined))];
+    const defaultLevel = normalizeThinkingLevel(rawOverride.default);
+    if (allowed.length === 0 || !defaultLevel || !allowed.includes(defaultLevel)) continue;
+    const normalized = { allowed, default: defaultLevel };
+    const existing = Object.hasOwn(thinking, key) ? thinking[key] : undefined;
+    setOwn(thinking, key, existing ? mergeThinkingOverride(existing, normalized) : normalized);
+  }
+  return Object.keys(thinking).length > 0 ? thinking : undefined;
+}
+
+function mergeProviderRule(
+  existing: ProviderModelAccess,
+  incoming: ProviderModelAccess,
+): ProviderModelAccess | undefined {
+  if (!existing.models) return incoming.models ? { models: [...incoming.models] } : {};
+  if (!incoming.models) return { models: [...existing.models] };
+  const incomingModels = new Set(incoming.models);
+  const models = existing.models.filter((model) => incomingModels.has(model));
+  return models.length > 0 ? { models } : undefined;
 }
 
 /**
@@ -103,27 +162,64 @@ function normalizeModelRouting(raw: unknown): ModelRoutingConfig {
   }
 
   const agentAccess: Record<string, AgentModelAccess> = {};
+  const blockedProviders = new Map<string, Set<string>>();
   if (isPlainObject(raw.agentAccess)) {
     for (const [rawType, rawAccess] of Object.entries(raw.agentAccess)) {
       const type = rawType.trim();
-      if (!type || !isPlainObject(rawAccess) || !isPlainObject(rawAccess.providers)) continue;
+      if (!type || !isPlainObject(rawAccess)) continue;
 
-      const providers: Record<string, ProviderModelAccess> = {};
-      for (const [rawProvider, rawProviderAccess] of Object.entries(rawAccess.providers)) {
-        const provider = rawProvider.trim();
-        if (!provider || !isPlainObject(rawProviderAccess)) continue;
-        if (!Object.hasOwn(rawProviderAccess, "models")) {
-          if (Object.keys(rawProviderAccess).length === 0) setOwn(providers, provider, {});
-          continue;
+      const existing = Object.hasOwn(agentAccess, type) ? agentAccess[type] : undefined;
+      const access = existing ?? { providers: {} };
+      const blocked = blockedProviders.get(type) ?? new Set<string>();
+      blockedProviders.set(type, blocked);
+
+      if (isPlainObject(rawAccess.providers)) {
+        for (const [rawProvider, rawProviderAccess] of Object.entries(rawAccess.providers)) {
+          const provider = rawProvider.trim();
+          if (!provider || blocked.has(provider) || !isPlainObject(rawProviderAccess)) continue;
+          let normalized: ProviderModelAccess | undefined;
+          if (!Object.hasOwn(rawProviderAccess, "models")) {
+            if (Object.keys(rawProviderAccess).length === 0) normalized = {};
+          } else if (Array.isArray(rawProviderAccess.models)) {
+            const models = [...new Set(rawProviderAccess.models
+              .filter((model): model is string => typeof model === "string")
+              .map((model) => model.trim())
+              .filter(Boolean))];
+            if (models.length > 0) normalized = { models };
+          }
+          if (!normalized) continue;
+          if (!Object.hasOwn(access.providers, provider)) {
+            setOwn(access.providers, provider, normalized);
+            continue;
+          }
+          const merged = mergeProviderRule(access.providers[provider], normalized);
+          if (merged) {
+            setOwn(access.providers, provider, merged);
+          } else {
+            delete access.providers[provider];
+            blocked.add(provider);
+          }
         }
-        if (!Array.isArray(rawProviderAccess.models)) continue;
-        const models = [...new Set(rawProviderAccess.models
-          .filter((model): model is string => typeof model === "string")
-          .map((model) => model.trim())
-          .filter(Boolean))];
-        if (models.length > 0) setOwn(providers, provider, { models });
       }
-      if (Object.keys(providers).length > 0) setOwn(agentAccess, type, { providers });
+      if (rawAccess.parentModelAccess === false) access.parentModelAccess = false;
+      const thinking = normalizeThinkingOverrides(rawAccess.thinking);
+      if (thinking) {
+        const mergedThinking = access.thinking ?? {};
+        for (const [key, override] of Object.entries(thinking)) {
+          const saved = Object.hasOwn(mergedThinking, key) ? mergedThinking[key] : undefined;
+          setOwn(mergedThinking, key, saved ? mergeThinkingOverride(saved, override) : override);
+        }
+        access.thinking = mergedThinking;
+      }
+      if (
+        Object.keys(access.providers).length > 0
+        || access.parentModelAccess === false
+        || Object.keys(access.thinking ?? {}).length > 0
+      ) {
+        if (!existing) setOwn(agentAccess, type, access);
+      } else if (existing) {
+        delete agentAccess[type];
+      }
     }
   }
 

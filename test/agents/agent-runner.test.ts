@@ -41,7 +41,6 @@ const mockModules = vi.hoisted(() => ({
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
   mockIncludeContextFiles: true as boolean,
   mockSystemPromptMode: "replace" as string,
-  mockDefaultThinking: undefined as string | undefined,
   getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
@@ -80,7 +79,6 @@ vi.mock("../../src/shell.js", () => ({
       graceTurns: 6,
       forceBackground: false,
       showCost: false,
-      defaultThinking: mockModules.mockDefaultThinking,
     },
   }),
   withSubagentSpawn: mockModules.mockWithSubagentSpawn,
@@ -144,7 +142,6 @@ function resetMocks() {
   mockModules.clearLoaderExtensions();
   mockModules.mockIncludeContextFiles = true;
   mockModules.mockSystemPromptMode = "replace";
-  mockModules.mockDefaultThinking = undefined;
   mockModules.mockLoadProjectContextFiles.mockReturnValue([]);
 
   mockModules.mockGetConfig.mockReturnValue({ ...defaultConfig });
@@ -450,10 +447,9 @@ describe("runAgent — tool visibility wiring", () => {
       .rejects.toThrow("no subagent model could be resolved");
   });
 
-  it("keeps a resolved undefined thinking snapshot from reading live defaults", async () => {
+  it("keeps a resolved undefined thinking snapshot", async () => {
     const session = createMockSession();
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockDefaultThinking = "xhigh";
 
     await runAgent(fakeCtx(), "test-agent", "do something", {
       pi: fakePi,

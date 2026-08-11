@@ -12,8 +12,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentConfig } from "./types.js";
-import type { ThinkingLevel } from "../types.js";
-import { parseThinkingLevel } from "../utils.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -30,7 +28,6 @@ export interface AgentConfigFromMd {
   exclude_extensions?: string[];
   skills?: boolean | string[];
   preload_skills?: string[] | false;
-  thinking?: ThinkingLevel;
   max_turns?: number;
   max_tokens?: number;
   hidden?: boolean;
@@ -259,6 +256,9 @@ export function parseAgentFile(
   source: "user" | "project",
 ): AgentConfigFromMd {
   const { frontmatter, body } = parseFrontmatter(content);
+  if (Object.hasOwn(frontmatter, "thinking")) {
+    console.warn("[subagents] Agent frontmatter field `thinking` is retired and was ignored.");
+  }
 
   return {
     name: parseString(frontmatter, "name"),
@@ -270,7 +270,6 @@ export function parseAgentFile(
     exclude_extensions: parseStringArray(frontmatter, "exclude_extensions"),
     skills: parseExtensions(frontmatter.skills),
     preload_skills: parsePreloadSkills(frontmatter.preload_skills),
-    thinking: parseThinkingLevel(parseString(frontmatter, "thinking")),
     max_turns: parseNumber(frontmatter, "max_turns"),
     max_tokens: parseNumber(frontmatter, "max_tokens"),
     hidden: parseBoolean(frontmatter, "hidden"),
@@ -396,7 +395,6 @@ function fromMd(md: AgentConfigFromMd): Partial<AgentConfig> {
     excludeExtensions: md.exclude_extensions,
     skills: md.skills,
     preloadSkills: md.preload_skills,
-    thinkingLevel: md.thinking,
     maxTurns: md.max_turns,
     maxTokens: md.max_tokens,
     hidden: md.hidden,

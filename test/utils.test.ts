@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
+import * as utils from "../src/utils.ts";
 import {
   isUnsafeName,
   parseModelKey,
-  parseModelSpec,
   parseThinkingLevel,
   resolveExactModel,
   unknownModelError,
@@ -74,45 +74,9 @@ describe("parseModelKey", () => {
   });
 });
 
-describe("parseModelSpec", () => {
-  it("parses bare model id", () => {
-    expect(parseModelSpec("grok-4.5")).toEqual({ modelRef: "grok-4.5" });
-  });
-
-  it("parses provider/model-id", () => {
-    expect(parseModelSpec("cpa-responses/grok-4.5")).toEqual({
-      modelRef: "cpa-responses/grok-4.5",
-    });
-  });
-
-  it("parses model:thinking shorthand", () => {
-    expect(parseModelSpec("grok-4.5:low")).toEqual({
-      modelRef: "grok-4.5",
-      thinkingFromModel: "low",
-    });
-  });
-
-  it("parses provider/model:thinking shorthand", () => {
-    expect(parseModelSpec("cpa-responses/grok-4.5:high")).toEqual({
-      modelRef: "cpa-responses/grok-4.5",
-      thinkingFromModel: "high",
-    });
-  });
-
-  it("accepts free-form thinking suffix not in the known list", () => {
-    expect(parseModelSpec("grok-4.5:custom-level")).toEqual({
-      modelRef: "grok-4.5",
-      thinkingFromModel: "custom-level",
-    });
-  });
-
-  it("does not split when thinking suffix is empty", () => {
-    expect(parseModelSpec("grok-4.5:")).toEqual({ modelRef: "grok-4.5:" });
-  });
-
-  it("returns undefined modelRef for empty input", () => {
-    expect(parseModelSpec(undefined)).toEqual({ modelRef: undefined });
-    expect(parseModelSpec("  ")).toEqual({ modelRef: undefined });
+describe("retired model shorthand", () => {
+  it("does not export the model:thinking parser", () => {
+    expect(utils).not.toHaveProperty("parseModelSpec");
   });
 });
 
@@ -123,8 +87,9 @@ describe("parseThinkingLevel", () => {
     expect(parseThinkingLevel("max")).toBe("max");
   });
 
-  it("accepts free-form levels", () => {
-    expect(parseThinkingLevel("custom-level")).toBe("custom-level");
+  it("rejects provider-specific and unknown levels", () => {
+    expect(parseThinkingLevel("custom-level")).toBeUndefined();
+    expect(parseThinkingLevel("super-high")).toBeUndefined();
   });
 
   it("rejects empty / whitespace", () => {
@@ -151,8 +116,8 @@ describe("resolveExactModel", () => {
     expect(resolveExactModel("cpa-responses/grok-4.5", registry)).toBe(grok);
   });
 
-  it("resolves bare model id with exact id match only", () => {
-    expect(resolveExactModel("grok-4.5", registry)).toBe(grok);
+  it("rejects bare model IDs even when the registry has an exact match", () => {
+    expect(resolveExactModel("grok-4.5", registry)).toBeUndefined();
   });
 
   it("returns undefined for unknown bare id (no silent fallback)", () => {
@@ -166,9 +131,11 @@ describe("resolveExactModel", () => {
 
 
 describe("unknownModelError", () => {
-  it("mentions the unknown id and list-models guidance", () => {
+  it("requires a canonical provider/model key without shorthand", () => {
     const msg = unknownModelError("nope");
     expect(msg).toContain("nope");
-    expect(msg).toContain("list-models");
+    expect(msg).toContain("provider/model");
+    expect(msg).not.toContain("bare model id");
+    expect(msg).not.toContain(":low");
   });
 });

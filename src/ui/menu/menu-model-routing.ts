@@ -4,8 +4,12 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type Component, type SettingItem } from "@earendil-works/pi-tui";
 import { getAllTypes } from "../../agents/agent-types.js";
 import type { ModelRoutingConfig } from "../../config/types.js";
+import { CANONICAL_THINKING_LEVELS } from "../../config/types.js";
 import { unavailableModelRules } from "../../models/model-access.js";
-import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
+import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../../models/model-scope.js";
+import { resolveThinkingAccess } from "../../models/thinking-access.js";
+import { getSupportedThinkingLevels, clampThinkingLevel } from "@earendil-works/pi-ai/compat";
+import type { ThinkingLevel } from "../../types.js";
 import { getStore } from "../../shell.js";
 import type { Theme } from "../types.js";
 import {
@@ -45,13 +49,13 @@ function defaultModelRow(ctx: ExtensionCommandContext, theme: Theme) {
   return ctx.model
     ? {
         value: "__default__",
-        label: theme.fg("dim", `[✓] Default · ${modelKey(ctx.model)}`),
+        label: theme.fg("dim", `Parent default · ${modelKey(ctx.model)}`),
         description: "",
         nonSelectable: true,
       }
     : {
         value: "__default__",
-        label: theme.fg("dim", "[ ] Default · No active parent model"),
+        label: theme.fg("dim", "Parent default · No active parent model"),
         description: "Unavailable until a parent model is selected",
         nonSelectable: true,
       };
@@ -105,19 +109,17 @@ function providerRuleCount(store: Store, provider: string): number {
 
 function availableAlternateProviders(
   snapshot: RegistrySnapshot,
-  ctx: ExtensionCommandContext,
+  _ctx: ExtensionCommandContext,
 ): string[] {
-  return [...snapshot.availableProviders]
-    .filter((provider) => provider !== ctx.model?.provider)
-    .sort();
+  return [...snapshot.availableProviders].sort();
 }
 
 function savedUnavailableProviders(
   snapshot: RegistrySnapshot,
-  ctx: ExtensionCommandContext,
+  _ctx: ExtensionCommandContext,
 ): string[] {
   return [...snapshot.providers]
-    .filter((provider) => provider !== ctx.model?.provider && !snapshot.availableProviders.has(provider))
+    .filter((provider) => !snapshot.availableProviders.has(provider))
     .sort();
 }
 
@@ -153,13 +155,11 @@ function unavailableRuleRefs(
 function effectiveProviderSet(
   store: Store,
   snapshot: RegistrySnapshot,
-  ctx: ExtensionCommandContext,
+  _ctx: ExtensionCommandContext,
 ): Set<string> {
-  const providers = new Set(
+  return new Set(
     store.routing.enabledProviders.filter((provider) => snapshot.availableProviders.has(provider)),
   );
-  if (ctx.model && snapshot.availableProviders.has(ctx.model.provider)) providers.add(ctx.model.provider);
-  return providers;
 }
 
 function agentSummary(
@@ -190,6 +190,128 @@ function agentSummary(
       return [`${provider} (${access})`];
     });
   return summaries.length > 0 ? summaries.join(" · ") : "Parent only";
+}
+
+function enableSpaceAction(list: any, action: (item: any) => void): void {
+  const handleInput = list.handleInput.bind(list);
+  list.handleInput = (data: string) => {
+    if (data === " ") {
+      const item = list.items?.[list.selectedIndex ?? 0];
+      if (item) action(item);
+      return;
+    }
+    handleInput(data);
+  };
+}
+
+function enableEnterAction(list: any, action: (item: any) => void): void {
+  const handleInput = list.handleInput.bind(list);
+  list.handleInput = (data: string) => {
+    if (data === "\r" || data === "\n") {
+      const item = list.items?.[list.selectedIndex ?? 0];
+      if (item) action(item);
+      return;
+    }
+    handleInput(data);
+  };
+}
+
+function replacementDefault(model: ModelRef, allowed: readonly ThinkingLevel[]): ThinkingLevel {
+  const preferred = clampThinkingLevel(model as any, "high") as ThinkingLevel;
+  const preferredIndex = CANONICAL_THINKING_LEVELS.indexOf(preferred);
+  for (let index = preferredIndex; index < CANONICAL_THINKING_LEVELS.length; index++) {
+    const candidate = CANONICAL_THINKING_LEVELS[index];
+    if (allowed.includes(candidate)) return candidate;
+  }
+  for (let index = preferredIndex - 1; index >= 0; index--) {
+    const candidate = CANONICAL_THINKING_LEVELS[index];
+    if (allowed.includes(candidate)) return candidate;
+  }
+  return allowed[0]!;
+}
+
+function buildThinkingEditor(options: {
+  store: Store;
+  ctx: ExtensionCommandContext;
+  theme: Theme;
+  type: string;
+  model: ModelRef;
+  done: (selectedValue?: string) => void;
+  onApplied: RebuildMenu;
+}): Component {
+  const { store, ctx, theme, type, model, done, onApplied } = options;
+  const key = modelKey(model);
+  let delegator: ReturnType<typeof createDelegatingComponent>;
+
+  const build = (selectedValue?: string): SelectList => {
+    const access = ownValue(store.routing.agentAccess, type);
+    const supported = getSupportedThinkingLevels(model as any) as ThinkingLevel[];
+    const baseline = resolveThinkingAccess({
+      agentAccess: access,
+      model: model as any,
+      modelKey: key,
+      parentModelKey: ctx.model ? modelKey(ctx.model) : "",
+      parentThinkingLevel: ctx.thinkingLevel,
+      scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, model),
+    });
+    const saved = access?.thinking?.[key];
+    const allowed = new Set(saved?.allowed.filter((level) => supported.includes(level)) ?? baseline?.allowed ?? supported);
+    let defaultLevel = saved?.default && allowed.has(saved.default)
+      ? saved.default
+      : baseline?.default ?? replacementDefault(model, [...allowed]);
+    const rows: any[] = [
+      ...supported.map((level) => {
+        const label = `[${allowed.has(level) ? "x" : " "}] ${level}${level === defaultLevel ? " · default" : ""}`;
+        return {
+          kind: "level",
+          value: level,
+          label: level === defaultLevel ? theme.bold(theme.fg("accent", label)) : label,
+          description: "",
+        };
+      }),
+      { kind: "reset", value: "__reset__", label: "Reset baseline", description: "" },
+    ];
+    const list = new SelectList(rows, 12, buildListTheme(theme));
+    if (selectedValue) {
+      const index = rows.findIndex((row) => row.value === selectedValue);
+      if (index >= 0) (list as any).selectedIndex = index;
+    }
+    const persist = (): void => {
+      store.mutate.routing.setThinkingAccess(type, key, [...allowed], defaultLevel);
+      onApplied(true);
+    };
+    list.onSelect = (item) => {
+      if ((item as any).kind === "reset") {
+        store.mutate.routing.resetThinkingAccess(type, key);
+        onApplied(true);
+        delegator.setActive(build("__reset__"));
+        return;
+      }
+      const level = item.value as ThinkingLevel;
+      allowed.add(level);
+      defaultLevel = level;
+      persist();
+      delegator.setActive(build(level));
+    };
+    enableSpaceAction(list, (item) => {
+      if ((item as any).kind !== "level") return;
+      const level = item.value as ThinkingLevel;
+      if (allowed.has(level)) {
+        if (allowed.size === 1) return;
+        allowed.delete(level);
+        if (defaultLevel === level) defaultLevel = replacementDefault(model, [...allowed]);
+      } else {
+        allowed.add(level);
+      }
+      persist();
+      delegator.setActive(build(level));
+    });
+    list.onCancel = () => done();
+    return list;
+  };
+
+  delegator = createDelegatingComponent(build());
+  return delegator;
 }
 
 function buildModelEditor(options: {
@@ -274,13 +396,56 @@ function buildModelEditor(options: {
         return;
       }
       if (kind === "model") {
-        allModels = false;
+        if (allModels) {
+          selected.clear();
+          for (const modelId of modelIds) selected.add(modelId);
+          allModels = false;
+        }
         if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
         persist();
         delegator.setActive(buildList({ kind, value: item.value }));
       }
     };
-    enableSpaceSelection(list);
+    enableSpaceAction(list, (item) => {
+      const kind = (item as any).kind;
+      if (kind === "all") {
+        allModels = !allModels;
+        if (allModels) selected.clear();
+        persist();
+        delegator.setActive(buildList({ kind, value: item.value }));
+        return;
+      }
+      if (kind !== "model") return;
+      if (allModels) {
+        selected.clear();
+        for (const modelId of modelIds) selected.add(modelId);
+        allModels = false;
+      }
+      if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
+      persist();
+      delegator.setActive(buildList({ kind, value: item.value }));
+    });
+    if (!quick) {
+      enableEnterAction(list, (item) => {
+        if ((item as any).kind !== "model" || (!allModels && !selected.has(item.value))) {
+          list.onSelect?.(item);
+          return;
+        }
+        const selectedModel = providerModels(snapshot.availableModels, provider)
+          .find((model) => model.id === item.value);
+        if (selectedModel) {
+          delegator.setActive(buildThinkingEditor({
+            store,
+            ctx,
+            theme,
+            type,
+            model: selectedModel,
+            done,
+            onApplied,
+          }));
+        }
+      });
+    }
     list.onCancel = () => done();
     return list;
   };
@@ -574,31 +739,56 @@ function agentAccessSubmenu(
       const type = item.value;
       const snapshot = registrySnapshot(ctx, store);
       const effectiveProviders = effectiveProviderSet(store, snapshot, ctx);
-      const parentProvider = ctx.model?.provider;
-      const providers = [
-        ...(parentProvider && effectiveProviders.has(parentProvider) ? [parentProvider] : []),
-        ...[...effectiveProviders].filter((provider) => provider !== parentProvider).sort(),
-      ];
+      const access = ownValue(store.routing.agentAccess, type);
+      const parentAllowed = access?.parentModelAccess !== false;
+      const parentPolicy = ctx.model ? resolveThinkingAccess({
+        agentAccess: access,
+        model: ctx.model,
+        modelKey: modelKey(ctx.model),
+        parentModelKey: modelKey(ctx.model),
+        parentThinkingLevel: ctx.thinkingLevel,
+        scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, ctx.model),
+      }) : null;
+      const providers = store.routing.enabled ? [...effectiveProviders].sort() : [];
+      const parentRow = ctx.model
+        ? {
+            kind: "parent",
+            value: "__parent__",
+            label: `[${parentAllowed ? "x" : " "}] Use parent model · ${modelKey(ctx.model)} · ${parentPolicy?.default ?? "unavailable"}`,
+            description: "",
+          }
+        : {
+            kind: "parent",
+            value: "__parent__",
+            label: "[ ] Use parent model · No active parent model",
+            description: "Unavailable until a parent model is selected",
+          };
       const providerRows = [
-        defaultModelRow(ctx, theme),
+        parentRow,
         { value: "__separator__", label: theme.fg("dim", "─".repeat(40)), description: "", nonSelectable: true },
-        ...(providers.length > 0
-          ? providers.map((provider) => ({
-              kind: "provider",
-              value: provider,
-              label: provider === parentProvider ? `${provider} · Parent alternates` : provider,
-              description: "",
-            }))
-          : [{
-              kind: "empty",
-              value: "",
-              label: theme.fg("dim", "No routed providers enabled"),
-              description: "",
-            }]),
+        ...providers.map((provider) => ({
+          kind: "provider",
+          value: provider,
+          label: provider,
+          description: "",
+        })),
       ];
       const providerList = new SelectList(providerRows, 14, buildListTheme(theme));
       skipNonSelectableRows(providerList, (row) => row?.nonSelectable === true);
       providerList.onSelect = (providerItem) => {
+        if ((providerItem as any).kind === "parent") {
+          if (!ctx.model) return;
+          delegator.setActive(buildThinkingEditor({
+            store,
+            ctx,
+            theme,
+            type,
+            model: ctx.model,
+            done,
+            onApplied: onRebuild,
+          }));
+          return;
+        }
         if ((providerItem as any).kind !== "provider") return;
         delegator.setActive(buildModelEditor({
           store,
@@ -612,6 +802,12 @@ function agentAccessSubmenu(
           onApplied: onRebuild,
         }));
       };
+      enableSpaceAction(providerList, (providerItem) => {
+        if ((providerItem as any).kind !== "parent" || !ctx.model) return;
+        store.mutate.routing.setParentModelAccess(type, !parentAllowed);
+        onRebuild(true);
+        list.onSelect?.(item);
+      });
       providerList.onCancel = () => done();
       delegator.setActive(providerList);
     };
@@ -629,13 +825,11 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
       const routing = store.routing;
       const triggerRebuild: RebuildMenu = (preserveSubmenu = false) => rebuild?.(buildItems(), preserveSubmenu);
       const items: SettingItem[] = [{
-        id: "enabled",
-        label: "Enabled",
+        id: "alternateModels",
+        label: "Alternate models",
         currentValue: routing.enabled ? "ON" : "OFF",
         values: ["ON", "OFF"],
       }];
-
-      if (!routing.enabled) return items;
 
       items.push({
         id: "quickSetup",
@@ -648,20 +842,22 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
       const enabledProviderCount = mutableProviders
         .filter((provider) => routing.enabledProviders.includes(provider))
         .length;
-      items.push({
-        id: "providerAccess",
-        label: "Provider access",
-        currentValue: `${enabledProviderCount} enabled`,
-        submenu: providerAccessSubmenu(store, ctx, theme, triggerRebuild),
-      });
+      if (routing.enabled) {
+        items.push({
+          id: "providerAccess",
+          label: "Provider access",
+          currentValue: `${enabledProviderCount} enabled`,
+          submenu: providerAccessSubmenu(store, ctx, theme, triggerRebuild),
+        });
+      }
       items.push({
         id: "agentAccess",
-        label: "Agent model access",
+        label: "Agent access",
         currentValue: `${configuredAgentCount(store)} configured`,
         submenu: agentAccessSubmenu(store, ctx, theme, triggerRebuild),
       });
       const unavailableProviders = savedUnavailableProviders(snapshot, ctx);
-      if (unavailableProviders.length > 0) {
+      if (routing.enabled && unavailableProviders.length > 0) {
         items.push({
           id: "savedUnavailableProviders",
           label: "Saved unavailable providers",
@@ -670,7 +866,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         });
       }
       const unavailableRules = unavailableRuleRefs(routing, snapshot);
-      if (unavailableRules.length > 0) {
+      if (routing.enabled && unavailableRules.length > 0) {
         items.push({
           id: "cleanUnavailableRules",
           label: "Clean unavailable rules",
@@ -680,15 +876,15 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
       }
       items.push({ id: "__sep__", ...sectionRow() });
       items.push({
-        id: "clearAll",
-        label: "Clear routing settings",
+        id: "resetAll",
+        label: "Reset Model access",
         currentValue: "",
         submenu: createConfirmSubmenu({
-          message: "Clear all Model routing settings?",
+          message: "Reset all Model access settings?",
           theme,
           onConfirm: () => {
             store.mutate.routing.clearAll();
-            ctx.ui.notify("Routing settings cleared", "info");
+            ctx.ui.notify("Model access reset", "info");
             triggerRebuild();
           },
         }),
@@ -697,14 +893,14 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
     };
 
     const settings = new SettingsList(buildItems(), 15, buildListTheme(theme), (id, value) => {
-      if (id === "enabled") {
+      if (id === "alternateModels") {
         getStore().mutate.routing.setEnabled(value === "ON");
-        ctx.ui.notify(`Model routing ${value === "ON" ? "enabled" : "disabled"}`, "info");
+        ctx.ui.notify(`Alternate models ${value === "ON" ? "enabled" : "disabled"}`, "info");
       }
       rebuild?.(buildItems());
     }, () => done(undefined));
     return new SettingsListWrapper(settings, {
-      title: "Model Routing",
+      title: "Model Access",
       theme,
       onCancel: () => done(undefined),
       onRebuild: (callback) => { rebuild = callback; },

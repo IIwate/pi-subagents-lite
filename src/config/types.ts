@@ -3,25 +3,45 @@
  *
  * Model routing is an access policy: a global switch, globally enabled
  * providers, and per-agent provider/model grants. It never assigns a default
- * model; omitting Agent.model always selects the exact parent model.
+ * model; omitting Agent.model requests the exact parent model and still
+ * requires that agent type's Parent model access.
  */
 
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
+
+export const CANONICAL_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const satisfies readonly ThinkingLevel[];
 
 export interface ProviderModelAccess {
   /** Omitted = all current provider models; non-empty = exact model IDs. */
   models?: string[];
 }
 
+export interface ThinkingAccessOverride {
+  allowed: ThinkingLevel[];
+  default: ThinkingLevel;
+}
+
 export interface AgentModelAccess {
+  /** Omitted means allowed. */
+  parentModelAccess?: boolean;
   providers: Record<string, ProviderModelAccess>;
+  /** Exact canonical provider/model key to a saved policy override. */
+  thinking?: Record<string, ThinkingAccessOverride>;
 }
 
 export interface ModelRoutingConfig {
   /** OFF permits only the exact parent model. */
   enabled: boolean;
-  /** Providers globally enabled for alternates; the current parent passes this gate dynamically. */
+  /** Providers globally enabled for alternate models. */
   enabledProviders: string[];
   /** Per-agent provider/model access rules. */
   agentAccess: Record<string, AgentModelAccess>;
@@ -35,8 +55,6 @@ export interface AgentSettings {
   systemPromptMode?: SystemPromptMode;
   /** Whether to include AGENTS.md context files in the subagent system prompt. Default: true. */
   includeContextFiles?: boolean;
-  /** Default thinking level for spawned agents. Undefined = inherit from agent config. */
-  defaultThinking?: ThinkingLevel;
   /** Global default for skills loading when agent doesn't explicitly set skills. true (default) or false. */
   loadSkillsImplicitly?: boolean;
   /** Global default for extensions loading when agent doesn't explicitly set extensions. true (default) or false. */

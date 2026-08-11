@@ -66,7 +66,7 @@ Every callable agent type and exact model has an effective Thinking access rule:
 
 An All models Provider rule continues to authorize current and future available models. Models without an exact thinking override use the dynamic baseline; exact overrides may be saved beneath the All models rule.
 
-The existing global `defaultThinking` setting and custom Agent frontmatter `thinking` field will be removed. Parent defaults inherit the parent session when no exact override exists; alternate defaults come from the exact model policy. Retired fields are ignored with an explicit warning rather than supported through a compatibility precedence layer.
+The existing global `defaultThinking` setting and custom Agent frontmatter `thinking` field will be removed. Parent defaults inherit the parent session when no exact override exists; alternate defaults come from the exact model policy. Persisted `agent.defaultThinking` is silently ignored, while retired custom Agent frontmatter `thinking` is ignored with an explicit warning. Neither field participates in a compatibility precedence layer.
 
 ### User interface
 
@@ -123,4 +123,4 @@ Calling an unavailable agent, omitting a required model, explicitly selecting a 
 
 This partially supersedes ADR 0005's decisions that the exact parent model is always available and that omission of `model` always selects it. It also removes the current-parent Provider's global-gate bypass and related Provider-list exception for alternate models. The explicit Provider access gate, Pi availability, Model scope, explicit alternate authorization, and accepted-work snapshot decisions from ADR 0005 remain in force.
 
-The redesign is a breaking change because it removes bare model IDs, `model:thinking`, global `defaultThinking`, and Agent frontmatter `thinking`. Existing Parent behavior remains compatible because absent `parentModelAccess` means allowed, and existing model access rules receive the dynamic thinking baseline without migration. The release should use a new major version and warn clearly about retired thinking fields.
+The redesign is a breaking change because it removes bare model IDs, `model:thinking`, global `defaultThinking`, and Agent frontmatter `thinking`. Existing Parent behavior remains compatible because absent `parentModelAccess` means allowed, and existing model access rules receive the dynamic thinking baseline without migration. The release should use a new major version and document retired thinking fields clearly; runtime configuration loading silently drops persisted `agent.defaultThinking`.

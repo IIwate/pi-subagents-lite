@@ -467,8 +467,7 @@ async function initSession(
   const thinkingLevel = options.thinkingResolved
     ? options.thinkingLevel
     : options.thinkingLevel
-      ?? scopedThinkingLevel(scopedModels, model)
-      ?? policy.definition.thinkingLevel;
+      ?? scopedThinkingLevel(scopedModels, model);
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
@@ -486,8 +485,7 @@ async function initSession(
     // Use the exact scope snapshot validated against the initial model above.
     scopedModels,
   };
-  // Always pass when set — including "off" — so settings default cannot override.
-  // Free-form thinking strings are allowed; cast for pi's narrower ThinkingLevel type.
+  // Always pass when set — including "off" — so settings defaults cannot override the accepted snapshot.
   if (thinkingLevel !== undefined) {
     sessionOpts.thinkingLevel = thinkingLevel as typeof sessionOpts.thinkingLevel;
   }

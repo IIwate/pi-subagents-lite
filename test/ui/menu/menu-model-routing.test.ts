@@ -82,25 +82,25 @@ function selectLastValue(value: string): void {
   list.onSelect(item);
 }
 
-describe("Model Routing top level", () => {
+describe("Model Access top level", () => {
   beforeEach(reset);
 
-  it("renders the OFF boundary without configuration rows", async () => {
+  it("keeps Parent and Quick access configuration available while alternates are OFF", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
-    expect(wrappers[0].options.title).toBe("Model Routing");
-    expect(topItem("enabled").currentValue).toBe("OFF");
-    expect(topItem("quickSetup")).toBeUndefined();
+    expect(wrappers[0].options.title).toBe("Model Access");
+    expect(topItem("alternateModels").currentValue).toBe("OFF");
+    expect(topItem("quickSetup")).toBeDefined();
+    expect(topItem("agentAccess")).toBeDefined();
     expect(topItem("providerAccess")).toBeUndefined();
-    expect(settingsLists[0].items.map((item) => item.id)).toEqual(["enabled"]);
   });
 
-  it("toggles Model routing", async () => {
+  it("toggles alternate models", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
-    settingsLists[0].onChange("enabled", "ON");
+    settingsLists[0].onChange("alternateModels", "ON");
     expect(mockModules.mockConfig.modelRouting.enabled).toBe(true);
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Model routing enabled", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Alternate models enabled", "info");
   });
 
   it("shows canonical summaries when ON", async () => {
@@ -115,10 +115,10 @@ describe("Model Routing top level", () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     expect(topItem("providerAccess").label).toBe("Provider access");
-    expect(topItem("providerAccess").currentValue).toBe("1 enabled");
+    expect(topItem("providerAccess").currentValue).toBe("2 enabled");
     expect(topItem("agentAccess").currentValue).toBe("2 configured");
     expect(topItem("quickSetup")).toBeDefined();
-    expect(topItem("clearAll")).toBeDefined();
+    expect(topItem("resetAll")).toBeDefined();
   });
 
   it("clears the complete routing policy", async () => {
@@ -129,7 +129,7 @@ describe("Model Routing top level", () => {
     };
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
-    topItem("clearAll").submenu("", vi.fn());
+    topItem("resetAll").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Yes" });
     expect(mockModules.mockConfig.modelRouting).toEqual({ enabled: false, enabledProviders: [], agentAccess: {} });
   });
@@ -141,7 +141,7 @@ describe("Provider access", () => {
     mockModules.mockConfig.modelRouting.enabled = true;
   });
 
-  it("uses only available alternate providers and never catalogue-only providers", async () => {
+  it("uses only Pi-available providers and includes the current Parent Provider as mutable", async () => {
     const ctx = createMockCtx();
     ctx.modelRegistry.getAll.mockReturnValue([
       ...ctx.modelRegistry.getAll(),
@@ -150,26 +150,28 @@ describe("Provider access", () => {
     await showModelRoutingMenu(ctx);
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items.filter((item: any) => item.kind === "provider").map((item: any) => item.provider))
-      .toEqual(["openai"]);
+      .toEqual(["anthropic", "openai"]);
 
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const agentProviders = lastSelect().items
-      .filter((item: any) => !item.nonSelectable)
+      .filter((item: any) => item.kind === "provider")
       .map((item: any) => item.value);
-    expect(agentProviders).toEqual(["anthropic"]);
+    expect(agentProviders).toEqual([]);
   });
 
-  it("shows Default, one separator, and direct checkboxes without diagnostics", async () => {
+  it("shows an informational Parent default and direct Provider checkboxes", async () => {
     mockModules.mockConfig.modelRouting.enabledProviders = ["anthropic"];
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     topItem("providerAccess").submenu("", vi.fn());
     const rows = lastSelect().items;
-    expect(rows[0].label).toContain("[✓] Default · anthropic/claude-sonnet-4-20250514");
+    expect(rows[0].label).toContain("Parent default · anthropic/claude-sonnet-4-20250514");
+    expect(rows[0].nonSelectable).toBe(true);
     expect(rows.filter((row: any) => row.kind === "separator")).toHaveLength(1);
     expect(rows.some((row: any) => row.label.includes("Available providers"))).toBe(false);
     expect(rows.map((row: any) => row.description).join(" ")).not.toMatch(/availability|effective|saved Agent rules|\b0\b/i);
+    expect(rows.find((row: any) => row.provider === "anthropic").label).toBe("[x] anthropic");
     expect(rows.find((row: any) => row.provider === "openai").label).toBe("[ ] openai");
   });
 
@@ -216,31 +218,31 @@ describe("Provider access", () => {
     ]);
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items.filter((item: any) => item.kind === "provider").map((item: any) => item.provider))
-      .toEqual(["late-provider"]);
+      .toEqual(["anthropic", "late-provider"]);
     expect(ctx.modelRegistry.getAvailable).toHaveBeenCalledTimes(2);
     expect(ctx.modelRegistry.getAll).toHaveBeenCalledTimes(2);
   });
 
-  it("rechecks the dynamic parent before toggling a stale row", async () => {
+  it("keeps the current Parent Provider as an ordinary mutable alternate Provider", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     topItem("providerAccess").submenu("", vi.fn());
-    const staleOpenAI = lastSelect().items.find((row: any) => row.provider === "openai");
+    const openai = lastSelect().items.find((row: any) => row.provider === "openai");
     ctx.model = { provider: "openai", id: "gpt-4o" };
-    lastSelect().onSelect(staleOpenAI);
-    expect(mockModules.mockConfig.modelRouting.enabledProviders).toEqual([]);
+    lastSelect().onSelect(openai);
+    expect(mockModules.mockConfig.modelRouting.enabledProviders).toEqual(["openai"]);
     expect(lastSelect().items.filter((row: any) => row.kind === "provider").map((row: any) => row.provider))
-      .toEqual(["anthropic"]);
+      .toEqual(["anthropic", "openai"]);
   });
 
-  it("excludes the parent and unavailable persisted providers from the summary", async () => {
+  it("counts the current Parent Provider when its alternate access is enabled", async () => {
     mockModules.mockConfig.modelRouting.enabledProviders = ["anthropic", "openai", "google"];
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
-    expect(topItem("providerAccess").currentValue).toBe("1 enabled");
+    expect(topItem("providerAccess").currentValue).toBe("2 enabled");
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items.filter((row: any) => row.kind === "provider").map((row: any) => row.provider))
-      .toEqual(["openai"]);
+      .toEqual(["anthropic", "openai"]);
   });
 
   it("toggles prototype-like Provider IDs without confusing control rows", async () => {
@@ -258,28 +260,24 @@ describe("Provider access", () => {
     expect(mockModules.mockConfig.modelRouting.enabledProviders).toContain("__proto__");
   });
 
-  it("shows a concise locked empty state when no alternate provider is available", async () => {
+  it("still exposes the current Parent Provider when it is the only available Provider", async () => {
     const ctx = createMockCtx();
     ctx.modelRegistry.getAvailable.mockReturnValue([
       { provider: "anthropic", id: "claude-sonnet-4-20250514" },
     ]);
     await showModelRoutingMenu(ctx);
     topItem("providerAccess").submenu("", vi.fn());
-    expect(lastSelect().items).toHaveLength(3);
-    expect(lastSelect().items[0].kind).toBe("default");
-    expect(lastSelect().items[1].kind).toBe("separator");
-    expect(lastSelect().items[2].label).toBe("No alternate providers available");
-    expect(lastSelect().items[2].nonSelectable).toBeUndefined();
-    expect(lastSelect().selectedIndex).toBe(2);
+    expect(lastSelect().items.filter((row: any) => row.kind === "provider").map((row: any) => row.provider))
+      .toEqual(["anthropic"]);
   });
 
-  it("keeps the unavailable Default form when no parent is active", async () => {
+  it("keeps the unavailable Parent default form when no parent is active", async () => {
     const ctx = createMockCtx();
     ctx.model = undefined;
     ctx.modelRegistry.getAvailable.mockReturnValue([]);
     await showModelRoutingMenu(ctx);
     topItem("providerAccess").submenu("", vi.fn());
-    expect(lastSelect().items[0].label).toContain("[ ] Default · No active parent model");
+    expect(lastSelect().items[0].label).toContain("Parent default · No active parent model");
     expect(lastSelect().items[0].description).toContain("Unavailable");
   });
 });
@@ -297,7 +295,7 @@ describe("Quick model setup", () => {
     lastSelect().onSelect({ value: "Explore" });
     const rows = lastSelect().items;
     expect(rows[0].value).toBe("__default__");
-    expect(rows[0].label).toContain("[✓] Default · anthropic/claude-sonnet-4-20250514");
+    expect(rows[0].label).toContain("Parent default · anthropic/claude-sonnet-4-20250514");
     expect(rows[1].value).toBe("__separator__");
     expect(rows[1].label).toMatch(/^─+$/);
     expect(rows[2].value).toBe("__all__");
@@ -332,15 +330,23 @@ describe("Quick model setup", () => {
     expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.anthropic).toEqual({});
   });
 
-  it("switches from All models to an exact rule when a model is selected", async () => {
+  it("snapshots current models before removing the first model from All models", async () => {
     const ctx = createMockCtx();
+    ctx.modelRegistry.getAll.mockReturnValue([
+      ...ctx.modelRegistry.getAll(),
+      { provider: "anthropic", id: "claude-opus-4" },
+    ]);
+    ctx.modelRegistry.getAvailable.mockReturnValue([
+      ...ctx.modelRegistry.getAvailable(),
+      { provider: "anthropic", id: "claude-opus-4" },
+    ]);
     await showModelRoutingMenu(ctx);
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
     selectLastValue("claude-haiku-4");
     expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.providers.anthropic)
-      .toEqual({ models: ["claude-haiku-4"] });
+      .toEqual({ models: ["claude-opus-4"] });
   });
 
   it("closes Quick setup safely without an active parent model", async () => {
@@ -407,11 +413,13 @@ describe("Agent model access", () => {
       .toBe("openai (2 models)");
   });
 
-  it("shows only the parent Provider and globally enabled available Providers", async () => {
+  it("shows Parent access separately from explicitly enabled alternate Providers", async () => {
     mockModules.mockConfig.modelRouting.agentAccess = {
       Explore: { providers: { google: { models: ["gemini-2.5-pro"] } } },
     };
     const ctx = createMockCtx();
+    ctx.thinkingLevel = "medium";
+    ctx.model = { ...ctx.model, reasoning: true };
     ctx.modelRegistry.getAvailable.mockReturnValue([
       ...ctx.modelRegistry.getAvailable(),
       { provider: "cicadas", id: "worker" },
@@ -420,38 +428,94 @@ describe("Agent model access", () => {
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const rows = lastSelect().items;
-    expect(rows[0].label).toContain("[✓] Default");
+    expect(rows[0].kind).toBe("parent");
+    expect(rows[0].label).toContain("[x] Use parent model");
+    expect(rows[0].label).toContain("medium");
     expect(rows[1].value).toBe("__separator__");
     expect(rows.filter((item: any) => item.kind === "provider").map((item: any) => item.value))
-      .toEqual(["anthropic", "openai"]);
-    expect(rows.find((item: any) => item.value === "anthropic").label)
-      .toBe("anthropic · Parent alternates");
+      .toEqual(["openai"]);
+    expect(rows.find((item: any) => item.value === "anthropic")).toBeUndefined();
     expect(rows.find((item: any) => item.value === "google")).toBeUndefined();
-    expect(rows.slice(2).every((item: any) => item.description === "")).toBe(true);
     expect(rows.find((item: any) => item.value === "cicadas")).toBeUndefined();
-    expect(rows.some((item: any) => item.label.includes("Available providers"))).toBe(false);
   });
 
-  it("moves the implicit Provider gate when the parent changes", async () => {
+  it("does not change alternate Provider access when the parent changes", async () => {
     const ctx = createMockCtx();
-    ctx.model = { provider: "openai", id: "gpt-4o" };
+    ctx.model = { provider: "openai", id: "gpt-4o", reasoning: true };
     await showModelRoutingMenu(ctx);
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const providers = lastSelect().items.filter((item: any) => item.kind === "provider");
     expect(providers.map((item: any) => item.value)).toEqual(["openai"]);
-    expect(providers[0].label).toBe("openai · Parent alternates");
+    expect(providers[0].label).toBe("openai");
   });
 
-  it("marks the Default row unavailable when no parent model is active", async () => {
+  it("marks Use parent model unavailable when no parent model is active", async () => {
     const ctx = createMockCtx();
     ctx.model = undefined;
     await showModelRoutingMenu(ctx);
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
-    const defaultRow = lastSelect().items[0];
-    expect(defaultRow.label).toContain("[ ] Default");
-    expect(defaultRow.description).toContain("Unavailable");
+    const parentRow = lastSelect().items[0];
+    expect(parentRow.label).toContain("[ ] Use parent model");
+    expect(parentRow.description).toContain("Unavailable");
+  });
+
+  it("toggles Parent model access independently of Provider rules", async () => {
+    const ctx = createMockCtx();
+    ctx.thinkingLevel = "medium";
+    ctx.model = { ...ctx.model, reasoning: true };
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    const list = lastSelect();
+    list.selectedIndex = list.items.findIndex((row: any) => row.kind === "parent");
+    list.handleInput(" ");
+    expect(mockModules.mockConfig.modelRouting.agentAccess.Explore).toEqual({
+      parentModelAccess: false,
+      providers: {},
+    });
+    expect(lastSelect().items.find((row: any) => row.kind === "parent").label)
+      .toContain("[ ] Use parent model");
+  });
+
+  it("edits and resets an exact Parent-model thinking policy", async () => {
+    const ctx = createMockCtx();
+    ctx.thinkingLevel = "medium";
+    ctx.model = {
+      ...ctx.model,
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: null },
+    };
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    const parentRow = lastSelect().items.find((row: any) => row.kind === "parent");
+    lastSelect().onSelect(parentRow);
+
+    expect(lastSelect().items.find((row: any) => row.value === "medium").label)
+      .toContain("default");
+    expect(lastSelect().items.find((row: any) => row.value === "max")).toBeUndefined();
+    lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "low"));
+    expect(mockModules.mockConfig.modelRouting.agentAccess.Explore.thinking).toEqual({
+      "anthropic/claude-sonnet-4-20250514": {
+        allowed: ["off", "minimal", "low", "medium", "high", "xhigh"],
+        default: "low",
+      },
+    });
+
+    lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "__reset__"));
+    expect(mockModules.mockConfig.modelRouting.agentAccess).toEqual({});
+  });
+
+  it("shows only Parent access while alternate routing is OFF", async () => {
+    mockModules.mockConfig.modelRouting.enabled = false;
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("agentAccess").submenu("", vi.fn());
+    lastSelect().onSelect({ value: "Explore" });
+    expect(lastSelect().items.some((row: any) => row.kind === "parent")).toBe(true);
+    expect(lastSelect().items.some((row: any) => row.kind === "provider")).toBe(false);
   });
 
   it("refreshes available models when entering the model editor", async () => {
@@ -563,6 +627,7 @@ describe("Agent model access", () => {
   });
 
   it("uses a concise empty state when the scope has no alternate models", async () => {
+    mockModules.mockConfig.modelRouting.enabledProviders = ["anthropic"];
     const ctx = createMockCtx();
     ctx.scopedModels = [{ model: ctx.model }];
     await showModelRoutingMenu(ctx);
@@ -603,7 +668,7 @@ describe("Saved unavailable providers", () => {
     };
   });
 
-  it("shows the conditional exception row and excludes the current parent", async () => {
+  it("keeps an unavailable Provider visible even when it becomes the current Parent Provider", async () => {
     const ctx = createMockCtx();
     await showModelRoutingMenu(ctx);
     expect(topItem("savedUnavailableProviders").currentValue).toBe("1");
@@ -613,7 +678,7 @@ describe("Saved unavailable providers", () => {
     selectLists = [];
     wrappers = [];
     await showModelRoutingMenu(ctx);
-    expect(topItem("savedUnavailableProviders")).toBeUndefined();
+    expect(topItem("savedUnavailableProviders").currentValue).toBe("1");
   });
 
   it("shows only routing and non-zero rule information in the exception flow", async () => {

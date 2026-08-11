@@ -6,7 +6,7 @@
  * reset bug that occurred with ctx.ui.select.
  *
  * Exports:
- *   - showSpawnOptionsMenu: default spawn-time options (thinking, force background, grace turns)
+ *   - showSpawnOptionsMenu: default spawn-time options
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -14,7 +14,6 @@ import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { buildListTheme } from "./helpers.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import type { ThinkingLevel } from "../../types.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-io.js";
 import { getStore } from "../../shell.js";
 import { setDefaultAgentsDisabled } from "../../agents/agent-types.js";
@@ -41,13 +40,6 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
       description: "Extra turns after the soft turn limit before a hard abort.",
     },
     {
-      id: "defaultThinking",
-      label: "Default thinking level",
-      currentValue: store.agent.defaultThinking ?? "inherit",
-      values: ["off", "minimal", "low", "medium", "high", "xhigh", "max", "inherit"],
-      description: "Thinking level applied when agent frontmatter omits one.",
-    },
-    {
       id: "disableDefaultAgents",
       label: "Disable default agents",
       currentValue: store.agent.disableDefaultAgents ? "ON" : "OFF",
@@ -61,10 +53,6 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
       case "forceBackground":
         store.mutate.agent.setForceBackground(newValue === "ON");
         ctx.ui.notify(`Force background set to ${newValue}`, "info");
-        break;
-      case "defaultThinking":
-        store.mutate.agent.setDefaultThinking(newValue === "inherit" ? undefined : newValue as ThinkingLevel);
-        ctx.ui.notify(`Default thinking level set to ${newValue}`, "info");
         break;
       case "disableDefaultAgents": {
         const disabled = newValue === "ON";

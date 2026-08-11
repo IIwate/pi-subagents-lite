@@ -43,6 +43,7 @@ describe("ConfigStore routing reads", () => {
     expect(store.routing).toEqual({ enabled: false, enabledProviders: [], agentAccess: {} });
     expect(store.agent.graceTurns).toBe(6);
     expect(store.agent.expandListByDefault).toBe(true);
+    expect(store.agent).not.toHaveProperty("defaultThinking");
     expect(store.concurrency).toEqual({ default: 4, providers: {}, models: {} });
   });
 
@@ -51,12 +52,21 @@ describe("ConfigStore routing reads", () => {
     config.modelRouting = {
       enabled: true,
       enabledProviders: ["openai"],
-      agentAccess: { Explore: { providers: { openai: { models: ["gpt-5"] } } } },
+      agentAccess: {
+        Explore: {
+          parentModelAccess: false,
+          providers: { openai: { models: ["gpt-5"] } },
+          thinking: {
+            "openai/gpt-5": { allowed: ["low", "high"], default: "low" },
+          },
+        },
+      },
     };
     const store = new ConfigStore(memIO(config).io);
     const copy = store.routing;
     copy.enabledProviders.push("google");
     copy.agentAccess.Explore.providers.openai.models!.push("o3");
+    copy.agentAccess.Explore.thinking!["openai/gpt-5"].allowed.push("medium");
     copy.agentAccess.reviewer = { providers: {} };
     expect(store.routing).toEqual(config.modelRouting);
   });
@@ -135,6 +145,46 @@ describe("ConfigStore routing mutations", () => {
     });
   });
 
+  it("leaves no partial Quick setup state when the selection is invalid", () => {
+    const { io, saves } = memIO();
+    const store = new ConfigStore(io);
+    store.mutate.routing.configureAgentProviderAccess("Explore", "anthropic", []);
+    expect(saves).toHaveLength(0);
+    expect(store.routing).toEqual({ enabled: false, enabledProviders: [], agentAccess: {} });
+  });
+
+  it("stores Parent model denial without requiring a Provider rule", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setParentModelAccess("Explore", false);
+    expect(store.routing.agentAccess).toEqual({
+      Explore: { parentModelAccess: false, providers: {} },
+    });
+
+    store.mutate.routing.setParentModelAccess("Explore", true);
+    expect(store.routing.agentAccess).toEqual({});
+  });
+
+  it("stores and explicitly resets exact-model thinking overrides", () => {
+    const store = new ConfigStore(memIO().io);
+    store.mutate.routing.setThinkingAccess(
+      "Explore",
+      "openai/gpt-5",
+      ["high", "low", "high"],
+      "low",
+    );
+    expect(store.routing.agentAccess).toEqual({
+      Explore: {
+        providers: {},
+        thinking: {
+          "openai/gpt-5": { allowed: ["high", "low"], default: "low" },
+        },
+      },
+    });
+
+    store.mutate.routing.resetThinkingAccess("Explore", "openai/gpt-5");
+    expect(store.routing.agentAccess).toEqual({});
+  });
+
   it("deletes one provider from every registered or unavailable Agent rule", () => {
     const config = defaultConfig();
     config.modelRouting = {
@@ -181,12 +231,20 @@ describe("ConfigStore routing mutations", () => {
     expect(store.accessTypesForProvider("google")).toEqual(["ghost-agent"]);
   });
 
-  it("clears the complete routing policy", () => {
+  it("clears the complete Model access policy", () => {
     const config = defaultConfig();
     config.modelRouting = {
       enabled: true,
       enabledProviders: ["openai"],
-      agentAccess: { Explore: { providers: { openai: {} } } },
+      agentAccess: {
+        Explore: {
+          parentModelAccess: false,
+          providers: { openai: {} },
+          thinking: {
+            "openai/gpt-5": { allowed: ["low"], default: "low" },
+          },
+        },
+      },
     };
     const store = new ConfigStore(memIO(config).io);
     store.mutate.routing.clearAll();

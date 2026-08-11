@@ -58,9 +58,9 @@ export async function showAgentsMenu(
   const buildItems = (): SelectItem[] => {
     const routing = getStore().routing;
     return [
-      { value: "routing", label: "Model routing", description: routing.enabled ? "ON · provider and Agent model access" : "OFF · exact parent only" },
+      { value: "routing", label: "Model access", description: routing.enabled ? "Alternates ON · Provider and Agent access" : "Alternates OFF · Parent access only" },
       { value: "concurrency", label: "Concurrency settings", description: `${getStore().concurrency.default} slots per model` },
-      { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
+      { value: "spawnoptions", label: "Spawn options", description: "Background, limits, and Agent availability" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "List defaults and stats visibility" },
       { value: "debug", label: "Debug", description: "Agent types, diagnostics, and fault injection" },

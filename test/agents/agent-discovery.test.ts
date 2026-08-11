@@ -8,7 +8,7 @@
  *   - mergeAgents: per-field merge default < user < project, returns Map<string, AgentConfig>
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseAgentFile,
   scanAgentFilesInDir,
@@ -87,7 +87,8 @@ describe("parseExtensions", () => {
 /* ------------------------------------------------------------------ */
 
 describe("parseAgentFile", () => {
-  it("parses all frontmatter fields into AgentConfigFromMd", () => {
+  it("parses supported frontmatter fields and warns about retired thinking", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const content = `---
 name: explorer
 display_name: Explorer Agent
@@ -110,7 +111,9 @@ This is the system prompt body.
     expect(result.tools).toEqual(["read", "bash", "grep"]);
     expect(result.extensions).toBe(false); // "none" → false
     expect(result.skills).toBe(true); // "all" → true
-    expect(result.thinking).toBe("high");
+    expect(result).not.toHaveProperty("thinking");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("thinking"));
+    warn.mockRestore();
     expect(result.max_turns).toBe(50);
     expect(result.max_tokens).toBe(2048);
     expect(result.hidden).toBe(false);
@@ -131,7 +134,7 @@ Just a body.
     expect(result.tools).toBeUndefined();
     expect(result.extensions).toBeUndefined();
     expect(result.skills).toBeUndefined();
-    expect(result.thinking).toBeUndefined();
+    expect(result).not.toHaveProperty("thinking");
     expect(result.max_turns).toBeUndefined();
     expect(result.max_tokens).toBeUndefined();
     expect(result.hidden).toBeUndefined();
@@ -228,7 +231,8 @@ body
     // Should not error on unknown fields
   });
 
-  it("accepts free-form thinking values", () => {
+  it("ignores retired Agent thinking regardless of its value", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const content = `---
 name: agent
 thinking: ultra
@@ -236,7 +240,9 @@ thinking: ultra
 body
 `;
     const result = parseAgentFile(content, "user");
-    expect(result.thinking).toBe("ultra");
+    expect(result).not.toHaveProperty("thinking");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("thinking"));
+    warn.mockRestore();
   });
 
 

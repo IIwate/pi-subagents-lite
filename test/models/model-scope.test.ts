@@ -32,8 +32,8 @@ describe("routingDisabledModelError", () => {
   it("points users at the routing switch when OFF rejects a model", () => {
     const message = routingDisabledModelError("parent/other");
     expect(message).toContain("parent/other");
-    expect(message).toContain("Model routing is OFF");
-    expect(message).toContain("exact parent model");
+    expect(message).toContain("Alternate models are OFF");
+    expect(message).toContain("Parent model access");
   });
 });
 

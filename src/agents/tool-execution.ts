@@ -14,9 +14,7 @@ import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agen
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
-  parseThinkingLevel,
   parseModelKey,
-  parseModelSpec,
   resolveExactModel,
   unknownModelError,
 } from "../utils.js";
@@ -34,6 +32,7 @@ import {
   modelUnavailableError,
 } from "../models/model-scope.js";
 import { authorizeModel } from "../models/model-access.js";
+import { resolveThinkingAccess, selectThinkingLevel } from "../models/thinking-access.js";
 import {
   getPiInstance,
   getSessionCtx,
@@ -120,33 +119,19 @@ export async function executeAgentTool(
   const scopedModels = structuredClone(ctx.scopedModels);
   const runInBackground = requestedBackground === true || store.agent.forceBackground;
   const routing = store.routing;
-  const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
+  const explicitModel = Object.hasOwn(params, "model") && params.model !== undefined;
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
 
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
-  const selectedModelSpec = explicitModel ? params.model as string : parentModelRef;
-  const { modelRef, thinkingFromModel } = parseModelSpec(selectedModelSpec);
-  const explicitlyRequestsParent = Boolean(
-    ctx.model
-    && modelRef
-    && (modelRef === parentModelRef || modelRef === ctx.model.id),
-  );
-  const model = explicitModel
-    ? explicitlyRequestsParent
-      ? ctx.model
-      : modelRef
-        ? resolveExactModel(modelRef, ctx.modelRegistry, ctx.model?.provider)
-        : undefined
-    : ctx.model;
-  const parsedModelKey = modelRef ? parseModelKey(modelRef) : null;
-  const resolvedModelKey = model
-    ? modelKey(model)
-    : parsedModelKey
-      ? `${parsedModelKey.provider}/${parsedModelKey.modelId}`
-      : "";
-
-  if (explicitModel && modelRef && !resolvedModelKey) return errorResult(unknownModelError(modelRef));
-  if (!resolvedModelKey) return errorResult(missingSubagentModelError());
+  const selectedModelSpec = explicitModel && typeof params.model === "string"
+    ? params.model.trim()
+    : explicitModel
+      ? ""
+      : parentModelRef;
+  const parsedModelKey = parseModelKey(selectedModelSpec);
+  if (explicitModel && !parsedModelKey) return errorResult(unknownModelError(selectedModelSpec));
+  if (!selectedModelSpec) return errorResult(missingSubagentModelError());
+  const resolvedModelKey = selectedModelSpec;
 
   const scopedKeys = scopedModelKeys(scopedModels);
   const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
@@ -160,6 +145,9 @@ export async function executeAgentTool(
   });
   if (!verdict.ok) {
     const provider = resolvedModelKey.slice(0, resolvedModelKey.indexOf("/"));
+    if (verdict.reason === "parent-model-denied") {
+      return errorResult(`Agent "${resolvedType}" is not authorized to use the parent model.`);
+    }
     if (verdict.reason === "out-of-scope") {
       return errorResult(outOfScopeModelError(resolvedModelKey, scopedKeys!));
     }
@@ -177,7 +165,11 @@ export async function executeAgentTool(
     }
     return errorResult(modelUnavailableError(resolvedModelKey));
   }
-  if (!model) return errorResult(unknownModelError(modelRef!));
+
+  const model = resolvedModelKey === parentModelRef && ctx.model
+    ? ctx.model
+    : resolveExactModel(resolvedModelKey, ctx.modelRegistry);
+  if (!model) return errorResult(unknownModelError(resolvedModelKey));
 
   const acceptedPolicy = resolveAcceptedRunPolicy(resolvedType, {
     loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
@@ -196,13 +188,32 @@ export async function executeAgentTool(
   const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
-  const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
-  const thinkingLevel = explicitThinkingLevel
-    ?? thinkingFromModel
-    ?? scopedThinkingLevel(scopedModels, model)
-    ?? acceptedPolicy.definition.thinkingLevel
-    ?? store.agent.defaultThinking
-    ?? ctx.thinkingLevel;
+  const agentAccess = Object.hasOwn(routing.agentAccess, resolvedType)
+    ? routing.agentAccess[resolvedType]
+    : undefined;
+  const thinkingPolicy = resolveThinkingAccess({
+    agentAccess,
+    model: acceptedModel,
+    modelKey: resolvedModelKey,
+    parentModelKey: parentModelRef,
+    parentThinkingLevel: ctx.thinkingLevel,
+    scopedThinkingLevel: scopedThinkingLevel(scopedModels, model),
+  });
+  if (!thinkingPolicy) {
+    return errorResult(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);
+  }
+  const hasRequestedThinking = Object.hasOwn(params, "thinking") && params.thinking !== undefined;
+  const requestedThinking = typeof params.thinking === "string" ? params.thinking.trim() : undefined;
+  const thinkingSelection = hasRequestedThinking && requestedThinking === undefined
+    ? { ok: false as const, reason: "thinking-denied" as const, allowed: [...thinkingPolicy.allowed] }
+    : selectThinkingLevel(thinkingPolicy, requestedThinking);
+  if (!thinkingSelection.ok) {
+    return errorResult(
+      `Thinking "${requestedThinking ?? ""}" is not authorized for Agent "${resolvedType}" on "${resolvedModelKey}". `
+      + `Allowed thinking levels: ${thinkingSelection.allowed.join(", ")}.`,
+    );
+  }
+  const thinkingLevel = thinkingSelection.level;
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;

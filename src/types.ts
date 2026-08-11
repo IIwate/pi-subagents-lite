@@ -8,12 +8,8 @@ import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
 import type { SubagentType, AgentConfig, AgentInvocation, SystemPromptMode } from "./agents/types.js";
 
-/**
- * Thinking level for agent models.
- * Known levels: off, minimal, low, medium, high, xhigh, max.
- * Free-form strings are also allowed (provider-specific thinking maps).
- */
-export type ThinkingLevel = string;
+/** Pi canonical thinking level accepted by the Agent tool and access policy. */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {

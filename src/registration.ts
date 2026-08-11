@@ -29,10 +29,17 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       prompt: Type.String(),
       description: Type.Optional(Type.String()),
       agent: agentParam,
-      // Optional explicit alternate: "id", "provider/id", or "id:thinking".
+      // Optional explicit alternate as an exact canonical provider/model key.
       model: Type.Optional(Type.String()),
-      // Optional thinking override (off/minimal/low/medium/high/xhigh/max).
-      thinking: Type.Optional(Type.String()),
+      thinking: Type.Optional(Type.Union([
+        Type.Literal("off"),
+        Type.Literal("minimal"),
+        Type.Literal("low"),
+        Type.Literal("medium"),
+        Type.Literal("high"),
+        Type.Literal("xhigh"),
+        Type.Literal("max"),
+      ])),
       run_in_background: Type.Optional(Type.Boolean()),
       worktree_path: Type.Optional(Type.String({
         description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",

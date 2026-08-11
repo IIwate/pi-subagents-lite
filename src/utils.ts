@@ -3,6 +3,7 @@
  */
 import type { Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "./types.js";
+import { CANONICAL_THINKING_LEVELS } from "./config/types.js";
 
 /**
  * Returns true if a name contains characters not allowed in agent/skill names.
@@ -13,13 +14,14 @@ export function isUnsafeName(name: string): boolean {
 }
 
 /**
- * Normalize a raw thinking value.
- * Accepts any non-empty string, so provider-specific levels can pass through.
+ * Normalize a raw Pi canonical thinking value.
  */
 export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  return (CANONICAL_THINKING_LEVELS as readonly string[]).includes(trimmed)
+    ? trimmed as ThinkingLevel
+    : undefined;
 }
 
 /**
@@ -35,93 +37,34 @@ export function errorMessage(err: unknown): string {
  */
 export function parseModelKey(modelStr: string): { provider: string; modelId: string } | null {
   const slashIdx = modelStr.indexOf("/");
-  if (slashIdx <= 0) return null;
+  if (slashIdx <= 0 || slashIdx === modelStr.length - 1) return null;
   return { provider: modelStr.slice(0, slashIdx), modelId: modelStr.slice(slashIdx + 1) };
 }
 
 /** Minimal registry surface used for model lookup. */
 export interface ModelLookupRegistry {
   find(provider: string, modelId: string): Model<any> | undefined;
-  /** Full loaded catalogue, used for exact bare-ID resolution before authorization. */
-  getAll?: () => Array<Model<any>>;
-  /** Compatibility fallback for minimal registries in tests/integrations. */
-  getAvailable?: () => Array<Model<any>>;
-}
-
-/**
- * Parse a model tool argument that may embed thinking as `model:thinking`.
- *
- * Supported forms:
- *   - "grok-4.5"
- *   - "cpa-responses/grok-4.5"
- *   - "grok-4.5:low"
- *   - "cpa-responses/grok-4.5:low"
- *   - "grok-4.5:custom-level"  (free-form thinking, not restricted to known levels)
- *
- * When a `:` is present and both sides are non-empty, the suffix after the
- * last `:` is always treated as thinking (no allowlist check).
- */
-export function parseModelSpec(raw: string | undefined): {
-  modelRef: string | undefined;
-  thinkingFromModel?: ThinkingLevel;
-} {
-  if (raw === undefined) return { modelRef: undefined };
-  const trimmed = raw.trim();
-  if (!trimmed) return { modelRef: undefined };
-
-  const colonIdx = trimmed.lastIndexOf(":");
-  if (colonIdx > 0) {
-    const modelRef = trimmed.slice(0, colonIdx).trim();
-    const thinkingFromModel = parseThinkingLevel(trimmed.slice(colonIdx + 1));
-    if (modelRef && thinkingFromModel !== undefined) {
-      return { modelRef, thinkingFromModel };
-    }
-  }
-
-  return { modelRef: trimmed };
 }
 
 /**
  * Resolve an explicit model ref with exact matching only (no silent fallback).
  *
- * - "provider/id" → registry.find(provider, id)
- * - bare id → available models where model.id === bare id (exact)
- *
- * When multiple providers share the same id, prefer preferredProvider if set,
- * otherwise the first match.
+ * Only canonical "provider/id" keys are accepted.
  */
 export function resolveExactModel(
   modelRef: string,
   registry: ModelLookupRegistry,
-  preferredProvider?: string,
 ): Model<any> | undefined {
-  const trimmed = modelRef.trim();
-  if (!trimmed) return undefined;
-
-  const parsed = parseModelKey(trimmed);
-  if (parsed) {
-    return registry.find(parsed.provider, parsed.modelId);
-  }
-
-  const registered = registry.getAll?.() ?? registry.getAvailable?.() ?? [];
-  const exact = registered.filter((m) => m.id === trimmed);
-  if (exact.length === 0) return undefined;
-  if (exact.length === 1) return exact[0];
-  if (preferredProvider) {
-    const sameProvider = exact.find((m) => m.provider === preferredProvider);
-    if (sameProvider) return sameProvider;
-  }
-  return exact[0];
+  const parsed = parseModelKey(modelRef.trim());
+  return parsed ? registry.find(parsed.provider, parsed.modelId) : undefined;
 }
 
 /** Build a helpful error when an explicit model ref cannot be resolved. */
 export function unknownModelError(modelRef: string): string {
   return (
     `Unknown model id: "${modelRef}". ` +
-    `Use a bare model id that exactly matches an available model (e.g. "grok-4.5"), ` +
-    `or "provider/model-id" (e.g. "cpa-responses/grok-4.5"). ` +
-    `Optional thinking shorthand: "grok-4.5:low". ` +
-    `List available models first (e.g. via your model list / list-models), then retry with a valid id.`
+    `Use an exact canonical provider/model key (e.g. "cpa-responses/grok-4.5"). ` +
+    "List available models first, then retry with a valid key."
   );
 }
 

@@ -46,14 +46,18 @@ export function missingSubagentModelError(): string {
 /** Build a clear error when routing is OFF and a non-parent model was requested. */
 export function routingDisabledModelError(modelRef: string): string {
   return (
-    `Model "${modelRef}" cannot be used while Model routing is OFF: `
-    + "subagents use the exact parent model. "
-    + "Enable /agents > Model routing to authorize alternate models."
+    `Model "${modelRef}" cannot be used while Alternate models are OFF. `
+    + "Parent model access is configured separately. "
+    + "Enable /agents > Model access > Alternate models to authorize alternates."
   );
 }
 
+export function parentModelDeniedError(agentType: string): string {
+  return `Agent "${agentType}" is not authorized to use the parent model. Enable Use parent model or pass an authorized alternate model.`;
+}
+
 export function providerDisabledError(modelRef: string, provider: string): string {
-  return `Model "${modelRef}" is not authorized: provider "${provider}" is not enabled in Model routing.`;
+  return `Model "${modelRef}" is not authorized: provider "${provider}" is disabled in Model access.`;
 }
 
 export function agentProviderDeniedError(modelRef: string, agentType: string, provider: string): string {

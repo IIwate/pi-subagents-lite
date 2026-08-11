@@ -158,8 +158,8 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       expect(config).toBeDefined();
       // Extensions parsed correctly
       expect(config!.extensions).toEqual(["read", "bash"]);
-      // Thinking parsed correctly
-      expect(config!.thinkingLevel).toBe("high");
+      // Retired frontmatter thinking never enters the Agent definition.
+      expect(config).not.toHaveProperty("thinkingLevel");
       // Max turns parsed correctly
       expect(config!.maxTurns).toBe(50);
     } finally {

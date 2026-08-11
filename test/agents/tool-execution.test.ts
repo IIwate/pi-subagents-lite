@@ -39,7 +39,11 @@ const {
   mockRouting: {
     enabled: false,
     enabledProviders: [] as string[],
-    agentAccess: {} as Record<string, { providers: Record<string, { models?: string[] }> }>,
+    agentAccess: {} as Record<string, {
+      parentModelAccess?: boolean;
+      providers: Record<string, { models?: string[] }>;
+      thinking?: Record<string, { allowed: string[]; default: string }>;
+    }>,
   },
   mockForceBackground: { value: false },
   mockSpawnIntents: [] as any[],
@@ -86,7 +90,7 @@ vi.mock("../../src/models/model-scope.js", () => ({
   missingSubagentModelError: () =>
     "Cannot start an agent because no subagent model could be resolved. Select a parent model or specify a model.",
   routingDisabledModelError: (modelRef: string) =>
-    `Model "${modelRef}" cannot be used while Model routing is OFF.`,
+    `Model "${modelRef}" cannot be used while Alternate models are OFF.`,
   providerDisabledError: (modelRef: string, provider: string) =>
     `Model "${modelRef}" is not authorized: provider "${provider}" is disabled.`,
   agentProviderDeniedError: (modelRef: string, agent: string, provider: string) =>
@@ -105,6 +109,10 @@ vi.mock("../../src/shell.js", () => ({
       return {
         graceTurns: 5,
         forceBackground: mockForceBackground.value,
+        loadSkillsImplicitly: true,
+        loadExtensionsImplicitly: true,
+        systemPromptMode: "replace",
+        includeContextFiles: true,
       };
     },
     get routing() {
@@ -529,6 +537,8 @@ describe("executeAgentTool — thinking param", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ctx = fakeCtx();
+    ctx.model = { ...ctx.model, reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } };
+    ctx.thinkingLevel = "medium";
     mockGetRecord.mockReturnValue({
       id: "agent-id-123",
       display: { type: "general-purpose", description: "Test agent" },
@@ -538,7 +548,7 @@ describe("executeAgentTool — thinking param", () => {
     });
   });
 
-  it("forwards explicit thinking=low to spawn", async () => {
+  it("forwards explicitly allowed thinking=low to spawn", async () => {
     await executeAgentTool(
       "tc-think",
       makeParams({ thinking: "low" }),
@@ -552,8 +562,8 @@ describe("executeAgentTool — thinking param", () => {
     expect(spawnOptions.thinkingLevel).toBe("low");
   });
 
-  it("forwards free-form thinking values not in the known list", async () => {
-    await executeAgentTool(
+  it("rejects free-form thinking values not in Pi's canonical list", async () => {
+    const result = await executeAgentTool(
       "tc-think-custom",
       makeParams({ thinking: "super-high" }),
       undefined,
@@ -561,8 +571,9 @@ describe("executeAgentTool — thinking param", () => {
       ctx,
     );
 
-    const spawnOptions = mockSpawn.mock.calls[0][4];
-    expect(spawnOptions.thinkingLevel).toBe("super-high");
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Allowed thinking levels");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
 
@@ -577,12 +588,18 @@ describe("executeAgentTool — model access", () => {
       "general-purpose": { providers: { "cpa-responses": { models: ["grok-4.5"] } } },
     };
     ctx = fakeCtx();
-    ctx.model = { provider: "test", id: "parent-model" };
+    ctx.thinkingLevel = "medium";
+    ctx.model = {
+      provider: "test",
+      id: "parent-model",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: null },
+    };
     const models = [
-      { provider: "test", id: "parent-model" },
-      { provider: "test", id: "other-model" },
-      { provider: "cpa-responses", id: "grok-4.5" },
-      { provider: "cpa-responses", id: "grok-5" },
+      ctx.model,
+      { provider: "test", id: "other-model", reasoning: true },
+      { provider: "cpa-responses", id: "grok-4.5", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: null } },
+      { provider: "cpa-responses", id: "grok-5", reasoning: true },
     ];
     ctx.modelRegistry = {
       find: vi.fn((provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id)),
@@ -599,9 +616,34 @@ describe("executeAgentTool — model access", () => {
     });
   });
 
-  it("uses the exact parent when model is omitted", async () => {
+  it("uses the exact parent when model is omitted and Parent access is implicit", async () => {
     await executeAgentTool("parent", makeParams({ model: undefined }), undefined, undefined, ctx);
     expect(mockSpawn.mock.calls[0][4].model).toEqual(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("medium");
+  });
+
+  it("rejects omitted and explicit Parent default use when Parent access is denied", async () => {
+    mockRouting.agentAccess["general-purpose"].parentModelAccess = false;
+
+    const omitted = await executeAgentTool(
+      "parent-denied-omitted",
+      makeParams({ model: undefined }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(omitted.isError).toBe(true);
+    expect(omitted.content[0].text).toContain("parent model");
+
+    const explicit = await executeAgentTool(
+      "parent-denied-explicit",
+      makeParams({ model: "test/parent-model" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(explicit.isError).toBe(true);
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("allows the exact parent explicitly while routing is OFF", async () => {
@@ -624,7 +666,7 @@ describe("executeAgentTool — model access", () => {
     mockRouting.enabled = false;
     const result = await executeAgentTool("off", makeParams({ model: "test/other-model" }), undefined, undefined, ctx);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Model routing is OFF");
+    expect(result.content[0].text).toContain("Alternate models are OFF");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
@@ -643,31 +685,31 @@ describe("executeAgentTool — model access", () => {
     expect(result.content[0].text).toContain("provider \"cpa-responses\" is disabled");
   });
 
-  it("allows an explicit current-parent-provider alternate past only the global gate", async () => {
+  it("does not bypass explicit Provider access for current-parent-provider alternates", async () => {
     mockRouting.enabledProviders = [];
     mockRouting.agentAccess = {
       "general-purpose": { providers: { test: { models: ["other-model"] } } },
     };
-    await executeAgentTool(
+    const denied = await executeAgentTool(
       "parent-provider-alternate",
       makeParams({ model: "test/other-model" }),
       undefined,
       undefined,
       ctx,
     );
-    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain("provider \"test\" is disabled");
+    expect(mockSpawn).not.toHaveBeenCalled();
 
-    vi.clearAllMocks();
-    mockRouting.agentAccess = {};
-    const denied = await executeAgentTool(
-      "parent-provider-no-rule",
+    mockRouting.enabledProviders = ["test"];
+    await executeAgentTool(
+      "parent-provider-enabled",
       makeParams({ model: "test/other-model" }),
       undefined,
       undefined,
       ctx,
     );
-    expect(denied.content[0].text).toContain("has no access");
-    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
   it("applies policy gates before registry availability for qualified models", async () => {
@@ -707,32 +749,110 @@ describe("executeAgentTool — model access", () => {
     expect(result.content[0].text).toContain("active model scope");
   });
 
-  it("resolves bare IDs from the full registry", async () => {
-    await executeAgentTool("bare", makeParams({ model: "grok-4.5" }), undefined, undefined, ctx);
-    expect(mockSpawn.mock.calls[0][4].model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+  it("rejects bare model IDs", async () => {
+    const result = await executeAgentTool(
+      "bare",
+      makeParams({ model: "grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("provider/model");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("rejects the retired model:thinking shorthand", async () => {
+    const result = await executeAgentTool(
+      "shorthand",
+      makeParams({ model: "cpa-responses/grok-4.5:low" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("locks model, scope, and resolved thinking in the spawn intent", async () => {
     ctx.scopedModels = [{ model: { provider: "cpa-responses", id: "grok-4.5" }, thinkingLevel: "high" }];
-    await executeAgentTool("snapshot", makeParams({ model: "grok-4.5" }), undefined, undefined, ctx);
+    await executeAgentTool(
+      "snapshot",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
     const options = mockSpawn.mock.calls[0][4];
-    expect(options.model).toEqual({ provider: "cpa-responses", id: "grok-4.5" });
+    expect(options.model).toMatchObject({ provider: "cpa-responses", id: "grok-4.5" });
     expect(options.scopedModels).toEqual(ctx.scopedModels);
     expect(options.thinkingLevel).toBe("high");
     expect(options.thinkingResolved).toBe(true);
     expect(options.invocation.thinkingLevel).toBe("high");
   });
 
-  it("prefers explicit thinking over model shorthand and scope", async () => {
+  it("makes a Model scope thinking pin authoritative", async () => {
     ctx.scopedModels = [{ model: { provider: "cpa-responses", id: "grok-4.5" }, thinkingLevel: "medium" }];
-    await executeAgentTool(
+    const rejected = await executeAgentTool(
       "thinking",
-      makeParams({ model: "grok-4.5:low", thinking: "xhigh" }),
+      makeParams({ model: "cpa-responses/grok-4.5", thinking: "xhigh" }),
       undefined,
       undefined,
       ctx,
     );
-    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("xhigh");
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content[0].text).toContain("medium");
+    expect(mockSpawn).not.toHaveBeenCalled();
+
+    await executeAgentTool(
+      "thinking-default",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("medium");
+  });
+
+  it("uses an exact-model thinking allowlist and default", async () => {
+    mockRouting.agentAccess["general-purpose"].thinking = {
+      "cpa-responses/grok-4.5": {
+        allowed: ["low", "medium"],
+        default: "low",
+      },
+    };
+    await executeAgentTool(
+      "thinking-default",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("low");
+
+    vi.clearAllMocks();
+    const rejected = await executeAgentTool(
+      "thinking-denied",
+      makeParams({ model: "cpa-responses/grok-4.5", thinking: "high" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content[0].text).toContain("low");
+    expect(rejected.content[0].text).toContain("medium");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("defaults an alternate model from Pi's high normalization", async () => {
+    await executeAgentTool(
+      "alternate-default",
+      makeParams({ model: "cpa-responses/grok-4.5" }),
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("high");
   });
 
   it("never falls back after an explicit denial", async () => {

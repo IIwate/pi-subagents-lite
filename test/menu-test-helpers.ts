@@ -18,7 +18,7 @@ import { vi } from "vitest";
  */
 export function selectByName(name: string): (title: string, items: string[]) => string | undefined {
   const nameMap: Record<string, string> = {
-    model: "Model routing",
+    model: "Model access",
     concurrency: "Concurrency settings",
     display: "Display settings",
     debug: "Debug",

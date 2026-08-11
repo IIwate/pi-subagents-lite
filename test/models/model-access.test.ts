@@ -36,13 +36,33 @@ function authorize(overrides: Record<string, unknown> = {}) {
 }
 
 describe("authorizeModel", () => {
-  it("always allows the exact parent before routing and scope gates", () => {
+  it("allows the exact parent when Parent model access is omitted", () => {
     expect(authorize({
       modelKey: "anthropic/sonnet",
-      routing: routing({ enabled: false, enabledProviders: [], agentAccess: {} }),
+      routing: routing({
+        enabled: false,
+        enabledProviders: [],
+        agentAccess: { Explore: { providers: {} } },
+      }),
       availableKeys: new Set(),
       scopedKeys: new Set(["openai/gpt-5"]),
     })).toEqual({ ok: true });
+  });
+
+  it("rejects the exact parent when Parent model access is denied", () => {
+    expect(authorize({
+      modelKey: "anthropic/sonnet",
+      routing: routing({
+        enabled: true,
+        enabledProviders: ["anthropic"],
+        agentAccess: {
+          Explore: {
+            parentModelAccess: false,
+            providers: { anthropic: { models: ["sonnet"] } },
+          },
+        },
+      }),
+    })).toEqual({ ok: false, reason: "parent-model-denied" });
   });
 
   it("rejects alternate models while routing is OFF", () => {
@@ -99,7 +119,7 @@ describe("authorizeModel", () => {
     expect(authorize({ parentModelKey: "" })).toEqual({ ok: true });
   });
 
-  it("bypasses only the global gate for a current-parent-provider alternate", () => {
+  it("requires explicit Provider access for current-parent-provider alternates", () => {
     const parentProviderRule = routing({
       enabledProviders: [],
       agentAccess: { Explore: { providers: { anthropic: { models: ["opus"] } } } },
@@ -108,18 +128,21 @@ describe("authorizeModel", () => {
       modelKey: "anthropic/opus",
       routing: parentProviderRule,
       availableKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
-    })).toEqual({ ok: true });
+    })).toEqual({ ok: false, reason: "provider-disabled" });
+
     expect(authorize({
       modelKey: "anthropic/opus",
-      parentModelKey: "openai/gpt-5",
-      routing: parentProviderRule,
-      availableKeys: new Set(["anthropic/opus", "openai/gpt-5"]),
-    })).toEqual({ ok: false, reason: "provider-disabled" });
+      routing: routing({
+        enabledProviders: ["anthropic"],
+        agentAccess: parentProviderRule.agentAccess,
+      }),
+      availableKeys: new Set(["anthropic/sonnet", "anthropic/opus"]),
+    })).toEqual({ ok: true });
   });
 
-  it("keeps every non-global gate for current-parent-provider alternates", () => {
+  it("keeps every alternate-model gate for current-parent-provider alternates", () => {
     const parentProviderRule = routing({
-      enabledProviders: [],
+      enabledProviders: ["anthropic"],
       agentAccess: { Explore: { providers: { anthropic: { models: ["opus"] } } } },
     });
     expect(authorize({
@@ -166,7 +189,7 @@ describe("effectiveAlternateModelKeys", () => {
     )).toEqual([]);
   });
 
-  it("moves the dynamic parent-provider gate when the parent changes", () => {
+  it("does not move Provider access when the parent changes", () => {
     const policy = routing({
       enabledProviders: [],
       agentAccess: {
@@ -179,9 +202,13 @@ describe("effectiveAlternateModelKeys", () => {
       },
     });
     expect(effectiveAlternateModelKeys("Explore", policy, available, null, "anthropic/sonnet"))
-      .toEqual(["anthropic/haiku"]);
+      .toEqual([]);
     expect(effectiveAlternateModelKeys("Explore", policy, available, null, "openai/gpt-5"))
-      .toEqual(["openai/o3"]);
+      .toEqual([]);
+
+    const enabled = routing({ ...policy, enabledProviders: ["anthropic", "openai"] });
+    expect(effectiveAlternateModelKeys("Explore", enabled, available, null, "anthropic/sonnet"))
+      .toEqual(["anthropic/haiku", "openai/o3"]);
   });
 });
 
