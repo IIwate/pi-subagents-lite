@@ -6,6 +6,7 @@ This directory is the system-level map for the S.U.P.E.R. modular monolith. It i
 
 - [S.U.P.E.R. boundaries ADR](../adr/0009-super-architecture-boundaries.md) is the migration-time authority for module direction, serializable contracts, composition-root wiring, and replacement rules.
 - [Refactoring plan](../refactoring-plan.md) owns evidence, phases, gates, and delivery cadence.
+- [Migration baseline](./migration-baseline.md) owns the measured Phase 0 starting values and approved test seams.
 - [History audit](../refactoring-history-audit.md) is temporary planning evidence only. It is transferred into the owning documents and retired in Phase 9.
 
 ## Module map

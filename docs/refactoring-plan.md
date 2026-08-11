@@ -310,7 +310,7 @@ Purpose: make architecture regression visible before moving behavior.
 
 - Record the baseline tool, lifecycle, delivery, model-access, worktree, configuration, and Child screen behaviors already covered by tests.
 - Walk every finding in the history audit, classify it as Current, Superseded, or Implementation-only, and transfer its actionable consequence to exactly one owning PRD, module document, architecture decision, or acceptance example.
-- Restore the Windows test baseline: the two directory-link cases currently fail during `symlinkSync` setup with `EPERM` when Developer Mode or link privilege is unavailable. Make the test fixture capability-aware while preserving real-path validation behavior, then require all 849 cases to pass.
+- Restore the Windows test baseline: the two directory-link cases currently fail during `symlinkSync` setup with `EPERM` when Developer Mode or link privilege is unavailable. Make the test fixture capability-aware while preserving real-path validation behavior. Supported environments run all 849 cases; unsupported environments skip only those two setup-blocked cases with an explicit capability condition.
 - Add blocking dependency checks with an exact baseline for existing cycle paths and internal module mocks. New violations fail immediately; every migration slice removes its resolved baseline entries in the same commit. Size checks report growth beyond the current baseline for explicit responsibility review.
 - Resolve the README wording that conflicts with ADR 0008 and current Model access behavior before using README as characterization input.
 - Add the layer map and S.U.P.E.R. checklist to the pull-request template or review instructions.
@@ -318,7 +318,7 @@ Purpose: make architecture regression visible before moving behavior.
 
 Exit:
 
-- Typecheck and all 849 tests pass on the supported Windows and CI environments.
+- Typecheck passes and the full test command exits successfully on supported Windows and CI environments. Environments with directory-symlink capability run all 849 cases; environments without it report only the two capability-conditioned skips.
 - No new cycle, oversize module, internal module mock, or boundary `any` can be added unnoticed.
 - Existing tests are not bulk rewritten.
 
