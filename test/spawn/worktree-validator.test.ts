@@ -59,6 +59,27 @@ function normalizedPath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
+/** Detect the host capability required by the two real symlink scenarios. */
+function canCreateDirectorySymlink(): boolean {
+  const probe = makeTempDir("wt-symlink-probe");
+  const target = join(probe.dir, "target");
+  const link = join(probe.dir, "link");
+  mkdirSync(target, { recursive: true });
+  try {
+    symlinkSync(target, link);
+    return true;
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EACCES") return false;
+    throw error;
+  } finally {
+    probe.cleanup();
+  }
+}
+
+const supportsDirectorySymlink = canCreateDirectorySymlink();
+const symlinkIt = supportsDirectorySymlink ? it : it.skip;
+
 // ── tests ────────────────────────────────────────────────────────
 
 describe("validateWorktreePath", () => {
@@ -367,7 +388,7 @@ describe("validateWorktreePath", () => {
 
   // ── symlink resolution ────────────────────────────────────────
 
-  it("resolves symlinks before validation", async () => {
+  symlinkIt("resolves symlinks before validation", async () => {
     const parentCwd = join(tmpDir, "parent");
     const realPath = join(tmpDir, "real-feature");
     const symlinkPath = join(tmpDir, "link-to-feature");
@@ -388,7 +409,7 @@ describe("validateWorktreePath", () => {
     expect(success.resolvedPath).toBe(normalizedPath(realPath));
   });
 
-  it("rejects a symlink whose target is in a different repo", async () => {
+  symlinkIt("rejects a symlink whose target is in a different repo", async () => {
     const parentCwd = join(tmpDir, "parent");
     const otherRepoPath = join(tmpDir, "other-repo-dir");
     const symlinkPath = join(tmpDir, "sneaky-link");

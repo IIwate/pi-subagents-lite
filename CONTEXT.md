@@ -18,6 +18,10 @@ _Avoid_: Agent kind, agent class
 A compact deterministic system-prompt block added automatically with `before_agent_start`. It distinguishes currently callable and unavailable agent types, teaches the parent LLM each agent type's effective Parent default access, marks `model` as required when no Parent default exists, and lists every effective alternate as an exact canonical model key. It never substitutes wildcard policy summaries for callable arguments, is not a session message, and requires no manual refresh.
 _Avoid_: Agent briefing, agent documentation, tool description
 
+**Subagent system prompt**:
+The exact system prompt provided to a Subagent when its isolated session is created, composed from its accepted Agent type definition, system prompt mode, skills, context files, and runtime environment. It is distinct from Agent guidance, which is added to the parent LLM.
+_Avoid_: Child prompt, injected prompt, Agent guidance
+
 **Stealth tool**:
 A tool registered at extension initialization with no description, promptSnippet, or promptGuidelines. The stable tool set preserves prompt-cache behavior; current usage and access rules come from dynamic Agent guidance.
 _Avoid_: Hidden tool, minimal tool
