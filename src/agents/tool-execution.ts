@@ -10,6 +10,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
+import { isAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
 import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
@@ -178,7 +179,9 @@ export async function executeAgentTool(
     includeContextFiles: store.agent.includeContextFiles,
     parentModelKey: parentModelRef,
   });
-  if (!acceptedPolicy) return errorResult(`Unknown agent type: ${type}`);
+  if (!acceptedPolicy || !isAcceptedRunPolicy(acceptedPolicy)) {
+    return errorResult(`Unknown agent type: ${type}`);
+  }
   const maxTurns = acceptedPolicy.definition.maxTurns;
 
   const acceptedModel = structuredClone(model);

@@ -4,6 +4,7 @@
 
 - The application owns serializable lifecycle state; the Pi session driver owns live session handles and teardown.
 - Running and queued work uses an immutable Accepted run policy.
+- `AcceptedRunPolicySchema` is the boundary contract; legacy runtime types are derived from its TypeBox static type during migration.
 - Scheduling, worktree targeting, and retention remain cohesive runtime components until an independent consumer requires a replacement boundary.
 
 ## Superseded

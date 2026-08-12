@@ -4,6 +4,8 @@
 
 Test lifecycle commands and emitted events through the runtime public surface with in-memory ports.
 
+The accepted-call contract test uses an independent literal snapshot and JSON round-trip. The resolver path also validates its returned policy against `AcceptedRunPolicySchema` before runtime consumption.
+
 ## Required scenarios
 
 - Authorization acceptance locks the complete run policy.

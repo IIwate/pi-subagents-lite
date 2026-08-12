@@ -6,18 +6,18 @@ import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
-import type { SubagentType, AgentConfig, SystemPromptMode } from "./agents/types.js";
+import type { SubagentType } from "./agents/types.js";
+import type {
+  AcceptedRunPolicy as AcceptedRunPolicyContract,
+  AgentInvocation as AgentInvocationContract,
+  ThinkingLevel as ThinkingLevelContract,
+} from "./modules/subagent-runtime/public.js";
 
-/** Pi canonical thinking level accepted by the Agent tool and access policy. */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export interface AgentInvocation {
-  /** Model id shown in the TUI. */
-  modelName?: string;
-  /** Provider id shown immediately after the model. */
-  providerName?: string;
-  thinkingLevel?: ThinkingLevel;
-}
+export type {
+  AcceptedRunPolicy,
+  AgentInvocation,
+  ThinkingLevel,
+} from "./modules/subagent-runtime/public.js";
 
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {
@@ -25,7 +25,7 @@ export interface RunTunables {
   /** Scope captured when the Agent call was accepted. */
   scopedModels?: ExtensionContext["scopedModels"];
   maxTurns?: number;
-  thinkingLevel?: ThinkingLevel;
+  thinkingLevel?: ThinkingLevelContract;
   /** True when thinkingLevel is the accepted-call snapshot, including undefined. */
   thinkingResolved?: boolean;
   graceTurns?: number;
@@ -62,34 +62,20 @@ export interface RunCallbacks {
   onCompaction?: () => void;
 }
 
-export interface AcceptedRunPolicy {
-  /** Deep-copied definition resolved when the Agent call is accepted. */
-  definition: AgentConfig;
-  registeredTools: string[];
-  restrictToRegisteredTools: boolean;
-  tools?: true | string[] | false;
-  extensions: true | string[] | false;
-  skills: true | string[] | false;
-  systemPromptMode: SystemPromptMode;
-  includeContextFiles: boolean;
-  /** Canonical parent model identity used when this call was authorized. */
-  parentModelKey: string;
-}
-
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
  * The resolved run params that both the manager and coordinator agree on;
  * extends RunTunables with display/identity fields.
  */
 export interface SpawnConfig extends RunTunables {
-  acceptedPolicy: AcceptedRunPolicy;
+  acceptedPolicy: AcceptedRunPolicyContract;
   description: string;
   modelKey?: string;
   worktreePath?: string;
   /** Parent session and branch anchor captured when background work is accepted. */
   resultSessionId?: string;
   resultOriginEntryId?: string | null;
-  invocation?: AgentInvocation;
+  invocation?: AgentInvocationContract;
 }
 
 /** How many characters of agent ID to show in display. */
@@ -136,7 +122,7 @@ interface AgentDisplayInfo {
   type: SubagentType;
   description: string;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-  invocation?: AgentInvocation;
+  invocation?: AgentInvocationContract;
 }
 
 /**

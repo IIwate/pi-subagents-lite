@@ -11,6 +11,7 @@ The module exposes one `public.ts` surface. Cross-module values are JSON-seriali
 - `DiscoverAgentCatalogueCommandSchema` defines source roots and the catalogue-owned configuration fragment for discovery.
 - `AgentCatalogueResultSchema` defines success and serializable validation or repository failures.
 - `AgentSourceLoadRequestSchema` and `AgentSourceLoadResultSchema` define the filesystem repository boundary.
+- `AgentDefinitionSnapshotSchema` is also consumed by the runtime's `AcceptedRunPolicySchema` through the catalogue public surface.
 
 Exact fields are owned by the TypeBox schemas introduced in the relevant vertical slice. This document does not duplicate field lists.
 

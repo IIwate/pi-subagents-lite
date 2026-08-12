@@ -24,7 +24,7 @@ export const AgentDefinitionSnapshotSchema = Type.Object({
   maxTokens: Type.Optional(Type.Number()),
   systemPrompt: Type.String(),
   hidden: Type.Optional(Type.Boolean()),
-  source: AgentDefinitionSourceSchema,
+  source: Type.Optional(AgentDefinitionSourceSchema),
 }, { additionalProperties: false });
 
 export const AgentSourceDefinitionSchema = Type.Object({

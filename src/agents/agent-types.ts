@@ -173,7 +173,7 @@ export function resolveAcceptedRunPolicy(
     defaults.loadSkillsImplicitly,
     defaults.loadExtensionsImplicitly,
   );
-  return {
+  const policy: AcceptedRunPolicy = {
     definition,
     registeredTools: definition.registeredTools?.length
       ? [...definition.registeredTools]
@@ -186,8 +186,8 @@ export function resolveAcceptedRunPolicy(
     includeContextFiles: defaults.includeContextFiles,
     parentModelKey: defaults.parentModelKey,
   };
+  return policy;
 }
-
 /** Get all visible type names (for spawning and tool descriptions). */
 export function getAvailableTypes(): string[] {
   return [...agents.entries()]

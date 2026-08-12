@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { isAcceptedRunPolicy } from "../../src/modules/subagent-runtime/public.js";
 
 // Import the module under test
 import {
@@ -457,6 +458,7 @@ describe("resolveAcceptedRunPolicy", () => {
         source: "project",
       },
     });
+    expect(isAcceptedRunPolicy(policy)).toBe(true);
     expect(resolveAcceptedRunPolicy(config.name, {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,

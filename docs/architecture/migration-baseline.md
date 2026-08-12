@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 49 files, 855 passed, 2 skipped, 857 total | Vitest |
+| Full suite | 50 files, 856 passed, 2 skipped, 858 total | Vitest |
 | Skipped tests | Two directory-symlink scenarios when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 6 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
@@ -24,8 +24,8 @@ The two skipped scenarios are not replaced by ordinary directories or junctions.
 
 ## Dependency baseline
 
-- Source TypeScript files: 59.
-- Internal source edges: 195.
+- Source TypeScript files: 62.
+- Internal source edges: 205.
 - Existing strongly connected components: 1.
 - The remaining allowed cycle fingerprint is recorded in `test/architecture/architecture-baseline.test.ts`.
 - Existing internal `vi.mock` baseline: 27 test files, 69 calls.
@@ -55,5 +55,6 @@ The first migration slice is a Phase 1 entry condition, not a Phase 0 implementa
 - `REQ-CATALOGUE-002` is exercised through `agent-catalogue/public.ts` with a literal JSON command and result.
 - Session-start discovery now uses the catalogue facade and the filesystem repository wired by `bootstrap`; the legacy `scanAndMerge` entry point was removed.
 - `disableDefaultAgents` is read through `configuration/public.ts`, validated by the catalogue contract, and does not add a persisted section or revision field.
+- `AcceptedRunPolicySchema` now validates the resolver's accepted-call snapshot; Agent configuration and invocation types derive from the Agent catalogue and runtime TypeBox contracts.
 - The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
 - The tracer commits run `bun run typecheck`, focused contract tests, architecture guards, and the full suite before the Phase 1 review checkpoint.
