@@ -1,5 +1,3 @@
-import type { ThinkingLevel } from "../types.js";
-
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
@@ -39,12 +37,4 @@ export interface AgentConfig {
   hidden?: boolean;
   /** Where this agent was loaded from */
   source?: "project" | "global";
-}
-
-export interface AgentInvocation {
-  /** Model id shown in the TUI. */
-  modelName?: string;
-  /** Provider id shown immediately after the model. */
-  providerName?: string;
-  thinkingLevel?: ThinkingLevel;
 }

@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 47 files, 853 passed, 2 skipped, 855 total | Vitest |
+| Full suite | 48 files, 854 passed, 2 skipped, 856 total | Vitest |
 | Skipped tests | Two directory-symlink scenarios when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 6 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
@@ -24,14 +24,14 @@ The two skipped scenarios are not replaced by ordinary directories or junctions.
 
 ## Dependency baseline
 
-- Source TypeScript files: 45.
-- Internal source edges: 160.
-- Existing strongly connected components: 2.
-- The two allowed cycle fingerprints are recorded in `test/architecture/architecture-baseline.test.ts`.
+- Source TypeScript files: 52.
+- Internal source edges: 181.
+- Existing strongly connected components: 1.
+- The remaining allowed cycle fingerprint is recorded in `test/architecture/architecture-baseline.test.ts`.
 - Existing internal `vi.mock` baseline: 27 test files, 69 calls.
 - New internal mocks and new cycles fail the architecture guard immediately.
 
-The allowed cycle and mock entries are migration debt. A migration slice removes a resolved entry in the same change; no slice may add a new baseline entry without an approved architecture decision.
+The allowed cycle and mock entries are migration debt. The first Agent catalogue tracer removed the direct `agents/types.ts` and `types.ts` cycle. A migration slice removes a resolved entry in the same change; no slice may add a new baseline entry without an approved architecture decision.
 
 ## Approved seams
 

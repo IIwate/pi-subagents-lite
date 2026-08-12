@@ -4,6 +4,8 @@
 
 Test catalogue application queries and snapshots through the module public surface. Do not call frontmatter helpers or inspect internal merge maps.
 
+The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in definitions still returns a same-name global definition through the public facade. The example validates the command and JSON-round-tripped result against their TypeBox schemas.
+
 ## Required scenarios
 
 - Built-in and custom source precedence.
@@ -15,3 +17,5 @@ Test catalogue application queries and snapshots through the module public surfa
 ## Fixtures and doubles
 
 Use an in-memory `AgentCatalogueRepository` for policy tests. Filesystem and source-loader doubles are allowed only at the repository contract seam. Expected snapshots are independent literals.
+
+The existing filesystem parser tests remain adapter tests while on-demand Worktree discovery is migrated in Phase 2. They are not a public catalogue policy seam.

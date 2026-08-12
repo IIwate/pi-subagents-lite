@@ -1,6 +1,9 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
+import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
+import type { AgentConfig } from "./agents/types.js";
+import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
+import type { AgentDefinitionSnapshot } from "./modules/agent-catalogue/public.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
@@ -15,6 +18,13 @@ import {
   setNavigator,
   setCoordinator,
 } from "./shell.js";
+
+const agentCatalogue = createAgentCatalogueRuntime();
+
+function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
+  const { source, ...config } = structuredClone(definition);
+  return source === "built-in" ? config : { ...config, source };
+}
 
 // ============================================================================
 // Config loader — session_start handler logic
@@ -73,10 +83,15 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
 
   const disableDefaults = getStore().agent.disableDefaultAgents;
   setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);
-  const merged = await scanAndMerge({ disableDefaultAgents: disableDefaults });
-
-  // Register into the type registry (skip re-adding defaults)
-  registerAgents(merged, { disableDefaultAgents: disableDefaults });
+  const result = await agentCatalogue.execute({
+    kind: "discover",
+    roots: { globalDirectory: userAgentDir, projectDirectory: projectAgentDir },
+    configuration: { disableDefaultAgents: disableDefaults },
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  registerAgents(new Map(
+    result.catalogue.definitions.map((definition) => [definition.name, toAgentConfig(definition)]),
+  ), { disableDefaultAgents: true });
 }
 
 export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promise<void> {

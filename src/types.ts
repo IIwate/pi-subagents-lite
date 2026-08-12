@@ -6,10 +6,18 @@ import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
-import type { SubagentType, AgentConfig, AgentInvocation, SystemPromptMode } from "./agents/types.js";
+import type { SubagentType, AgentConfig, SystemPromptMode } from "./agents/types.js";
 
 /** Pi canonical thinking level accepted by the Agent tool and access policy. */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface AgentInvocation {
+  /** Model id shown in the TUI. */
+  modelName?: string;
+  /** Provider id shown immediately after the model. */
+  providerName?: string;
+  thinkingLevel?: ThinkingLevel;
+}
 
 /** Resolved model + run-limit tunables shared by every spawn/run shape. */
 export interface RunTunables {

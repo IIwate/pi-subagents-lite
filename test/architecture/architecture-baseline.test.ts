@@ -9,7 +9,6 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // These are migration baselines, not accepted architecture. A slice must remove
 // a resolved entry and may never add a new one.
 const legacyCycleBaseline = new Set([
-  "src/agents/types.ts|src/types.ts",
   [
     "src/agents/agent-manager.ts",
     "src/agents/agent-runner.ts",

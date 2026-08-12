@@ -93,15 +93,6 @@ export function setDefaultAgentsDisabled(disabled: boolean): void {
   }
 }
 
-/** Scan user and project agent directories, merge with defaults. Returns the merged Map. */
-export async function scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promise<Map<string, AgentConfig>> {
-  const [userAgents, projectAgents] = await Promise.all([
-    scanAgentFilesInDir(userAgentDir, "user"),
-    scanAgentFilesInDir(projectAgentDir, "project"),
-  ]);
-  const defaults = options?.disableDefaultAgents ? new Map<string, AgentConfig>() : DEFAULT_AGENTS;
-  return mergeAgents(defaults, userAgents, projectAgents);
-}
 /**
  * Scan the known agent directories and register any newly discovered agents
  * that aren't already in the registry. Returns the number of new agents added.
@@ -112,7 +103,12 @@ export async function scanAndMerge(options?: { disableDefaultAgents?: boolean })
  *   parsing and name-uniqueness rules as the parent's project scan.
  */
 export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
-  const merged = await scanAndMerge({ disableDefaultAgents: defaultAgentsDisabled });
+  const [userAgents, projectAgents] = await Promise.all([
+    scanAgentFilesInDir(userAgentDir, "user"),
+    scanAgentFilesInDir(projectAgentDir, "project"),
+  ]);
+  const defaults = defaultAgentsDisabled ? new Map<string, AgentConfig>() : DEFAULT_AGENTS;
+  const merged = mergeAgents(defaults, userAgents, projectAgents);
 
   let count = 0;
   for (const [name, config] of merged) {

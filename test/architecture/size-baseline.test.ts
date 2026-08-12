@@ -9,7 +9,7 @@ const sizeWarningBaseline: Readonly<Record<string, number>> = {
   "src/agents/agent-manager.ts": 811,
   "src/agents/agent-runner.ts": 738,
   "src/config/config-store.ts": 457,
-  "src/agents/agent-types.ts": 430,
+  "src/agents/agent-types.ts": 426,
   "src/spawn/spawn-coordinator.ts": 429,
   "src/agents/agent-discovery.ts": 417,
 };

@@ -4,18 +4,21 @@
 
 The module exposes one `public.ts` surface. Cross-module values are JSON-serializable and validated at the receiving boundary.
 
-## Planned schemas
+## Implemented schemas
 
-- `AgentDefinitionSnapshot` — one effective Agent type definition.
-- `AgentCatalogueSnapshot` — the ordered set of available definitions and source metadata.
-- `CatalogueQuery` and `CatalogueResult` — discovery and lookup requests/results.
-- `CatalogueChanged` — a serializable snapshot replacement notification when a host lifecycle requires one.
+- `AgentDefinitionSnapshotSchema` defines one effective Agent type definition and its source.
+- `AgentCatalogueSnapshotSchema` defines the ordered effective definitions.
+- `DiscoverAgentCatalogueCommandSchema` defines source roots and the catalogue-owned configuration fragment for discovery.
+- `AgentCatalogueResultSchema` defines success and serializable validation or repository failures.
+- `AgentSourceLoadRequestSchema` and `AgentSourceLoadResultSchema` define the filesystem repository boundary.
 
 Exact fields are owned by the TypeBox schemas introduced in the relevant vertical slice. This document does not duplicate field lists.
 
+Lookup commands and catalogue-change notifications remain planned for the slices that migrate their current production call sites.
+
 ## Port
 
-`AgentCatalogueRepository` loads serialized source definitions from configured roots. It does not expose frontmatter parser objects or filesystem handles.
+`AgentCatalogueRepository` loads serialized global and project source definitions from configured roots. It does not expose frontmatter parser objects or filesystem handles. The Node filesystem implementation is isolated under `platform/fs` and is selected by the bootstrap factory.
 
 ## Dependency rule
 
