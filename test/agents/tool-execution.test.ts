@@ -139,7 +139,6 @@ vi.mock("../../src/shell.js", () => ({
         description: intent.description,
         signal: intent.signal,
         acceptedPolicy: intent.acceptedPolicy,
-        modelKey: intent.modelKey,
         worktreePath: intent.worktreePath,
         invocation: intent.invocation,
       });
@@ -454,6 +453,7 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
 
     expect(mockValidateWorktreePath).toHaveBeenCalledTimes(1);
     expect(mockSpawnIntents.at(-1)).not.toHaveProperty("backgroundDelivery");
+    expect(mockSpawnIntents.at(-1)).not.toHaveProperty("modelKey");
     expect(result.content[0].text).toContain("running");
     expect(result.content[0].text).toContain("delivered automatically");
   });

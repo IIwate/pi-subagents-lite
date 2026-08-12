@@ -57,7 +57,6 @@ export interface RunCallbacks {
 export interface SpawnConfig {
   acceptedPolicy: AcceptedRunPolicyContract;
   description: string;
-  modelKey?: string;
   worktreePath?: string;
   /** Parent session and branch anchor captured when background work is accepted. */
   resultSessionId?: string;
@@ -122,8 +121,8 @@ interface AgentExecutionState {
   promise?: Promise<string>;
   /** Whether the current execution promise has fully settled. */
   settled?: boolean;
-  /** Resolved model key used for concurrency accounting. */
-  modelKey?: string;
+  /** Concurrency bucket derived from the accepted model snapshot. */
+  concurrencyKey: string;
   /** Grace turns retained for direct follow-up prompts. */
   graceTurns?: number;
   /** Parent session and branch anchor captured with the accepted invocation. */

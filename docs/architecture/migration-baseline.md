@@ -15,9 +15,9 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 50 files, 861 passed, 2 skipped, 863 total | Vitest |
+| Full suite | 50 files, 864 passed, 2 skipped, 866 total | Vitest |
 | Skipped tests | Two directory-symlink scenarios when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
-| Architecture guard | 7 tests passed | Source graph, documentation, and migration baselines |
+| Architecture guard | 9 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
 
 The two skipped scenarios are not replaced by ordinary directories or junctions. Environments with directory-symlink capability execute the real symlink resolution and cross-repository tests.
@@ -80,9 +80,9 @@ The audit remains available only to explain how these risks were discovered and 
 - Session-start discovery now uses the catalogue facade and the filesystem repository wired by `bootstrap`; the legacy `scanAndMerge` entry point was removed.
 - `disableDefaultAgents` is read through `configuration/public.ts`, validated by the catalogue contract, and does not add a persisted section or revision field.
 - `AcceptedRunPolicySchema` validates the complete accepted-call snapshot; Agent configuration and invocation types derive from the Agent catalogue and runtime TypeBox contracts.
-- The runtime receives one validated JSON copy containing model, parent model, scope, Thinking, output, turn, and grace limits; parallel mutable spawn fields were removed.
+- The runtime receives one validated JSON copy containing model, parent model, scope, Thinking, output, turn, and grace limits. Scheduling derives its concurrency key from that accepted model snapshot; callers cannot provide a parallel model key.
 - The filesystem catalogue adapter isolates malformed definitions before returning its schema-valid result, preserving valid definitions in the same request.
-- The architecture guard enforces the full inward matrix inside each capability module.
+- The architecture guard enforces the full inward matrix inside each capability module, including ports, and requires every module-external consumer to use the target module's `public.ts`.
 - The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
 - The tracer commits run `bun run typecheck`, focused contract tests, architecture guards, and the full suite before the Phase 1 review checkpoint.
 

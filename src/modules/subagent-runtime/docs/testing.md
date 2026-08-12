@@ -9,6 +9,7 @@ The accepted-call contract test uses an independent literal snapshot and JSON ro
 ## Required scenarios
 
 - Authorization acceptance locks the complete run policy.
+- Concurrency accounting derives its model bucket only from the accepted model snapshot, even when an untyped caller supplies a conflicting extra field.
 - Model and Provider ceilings queue and release work hierarchically.
 - Foreground interruption stops and retains records while background work remains detached.
 - Setup, provider, abort, timeout, continuation, and close failures produce ordinary terminal outcomes.

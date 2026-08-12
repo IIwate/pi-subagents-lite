@@ -30,6 +30,7 @@ import { AgentManager } from "../../src/agents/agent-manager.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
+import { acceptedRunPolicy } from "../fixtures.js";
 
 describe("durable result delivery integration", () => {
   beforeEach(() => {
@@ -76,7 +77,7 @@ describe("durable result delivery integration", () => {
   it("reads and acknowledges a durable result after TTL cleanup removes the Agent record", async () => {
     const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
       description: "review",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy(),
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
       invocation: { providerName: "test", modelName: "model" },
@@ -117,7 +118,7 @@ describe("durable result delivery integration", () => {
 
     const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
       description: "review",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy(),
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
     });
@@ -139,7 +140,7 @@ describe("durable result delivery integration", () => {
   it("preserves background delivery identity and creates a new delivery ID after continuation", async () => {
     const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
       description: "review",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy(),
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
     });
@@ -175,7 +176,7 @@ describe("durable result delivery integration", () => {
       type: "reviewer",
       prompt: "review",
       description: "review",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
     state.continueAgentSession.mockResolvedValue({

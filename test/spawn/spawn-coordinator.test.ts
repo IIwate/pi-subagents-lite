@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord } from "../../src/types.js";
+import { acceptedRunPolicy } from "../fixtures.js";
 
 vi.mock("../../src/agents/agent-types.js", () => ({
   resolveType: vi.fn((name: string) => name),
@@ -176,7 +177,7 @@ describe("SpawnCoordinator", () => {
       type: "builder",
       prompt: "do something",
       description: "Test spawn",
-      graceTurns: 6,
+      acceptedPolicy: acceptedRunPolicy(),
       runInBackground: true,
     });
   }
@@ -192,6 +193,7 @@ describe("SpawnCoordinator", () => {
     expect(result.record.execution).not.toHaveProperty("backgroundDelivery");
     expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("runInBackground");
     expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("backgroundDelivery");
+    expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("modelKey");
   });
 
   it("awaits foreground work and marks its direct result consumed", async () => {
@@ -200,7 +202,7 @@ describe("SpawnCoordinator", () => {
       type: "builder",
       prompt: "do something",
       description: "Test foreground",
-      graceTurns: 6,
+      acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
 
@@ -216,7 +218,7 @@ describe("SpawnCoordinator", () => {
       type: "builder",
       prompt: "do something",
       description: "Test foreground",
-      graceTurns: 6,
+      acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
     manager.listAgents()[0].result = "";
@@ -810,7 +812,7 @@ describe("SpawnCoordinator", () => {
       type: "builder",
       prompt: "do something",
       description: "Test foreground",
-      graceTurns: 6,
+      acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
     complete(result.record, "completed", "continuation result");

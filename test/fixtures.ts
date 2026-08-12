@@ -13,6 +13,56 @@
  */
 
 import { vi } from "vitest";
+import {
+  parseAcceptedRunPolicy,
+  type AcceptedRunPolicy,
+} from "../src/modules/subagent-runtime/public.js";
+
+/** Build a complete accepted policy for tests that enter the runtime spawn seam. */
+export function acceptedRunPolicy(modelKey = "test/model"): AcceptedRunPolicy {
+  const separator = modelKey.indexOf("/");
+  if (separator < 1 || separator === modelKey.length - 1) {
+    throw new TypeError(`Invalid test model key: ${modelKey}`);
+  }
+  const provider = modelKey.slice(0, separator);
+  const id = modelKey.slice(separator + 1);
+  const model = {
+    id,
+    name: id,
+    api: "test-api",
+    provider,
+    baseUrl: "https://example.test/v1",
+    reasoning: false,
+    input: ["text"] as const,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 8_192,
+  };
+  const policy = parseAcceptedRunPolicy({
+    definition: {
+      name: "test-agent",
+      description: "Test agent",
+      systemPrompt: "Complete the test task.",
+    },
+    registeredTools: ["read"],
+    restrictToRegisteredTools: true,
+    tools: ["read"],
+    extensions: false,
+    skills: false,
+    systemPromptMode: "replace",
+    includeContextFiles: false,
+    parentModelKey: modelKey,
+    model,
+    parentModel: model,
+    scopedModels: [],
+    thinkingLevel: null,
+    outputTokenLimit: model.maxTokens,
+    turnLimit: null,
+    graceTurns: 6,
+  });
+  if (!policy) throw new TypeError(`Invalid accepted policy fixture: ${modelKey}`);
+  return policy;
+}
 
 /* ================================================================== */
 /*  Shared mock factories                                             */

@@ -115,8 +115,8 @@ export class AgentManager {
   /** Per-model ceiling when no explicit model override exists. */
   private defaultConcurrency: number;
 
-  /** Queue of agents waiting to start, keyed by modelKey. */
-  private queue: { id: string; modelKey: string; args: SpawnArgs }[] = [];
+  /** Queue of agents waiting to start, keyed by the accepted model snapshot. */
+  private queue: { id: string; concurrencyKey: string; args: SpawnArgs }[] = [];
   /** Resolvers for foreground callers waiting on queued records to start and settle. */
   private queuedResolvers = new Map<string, (result: string) => void>();
   /** Parent interrupt listeners scoped to the initial foreground execution only. */
@@ -263,16 +263,16 @@ export class AgentManager {
     const abortController = new AbortController();
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
-    // Reserve both the per-model ceiling and any shared Provider ceiling.
-    const reservedModelKey = options.modelKey && this.reserveConcurrency(options.modelKey)
-      ? options.modelKey
+    const concurrencyKey = `${options.acceptedPolicy.model.provider}/${options.acceptedPolicy.model.id}`;
+    const reservedConcurrencyKey = this.reserveConcurrency(concurrencyKey)
+      ? concurrencyKey
       : undefined;
-    const queued = options.modelKey !== undefined && reservedModelKey === undefined;
+    const queued = reservedConcurrencyKey === undefined;
 
     let queuedPromise: Promise<string> | undefined;
     if (queued) {
       queuedPromise = new Promise(resolve => this.queuedResolvers.set(id, resolve));
-      this.queue.push({ id, modelKey: options.modelKey!, args });
+      this.queue.push({ id, concurrencyKey, args });
     }
 
     const record: AgentRecord = {
@@ -290,7 +290,7 @@ export class AgentManager {
         abortController,
         promise: queuedPromise,
         settled: false,
-        modelKey: options.modelKey,
+        concurrencyKey,
         graceTurns: options.acceptedPolicy?.graceTurns,
         resultSessionId: options.resultSessionId,
         resultOriginEntryId: options.resultOriginEntryId,
@@ -313,8 +313,8 @@ export class AgentManager {
       if (queued) {
         this.queue = this.queue.filter(entry => entry.id !== id);
         this.settleQueued(id);
-      } else if (reservedModelKey) {
-        this.releaseConcurrency(reservedModelKey);
+      } else if (reservedConcurrencyKey) {
+        this.releaseConcurrency(reservedConcurrencyKey);
       }
       this.safeNotifyComplete(record);
       return id;
@@ -329,10 +329,10 @@ export class AgentManager {
 
     // startAgent can throw — clean up record so callers don't see an orphan
     try {
-      this.startAgent(id, record, args, reservedModelKey);
+      this.startAgent(id, record, args, reservedConcurrencyKey);
     } catch (err) {
       this.detachParentAbort(id);
-      if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+      if (reservedConcurrencyKey) this.releaseConcurrency(reservedConcurrencyKey);
       this.agents.delete(id);
       throw err;
     }
@@ -341,13 +341,13 @@ export class AgentManager {
 
   /**
    * Actually start an agent (called immediately or from queue drain).
-   * reservedModelKey identifies the already-acquired Provider and model ceilings.
+   * reservedConcurrencyKey identifies the already-acquired Provider and model ceilings.
    */
   private startAgent(
     id: string,
     record: AgentRecord,
     { pi, ctx, type, prompt, options }: SpawnArgs,
-    reservedModelKey?: string,
+    reservedConcurrencyKey?: string,
   ) {
     const debugFault = this.armedDebugFault;
     this.armedDebugFault = undefined;
@@ -433,7 +433,7 @@ export class AgentManager {
       })
       .finally(() => {
         this.detachParentAbort(id);
-        if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+        if (reservedConcurrencyKey) this.releaseConcurrency(reservedConcurrencyKey);
 
         record.execution.settled = true;
         this.safeNotifyComplete(record);
@@ -495,14 +495,14 @@ export class AgentManager {
     for (const entry of this.queue) {
       const record = this.agents.get(entry.id);
       if (!record || record.lifecycle.status !== "queued") continue;
-      if (!this.reserveConcurrency(entry.modelKey)) continue;
+      if (!this.reserveConcurrency(entry.concurrencyKey)) continue;
 
       try {
-        this.startAgent(entry.id, record, entry.args, entry.modelKey);
+        this.startAgent(entry.id, record, entry.args, entry.concurrencyKey);
         started.add(entry.id);
       } catch (err) {
         this.detachParentAbort(entry.id);
-        this.releaseConcurrency(entry.modelKey);
+        this.releaseConcurrency(entry.concurrencyKey);
         // Late failure — surface on the record so the user can see it
         record.lifecycle.status = "error";
         record.error = errorMessage(err);
@@ -567,9 +567,9 @@ export class AgentManager {
       return { accepted: false, reason: "unavailable" };
     }
 
-    const reservedModelKey = record.execution.modelKey;
-    if (reservedModelKey && !this.reserveConcurrency(reservedModelKey)) {
-      return { accepted: false, reason: "concurrency", modelKey: reservedModelKey };
+    const concurrencyKey = record.execution.concurrencyKey;
+    if (!this.reserveConcurrency(concurrencyKey)) {
+      return { accepted: false, reason: "concurrency", modelKey: concurrencyKey };
     }
 
     const previousTurns = record.stats.turnCount ?? 0;
@@ -628,7 +628,7 @@ export class AgentManager {
       })
       .finally(() => {
         abortController.signal.removeEventListener("abort", abortSession);
-        if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+        this.releaseConcurrency(concurrencyKey);
         record.execution.settled = true;
         this.safeNotifyComplete(record);
         this.drainQueue();

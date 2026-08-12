@@ -21,6 +21,7 @@ import {
   type WorktreeValidationSuccess,
   type WorktreeValidationFailure,
 } from "../../src/spawn/worktree-validator.js";
+import { acceptedRunPolicy } from "../fixtures.js";
 
 // ── helpers ──────────────────────────────────────────────────────
 
@@ -474,7 +475,11 @@ describe("worktree deletion mid-run", () => {
       mockCtx,
       "general-purpose",
       "test prompt",
-      { description: "test", worktreePath: "/deleted/worktree" },
+      {
+        description: "test",
+        acceptedPolicy: acceptedRunPolicy(),
+        worktreePath: "/deleted/worktree",
+      },
     );
 
     // Wait for the promise microtasks to settle (runAgent mock rejects/throws,

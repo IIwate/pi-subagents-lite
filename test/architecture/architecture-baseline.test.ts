@@ -117,4 +117,34 @@ describe("architecture migration guardrails", () => {
       "src/modules/example/ports/repository.ts imports reverse layer src/modules/example/application/execute.ts",
     ]);
   });
+
+  it("rejects ports that depend on platform packages", () => {
+    expect(dependencyDirectionViolations({
+      files: ["src/modules/example/ports/repository.ts"],
+      imports: [{
+        source: "src/modules/example/ports/repository.ts",
+        specifier: "node:fs",
+      }],
+      edges: new Map(),
+    })).toEqual([
+      "src/modules/example/ports/repository.ts imports outward dependency node:fs",
+    ]);
+  });
+
+  it("rejects external consumers that bypass a module public surface", () => {
+    expect(dependencyDirectionViolations({
+      files: [
+        "src/platform/fs/adapter.ts",
+        "src/modules/example/contracts/request.ts",
+      ],
+      imports: [{
+        source: "src/platform/fs/adapter.ts",
+        specifier: "../../modules/example/contracts/request.js",
+        target: "src/modules/example/contracts/request.ts",
+      }],
+      edges: new Map(),
+    })).toEqual([
+      "src/platform/fs/adapter.ts imports src/modules/example/contracts/request.ts instead of example/public.ts",
+    ]);
+  });
 });

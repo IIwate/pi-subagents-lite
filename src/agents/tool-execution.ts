@@ -245,7 +245,6 @@ export async function executeAgentTool(
     description,
     signal: runInBackground ? undefined : signal,
     acceptedPolicy,
-    modelKey: resolvedModelKey,
     worktreePath: validatedWorktreePath,
     invocation: { modelName, providerName, thinkingLevel },
     runInBackground,

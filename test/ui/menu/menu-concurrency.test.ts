@@ -179,7 +179,7 @@ describe("showConcurrencySettingsMenu", () => {
       models: { "google/gemini-2.5-pro": 2 },
     };
     mockModules.mockManager.listAgents.mockReturnValue([
-      { execution: { modelKey: "google/gemini-2.5-pro" }, lifecycle: { status: "completed" } },
+      { execution: { concurrencyKey: "google/gemini-2.5-pro" }, lifecycle: { status: "completed" } },
     ] as any);
     await showConcurrencySettingsMenu(createMockCtx());
 

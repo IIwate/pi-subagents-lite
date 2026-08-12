@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fakeCtx, fakePi, makeResolvablePromise } from "../fixtures.ts";
+import { acceptedRunPolicy, fakeCtx, fakePi, makeResolvablePromise } from "../fixtures.ts";
 
 let uuidCounter = 0;
 
@@ -87,9 +87,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/4b_small" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -107,12 +107,38 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
       expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(1);
+
+      deferred.resolve(mockRunResult());
+    });
+
+    it("derives the concurrency bucket only from the accepted model snapshot", () => {
+      manager = new AgentManager(onComplete, {
+        default: 1,
+        models: { "test/accepted": 1 },
+      });
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first",
+        acceptedPolicy: acceptedRunPolicy("test/accepted"),
+        modelKey: "forged/first",
+      } as any);
+      const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second",
+        acceptedPolicy: acceptedRunPolicy("test/accepted"),
+        modelKey: "forged/second",
+      } as any);
+
+      expect(manager.getRecord(firstId)?.execution.concurrencyKey).toBe("test/accepted");
+      expect(manager.getRecord(secondId)?.lifecycle.status).toBe("queued");
+      expect(mockModules.mockRunAgent).toHaveBeenCalledOnce();
 
       deferred.resolve(mockRunResult());
     });
@@ -130,8 +156,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b_small" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b_small" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small") });
 
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
 
@@ -163,9 +189,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/27b" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/27b" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/27b") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", acceptedPolicy: acceptedRunPolicy("llamacpp/27b") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -187,9 +213,9 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "claude/sonnet" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "claude/sonnet" });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "claude/sonnet" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("claude/sonnet") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("claude/sonnet") });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", acceptedPolicy: acceptedRunPolicy("claude/sonnet") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -218,10 +244,10 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/27b" });
-      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", modelKey: "llamacpp/3b" });
-      const id4 = manager.spawn(pi, ctx, "general-purpose", "task 4", { description: "task 4", modelKey: "claude/sonnet" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/27b") });
+      const id3 = manager.spawn(pi, ctx, "general-purpose", "task 3", { description: "task 3", acceptedPolicy: acceptedRunPolicy("llamacpp/3b") });
+      const id4 = manager.spawn(pi, ctx, "general-purpose", "task 4", { description: "task 4", acceptedPolicy: acceptedRunPolicy("claude/sonnet") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("running");
@@ -248,8 +274,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
@@ -274,15 +300,15 @@ describe("AgentManager", () => {
 
       const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
-        modelKey: "llamacpp/4b",
+        acceptedPolicy: acceptedRunPolicy("llamacpp/4b"),
       });
       manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
         description: "second",
-        modelKey: "llamacpp/27b",
+        acceptedPolicy: acceptedRunPolicy("llamacpp/27b"),
       });
       const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "third", {
         description: "third",
-        modelKey: "llamacpp/4b",
+        acceptedPolicy: acceptedRunPolicy("llamacpp/4b"),
       });
 
       expect(manager.getRecord(queuedId)?.lifecycle.status).toBe("queued");
@@ -307,8 +333,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", modelKey: "llamacpp/4b" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", modelKey: "llamacpp/4b" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "task 1", { description: "task 1", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "task 2", { description: "task 2", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
 
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
 
@@ -333,8 +359,8 @@ describe("AgentManager", () => {
       const ctx = fakeCtx();
       const pi = fakePi();
 
-      const id1 = manager.spawn(pi, ctx, "general-purpose", "bg task", { description: "bg task", modelKey: "llamacpp/4b" });
-      const id2 = manager.spawn(pi, ctx, "general-purpose", "fg task", { description: "fg task", modelKey: "llamacpp/4b" });
+      const id1 = manager.spawn(pi, ctx, "general-purpose", "bg task", { description: "bg task", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
+      const id2 = manager.spawn(pi, ctx, "general-purpose", "fg task", { description: "fg task", acceptedPolicy: acceptedRunPolicy("llamacpp/4b") });
 
       expect(manager.getRecord(id1)?.lifecycle.status).toBe("running");
       expect(manager.getRecord(id2)?.lifecycle.status).toBe("queued");
@@ -361,11 +387,11 @@ describe("AgentManager", () => {
 
     const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
       description: "blocker",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
       description: "queued",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const queuedRecord = manager.getRecord(queuedId)!;
     const queuedWait = queuedRecord.execution.promise!;
@@ -390,7 +416,7 @@ describe("AgentManager", () => {
     manager = new AgentManager(onComplete);
     manager.spawn(fakePi(), fakeCtx(), "general-purpose", "running", {
       description: "running",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
 
     await manager.dispose();
@@ -409,7 +435,7 @@ describe("AgentManager", () => {
     manager = new AgentManager(onComplete);
     manager.spawn(fakePi(), fakeCtx(), "general-purpose", "stuck setup", {
       description: "stuck setup",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
 
     let disposed = false;
@@ -436,7 +462,7 @@ describe("AgentManager", () => {
     manager = new AgentManager(onComplete);
     const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "late setup", {
       description: "late setup",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const run = manager.getRecord(id)!.execution.promise!;
 
@@ -463,7 +489,7 @@ describe("AgentManager", () => {
     manager = new AgentManager(onComplete);
     const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "cleared setup", {
       description: "cleared setup",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const run = manager.getRecord(id)!.execution.promise!;
 
@@ -485,11 +511,11 @@ describe("AgentManager", () => {
 
     const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
       description: "blocker",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
       description: "queued",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const queuedWait = manager.getRecord(queuedId)!.execution.promise!;
 
@@ -516,10 +542,12 @@ describe("AgentManager", () => {
 
     const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
       description: "first",
+      acceptedPolicy: acceptedRunPolicy(),
       signal: controller.signal,
     });
     const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
       description: "second",
+      acceptedPolicy: acceptedRunPolicy(),
       signal: controller.signal,
     });
     const firstWait = manager.getRecord(firstId)!.execution.promise!;
@@ -548,11 +576,11 @@ describe("AgentManager", () => {
 
     const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
       description: "blocker",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
     const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
       description: "queued",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
       signal: controller.signal,
     });
     const queuedWait = manager.getRecord(queuedId)!.execution.promise!;
@@ -584,12 +612,12 @@ describe("AgentManager", () => {
 
     const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
       description: "first",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
       signal: controller.signal,
     });
     const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
       description: "second",
-      modelKey: "test/model",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
     });
 
     controller.abort();
@@ -616,6 +644,7 @@ describe("AgentManager", () => {
 
     const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "initial", {
       description: "initial",
+      acceptedPolicy: acceptedRunPolicy(),
       signal: controller.signal,
     });
     const record = manager.getRecord(id)!;
@@ -641,6 +670,7 @@ describe("AgentManager", () => {
 
     const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "cancelled", {
       description: "cancelled",
+      acceptedPolicy: acceptedRunPolicy(),
       signal: controller.signal,
     });
 
@@ -661,7 +691,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -683,7 +713,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -714,7 +744,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       record.execution.session = session;
@@ -734,7 +764,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       manager.getRecord(id)!.execution.session = session;
 
@@ -756,7 +786,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -793,7 +823,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -825,7 +855,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -857,7 +887,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       record.execution.session = session;
@@ -879,7 +909,7 @@ describe("AgentManager", () => {
 
       const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       await manager.getRecord(firstId)!.execution.promise;
 
@@ -888,7 +918,7 @@ describe("AgentManager", () => {
       mockModules.mockRunAgent.mockReturnValueOnce(secondDeferred.promise);
       manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
         description: "second",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
 
       await expect(manager.interact(firstId, "resume")).resolves.toEqual({
@@ -916,7 +946,7 @@ describe("AgentManager", () => {
 
       const failedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "failed", {
         description: "failed",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const failedRecord = manager.getRecord(failedId)!;
       await failedRecord.execution.promise;
@@ -925,7 +955,7 @@ describe("AgentManager", () => {
       mockModules.mockRunAgent.mockReturnValueOnce(blocker.promise);
       const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
         description: "blocker",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
 
       await expect(manager.interact(failedId, "continue")).resolves.toEqual({
@@ -951,11 +981,11 @@ describe("AgentManager", () => {
 
       manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
         description: "second",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
 
       await expect(manager.interact(queuedId, "hello")).resolves.toEqual({ accepted: false, reason: "queued" });
@@ -970,7 +1000,7 @@ describe("AgentManager", () => {
       manager = new AgentManager(onComplete);
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
 
@@ -989,7 +1019,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
         resultSessionId: "parent-session",
         resultOriginEntryId: "origin-a",
       });
@@ -1010,7 +1040,7 @@ describe("AgentManager", () => {
       manager.setOnRemove(onRemove);
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
 
@@ -1031,11 +1061,11 @@ describe("AgentManager", () => {
 
       const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
         description: "second",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       await Promise.all([
         manager.getRecord(firstId)!.execution.promise,
@@ -1073,7 +1103,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       expect(manager.togglePinned(id)).toBe(true);
       deferred.resolve(mockRunResult());
@@ -1101,7 +1131,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -1125,7 +1155,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -1150,12 +1180,12 @@ describe("AgentManager", () => {
       manager.armDebugFault("output_blocked");
       const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
         description: "first",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       await manager.getRecord(firstId)!.execution.promise;
       const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
         description: "second",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       await manager.getRecord(secondId)!.execution.promise;
 
@@ -1184,16 +1214,16 @@ describe("AgentManager", () => {
 
       const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
         description: "blocker",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       manager.armDebugFault("output_blocked");
       const firstQueuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first queued", {
         description: "first queued",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const secondQueuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second queued", {
         description: "second queued",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
 
       expect(manager.getRecord(firstQueuedId)!.lifecycle.status).toBe("queued");
@@ -1232,12 +1262,12 @@ describe("AgentManager", () => {
 
       const blockerId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "blocker", {
         description: "blocker",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       manager.armDebugFault("provider_error");
       const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", {
         description: "queued",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       manager.clearDebugFault();
 
@@ -1256,7 +1286,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       await manager.getRecord(id)!.execution.promise;
 
@@ -1278,7 +1308,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -1310,7 +1340,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -1334,7 +1364,7 @@ describe("AgentManager", () => {
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
         description: "task",
-        modelKey: "test/model",
+        acceptedPolicy: acceptedRunPolicy("test/model"),
       });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
@@ -1350,7 +1380,7 @@ describe("AgentManager", () => {
       manager = new AgentManager(onComplete);
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult());
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       record.lifecycle.resultConsumed = true;
@@ -1374,7 +1404,7 @@ describe("AgentManager", () => {
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       expect(manager.clear(id)).toBe(true);
@@ -1391,7 +1421,7 @@ describe("AgentManager", () => {
       const session = mockAgentSession();
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       const record = manager.getRecord(id)!;
       await record.execution.promise;
       record.lifecycle.resultConsumed = true;
@@ -1415,7 +1445,7 @@ describe("AgentManager", () => {
       });
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       const disposed = manager.dispose();
@@ -1434,7 +1464,7 @@ describe("AgentManager", () => {
       session.extensionRunner.emit.mockRejectedValue(new Error("handler exploded"));
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       manager.clear(id);
@@ -1452,7 +1482,7 @@ describe("AgentManager", () => {
       );
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       const disposed = manager.dispose();
@@ -1476,7 +1506,7 @@ describe("AgentManager", () => {
       session.extensionRunner.emit.mockReturnValue(new Promise(() => {}));
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       let disposeSettled = false;
@@ -1515,7 +1545,7 @@ describe("AgentManager", () => {
       });
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
-      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", acceptedPolicy: acceptedRunPolicy("test/model") });
       await manager.getRecord(id)!.execution.promise;
 
       await manager.dispose();

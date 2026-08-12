@@ -20,23 +20,7 @@ import {
 } from "../../src/shell.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
-import type { AcceptedRunPolicy } from "../../src/types.js";
-
-const acceptedPolicy: AcceptedRunPolicy = {
-  definition: {
-    name: "reviewer",
-    description: "Review",
-    systemPrompt: "Review the task.",
-  },
-  registeredTools: ["read"],
-  restrictToRegisteredTools: true,
-  tools: ["read"],
-  extensions: false,
-  skills: false,
-  systemPromptMode: "replace",
-  includeContextFiles: false,
-  parentModelKey: "test/model",
-};
+import { acceptedRunPolicy } from "../fixtures.js";
 
 function createSession() {
   return {
@@ -116,10 +100,7 @@ describe("session-keyed coordinator fallback", () => {
         type: "reviewer",
         prompt: "review",
         description: "review",
-        acceptedPolicy,
-        model: { provider: "test", id: "model" },
-        modelKey: "test/model",
-        graceTurns: 6,
+        acceptedPolicy: acceptedRunPolicy(),
         runInBackground: true,
       });
       await spawned.record.execution.promise;
