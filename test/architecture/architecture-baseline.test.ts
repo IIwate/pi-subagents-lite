@@ -84,4 +84,37 @@ describe("architecture migration guardrails", () => {
     const graph = collectSourceGraph(projectRoot);
     expect(dependencyDirectionViolations(graph)).toEqual([]);
   });
+
+  it("rejects reverse dependencies inside a capability module", () => {
+    expect(dependencyDirectionViolations({
+      files: [
+        "src/modules/example/contracts/request.ts",
+        "src/modules/example/core/decision.ts",
+        "src/modules/example/application/execute.ts",
+        "src/modules/example/ports/repository.ts",
+      ],
+      imports: [
+        {
+          source: "src/modules/example/contracts/request.ts",
+          specifier: "../core/decision.js",
+          target: "src/modules/example/core/decision.ts",
+        },
+        {
+          source: "src/modules/example/core/decision.ts",
+          specifier: "../application/execute.js",
+          target: "src/modules/example/application/execute.ts",
+        },
+        {
+          source: "src/modules/example/ports/repository.ts",
+          specifier: "../application/execute.js",
+          target: "src/modules/example/application/execute.ts",
+        },
+      ],
+      edges: new Map(),
+    })).toEqual([
+      "src/modules/example/contracts/request.ts imports reverse layer src/modules/example/core/decision.ts",
+      "src/modules/example/core/decision.ts imports reverse layer src/modules/example/application/execute.ts",
+      "src/modules/example/ports/repository.ts imports reverse layer src/modules/example/application/execute.ts",
+    ]);
+  });
 });

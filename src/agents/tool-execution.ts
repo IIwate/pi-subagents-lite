@@ -10,8 +10,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
-import { isAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
-import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
+import { parseAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
+import { resolveType, resolveAgentPolicyInputs, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
@@ -172,19 +172,21 @@ export async function executeAgentTool(
     : resolveExactModel(resolvedModelKey, ctx.modelRegistry);
   if (!model) return errorResult(unknownModelError(resolvedModelKey));
 
-  const acceptedPolicy = resolveAcceptedRunPolicy(resolvedType, {
+  const policyInputs = resolveAgentPolicyInputs(resolvedType, {
     loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
     loadExtensionsImplicitly: store.agent.loadExtensionsImplicitly,
     systemPromptMode: store.agent.systemPromptMode,
     includeContextFiles: store.agent.includeContextFiles,
     parentModelKey: parentModelRef,
   });
-  if (!acceptedPolicy || !isAcceptedRunPolicy(acceptedPolicy)) {
+  if (!policyInputs) {
     return errorResult(`Unknown agent type: ${type}`);
   }
-  const maxTurns = acceptedPolicy.definition.maxTurns;
 
-  const acceptedModel = structuredClone(model);
+  const configuredOutputLimit = policyInputs.definition.maxTokens;
+  const acceptedModel = configuredOutputLimit != null && configuredOutputLimit > 0
+    ? { ...structuredClone(model), maxTokens: configuredOutputLimit }
+    : structuredClone(model);
 
   // Capture the predicted model/provider for queued-agent display.
   const modelName = acceptedModel.id;
@@ -217,6 +219,23 @@ export async function executeAgentTool(
     );
   }
   const thinkingLevel = thinkingSelection.level;
+  const configuredTurnLimit = policyInputs.definition.maxTurns;
+  const turnLimit = configuredTurnLimit == null || configuredTurnLimit === 0
+    ? null
+    : Math.max(1, configuredTurnLimit);
+  const acceptedPolicy = parseAcceptedRunPolicy({
+    ...policyInputs,
+    model: acceptedModel,
+    parentModel: ctx.model ? structuredClone(ctx.model) : null,
+    scopedModels,
+    thinkingLevel: thinkingLevel ?? null,
+    outputTokenLimit: acceptedModel.maxTokens,
+    turnLimit,
+    graceTurns: store.agent.graceTurns,
+  });
+  if (!acceptedPolicy) {
+    return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);
+  }
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;
@@ -226,13 +245,7 @@ export async function executeAgentTool(
     description,
     signal: runInBackground ? undefined : signal,
     acceptedPolicy,
-    model: acceptedModel,
     modelKey: resolvedModelKey,
-    scopedModels,
-    maxTurns,
-    thinkingLevel,
-    thinkingResolved: true,
-    graceTurns: store.agent.graceTurns,
     worktreePath: validatedWorktreePath,
     invocation: { modelName, providerName, thinkingLevel },
     runInBackground,

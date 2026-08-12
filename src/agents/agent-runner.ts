@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
@@ -26,10 +26,10 @@ import {
 import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
-import { missingSubagentModelError, scopedThinkingLevel } from "../models/model-scope.js";
+import { missingSubagentModelError } from "../models/model-scope.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
-import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
+import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGTH } from "../types.js";
 import type { SubagentType } from "./types.js";
 import { withSubagentSpawn } from "../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
@@ -43,7 +43,7 @@ function normalizeMaxTurns(n: number | undefined): number | undefined {
 }
 
 /** Info about a tool event in the subagent. */
-interface RunOptions extends RunTunables, RunCallbacks {
+interface RunOptions extends RunCallbacks {
   acceptedPolicy: AcceptedRunPolicy;
   /** ExtensionAPI instance — used for pi.exec() for git detection. */
   pi: ExtensionAPI;
@@ -454,20 +454,12 @@ async function initSession(
   loader: DefaultResourceLoader,
 ) {
   const policy = options.acceptedPolicy;
-  const sourceModel = options.model ?? ctx.model;
+  const sourceModel = policy.model as Model<any>;
   if (!sourceModel) throw new Error(missingSubagentModelError());
-  const maxTokens = policy.definition.maxTokens;
-  const model = maxTokens != null && maxTokens > 0
-    ? { ...sourceModel, maxTokens }
-    : sourceModel;
+  const model = sourceModel;
 
-  // Agent-tool calls pass invocation snapshots. The fallback keeps direct
-  // internal runAgent callers working without weakening accepted-call locks.
-  const scopedModels = options.scopedModels ? [...options.scopedModels] : [...ctx.scopedModels];
-  const thinkingLevel = options.thinkingResolved
-    ? options.thinkingLevel
-    : options.thinkingLevel
-      ?? scopedThinkingLevel(scopedModels, model);
+  const scopedModels = policy.scopedModels as NonNullable<Parameters<typeof createAgentSession>[0]>["scopedModels"];
+  const thinkingLevel = policy.thinkingLevel ?? undefined;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
@@ -555,7 +547,10 @@ async function createAndConfigureSession(
  */
 function wireTurnTracking(
   session: AgentSession,
-  options: Pick<RunOptions, "maxTurns" | "graceTurns" | "onTurnEnd">,
+  options: Pick<RunCallbacks, "onTurnEnd"> & {
+    maxTurns?: number;
+    graceTurns?: number;
+  },
 ) {
   let turnCount = 0;
   const maxTurns = normalizeMaxTurns(options.maxTurns);
@@ -717,7 +712,8 @@ async function runAgentImpl(
   }
   const { unsubscribe: unsubTurns, getAborted, getTurnLimited } = wireTurnTracking(session, {
     ...options,
-    maxTurns: options.maxTurns ?? agentConfig.maxTurns,
+    maxTurns: policy.turnLimit ?? undefined,
+    graceTurns: policy.graceTurns,
   });
 
   const finalMessage = await runTurnLoop(session, prompt, options, unsubTurns);

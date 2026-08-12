@@ -29,3 +29,7 @@ Required invariants:
 - Continuation is a new prompt to a still-settled live session, not persisted resume.
 - Cleanup never removes a pinned record and never changes delivery eligibility.
 - Late platform events are ignored or translated through the session ID without reviving a closed record.
+- Retention start, pause, expiry, pin, continuation, and close decisions use an injected runtime clock.
+- Close is idempotent across setup, running, settling, closing, and closed event traces. The Pi session driver owns shutdown emission, abort, bounded wait, disposal, and late platform events.
+
+Superseded states do not appear in the machine: an `Error` result has no special 30-minute retention window, selecting the Child screen does not pause cleanup, and concurrency-blocked continuation does not create a second retention mode. Restoring any of these states requires an approved product and domain-model change.

@@ -168,6 +168,21 @@ async function dispose(): Promise<void> {
   await mocks.manager.dispose();
 }
 
+function model(provider: string, id: string) {
+  return {
+    id,
+    name: id,
+    api: "openai-responses",
+    provider,
+    baseUrl: "https://example.test/v1",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
+}
+
 describe("queued invocation snapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -184,9 +199,9 @@ describe("queued invocation snapshots", () => {
     mocks.store.agent.includeContextFiles = false;
     mocks.store.agent.systemPromptMode = "replace";
     const models = [
-      { provider: "parent", id: "main-model", reasoning: true },
-      { provider: "parent", id: "next-model", reasoning: true },
-      { provider: "other", id: "worker-model", reasoning: true },
+      model("parent", "main-model"),
+      model("parent", "next-model"),
+      model("other", "worker-model"),
     ];
     mocks.ctx = {
       cwd: "/tmp/project",
@@ -227,7 +242,7 @@ describe("queued invocation snapshots", () => {
     mocks.routing.enabled = false;
     mocks.routing.enabledProviders = [];
     mocks.routing.agentAccess = {};
-    mocks.ctx.model = { provider: "parent", id: "next-model" };
+    mocks.ctx.model = model("parent", "next-model");
     mocks.ctx.scopedModels = [{ model: mocks.ctx.model, thinkingLevel: "low" }];
     mocks.releaseFirst();
     await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
@@ -236,8 +251,8 @@ describe("queued invocation snapshots", () => {
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
     expect(queuedOptions.model).toMatchObject({ provider: "other", id: "worker-model" });
     expect(queuedOptions.scopedModels).toEqual([
-      { model: { provider: "parent", id: "main-model", reasoning: true } },
-      { model: { provider: "other", id: "worker-model", reasoning: true }, thinkingLevel: "high" },
+      { model: model("parent", "main-model") },
+      { model: model("other", "worker-model"), thinkingLevel: "high" },
     ]);
     expect(queuedOptions.thinkingLevel).toBe("high");
     expect(second.lifecycle.status, second.error).toBe("completed");

@@ -13,6 +13,7 @@ The accepted-call contract test uses an independent literal snapshot and JSON ro
 - Foreground interruption stops and retains records while background work remains detached.
 - Setup, provider, abort, timeout, continuation, and close failures produce ordinary terminal outcomes.
 - Retention, pinning, cleanup, late usage, and idempotent shutdown use an injected clock.
+- Special failure retention, selection-paused cleanup, and queue revalidation remain absent regression cases.
 - Worktree validation is delegated through its serializable inspector port.
 
 ## Fixtures and doubles

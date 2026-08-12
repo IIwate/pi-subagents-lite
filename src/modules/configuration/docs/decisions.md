@@ -9,7 +9,7 @@
 
 ## Superseded
 
-- `ConfigStore` ownership of persistence, policy mutation, and manager/navigator side effects is historical evidence in [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md).
+- `ConfigStore` as the owner of persistence, capability policy, and manager or navigator side effects is retired. The [operations contract](./operations.md) owns precedence and transaction behavior.
 
 ## Implementation-only
 

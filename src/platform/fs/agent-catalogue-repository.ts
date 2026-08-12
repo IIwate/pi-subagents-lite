@@ -1,7 +1,9 @@
 import { scanAgentFilesInDir, type AgentConfigFromMd } from "../../agents/agent-discovery.js";
-import type {
-  AgentCatalogueRepository,
-  AgentSourceDefinition,
+import { Check } from "typebox/value";
+import {
+  AgentSourceDefinitionSchema,
+  type AgentCatalogueRepository,
+  type AgentSourceDefinition,
 } from "../../modules/agent-catalogue/public.js";
 
 function compactDefinition(definition: Record<string, unknown>): AgentSourceDefinition {
@@ -12,7 +14,7 @@ function compactDefinition(definition: Record<string, unknown>): AgentSourceDefi
 
 function toSourceDefinition(definition: AgentConfigFromMd): AgentSourceDefinition | undefined {
   if (!definition.name) return undefined;
-  return compactDefinition({
+  const sourceDefinition = compactDefinition({
     name: definition.name,
     displayName: definition.display_name,
     description: definition.description,
@@ -29,6 +31,9 @@ function toSourceDefinition(definition: AgentConfigFromMd): AgentSourceDefinitio
     systemPrompt: definition.systemPrompt,
     source: definition.source === "user" ? "global" : "project",
   });
+  return Check(AgentSourceDefinitionSchema, sourceDefinition)
+    ? sourceDefinition
+    : undefined;
 }
 
 export function createFileAgentCatalogueRepository(): AgentCatalogueRepository {

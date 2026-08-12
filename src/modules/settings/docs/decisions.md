@@ -8,7 +8,7 @@
 
 ## Superseded
 
-- Repeated menu and ConfigStore side-effect patches are historical evidence in [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md), not policy requirements.
+- Menu callbacks that implement policy or publish in-memory state before persistence are retired. The [UI state matrix](./ui-states.md) owns workflows; capability commands own decisions.
 
 ## Implementation-only
 

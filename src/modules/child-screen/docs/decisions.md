@@ -8,7 +8,7 @@
 
 ## Superseded
 
-- Repaint, focus, footer, and Pi-version patch history is classified in [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md) until it is transferred to state examples and decisions.
+- Renderer-owned navigation state and `LiveView`-specific repaint behavior are retired. The [UI state matrix](./ui-states.md) owns shrink, focus, footer, regular/fullscreen, teardown, and conflict examples.
 
 ## Implementation-only
 

@@ -6,9 +6,10 @@
 
 ## Implemented accepted-call schemas
 
-- `AcceptedRunPolicySchema` defines the immutable policy snapshot captured after Agent authorization.
+- `AcceptedRunPolicySchema` defines the complete immutable policy snapshot captured after Agent authorization: the copied definition and loading policy, prompt and context modes, selected and parent models, scoped models, Thinking selection, output and turn limits, and grace turns.
 - `AgentInvocationSchema`, `ThinkingLevelSchema`, and `SystemPromptModeSchema` define the serializable invocation vocabulary used by that snapshot.
-- `isAcceptedRunPolicy` is the receiving-boundary validator used before the runtime spawn path consumes a snapshot.
+- `AcceptedModelSnapshotSchema` and `AcceptedScopedModelSchema` describe the serializable Pi model data needed by the platform session driver.
+- `parseAcceptedRunPolicy` accepts only plain JSON values, verifies the parent-model key and derived output/turn limits, then returns a separately validated JSON copy for runtime consumption.
 
 Lifecycle commands and snapshots remain planned for the slices that migrate runtime ownership.
 

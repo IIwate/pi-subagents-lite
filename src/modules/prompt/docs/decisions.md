@@ -8,7 +8,7 @@
 
 ## Superseded
 
-- Prompt fragments previously assembled in `events.ts` and `agent-runner` are historical ownership evidence in [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md).
+- Consumer-owned prompt fragments and independently projected Model access guidance are retired. The [prompt source inventory](./prompt-sources.md) owns every extension-controlled fragment and its ordering.
 
 ## Implementation-only
 

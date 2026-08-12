@@ -7,7 +7,7 @@
 
 ## Superseded
 
-- Removed delivery modes and superseded recovery windows remain historical scenarios only. See [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md) until Phase 0 transfers their classification.
+- Configurable next-turn delivery and session-global injection are retired. Durable origin-branch eligibility and the state-machine examples are the current authority.
 
 ## Implementation-only
 

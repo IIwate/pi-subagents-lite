@@ -2,15 +2,14 @@
  * Type definitions for the subagent system.
  */
 
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
 import type { SubagentType } from "./agents/types.js";
 import type {
   AcceptedRunPolicy as AcceptedRunPolicyContract,
   AgentInvocation as AgentInvocationContract,
-  ThinkingLevel as ThinkingLevelContract,
 } from "./modules/subagent-runtime/public.js";
 
 export type {
@@ -18,18 +17,6 @@ export type {
   AgentInvocation,
   ThinkingLevel,
 } from "./modules/subagent-runtime/public.js";
-
-/** Resolved model + run-limit tunables shared by every spawn/run shape. */
-export interface RunTunables {
-  model?: Model<any>;
-  /** Scope captured when the Agent call was accepted. */
-  scopedModels?: ExtensionContext["scopedModels"];
-  maxTurns?: number;
-  thinkingLevel?: ThinkingLevelContract;
-  /** True when thinkingLevel is the accepted-call snapshot, including undefined. */
-  thinkingResolved?: boolean;
-  graceTurns?: number;
-}
 
 export interface AgentRecord {
   id: string;
@@ -64,10 +51,10 @@ export interface RunCallbacks {
 
 /**
  * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
- * The resolved run params that both the manager and coordinator agree on;
- * extends RunTunables with display/identity fields.
+ * Runtime policy has one source here; duplicated mutable fields would let
+ * queued work remember whichever copy a later caller happened to read.
  */
-export interface SpawnConfig extends RunTunables {
+export interface SpawnConfig {
   acceptedPolicy: AcceptedRunPolicyContract;
   description: string;
   modelKey?: string;

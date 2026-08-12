@@ -117,6 +117,13 @@ const defaultAgentConfig = {
 function runAgent(ctx: any, type: string, prompt: string, options: any) {
   const definition = structuredClone(mockModules.mockGetAgentConfig() ?? defaultAgentConfig);
   const config = mockModules.mockGetConfig();
+  const model = options.model ?? ctx.model;
+  const scopedModels = options.scopedModels ?? ctx.scopedModels;
+  const configuredTurnLimit = options.maxTurns ?? definition.maxTurns;
+  const configuredOutputLimit = definition.maxTokens;
+  const acceptedModel = configuredOutputLimit != null && configuredOutputLimit > 0
+    ? { ...model, maxTokens: configuredOutputLimit }
+    : model;
   return runAgentWithPolicy(ctx, type, prompt, {
     ...options,
     acceptedPolicy: {
@@ -129,6 +136,17 @@ function runAgent(ctx: any, type: string, prompt: string, options: any) {
       systemPromptMode: mockModules.mockSystemPromptMode,
       includeContextFiles: mockModules.mockIncludeContextFiles,
       parentModelKey: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "",
+      model: acceptedModel,
+      parentModel: ctx.model ?? null,
+      scopedModels,
+      thinkingLevel: options.thinkingLevel ?? null,
+      outputTokenLimit: configuredOutputLimit != null && configuredOutputLimit > 0
+        ? configuredOutputLimit
+        : acceptedModel?.maxTokens ?? 1,
+      turnLimit: configuredTurnLimit == null || configuredTurnLimit === 0
+        ? null
+        : Math.max(1, configuredTurnLimit),
+      graceTurns: options.graceTurns ?? 6,
     },
   });
 }

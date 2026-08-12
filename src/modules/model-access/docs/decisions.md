@@ -7,7 +7,7 @@
 
 ## Superseded
 
-- Earlier switch, assignment, queue-revalidation, and global Thinking-default behavior is retained only as historical evidence. See [refactoring-history-audit.md](../../../../docs/refactoring-history-audit.md) and the accepted model-access ADRs until migration documents absorb them.
+- Assignment precedence, queue revalidation, implicit alternate selection, and global Thinking defaults are retired. The [decision tables](./decision-tables.md) are the sole module authority for saved, effective, unavailable, dormant, scope, and Thinking combinations.
 
 ## Implementation-only
 

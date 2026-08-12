@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
 import { Check } from "typebox/value";
 import {
   AgentCatalogueResultSchema,
@@ -6,6 +7,7 @@ import {
   createAgentCatalogue,
   type AgentCatalogueRepository,
 } from "../../../src/modules/agent-catalogue/public.js";
+import { createFileAgentCatalogueRepository } from "../../../src/platform/fs/agent-catalogue-repository.js";
 
 describe("REQ-CATALOGUE-002 Agent catalogue public seam", () => {
   it("keeps a same-name global definition when built-in definitions are disabled", async () => {
@@ -70,6 +72,33 @@ describe("REQ-CATALOGUE-002 Agent catalogue public seam", () => {
         },
       },
       resultValid: true,
+    });
+  });
+
+  it("keeps valid filesystem definitions when another file is malformed", async () => {
+    const globalDirectory = resolve(import.meta.dirname, "../../resources/agent-catalogue/mixed");
+    const projectDirectory = resolve(import.meta.dirname, "../../resources/agent-catalogue/missing");
+
+    const catalogue = createAgentCatalogue({
+      repository: createFileAgentCatalogueRepository(),
+      builtInDefinitions: [],
+    });
+    const result = await catalogue.execute({
+      kind: "discover",
+      roots: { globalDirectory, projectDirectory },
+      configuration: {},
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      catalogue: {
+        definitions: [{
+          name: "valid-agent",
+          description: "Valid definition",
+          systemPrompt: "Review the task.",
+          source: "global",
+        }],
+      },
     });
   });
 });

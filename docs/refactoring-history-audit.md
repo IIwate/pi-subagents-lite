@@ -6,7 +6,7 @@ This audit identifies repeated change and patch patterns that are easy to miss w
 
 ## Lifecycle
 
-Use this file during planning and Phase 0 to classify historical behavior as Current, Superseded, or Implementation-only and to prevent repeated patches from disappearing from consideration. For every actionable finding, record one final owner:
+This file is frozen planning evidence. Phase 0 used it to classify historical behavior as Current, Superseded, or Implementation-only and prevent repeated patches from disappearing from consideration. The final owner mapping now lives in [migration-baseline.md](./architecture/migration-baseline.md#history-finding-ownership); this audit is neither a product requirement nor a maintenance backlog.
 
 - user outcomes and behavior belong in the PRD and acceptance examples;
 - boundary rationale belongs in the owning module's `docs/decisions.md`;

@@ -56,7 +56,7 @@ vi.mock("../../src/spawn/worktree-validator.js", () => ({
 vi.mock("../../src/agents/agent-types.js", () => ({
   resolveType: vi.fn((type: string) => type),
   getAgentConfig: vi.fn(() => ({ maxTurns: 25, thinkingLevel: undefined })),
-  resolveAcceptedRunPolicy: vi.fn((_type: string, defaults: any) => ({
+  resolveAgentPolicyInputs: vi.fn((_type: string, defaults: any) => ({
     definition: {
       name: "general-purpose",
       description: "Test agent",
@@ -138,13 +138,8 @@ vi.mock("../../src/shell.js", () => ({
       const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
         description: intent.description,
         signal: intent.signal,
-        model: intent.model,
-        scopedModels: intent.scopedModels,
-        maxTurns: intent.maxTurns,
-        thinkingLevel: intent.thinkingLevel,
-        thinkingResolved: intent.thinkingResolved,
+        acceptedPolicy: intent.acceptedPolicy,
         modelKey: intent.modelKey,
-        graceTurns: intent.graceTurns,
         worktreePath: intent.worktreePath,
         invocation: intent.invocation,
       });
@@ -180,6 +175,22 @@ function makeParams(overrides: Record<string, unknown> = {}): Record<string, unk
     prompt: "Do something useful",
     description: "Test agent",
     agent: "general-purpose",
+    ...overrides,
+  };
+}
+
+function makeModel(provider: string, id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    name: id,
+    api: "openai-responses",
+    provider,
+    baseUrl: "https://example.test/v1",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
     ...overrides,
   };
 }
@@ -559,7 +570,7 @@ describe("executeAgentTool — thinking param", () => {
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
     const spawnOptions = mockSpawn.mock.calls[0][4];
-    expect(spawnOptions.thinkingLevel).toBe("low");
+    expect(spawnOptions.acceptedPolicy.thinkingLevel).toBe("low");
   });
 
   it("rejects free-form thinking values not in Pi's canonical list", async () => {
@@ -589,17 +600,14 @@ describe("executeAgentTool — model access", () => {
     };
     ctx = fakeCtx();
     ctx.thinkingLevel = "medium";
-    ctx.model = {
-      provider: "test",
-      id: "parent-model",
-      reasoning: true,
+    ctx.model = makeModel("test", "parent-model", {
       thinkingLevelMap: { xhigh: "xhigh", max: null },
-    };
+    });
     const models = [
       ctx.model,
-      { provider: "test", id: "other-model", reasoning: true },
-      { provider: "cpa-responses", id: "grok-4.5", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: null } },
-      { provider: "cpa-responses", id: "grok-5", reasoning: true },
+      makeModel("test", "other-model"),
+      makeModel("cpa-responses", "grok-4.5", { thinkingLevelMap: { xhigh: "xhigh", max: null } }),
+      makeModel("cpa-responses", "grok-5"),
     ];
     ctx.modelRegistry = {
       find: vi.fn((provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id)),
@@ -618,8 +626,8 @@ describe("executeAgentTool — model access", () => {
 
   it("uses the exact parent when model is omitted and Parent access is implicit", async () => {
     await executeAgentTool("parent", makeParams({ model: undefined }), undefined, undefined, ctx);
-    expect(mockSpawn.mock.calls[0][4].model).toEqual(ctx.model);
-    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("medium");
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.model).toEqual(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.thinkingLevel).toBe("medium");
   });
 
   it("rejects omitted and explicit Parent default use when Parent access is denied", async () => {
@@ -658,8 +666,8 @@ describe("executeAgentTool — model access", () => {
     ctx.modelRegistry.getAll.mockReturnValue([]);
     ctx.modelRegistry.getAvailable.mockReturnValue([]);
     await executeAgentTool("parent-unregistered", makeParams({ model: "test/parent-model" }), undefined, undefined, ctx);
-    expect(mockSpawn.mock.calls[0][4].model).toEqual(ctx.model);
-    expect(mockSpawn.mock.calls[0][4].model).not.toBe(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.model).toEqual(ctx.model);
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.model).not.toBe(ctx.model);
   });
 
   it("rejects every non-parent explicit model while routing is OFF", async () => {
@@ -775,7 +783,7 @@ describe("executeAgentTool — model access", () => {
   });
 
   it("locks model, scope, and resolved thinking in the spawn intent", async () => {
-    ctx.scopedModels = [{ model: { provider: "cpa-responses", id: "grok-4.5" }, thinkingLevel: "high" }];
+    ctx.scopedModels = [{ model: makeModel("cpa-responses", "grok-4.5"), thinkingLevel: "high" }];
     await executeAgentTool(
       "snapshot",
       makeParams({ model: "cpa-responses/grok-4.5" }),
@@ -783,16 +791,15 @@ describe("executeAgentTool — model access", () => {
       undefined,
       ctx,
     );
-    const options = mockSpawn.mock.calls[0][4];
+    const options = mockSpawn.mock.calls[0][4].acceptedPolicy;
     expect(options.model).toMatchObject({ provider: "cpa-responses", id: "grok-4.5" });
     expect(options.scopedModels).toEqual(ctx.scopedModels);
     expect(options.thinkingLevel).toBe("high");
-    expect(options.thinkingResolved).toBe(true);
-    expect(options.invocation.thinkingLevel).toBe("high");
+    expect(mockSpawn.mock.calls[0][4].invocation.thinkingLevel).toBe("high");
   });
 
   it("makes a Model scope thinking pin authoritative", async () => {
-    ctx.scopedModels = [{ model: { provider: "cpa-responses", id: "grok-4.5" }, thinkingLevel: "medium" }];
+    ctx.scopedModels = [{ model: makeModel("cpa-responses", "grok-4.5"), thinkingLevel: "medium" }];
     const rejected = await executeAgentTool(
       "thinking",
       makeParams({ model: "cpa-responses/grok-4.5", thinking: "xhigh" }),
@@ -811,7 +818,7 @@ describe("executeAgentTool — model access", () => {
       undefined,
       ctx,
     );
-    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("medium");
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.thinkingLevel).toBe("medium");
   });
 
   it("uses an exact-model thinking allowlist and default", async () => {
@@ -828,7 +835,7 @@ describe("executeAgentTool — model access", () => {
       undefined,
       ctx,
     );
-    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("low");
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.thinkingLevel).toBe("low");
 
     vi.clearAllMocks();
     const rejected = await executeAgentTool(
@@ -852,7 +859,7 @@ describe("executeAgentTool — model access", () => {
       undefined,
       ctx,
     );
-    expect(mockSpawn.mock.calls[0][4].thinkingLevel).toBe("high");
+    expect(mockSpawn.mock.calls[0][4].acceptedPolicy.thinkingLevel).toBe("high");
   });
 
   it("never falls back after an explicit denial", async () => {

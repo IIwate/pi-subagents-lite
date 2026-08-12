@@ -26,8 +26,6 @@ export interface SpawnIntent extends SpawnConfig {
   /** Parent tool-call signal, present only for foreground work. */
   signal?: AbortSignal;
   runInBackground: boolean;
-  /** Narrowed to required — all callers resolve this before spawn. */
-  graceTurns: number;
 }
 
 export interface SpawnResult {

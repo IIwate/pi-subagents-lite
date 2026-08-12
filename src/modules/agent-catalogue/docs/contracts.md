@@ -21,6 +21,8 @@ Lookup commands and catalogue-change notifications remain planned for the slices
 
 `AgentCatalogueRepository` loads serialized global and project source definitions from configured roots. It does not expose frontmatter parser objects or filesystem handles. The Node filesystem implementation is isolated under `platform/fs` and is selected by the bootstrap factory.
 
+The filesystem adapter validates each mapped definition before it enters the repository result. One malformed file is isolated; the application still validates the complete repository result so a defective replacement adapter cannot cross the module boundary.
+
 ## Dependency rule
 
 `contracts` and `core` do not import Pi, Node filesystem APIs, process globals, timers, or other module internals. Consumers import only `public.ts`.

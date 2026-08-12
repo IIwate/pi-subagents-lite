@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isAcceptedRunPolicy } from "../../src/modules/subagent-runtime/public.js";
 
 // Import the module under test
 import {
@@ -17,7 +16,7 @@ import {
   BUILTIN_TOOL_NAMES,
   getConfig,
   registerAgents,
-  resolveAcceptedRunPolicy,
+  resolveAgentPolicyInputs,
 } from "../../src/agents/agent-types.js";
 import type { AgentConfig } from "../../src/agents/types.ts";
 
@@ -409,7 +408,7 @@ describe("resolveVisibleTools — edge cases", () => {
   });
 });
 
-describe("resolveAcceptedRunPolicy", () => {
+describe("resolveAgentPolicyInputs", () => {
   it("deep-copies the accepted definition and resolves loading defaults", () => {
     const config: AgentConfig = {
       name: "snapshot-agent",
@@ -425,7 +424,7 @@ describe("resolveAcceptedRunPolicy", () => {
     };
     registerAgents(new Map([[config.name, config]]), { disableDefaultAgents: true });
 
-    const policy = resolveAcceptedRunPolicy(config.name, {
+    const policy = resolveAgentPolicyInputs(config.name, {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: false,
       systemPromptMode: "inherit",
@@ -458,8 +457,7 @@ describe("resolveAcceptedRunPolicy", () => {
         source: "project",
       },
     });
-    expect(isAcceptedRunPolicy(policy)).toBe(true);
-    expect(resolveAcceptedRunPolicy(config.name, {
+    expect(resolveAgentPolicyInputs(config.name, {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",

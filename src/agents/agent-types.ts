@@ -7,7 +7,6 @@
 
 import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import type { AcceptedRunPolicy } from "../types.js";
 import type { AgentConfig, SystemPromptMode } from "./types.js";
 
 /**
@@ -152,7 +151,7 @@ export function getAgentConfig(name: string): AgentConfig | undefined {
 }
 
 /** Resolve and deep-copy every mutable policy input for an accepted call. */
-export function resolveAcceptedRunPolicy(
+export function resolveAgentPolicyInputs(
   type: string,
   defaults: {
     loadSkillsImplicitly: boolean;
@@ -161,19 +160,22 @@ export function resolveAcceptedRunPolicy(
     includeContextFiles: boolean;
     parentModelKey: string;
   },
-): AcceptedRunPolicy | undefined {
+) {
   const key = resolveType(type);
   const config = key ? agents.get(key) : undefined;
   if (!config) return undefined;
 
-  const definition = structuredClone(config);
+  // The registry still contains optional undefined properties from the legacy
+  // parser. Canonicalize once here so the accepted boundary receives JSON,
+  // while direct callers with functions or custom serializers remain rejected.
+  const definition = JSON.parse(JSON.stringify(config)) as AgentConfig;
   const resolved = applyGlobalDefaults(
     definition.skills,
     definition.extensions,
     defaults.loadSkillsImplicitly,
     defaults.loadExtensionsImplicitly,
   );
-  const policy: AcceptedRunPolicy = {
+  const policy = {
     definition,
     registeredTools: definition.registeredTools?.length
       ? [...definition.registeredTools]
@@ -186,7 +188,7 @@ export function resolveAcceptedRunPolicy(
     includeContextFiles: defaults.includeContextFiles,
     parentModelKey: defaults.parentModelKey,
   };
-  return policy;
+  return JSON.parse(JSON.stringify(policy));
 }
 /** Get all visible type names (for spawning and tool descriptions). */
 export function getAvailableTypes(): string[] {
