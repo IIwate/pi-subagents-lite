@@ -49,3 +49,11 @@ Tests at these seams use public behavior and independent expected values. Intern
 - README and product docs no longer contradict the approved Model access and Thinking behavior.
 
 The first migration slice is a Phase 1 entry condition, not a Phase 0 implementation requirement: it must have one documented requirement, one TypeBox contract, one failing public-seam test, and one removed legacy path.
+
+## Phase 1 tracer verification
+
+- `REQ-CATALOGUE-002` is exercised through `agent-catalogue/public.ts` with a literal JSON command and result.
+- Session-start discovery now uses the catalogue facade and the filesystem repository wired by `bootstrap`; the legacy `scanAndMerge` entry point was removed.
+- `disableDefaultAgents` is read through `configuration/public.ts`, validated by the catalogue contract, and does not add a persisted section or revision field.
+- The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
+- The tracer commits run `bun run typecheck`, focused contract tests, architecture guards, and the full suite before the Phase 1 review checkpoint.
