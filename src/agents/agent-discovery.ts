@@ -55,25 +55,26 @@ function parseFrontmatter(
     return { frontmatter: {}, body: "" };
   }
 
-  // Check for triple-dash delimited frontmatter
+  const openingDelimiterLength = content.startsWith("---\r\n") ? 5 : 4;
   if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
     return { frontmatter: {}, body: content };
   }
 
-  // Find closing ---
-  const endIdx = content.indexOf("\n---\n", 4);
-  if (endIdx === -1) {
+  const closingDelimiter = /\r?\n---\r?\n/g;
+  closingDelimiter.lastIndex = openingDelimiterLength;
+  const delimiterMatch = closingDelimiter.exec(content);
+  if (!delimiterMatch) {
     return { frontmatter: {}, body: content };
   }
 
-  const fmRaw = content.slice(4, endIdx);
-  const body = content.slice(endIdx + 5).trim();
+  const fmRaw = content.slice(openingDelimiterLength, delimiterMatch.index);
+  const body = content.slice(delimiterMatch.index + delimiterMatch[0].length).trim();
 
   const frontmatter: Record<string, unknown> = {};
   let currentKey: string | null = null;
   let currentValues: string[] | null = null;
 
-  for (const line of fmRaw.split("\n")) {
+  for (const line of fmRaw.split(/\r?\n/)) {
     const trimmed = line.trim();
 
     // Skip empty lines

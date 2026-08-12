@@ -142,6 +142,17 @@ Just a body.
     expect(result.source).toBe("project");
   });
 
+  it("parses frontmatter with Windows line endings", () => {
+    const content = "---\r\nname: windows-agent\r\ndescription: Windows definition\r\n---\r\nReview the task.\r\n";
+
+    expect(parseAgentFile(content, "user")).toMatchObject({
+      name: "windows-agent",
+      description: "Windows definition",
+      systemPrompt: "Review the task.",
+      source: "user",
+    });
+  });
+
   it("parses content with no frontmatter", () => {
     const content = "# Just a markdown file\n\nNo frontmatter here.";
     const result = parseAgentFile(content, "user");
