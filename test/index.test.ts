@@ -33,7 +33,9 @@ vi.mock("typebox", () => {
       }),
       String: createType("string"),
       Number: createType("number"),
+      Integer: createType("integer"),
       Boolean: createType("boolean"),
+      Null: createType("null"),
       Optional: (schema: any) => ({ ...schema, optional: true }),
       Array: (items: any) => ({ type: "array", items }),
       Record: (keyType: any, valueType: any) => ({
@@ -45,6 +47,12 @@ vi.mock("typebox", () => {
       Literal: (value: string | number | boolean) => ({
         type: "literal",
         const: value,
+      }),
+      Ref: (ref: string) => ({ type: "ref", ref }),
+      Cyclic: (definitions: Record<string, any>, ref: string) => ({
+        type: "cyclic",
+        definitions,
+        ref,
       }),
     },
   };

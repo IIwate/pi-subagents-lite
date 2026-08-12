@@ -15,6 +15,8 @@ Interactive product policies such as Model access and Thinking access are not si
 
 The refactor preserves the current unversioned `modelRouting`, `agent`, and `concurrency` sections. A `revision` is runtime transaction metadata and is not written to disk. No dual-format reader or migration layer is introduced.
 
+The Phase 1 read path translates the existing ConfigStore snapshot into those same three sections and returns revision metadata alongside it. It does not persist, add, or rename a field.
+
 ## Transaction boundary
 
 The owning capability validates and normalizes its proposed fragment, then submits one serializable atomic replacement request. The repository preserves unrelated sections and returns a new in-memory revision only after the write succeeds.

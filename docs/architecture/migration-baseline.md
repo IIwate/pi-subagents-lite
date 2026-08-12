@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 48 files, 854 passed, 2 skipped, 856 total | Vitest |
+| Full suite | 49 files, 855 passed, 2 skipped, 857 total | Vitest |
 | Skipped tests | Two directory-symlink scenarios when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 6 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
@@ -24,8 +24,8 @@ The two skipped scenarios are not replaced by ordinary directories or junctions.
 
 ## Dependency baseline
 
-- Source TypeScript files: 52.
-- Internal source edges: 181.
+- Source TypeScript files: 59.
+- Internal source edges: 195.
 - Existing strongly connected components: 1.
 - The remaining allowed cycle fingerprint is recorded in `test/architecture/architecture-baseline.test.ts`.
 - Existing internal `vi.mock` baseline: 27 test files, 69 calls.

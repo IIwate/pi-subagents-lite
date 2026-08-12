@@ -1,9 +1,14 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Check } from "typebox/value";
 import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import type { AgentConfig } from "./agents/types.js";
 import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
-import type { AgentDefinitionSnapshot } from "./modules/agent-catalogue/public.js";
+import { createConfigurationRuntime } from "./bootstrap/configuration.js";
+import {
+  AgentCatalogueConfigurationSchema,
+  type AgentDefinitionSnapshot,
+} from "./modules/agent-catalogue/public.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
@@ -20,6 +25,7 @@ import {
 } from "./shell.js";
 
 const agentCatalogue = createAgentCatalogueRuntime();
+const configuration = createConfigurationRuntime();
 
 function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
   const { source, ...config } = structuredClone(definition);
@@ -81,12 +87,23 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
   const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
-  const disableDefaults = getStore().agent.disableDefaultAgents;
+  const configurationResult = await configuration.execute({
+    kind: "read-value",
+    path: ["agent", "disableDefaultAgents"],
+  });
+  if (!configurationResult.ok) throw new Error(configurationResult.error.message);
+  const catalogueConfiguration = configurationResult.found
+    ? { disableDefaultAgents: configurationResult.value }
+    : {};
+  if (!Check(AgentCatalogueConfigurationSchema, catalogueConfiguration)) {
+    throw new TypeError("Agent catalogue configuration is invalid.");
+  }
+  const disableDefaults = catalogueConfiguration.disableDefaultAgents === true;
   setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);
   const result = await agentCatalogue.execute({
     kind: "discover",
     roots: { globalDirectory: userAgentDir, projectDirectory: projectAgentDir },
-    configuration: { disableDefaultAgents: disableDefaults },
+    configuration: catalogueConfiguration,
   });
   if (!result.ok) throw new Error(result.error.message);
   registerAgents(new Map(

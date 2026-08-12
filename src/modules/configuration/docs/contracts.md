@@ -2,16 +2,16 @@
 
 ## Public boundary
 
-`public.ts` exports serialized document snapshots, fragment transaction requests/results, source-resolution results, and the repository port. It does not export capability policy types.
+`public.ts` currently exports serialized document read contracts and the repository port. Fragment transactions and source-resolution contracts join the same surface when their production paths migrate. It does not export capability policy types.
 
-## Planned schemas
+## Implemented read schemas
 
-- `ConfigurationDocumentSnapshot` with in-memory revision metadata.
-- `ConfigurationFragmentTransaction` and `ConfigurationCommitResult`.
-- `ConfigurationSourceRequest` and `ConfigurationSourceResult`.
+- `ConfigurationDocumentSnapshotSchema` defines a JSON document plus revision metadata held outside that document.
+- `ReadConfigurationValueCommandSchema` defines a non-empty document path.
+- `ReadConfigurationValueResultSchema` defines a found value, a missing path, or a serializable validation/repository failure.
 
-The persisted JSON remains in its current unversioned shape. Capability modules validate their own fragments before submitting them.
+Fragment transaction and source-precedence schemas remain planned for the slices that migrate writes and operational source resolution. The persisted JSON remains in its current unversioned shape. Capability modules validate their own values before using or submitting them.
 
 ## Port
 
-`ConfigurationDocumentRepository` loads a document and atomically replaces one fragment. It reports persistence failure instead of swallowing it. File handles and temporary paths remain inside the platform implementation.
+`ConfigurationDocumentRepository` currently loads a serialized document snapshot. Its later atomic replacement operation will report persistence failure instead of swallowing it. File handles and temporary paths remain inside the platform implementation.

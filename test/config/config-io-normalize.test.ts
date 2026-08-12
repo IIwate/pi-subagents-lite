@@ -231,7 +231,12 @@ describe("config-io model access normalization", () => {
     expect(config.concurrency.default).toBe(7);
 
     saveConfigAtomic(config);
-    expect(JSON.parse(files.get(CONFIG_PATH)!).modelRouting).toEqual({
+    const saved = JSON.parse(files.get(CONFIG_PATH)!);
+    expect({ sections: Object.keys(saved), revision: saved.revision }).toEqual({
+      sections: ["modelRouting", "agent", "concurrency"],
+      revision: undefined,
+    });
+    expect(saved.modelRouting).toEqual({
       enabled: true,
       enabledProviders: [],
       agentAccess: {},

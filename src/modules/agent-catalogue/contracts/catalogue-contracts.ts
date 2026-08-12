@@ -46,7 +46,7 @@ export const AgentSourceDefinitionSchema = Type.Object({
 }, { additionalProperties: false });
 
 export const AgentCatalogueConfigurationSchema = Type.Object({
-  disableDefaultAgents: Type.Boolean(),
+  disableDefaultAgents: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
 
 export const AgentCatalogueRootsSchema = Type.Object({

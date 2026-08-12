@@ -4,6 +4,8 @@
 
 Test source resolution and fragment transactions through `configuration/public.ts` with plain JSON values.
 
+The Phase 1 tracer reads a capability-owned value through that public surface and verifies that JSON round-tripping keeps the revision outside the three-section document.
+
 ## Required scenarios
 
 - Environment > `.env` > persisted file > capability-owned defaults for operational settings.

@@ -5,7 +5,7 @@
 - Discovery and merge policy belong to one catalogue capability; frontmatter parsing remains an internal component.
 - The effective definition is copied into the Accepted run policy at authorization time.
 - Session-start discovery enters through `agent-catalogue/public.ts`; its filesystem source is wired by `bootstrap/agent-catalogue.ts`.
-- The `disableDefaultAgents` value is validated as a catalogue-owned fragment and does not create a new persisted section.
+- The `disableDefaultAgents` value is read through `configuration/public.ts`, then validated as a catalogue-owned fragment without creating a new persisted section.
 
 ## Superseded
 
