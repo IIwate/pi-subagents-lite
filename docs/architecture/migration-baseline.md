@@ -58,3 +58,10 @@ The first migration slice is a Phase 1 entry condition, not a Phase 0 implementa
 - `AcceptedRunPolicySchema` now validates the resolver's accepted-call snapshot; Agent configuration and invocation types derive from the Agent catalogue and runtime TypeBox contracts.
 - The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
 - The tracer commits run `bun run typecheck`, focused contract tests, architecture guards, and the full suite before the Phase 1 review checkpoint.
+
+## Phase 1 exit review
+
+- The session-start Agent discovery behavior has one production path through `agent-catalogue/public.ts`; no parallel old discovery execution remains for that call site.
+- The accepted Agent call snapshot is validated through `subagent-runtime/public.ts` before the spawn path consumes it.
+- The direct contract cycle, configuration-shape drift, undocumented requirement references, and new internal mocks remain absent.
+- The final Phase 1 review includes the architecture guard, typecheck, focused public-seam tests, and full suite recorded above.
