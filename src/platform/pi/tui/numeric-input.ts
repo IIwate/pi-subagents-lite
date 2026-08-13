@@ -1,5 +1,5 @@
 /**
- * numeric-input-submenu.ts — Shared input submenu Components.
+ * numeric-input.ts — Shared numeric input submenu component.
  *
  * - createNumericSubmenu: numeric input with validation
  */

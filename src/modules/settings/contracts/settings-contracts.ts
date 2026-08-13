@@ -2,13 +2,24 @@ import { Type, type Static } from "typebox";
 
 // ── Workflow surface ──────────────────────────────────────────────
 
+// Row kinds drive the renderer's widget choice and the value contract:
+// toggle/choice cycle through `choices`, numeric opens an integer input with
+// `min`/`fallback` hints, action fires with its single choice as the value.
 export const SettingsRowSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
-  kind: Type.Union([Type.Literal("category"), Type.Literal("toggle")]),
+  kind: Type.Union([
+    Type.Literal("category"),
+    Type.Literal("toggle"),
+    Type.Literal("choice"),
+    Type.Literal("numeric"),
+    Type.Literal("action"),
+  ]),
   label: Type.String({ minLength: 1 }),
   detail: Type.Optional(Type.String()),
   value: Type.Optional(Type.String()),
-  choices: Type.Optional(Type.Array(Type.String(), { minItems: 2 })),
+  choices: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
+  min: Type.Optional(Type.Integer()),
+  fallback: Type.Optional(Type.Integer()),
 }, { additionalProperties: false });
 
 export const SettingsNoticeSchema = Type.Object({
@@ -107,6 +118,53 @@ export const RootSummariesSchema = Type.Object({
   concurrencyDefault: Type.Number(),
 }, { additionalProperties: false });
 
+export const SpawnSettingsViewSchema = Type.Object({
+  forceBackground: Type.Boolean(),
+  graceTurns: Type.Integer({ minimum: 0 }),
+  disableDefaultAgents: Type.Boolean(),
+}, { additionalProperties: false });
+
+export const SpawnSettingUpdateSchema = Type.Union([
+  Type.Object({
+    id: Type.Union([Type.Literal("forceBackground"), Type.Literal("disableDefaultAgents")]),
+    value: Type.Boolean(),
+  }, { additionalProperties: false }),
+  Type.Object({
+    id: Type.Literal("graceTurns"),
+    value: Type.Integer({ minimum: 0 }),
+  }, { additionalProperties: false }),
+]);
+
+export const SystemPromptModeSchema = Type.Union([
+  Type.Literal("replace"),
+  Type.Literal("inherit"),
+  Type.Literal("custom"),
+]);
+
+export const PromptSettingsViewSchema = Type.Object({
+  systemPromptMode: SystemPromptModeSchema,
+  includeContextFiles: Type.Boolean(),
+  loadSkillsImplicitly: Type.Boolean(),
+  loadExtensionsImplicitly: Type.Boolean(),
+  customPromptPath: Type.String({ minLength: 1 }),
+  customPromptFileExists: Type.Boolean(),
+}, { additionalProperties: false });
+
+export const PromptSettingUpdateSchema = Type.Union([
+  Type.Object({
+    id: Type.Literal("systemPromptMode"),
+    value: SystemPromptModeSchema,
+  }, { additionalProperties: false }),
+  Type.Object({
+    id: Type.Union([
+      Type.Literal("includeContextFiles"),
+      Type.Literal("loadSkillsImplicitly"),
+      Type.Literal("loadExtensionsImplicitly"),
+    ]),
+    value: Type.Boolean(),
+  }, { additionalProperties: false }),
+]);
+
 export type SettingsRow = Static<typeof SettingsRowSchema>;
 export type SettingsNotice = Static<typeof SettingsNoticeSchema>;
 export type SettingsSnapshot = Static<typeof SettingsSnapshotSchema>;
@@ -117,3 +175,8 @@ export type DisplayToggleId = Static<typeof DisplayToggleIdSchema>;
 export type DisplaySettingsView = Static<typeof DisplaySettingsViewSchema>;
 export type SettingsUpdateResult = Static<typeof SettingsUpdateResultSchema>;
 export type RootSummaries = Static<typeof RootSummariesSchema>;
+export type SpawnSettingsView = Static<typeof SpawnSettingsViewSchema>;
+export type SpawnSettingUpdate = Static<typeof SpawnSettingUpdateSchema>;
+export type SystemPromptMode = Static<typeof SystemPromptModeSchema>;
+export type PromptSettingsView = Static<typeof PromptSettingsViewSchema>;
+export type PromptSettingUpdate = Static<typeof PromptSettingUpdateSchema>;

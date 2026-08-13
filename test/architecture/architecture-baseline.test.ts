@@ -30,10 +30,7 @@ const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/ui/menu/menu-concurrency.test.ts": 2,
   "test/ui/menu/menu-debug.test.ts": 2,
   "test/ui/menu/menu-model-routing.test.ts": 2,
-  "test/ui/menu/menu-spawn-options.test.ts": 1,
-  "test/ui/menu/menu-system-prompt.test.ts": 1,
   "test/ui/menu/submenus/confirm.test.ts": 2,
-  "test/ui/menu/submenus/numeric-input.test.ts": 1,
 };
 
 function internalMockCounts(): Record<string, number> {

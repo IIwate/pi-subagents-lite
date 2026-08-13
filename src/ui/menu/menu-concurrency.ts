@@ -14,7 +14,7 @@ import {
 } from "./helpers.js";
 import { buildListTheme, SettingsListWrapper } from "../../platform/pi/tui/settings-chrome.js";
 import { createConfirmSubmenu } from "./submenus/confirm.js";
-import { createNumericSubmenu } from "./submenus/numeric-input.js";
+import { createNumericSubmenu } from "../../platform/pi/tui/numeric-input.js";
 import type { SelectOption } from "../searchable-select.js";
 import type { Theme } from "../types.js";
 

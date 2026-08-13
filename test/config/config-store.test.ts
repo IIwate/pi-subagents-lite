@@ -49,7 +49,7 @@ describe("ConfigStore resolved reads", () => {
     expect(store.agent).not.toHaveProperty("defaultThinking");
     expect(store.agent).not.toHaveProperty("backgroundDelivery");
     expect(store.agent.graceTurns).toBe(9);
-    store.mutate.agent.setGraceTurns(4);
+    store.updateAgentSetting("graceTurns", 4);
     const persistedAgent = saves[0]!.agent as Record<string, unknown>;
     expect(persistedAgent.graceTurns).toBe(4);
     expect(persistedAgent.defaultThinking).toBe("xhigh");
@@ -263,9 +263,9 @@ describe("ConfigStore routing mutations", () => {
 describe("ConfigStore persistence boundary", () => {
   it("persists Agent and concurrency settings as their own sections", () => {
     const { store, saves, document } = harness();
-    store.mutate.agent.setGraceTurns(9);
-    store.mutate.agent.setShowCost(true);
-    store.mutate.agent.setExpandListByDefault(false);
+    store.updateAgentSetting("graceTurns", 9);
+    store.updateAgentSetting("showCost", true);
+    store.updateAgentSetting("expandListByDefault", false);
     store.mutate.concurrency.setDefault(2);
     store.mutate.concurrency.setProvider("openai", 1);
     store.mutate.concurrency.setModel("openai/gpt-5", 3);
@@ -290,7 +290,7 @@ describe("ConfigStore persistence boundary", () => {
       modelRouting: { enabled: "yes-please" as unknown as boolean, enabledProviders: [], agentAccess: {} },
       concurrency: { default: 7 },
     });
-    store.mutate.agent.setGraceTurns(2);
+    store.updateAgentSetting("graceTurns", 2);
     // The malformed routing block stays byte-identical on disk; only reads
     // normalize it. Rewriting unowned sections would destroy user data that a
     // newer version might still understand.
@@ -307,7 +307,7 @@ describe("ConfigStore persistence boundary", () => {
 
   it("reloads persisted state", () => {
     const { store, document } = harness();
-    store.mutate.agent.setGraceTurns(3);
+    store.updateAgentSetting("graceTurns", 3);
     store.mutate.routing.setEnabled(true);
     const persisted = document();
     const next = harness(persisted);
@@ -316,7 +316,7 @@ describe("ConfigStore persistence boundary", () => {
     expect(next.store.routing.enabled).toBe(true);
   });
 
-  it("persists a display setting before publishing it and keeps the old value on failure", () => {
+  it("persists an agent setting before publishing it and keeps the old value on failure", () => {
     // REQ-CONFIG-001: the navigator must never be synchronized with a value
     // that is not on disk.
     const { store } = harness();
@@ -331,11 +331,13 @@ describe("ConfigStore persistence boundary", () => {
       read: () => undefined,
       commit: () => ({ ok: false, message: "disk full" }),
     });
-    const failed = failing.updateDisplaySetting("showTools", false);
+    const failed = failing.updateAgentSetting("showTools", false);
     expect(failed).toEqual({ ok: false, message: "disk full" });
     expect(failing.agent.showTools).toBe(true);
+    expect(failing.updateAgentSetting("graceTurns", 9)).toEqual({ ok: false, message: "disk full" });
+    expect(failing.agent.graceTurns).toBe(6);
 
-    const succeeded = store.updateDisplaySetting("showTools", false);
+    const succeeded = store.updateAgentSetting("showTools", false);
     expect(succeeded).toEqual({ ok: true });
     expect(store.agent.showTools).toBe(false);
     expect(visibility.length).toBe(syncsBefore + 1);
@@ -349,7 +351,7 @@ describe("ConfigStore persistence boundary", () => {
       navigator: { setStatsVisibility: (value: unknown) => visibility.push(value) } as any,
       manager: { replaceLimits: (value: unknown) => concurrencies.push(value) } as any,
     });
-    store.mutate.agent.setShowTools(false);
+    store.updateAgentSetting("showTools", false);
     store.mutate.concurrency.setDefault(8);
     expect(visibility.length).toBeGreaterThan(1);
     expect(concurrencies.length).toBeGreaterThan(1);

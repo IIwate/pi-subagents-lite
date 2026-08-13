@@ -13,6 +13,9 @@ import {
   createSettings,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
+  type PromptSettingsOwner,
+  type SpawnSettingsOwner,
+  type SpawnSettingsView,
 } from "../../../src/modules/settings/public.js";
 
 function createRealSettings(options: { failUpdatesWith?: string } = {}) {
@@ -34,9 +37,44 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
       return { ok: true };
     },
   };
+  const spawnView: SpawnSettingsView = {
+    forceBackground: false,
+    graceTurns: 6,
+    disableDefaultAgents: false,
+  };
+  const spawn: SpawnSettingsOwner = {
+    read: () => ({ ...spawnView }),
+    update(update) {
+      if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
+      (spawnView as Record<string, boolean | number>)[update.id] = update.value;
+      return { ok: true };
+    },
+  };
+  const promptView = {
+    systemPromptMode: "replace" as const,
+    includeContextFiles: true,
+    loadSkillsImplicitly: true,
+    loadExtensionsImplicitly: true,
+    customPromptPath: "/home/user/.pi/agent/subagent-prompt.md",
+    customPromptFileExists: false,
+  };
+  const prompt: PromptSettingsOwner = {
+    read: () => ({ ...promptView }),
+    update(update) {
+      if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
+      (promptView as Record<string, boolean | string>)[update.id] = update.value;
+      return { ok: true };
+    },
+    createCustomPromptFile() {
+      promptView.customPromptFileExists = true;
+      return { ok: true };
+    },
+  };
   return createSettings({
     summaries: { read: () => ({ modelAccessEnabled: false, concurrencyDefault: 4 }) },
     display,
+    spawn,
+    prompt,
   });
 }
 
@@ -136,6 +174,85 @@ describe("settings screen renderer contract", () => {
     expect(notifications).toHaveBeenCalledWith("Failed to save setting: disk full", "error");
     // The row shows the saved ON value again instead of the failed OFF attempt.
     expect(failedFormText).toMatch(/Expand list by default\s+ON/);
+  });
+
+  it("edits grace turns through the numeric submenu with one commit per submit", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        // Move down to "Spawn options" (3rd row) and enter it.
+        component.handleInput("\x1b[B");
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\x1b[B");  // move to Grace turns
+        component.handleInput("\r");      // open the numeric submenu
+        // The pre-filled Input leaves its cursor at position 0, so clear the
+        // "6" with forward-delete before typing the new value.
+        component.handleInput("\x1b[3~");
+        component.handleInput("9");
+        component.handleInput("\r");      // submit
+        component.handleInput("\x1b");    // back to root
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    const graceNotifications = notifications.mock.calls.filter(([message]) =>
+      String(message).startsWith("Grace turns"));
+    expect(graceNotifications).toEqual([["Grace turns set to 9", "info"]]);
+  });
+
+  it("rejects invalid numeric input inside the submenu without committing", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");     // open the numeric submenu
+        component.handleInput("-");
+        component.handleInput("1");
+        component.handleInput("\r");     // invalid submit keeps the submenu open
+        component.handleInput("\x1b");   // leave the submenu
+        component.handleInput("\x1b");   // back to root
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(notifications).toHaveBeenCalledWith(expect.stringContaining("Invalid value"), "error");
+    expect(notifications).not.toHaveBeenCalledWith(expect.stringContaining("Grace turns set"), "info");
+  });
+
+  it("reveals the create-prompt-file action in custom mode and fires it once", async () => {
+    let customModeText = "";
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        // Move down to "System prompt" (4th row) and enter it.
+        for (let i = 0; i < 3; i++) component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\r"); // replace -> inherit
+        component.handleInput("\r"); // inherit -> custom, reveals the action row
+        customModeText = component.render(120).join("\n");
+        component.handleInput("\x1b[B"); // move to "Create prompt file"
+        component.handleInput("\r");     // fire the action
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(customModeText).toContain("Create prompt file");
+    expect(notifications).toHaveBeenCalledWith("System prompt mode set to custom", "info");
+    expect(notifications).toHaveBeenCalledWith(
+      "Created prompt file: /home/user/.pi/agent/subagent-prompt.md",
+      "info",
+    );
   });
 
   it("runs the legacy menu for an un-migrated category and re-renders the root", async () => {

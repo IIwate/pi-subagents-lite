@@ -10,6 +10,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type SelectItem, type SettingItem } from "@earendil-works/pi-tui";
 import { buildListTheme, SettingsListWrapper } from "./settings-chrome.js";
+import { createNumericSubmenu } from "./numeric-input.js";
 import type {
   Settings,
   SettingsResult,
@@ -45,14 +46,28 @@ export async function runSettingsScreen(
   }
 }
 
-function toSettingItems(snapshot: SettingsSnapshot): SettingItem[] {
-  return snapshot.rows.map((row) => ({
-    id: row.id,
-    label: row.label,
-    currentValue: row.value ?? "",
-    values: row.choices ? [...row.choices] : [],
-    description: row.detail ?? "",
-  }));
+function toSettingItems(snapshot: SettingsSnapshot, ctx: ExtensionCommandContext): SettingItem[] {
+  return snapshot.rows.map((row) => {
+    const base = {
+      id: row.id,
+      label: row.label,
+      currentValue: row.value ?? "",
+      description: row.detail ?? "",
+    };
+    if (row.kind === "numeric") {
+      // Numeric rows edit through an input submenu. The submenu only
+      // validates; committing stays on the SettingsList done→onChange path,
+      // the same seam every other row kind uses (one commit per submit).
+      return {
+        ...base,
+        submenu: createNumericSubmenu(ctx, {
+          min: row.min ?? 0,
+          ...(row.fallback !== undefined ? { default: row.fallback } : {}),
+        }),
+      };
+    }
+    return { ...base, values: row.choices ? [...row.choices] : [] };
+  });
 }
 
 /** Render one page until the user picks a category or leaves; returns the next settings result. */
@@ -91,10 +106,10 @@ function renderPageVisit(
       }
       const notice = outcome.snapshot.notice;
       if (notice) ctx.ui.notify(notice.message, notice.severity);
-      rebuild?.(toSettingItems(outcome.snapshot));
+      rebuild?.(toSettingItems(outcome.snapshot, ctx));
     };
     const list = new SettingsList(
-      toSettingItems(snapshot),
+      toSettingItems(snapshot, ctx),
       10,
       listTheme,
       onChange,

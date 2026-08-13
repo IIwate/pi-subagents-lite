@@ -11,6 +11,8 @@ Test settings navigation, snapshots, delegation, and action results through `set
 - Quick model setup sharing the full model-access command semantics.
 - Successful persistence and explicit persistence failure with no partial state.
 - Inactive-limit management and future-call-only effect boundaries.
+- Numeric input validation (digits-only, minimum bound) rejecting host garbage before the owner is called.
+- Conditional actions (create prompt file) appearing only while actionable and reporting explicit failure.
 
 ## Fixtures and doubles
 

@@ -308,48 +308,6 @@ export class ConfigStore {
         this.persist("modelRouting");
       },
     },
-    agent: {
-      setForceBackground: (enabled: boolean): void => {
-        this.config.agent.forceBackground = enabled;
-        this.persist("agent");
-      },
-      setShowCost: (enabled: boolean): void => {
-        this.updateDisplaySetting("showCost", enabled);
-      },
-      setGraceTurns: (n: number): void => {
-        this.config.agent.graceTurns = n;
-        this.persist("agent");
-      },
-      setSystemPromptMode: (mode: SystemPromptMode): void => {
-        this.config.agent.systemPromptMode = mode;
-        this.persist("agent");
-      },
-      setIncludeContextFiles: (enabled: boolean): void => {
-        this.config.agent.includeContextFiles = enabled;
-        this.persist("agent");
-      },
-      setLoadSkillsImplicitly: (value: boolean): void => {
-        this.config.agent.loadSkillsImplicitly = value;
-        this.persist("agent");
-      },
-      setLoadExtensionsImplicitly: (value: boolean): void => {
-        this.config.agent.loadExtensionsImplicitly = value;
-        this.persist("agent");
-      },
-      setDisableDefaultAgents: (value: boolean): void => {
-        this.config.agent.disableDefaultAgents = value;
-        this.persist("agent");
-      },
-      setExpandListByDefault: (value: boolean): void => {
-        this.updateDisplaySetting("expandListByDefault", value);
-      },
-      setShowTools: (enabled: boolean) => { this.updateDisplaySetting("showTools", enabled); },
-      setShowTurns: (enabled: boolean) => { this.updateDisplaySetting("showTurns", enabled); },
-      setShowInput: (enabled: boolean) => { this.updateDisplaySetting("showInput", enabled); },
-      setShowOutput: (enabled: boolean) => { this.updateDisplaySetting("showOutput", enabled); },
-      setShowContext: (enabled: boolean) => { this.updateDisplaySetting("showContext", enabled); },
-      setShowTime: (enabled: boolean) => { this.updateDisplaySetting("showTime", enabled); },
-    },
     concurrency: {
       setDefault: (n: number): void => {
         this.config.concurrency.default = n;
@@ -385,14 +343,16 @@ export class ConfigStore {
   };
 
   /**
-   * Commit-first display update (REQ-CONFIG-001): the candidate fragment is
-   * persisted before it becomes the effective value, and the navigator is
-   * only synchronized after a successful commit. Failure keeps the previous
-   * value and reports an explicit message to the settings workflow.
+   * Commit-first agent-fragment update (REQ-CONFIG-001): the candidate
+   * fragment is persisted before it becomes the effective value, and the
+   * navigator is only synchronized after a successful commit. Failure keeps
+   * the previous value and reports an explicit message to the settings
+   * workflow. Serves the display, spawn-options, and system-prompt pages
+   * until their fragments move to owning capabilities.
    */
-  updateDisplaySetting(
-    key: "expandListByDefault" | "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showCost" | "showTime",
-    value: boolean,
+  updateAgentSetting<K extends keyof AgentSettings>(
+    key: K,
+    value: NonNullable<AgentSettings[K]>,
   ): { ok: true } | { ok: false; message: string } {
     const candidate = { ...this.config.agent, [key]: value };
     const assignments = JSON.parse(JSON.stringify(candidate)) as Record<string, JsonValue>;

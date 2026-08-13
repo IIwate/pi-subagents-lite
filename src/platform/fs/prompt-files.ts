@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 export type CustomPromptReadResult =
   | { ok: true; content: string }
@@ -18,6 +19,23 @@ export function readCustomPromptFile(filePath: string): CustomPromptReadResult {
     }
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: "unreadable", message: `Failed to read custom prompt file: ${message}` };
+  }
+}
+
+export function customPromptFileExists(filePath: string): boolean {
+  return existsSync(filePath);
+}
+
+const CUSTOM_PROMPT_TEMPLATE = "You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously";
+
+/** Create the starter custom prompt file; failure is reported, never thrown. */
+export function createCustomPromptFile(filePath: string): { ok: true } | { ok: false; message: string } {
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, CUSTOM_PROMPT_TEMPLATE, "utf-8");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
