@@ -16,4 +16,4 @@ Test authorization commands and effective policy snapshots through `model-access
 
 ## Fixtures and doubles
 
-Use plain JSON fragments and independent literals. Do not mock settings menus, runtime services, prompt assembly, or internal policy functions. Persistence remains covered by ConfigStore tests until Phase 7.
+Use plain JSON fragments and independent literals. Do not mock settings pages, runtime services, prompt assembly, or internal policy functions. Persistence is covered by the configuration module and its platform repository contract tests; the settings suite covers the owner verbs that commit fragment transitions.

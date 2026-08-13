@@ -10,12 +10,15 @@
  *   - Optional model selection is resolved inside Agent execution
  *
  * Config:
- *   - Loaded from ~/.pi/agent/subagents-lite.json at session_start
- *   - ConfigStore owns canonical config, persistence, and side effects
- *   - Tool execution and menus read/write through store
+ *   - One persisted document (~/.pi/agent/subagents-lite.json), owned by the
+ *     configuration module and reloaded at session_start
+ *   - Capabilities own their fragments; commits are atomic with explicit
+ *     failure (bootstrap/agent-settings, bootstrap/model-access,
+ *     bootstrap/concurrency)
  *
  * Commands:
- *   - /agents: Management menu (model settings, concurrency, debug)
+ *   - /agents: Settings pages (model access, concurrency, spawn, prompt,
+ *     display, debug)
  *
  * Shortcuts:
  *   - Alt+A: Toggle the below-editor subagent list

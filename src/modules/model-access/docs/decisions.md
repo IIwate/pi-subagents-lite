@@ -12,4 +12,4 @@
 
 ## Implementation-only
 
-- Menu row IDs, current manager methods, and ConfigStore mutation names are not policy terms.
+- Settings row IDs, page encodings, and the bootstrap owner's verb names are not policy terms.

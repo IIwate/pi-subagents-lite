@@ -13,5 +13,4 @@
 
 ## Implementation-only
 
-- ConfigStore getters, mutation names, and injected manager/navigator dependencies are not configuration concepts.
-- The transitional ConfigStore section IO delegates every read and commit to this module, so there is exactly one in-memory document and one write path while menus migrate to settings pages. It is deleted with ConfigStore.
+- The shared section IO in `bootstrap/configuration.ts` delegates every fragment read and commit to this module, so there is exactly one in-memory document, one observed revision, and one write path. Phase 8 moves its ownership into the explicit composition root.

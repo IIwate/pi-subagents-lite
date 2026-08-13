@@ -10,7 +10,7 @@
 - `AuthorizeModelCommandSchema` and `AuthorizeModelResultSchema` authorize one Agent call.
 - `ThinkingAccessOverrideSchema` and `ThinkingLevelSchema` describe saved and effective Thinking policy.
 
-Parse, apply, and query functions consume that fragment. Persistence still goes through ConfigStore until Phase 7. Exact fields stay in the TypeBox schemas.
+Parse, apply, and query functions consume that fragment. Persistence goes through the configuration module's fragment commits; the composition seam (`bootstrap/model-access.ts`) reads the fragment and commits one atomic policy transition per settings verb. Exact fields stay in the TypeBox schemas.
 
 ## Ports
 

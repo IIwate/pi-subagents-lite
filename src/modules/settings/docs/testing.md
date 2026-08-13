@@ -14,6 +14,7 @@ Test settings navigation, snapshots, delegation, and action results through `set
 - Numeric input validation (digits-only, minimum bound) rejecting host garbage before the owner is called.
 - Conditional actions (create prompt file) appearing only while actionable and reporting explicit failure.
 - Debug reports formatted from structured owner JSON, armed-fault row marking, and session unavailability surfacing as informational notices.
+- Nested model-access navigation unwinding one level per back, stale-subject rows refreshing silently instead of acting, destructive actions gated behind multiline confirmation, and the last-allowed-thinking-level guard.
 
 ## Fixtures and doubles
 

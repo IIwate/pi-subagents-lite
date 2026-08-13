@@ -15,4 +15,4 @@ Test source resolution and fragment transactions through `configuration/public.t
 
 ## Fixtures and doubles
 
-Use an in-memory document repository for core tests. Filesystem, environment, and atomic-rename failures are covered by platform contract tests. Do not mock ConfigStore or capability modules.
+Use an in-memory document repository for core tests. Filesystem, environment, and atomic-rename failures are covered by platform contract tests. Do not mock capability modules.
