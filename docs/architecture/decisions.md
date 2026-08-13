@@ -42,7 +42,7 @@ The Agent, StopAgent, and AgentStatus tools are registered once at extension ini
 
 Why: registering a tool mid-session rebuilds the system prompt, and llama.cpp renders tool definitions into prompt text through its Jinja2 chat template, so the token sequence changes and the KV-cache prefix is invalidated. Registration at initialization freezes the tool set from turn one. The access policy cannot live in the static schema because it depends on session state (discovered agent types, exact parent model, enabled providers, per-agent rules, registry and scope); the hook appends that state before each parent run without creating a message, triggering a turn, or requiring `/reload`.
 
-Cache boundary: the prompt suffix changes only when effective authorization state changes, and must be byte-stable while state is unchanged. The guidance contract itself — what is advertised, exact-key enumeration, stable ordering — is owned by the [prompt module](../../src/modules/prompt/docs/decisions.md). Subagents never inherit the three tools (no sub-subagent policy).
+Cache boundary: the prompt suffix changes only when effective authorization state changes, and must be byte-stable while state is unchanged. The guidance contract itself — what is advertised, exact-key enumeration, stable ordering — is owned by the [prompt module](../../src/modules/prompt/docs/decisions.md).
 
 ## Agent tool `worktree_path` naming
 

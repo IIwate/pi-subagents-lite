@@ -200,7 +200,7 @@ export function getAllTypes(): string[] {
   return [...agents.keys()];
 }
 
-/** Names of tools that subagents must NOT inherit (no sub-subagent policy; see docs/architecture/decisions.md). */
+/** Tools a Subagent must never inherit; see agent-catalogue/docs/decisions.md. */
 export const EXCLUDED_TOOL_NAMES = ["Agent"];
 
 /**
