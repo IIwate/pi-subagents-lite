@@ -4,9 +4,12 @@
 
 `public.ts` exports only serializable prompt assembly schemas, derived types, reader ports, and application entry points. It exposes prompt text as a result, not prompt fragments as mutable shared state.
 
+## Implemented schemas
+
+- `AgentGuidanceRequestSchema` and `AgentGuidanceResultSchema` assemble Parent Agent guidance from serializable catalogue and Model access inputs.
+
 ## Planned schemas
 
-- `AgentGuidanceRequest` and `AgentGuidanceResult`.
 - `SubagentPromptRequest` and `SubagentPromptResult`.
 - `PromptSourceSnapshot` for deterministic source provenance inside tests, not persisted runtime state.
 

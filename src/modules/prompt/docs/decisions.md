@@ -5,6 +5,7 @@
 - Agent guidance and Subagent system prompt are distinct outputs with one source owner.
 - Prompt assembly is deterministic and receives explicit snapshots; it has no global refresh or persistence.
 - Prompt material is inspectable in source and module documentation, not through a new product capability.
+- Parent Agent guidance is assembled through `prompt/public.ts`. The Pi host only translates models and scope into the serializable request.
 
 ## Superseded
 
