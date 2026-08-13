@@ -53,7 +53,7 @@ const executeAgentStatusTool = createAgentStatusToolExecutor(fakeExtensionRuntim
 /*  Execute behavior tests                                            */
 /* ------------------------------------------------------------------ */
 
-describe("AgentStatus tool execute behavior", () => {
+describe("REQ-AGENT-003 AgentStatus tool execute behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetRecord.mockReturnValue(undefined);

@@ -1,53 +1,75 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { dependencyDirectionViolations } from "./architecture-rules.js";
 import { collectSourceGraph, stronglyConnectedComponents } from "./source-graph.js";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 
-// These are migration baselines, not accepted architecture. A slice must remove
-// a resolved entry and may never add a new one.
-const legacyCycleBaseline = new Set<string>();
-
-// Internal-module mocks are gone. Every remaining vi.mock replaces the
-// @earendil-works/pi-coding-agent vendor package — an external seam whose
-// session/loader surface has no in-repo implementation to run instead.
-const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
-  "test/agents/agent-runner.test.ts": 1,
-  "test/agents/queued-model-permission.integration.test.ts": 1,
-  "test/prompt/prompts.test.ts": 1,
-  "test/prompt/skill-loader.test.ts": 1,
-};
-
-function internalMockCounts(): Record<string, number> {
-  const counts: Record<string, number> = {};
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory)) {
-      const path = join(directory, entry);
-      if (statSync(path).isDirectory()) {
-        visit(path);
-        continue;
-      }
-      if (!path.endsWith(".ts")) continue;
-      const source = readFileSync(path, "utf8");
-      const count = [...source.matchAll(/vi\.mock\s*\(/g)].length;
-      if (count > 0) counts[path.slice(projectRoot.length + 1).replaceAll("\\", "/")] = count;
-    }
-  };
-  visit(resolve(projectRoot, "test"));
-  return counts;
+function typescriptFiles(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) files.push(...typescriptFiles(path));
+    else if (path.endsWith(".ts")) files.push(path);
+  }
+  return files;
 }
 
-describe("architecture migration guardrails", () => {
-  it("does not introduce a source cycle beyond the recorded migration baseline", () => {
+function repoPath(path: string): string {
+  return relative(projectRoot, path).replaceAll("\\", "/");
+}
+
+/**
+ * vi.mock is allowed only against external packages (vendor seams with no
+ * in-repo implementation to run instead). A relative specifier replaces one
+ * of this repository's own modules and bypasses its public surface, so it is
+ * a blocking violation — there is no baseline to ratchet anymore.
+ */
+function internalMockViolations(): string[] {
+  const violations: string[] = [];
+  for (const path of typescriptFiles(resolve(projectRoot, "test"))) {
+    const source = readFileSync(path, "utf8");
+    for (const match of source.matchAll(/vi\.mock\s*\(\s*["']([^"']+)["']/g)) {
+      if (match[1].startsWith(".") || match[1].includes("/src/")) {
+        violations.push(`${repoPath(path)} mocks internal module ${match[1]}`);
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * Cross-reload process state is confined to the one approved platform module:
+ * Jiti reloads give each extension activation a fresh module registry, so
+ * anything that must survive a reload lives behind that module's API. Any
+ * other globalThis access reintroduces hidden shared state.
+ */
+function globalThisViolations(): string[] {
+  const allowed = new Set(["src/platform/process/process-state.ts"]);
+  const violations: string[] = [];
+  for (const path of typescriptFiles(resolve(projectRoot, "src"))) {
+    if (allowed.has(repoPath(path))) continue;
+    const source = readFileSync(path, "utf8");
+    if (/\bglobalThis\b/.test(source)) {
+      violations.push(`${repoPath(path)} accesses globalThis`);
+    }
+  }
+  return violations;
+}
+
+describe("architecture guards", () => {
+  it("keeps the source dependency graph cycle-free", () => {
     const graph = collectSourceGraph(projectRoot);
-    const newCycles = stronglyConnectedComponents(graph).filter((cycle) => !legacyCycleBaseline.has(cycle));
-    expect(newCycles).toEqual([]);
+    expect(stronglyConnectedComponents(graph)).toEqual([]);
   });
 
-  it("does not add internal module mocks beyond the recorded migration baseline", () => {
-    expect(internalMockCounts()).toEqual(legacyInternalMockBaseline);
+  it("forbids vi.mock of internal modules", () => {
+    expect(internalMockViolations()).toEqual([]);
+  });
+
+  it("confines globalThis to the process-state platform module", () => {
+    expect(globalThisViolations()).toEqual([]);
   });
 
   it("keeps target module imports behind public surfaces and inward layers", () => {

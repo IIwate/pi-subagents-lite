@@ -53,7 +53,7 @@ describe("formatResultContent", () => {
   });
 });
 
-describe("executeStopAgentTool", () => {
+describe("REQ-AGENT-003 executeStopAgentTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

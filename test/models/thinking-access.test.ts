@@ -38,7 +38,7 @@ function resolve(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe("resolveThinkingAccess", () => {
+describe("REQ-MODEL-005 resolveThinkingAccess", () => {
   it("allows every model-supported level and defaults alternates from high", () => {
     expect(resolve()).toEqual({
       allowed: ["off", "minimal", "low", "medium", "high", "xhigh"],
@@ -76,7 +76,7 @@ describe("resolveThinkingAccess", () => {
     });
   });
 
-  it("lets a Model scope pin replace the saved policy", () => {
+  it("REQ-MODEL-004 lets a Model scope pin replace the saved policy", () => {
     expect(resolve({
       override: { allowed: ["low", "high"], default: "low" },
       scopedThinkingLevel: "xhigh",

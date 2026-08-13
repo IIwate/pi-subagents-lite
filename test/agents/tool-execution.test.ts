@@ -167,7 +167,7 @@ function makeModel(provider: string, id: string, overrides: Record<string, unkno
 /*  Tests                                                             */
 /* ------------------------------------------------------------------ */
 
-describe("executeAgentTool — worktree_path validation", () => {
+describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () => {
   let ctx: any;
   let repo: string;
   let worktree: string;

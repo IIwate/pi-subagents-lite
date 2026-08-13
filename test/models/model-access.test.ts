@@ -120,7 +120,7 @@ describe("authorizeModel", () => {
       .toEqual({ ok: false, reason: "model-unavailable" });
   });
 
-  it("requires alternate models to be in active scope", () => {
+  it("REQ-MODEL-004 requires alternate models to be in active scope", () => {
     expect(authorize({ scopedKeys: new Set(["anthropic/sonnet"]) }))
       .toEqual({ ok: false, reason: "out-of-scope" });
   });

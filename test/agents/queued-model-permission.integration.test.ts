@@ -214,7 +214,7 @@ function model(provider: string, id: string) {
   };
 }
 
-describe("queued invocation snapshots", () => {
+describe("REQ-AGENT-002 queued invocation snapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reset();

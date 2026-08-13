@@ -48,7 +48,7 @@ function requirementIds(): { defined: Set<string>; referenced: Set<string> } {
   return { defined, referenced };
 }
 
-describe("documentation migration guardrails", () => {
+describe("documentation guards", () => {
   it("keeps scoped repository links and required module documents valid", () => {
     const errors: string[] = [];
     for (const source of scopedMarkdownFiles()) {
@@ -78,5 +78,28 @@ describe("documentation migration guardrails", () => {
     const { defined, referenced } = requirementIds();
     expect([...referenced].filter((id) => !defined.has(id))).toEqual([]);
     expect([...defined].filter((id) => !referenced.has(id))).toEqual([]);
+  });
+
+  it("keeps every active requirement exercised by at least one tagged test", () => {
+    // Acceptance examples are test titles carrying the requirement ID. A
+    // text-level match is the enforced proxy: an ID that appears nowhere in
+    // the test tree has no acceptance example at all.
+    const { defined } = requirementIds();
+    const tagged = new Set<string>();
+    const visit = (directory: string): void => {
+      for (const entry of readdirSync(directory)) {
+        const path = join(directory, entry);
+        if (statSync(path).isDirectory()) {
+          visit(path);
+          continue;
+        }
+        if (!path.endsWith(".ts")) continue;
+        for (const match of readFileSync(path, "utf8").matchAll(/REQ-[A-Z]+-\d+/g)) {
+          tagged.add(match[0]);
+        }
+      }
+    };
+    visit(resolve(projectRoot, "test"));
+    expect([...defined].filter((id) => !tagged.has(id))).toEqual([]);
   });
 });

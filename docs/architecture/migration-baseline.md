@@ -27,7 +27,7 @@ The two skipped scenarios are not replaced by ordinary directories or junctions.
 - Source TypeScript files: 62.
 - Internal source edges: 196.
 - Existing strongly connected components: 1.
-- The remaining allowed cycle fingerprint is recorded in `test/architecture/architecture-baseline.test.ts`.
+- The remaining allowed cycle fingerprint was migration debt; Phase 9 removed the last cycle and `test/architecture/architecture-guards.test.ts` now rejects any cycle outright.
 - Existing internal `vi.mock` baseline: 27 test files, 69 calls.
 - New internal mocks and new cycles fail the architecture guard immediately.
 
