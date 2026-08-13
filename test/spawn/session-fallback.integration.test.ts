@@ -19,7 +19,8 @@ import {
   takeFallbackResults,
 } from "../../src/shell.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
+import { createSessionHost } from "../../src/bootstrap/session-host.js";
+import type { SpawnCoordinatorApi } from "../../src/spawn/coordinator-api.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 
@@ -57,7 +58,7 @@ function createPi(entries: any[], appendFails = false) {
   } as any;
 }
 
-async function disposeRuntime(manager?: SubagentRuntime, coordinator?: SpawnCoordinator) {
+async function disposeRuntime(manager?: SubagentRuntime, coordinator?: SpawnCoordinatorApi) {
   coordinator?.dispose();
   await manager?.dispose();
   setCoordinator(null);
@@ -85,15 +86,15 @@ describe("session-keyed coordinator fallback", () => {
 
     let managerA: SubagentRuntime | undefined;
     let managerB: SubagentRuntime | undefined;
-    let coordinatorA: SpawnCoordinator | undefined;
-    let coordinatorB: SpawnCoordinator | undefined;
-    let restoredA: SpawnCoordinator | undefined;
+    let coordinatorA: SpawnCoordinatorApi | undefined;
+    let coordinatorB: SpawnCoordinatorApi | undefined;
+    let restoredA: SpawnCoordinatorApi | undefined;
     try {
       setSessionCtx(ctxA);
       setPiInstance(piA);
       managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
       setManager(managerA);
-      coordinatorA = new SpawnCoordinator(managerA);
+      coordinatorA = createSessionHost(managerA);
       setCoordinator(coordinatorA);
       managerA.setOnComplete(record => coordinatorA!.onAgentComplete(record));
 
@@ -115,7 +116,7 @@ describe("session-keyed coordinator fallback", () => {
       setPiInstance(piB);
       managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
       setManager(managerB);
-      coordinatorB = new SpawnCoordinator(managerB);
+      coordinatorB = createSessionHost(managerB);
       setCoordinator(coordinatorB);
       coordinatorB.restorePending();
 
@@ -129,7 +130,7 @@ describe("session-keyed coordinator fallback", () => {
       setSessionCtx(ctxA);
       setPiInstance(piA);
       setManager(managerA);
-      restoredA = new SpawnCoordinator(managerA);
+      restoredA = createSessionHost(managerA);
       setCoordinator(restoredA);
       managerA.setOnComplete(record => restoredA!.onAgentComplete(record));
       restoredA.restorePending();

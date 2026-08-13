@@ -11,4 +11,4 @@
 
 ## Implementation-only
 
-- `SpawnCoordinator`, result-inbox helper names, debounce constants, and manager refresh calls are not delivery concepts.
+- Result-inbox helper names, debounce constants, and manager refresh calls are not delivery concepts. The session host only translates Pi lifecycle into delivery commands.

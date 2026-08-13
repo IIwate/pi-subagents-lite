@@ -32,11 +32,11 @@ vi.mock("../src/bootstrap/subagent-runtime.js", () => ({
   }),
 }));
 
-vi.mock("../src/spawn/spawn-coordinator.js", () => ({
-  SpawnCoordinator: class {
-    pendingResultCount = vi.fn();
-    interact = vi.fn();
-  },
+vi.mock("../src/bootstrap/session-host.js", () => ({
+  createSessionHost: () => ({
+    pendingResultCount: vi.fn(),
+    interact: vi.fn(),
+  }),
 }));
 
 vi.mock("../src/ui/agent-navigator.js", () => ({

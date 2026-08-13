@@ -29,7 +29,7 @@ vi.mock("../../src/shell.js", () => ({
 
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
+import { createSessionHost } from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 
@@ -73,7 +73,7 @@ describe("durable result delivery integration", () => {
       ctx: state.ctx,
       clock: { now: () => state.now },
     });
-    state.coordinator = new SpawnCoordinator(state.manager);
+    state.coordinator = createSessionHost(state.manager);
     state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
   });
 

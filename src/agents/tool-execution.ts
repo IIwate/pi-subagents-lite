@@ -3,7 +3,7 @@ import { getStatusNote } from "../status-note.js";
  * tool-execution.ts — Agent tool execution handlers.
  *
  * Contains the execute callbacks registered for the Agent tool.
- * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
+ * Spawn coordination and background delivery live in the session host.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -245,7 +245,7 @@ export async function executeAgentTool(
     return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);
   }
 
-  // Use SpawnCoordinator for unified spawn path
+  // Use the session host for unified spawn and delivery.
   const coordinator = getCoordinator()!;
   const result = await coordinator.spawn(getPiInstance(), ctx, {
     type: resolvedType,

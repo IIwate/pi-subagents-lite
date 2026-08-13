@@ -11,8 +11,8 @@ import {
 } from "./modules/agent-catalogue/public.js";
 import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
-import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
+import { createSessionHost } from "./bootstrap/session-host.js";
 import {
   getManager,
   getNavigator,
@@ -59,7 +59,7 @@ export function ensureManagerAndNavigator(): void {
     setManager(newManager);
     getStore().setDeps({ manager: newManager });
 
-    const coordinator = new SpawnCoordinator(newManager);
+    const coordinator = createSessionHost(newManager);
     setCoordinator(coordinator);
 
     newManager.setOnComplete(record => coordinator.onAgentComplete(record));

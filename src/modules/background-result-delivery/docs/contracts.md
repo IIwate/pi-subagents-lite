@@ -4,13 +4,12 @@
 
 `public.ts` exports serialized delivery commands, events, snapshots, and application entry points. Parent-session entries and Pi lifecycle handles remain behind ports.
 
-## Planned schemas
+## Implemented schemas
 
-- `DeliveryCommand`, `DeliveryEvent`, and `DeliverySnapshot`.
-- `BackgroundResultRecord` and `DeliveryFailure`.
-- `ParentLifecycleEvent` and `AcknowledgementResult`.
+- `DeliveryCommandSchema` and `DeliveryCommandResultSchema` cover record-terminal, parent lifecycle, restore, `/tree`, inspect, and dispose.
+- `BackgroundResultRecordSchema` and `DeliverySnapshotSchema` are the serializable pending/fallback view.
 
-Exact fields are defined by TypeBox in the relevant delivery slices.
+Exact fields are owned by those TypeBox schemas.
 
 ## Ports
 

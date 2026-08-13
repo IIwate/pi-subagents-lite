@@ -169,8 +169,8 @@ function complete(record: any, status = "completed", result = "result") {
   record.result = result;
 }
 
-describe("SpawnCoordinator", () => {
-  let SpawnCoordinator: typeof import("../../src/spawn/spawn-coordinator.js").SpawnCoordinator;
+describe("session host delivery", () => {
+  let createSessionHost: typeof import("../../src/bootstrap/session-host.js").createSessionHost;
   let manager: ReturnType<typeof makeMockManager>;
   let ctx: ExtensionContext;
 
@@ -192,11 +192,11 @@ describe("SpawnCoordinator", () => {
     mockGetBranch.mockClear();
     mockGetEntries.mockClear();
     mockGetPiInstance.mockReturnValue(mockPi);
-    const mod = await import("../../src/spawn/spawn-coordinator.js");
-    SpawnCoordinator = mod.SpawnCoordinator;
+    const mod = await import("../../src/bootstrap/session-host.js");
+    createSessionHost = mod.createSessionHost;
   });
 
-  async function spawnBackground(coordinator: InstanceType<typeof SpawnCoordinator>) {
+  async function spawnBackground(coordinator: ReturnType<typeof createSessionHost>) {
     return coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
@@ -207,7 +207,7 @@ describe("SpawnCoordinator", () => {
   }
 
   it("captures the parent delivery target only for background work", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
 
     expect(result.snapshot).toMatchObject({
@@ -222,7 +222,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("awaits foreground work and marks its direct result consumed", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
@@ -238,7 +238,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("marks an empty foreground result consumed", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const pending = coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
@@ -254,7 +254,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("persists a background result and requests one parent wake immediately", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "original result");
 
@@ -280,7 +280,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("persists an empty background completion as a terminal event", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "");
 
@@ -299,7 +299,7 @@ describe("SpawnCoordinator", () => {
     ["turn_limited", null],
     ["stopped", null],
   ] as const)("persists %s terminal metadata before wake", async (status, error) => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     result.snapshot.invocation = { providerName: "test-provider", modelName: "test-model" };
     complete(result.snapshot, status, status === "error" ? "" : "partial output");
@@ -323,7 +323,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("uses follow-up when a completion lands after natural preflight but before the run becomes non-idle", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
     expect(fallbackMeta.idle).toBe(true);
 
@@ -340,7 +340,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("defers a completion from the settled-idle gap until settlement", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     coordinator.prepareBeforeAgentStart();
     coordinator.onParentAgentStart();
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
@@ -359,7 +359,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not issue another wake while a parent wake is active", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     complete(first.snapshot, "completed", "first");
@@ -373,7 +373,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("restores the session inbox once and maintains pending state in memory", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "cached result");
 
@@ -386,7 +386,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("waits off-branch and wakes when navigation returns to the origin subtree", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
@@ -415,7 +415,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("re-arms a failed result only after explicit tree navigation returns to its origin", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "retry on return");
     coordinator.onAgentComplete(result.snapshot);
@@ -436,7 +436,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("acknowledges only the result IDs delivered by a successful parent turn", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     complete(first.snapshot, "completed", "first");
@@ -457,7 +457,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not let an old wake ack a newer continuation result", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "first result");
     coordinator.onAgentComplete(result.snapshot);
@@ -476,7 +476,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not acknowledge results after an aborted parent turn", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot);
     coordinator.onAgentComplete(result.snapshot);
@@ -489,7 +489,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("keeps results pending when acknowledgement persistence fails", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "ack me");
     coordinator.onAgentComplete(result.snapshot);
@@ -508,7 +508,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("retries persistence when a later parent prompt can append entries", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "retry me");
     mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
@@ -525,7 +525,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("keeps results after a failed parent turn and lets a later completion retry", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     complete(first.snapshot, "completed", "first");
     coordinator.onAgentComplete(first.snapshot);
@@ -542,7 +542,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("lets a completion during a failed parent turn provide the next wake opportunity", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     complete(first.snapshot, "completed", "first");
@@ -570,7 +570,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("allows one new wake per later persisted completion and then stops", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     const third = await spawnBackground(coordinator);
@@ -599,7 +599,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not let an unpersisted completion retrigger a failed wake", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     complete(first.snapshot, "completed", "first");
     coordinator.onAgentComplete(first.snapshot);
@@ -620,7 +620,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("wakes results recovered while the current completion remains unpersisted", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     let pendingAttempts = 0;
@@ -650,7 +650,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("delivers a failed automatic wake on the next natural parent prompt", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "recovered result");
     coordinator.onAgentComplete(result.snapshot);
@@ -677,7 +677,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("keeps a result pending when its natural retry turn also fails", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "retry later");
     coordinator.onAgentComplete(result.snapshot);
@@ -694,7 +694,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("acknowledges an explicitly read result only after the parent turn succeeds", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
@@ -710,7 +710,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("acknowledges an explicitly read result alongside a concurrent automatic follow-up", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const explicit = await spawnBackground(coordinator);
     complete(explicit.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
@@ -739,7 +739,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("keeps an explicitly read result pending when the parent turn fails", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
@@ -754,7 +754,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("reads a stored result after the manager record is removed", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "durable result");
     coordinator.onAgentComplete(result.snapshot);
@@ -764,7 +764,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("reads the current completion instead of an older fallback for the same agent", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     mockPi.appendEntry.mockImplementation((customType: string, data: any) => {
       if (customType === "subagents-lite:pending-result" && data.result === "older fallback") {
@@ -796,7 +796,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("reads the newest completion after record cleanup while an older fallback remains", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     mockPi.appendEntry.mockImplementation((customType: string, data: any) => {
       if (customType === "subagents-lite:pending-result" && data.result === "older fallback") {
@@ -820,7 +820,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not re-enqueue a result after the manager record was cleared", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "cleared result");
     manager.deleteRecord(result.agentId);
@@ -832,7 +832,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not stage foreground completion or continuation results", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await coordinator.spawn(mockPi, ctx, {
       type: "builder",
       prompt: "do something",
@@ -847,7 +847,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("retains staged results when the pi runtime rejects delivery", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot);
     mockPi.sendMessage.mockImplementation(() => { throw new Error("stale context"); });
@@ -862,7 +862,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not retry a failed running-parent follow-up at settlement without a new Auto completion", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     fallbackMeta.idle = false;
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "failed follow-up");
@@ -878,7 +878,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("keeps append failure visible across tree refresh and same-session reload", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "unpersisted");
     mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
@@ -889,13 +889,13 @@ describe("SpawnCoordinator", () => {
     expect(coordinator.pendingResultCount()).toBe(1);
     coordinator.dispose();
 
-    const replacement = new SpawnCoordinator(manager as any);
+    const replacement = createSessionHost(manager as any);
     replacement.restorePending();
     expect(replacement.pendingResultCount()).toBe(1);
   });
 
   it("flushes an in-memory fallback before disposal", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "flush before dispose");
     mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
@@ -913,7 +913,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("transfers an unpersisted fallback to a replacement coordinator", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "reload result");
     mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
@@ -925,7 +925,7 @@ describe("SpawnCoordinator", () => {
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       sessionEntries.push({ type: "custom", customType, data });
     });
-    const replacement = new SpawnCoordinator(manager as any);
+    const replacement = createSessionHost(manager as any);
     const message = replacement.prepareBeforeAgentStart();
 
     expect(message?.content).toContain("reload result");
@@ -933,7 +933,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("re-arms restored Auto pending on explicit session reload", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
@@ -945,7 +945,7 @@ describe("SpawnCoordinator", () => {
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
     fallbackMeta.currentLeafId = "origin-a";
-    const replacement = new SpawnCoordinator(manager as any);
+    const replacement = createSessionHost(manager as any);
     replacement.restorePending();
 
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
@@ -955,7 +955,7 @@ describe("SpawnCoordinator", () => {
   });
 
   it("does not wake after disposal", async () => {
-    const coordinator = new SpawnCoordinator(manager as any);
+    const coordinator = createSessionHost(manager as any);
     const result = await spawnBackground(coordinator);
     coordinator.dispose();
     complete(result.snapshot);

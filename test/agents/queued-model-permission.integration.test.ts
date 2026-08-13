@@ -151,7 +151,7 @@ import {
 import type { AgentConfig } from "../../src/agents/types.js";
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
+import { createSessionHost } from "../../src/bootstrap/session-host.js";
 
 function params(description: string, model?: string, background = true, agent = "general-purpose") {
   return {
@@ -231,7 +231,7 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.coordinator = new SpawnCoordinator(mocks.manager);
+    mocks.coordinator = createSessionHost(mocks.manager);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
   });
 
@@ -384,7 +384,7 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.coordinator = new SpawnCoordinator(mocks.manager);
+    mocks.coordinator = createSessionHost(mocks.manager);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
     mocks.blockFirst = false;
