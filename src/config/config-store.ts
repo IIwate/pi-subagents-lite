@@ -1,21 +1,21 @@
 /**
- * config-store.ts — Deep module owning persisted configuration.
+ * config-store.ts — Transitional resolved-settings surface for the menus.
  *
- * Absorbs config-io.ts, config-mutator.ts, and the config-sync half of
- * state.ts. See docs/adr/0004-composition-root-over-shared-state.md.
- *
- * - Reads return defaults baked in (no `?? 6` at call sites).
- * - Each persisted mutate method is mutate + persist + its side effect, so a
- *   side effect cannot be forgotten.
- * - Navigator/manager are injected after construction (they're created lazily).
- *
- * Lifecycle: per-session. `reload()` re-reads disk at session_start;
- * `dispose()` drops deps at session_shutdown.
+ * Phase 7 migration state: the configuration module owns the persisted
+ * document, revisions, and atomic fragment commits. This store keeps only the
+ * legacy responsibilities that have not yet moved to the settings module:
+ * resolved reads with capability defaults, the menu mutation surface, and the
+ * manager/navigator synchronization side effects. Each settings slice deletes
+ * the accessors it replaces; the store is removed with the last menu.
  */
 
 import type { ChildScreenHost } from "../bootstrap/child-screen.js";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
-import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
+import type {
+  Configuration,
+  JsonValue,
+} from "../modules/configuration/public.js";
+import type { AgentModelAccess, AgentSettings, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import {
   agentTypesForProvider,
   applyAgentProviderAccess,
@@ -28,26 +28,107 @@ import {
   applyResetThinkingAccess,
   applyRoutingEnabled,
   applyThinkingAccess,
+  parseModelAccessFragment,
 } from "../modules/model-access/public.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
-import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
 
 function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
 }
 
-/** Injected persistence adapter. Swap for an in-memory adapter in tests. */
-export interface ConfigIO {
-  load(): SubagentsConfig;
-  save(config: SubagentsConfig): void;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Production adapter wrapping the real config file. */
-export const fileConfigIO: ConfigIO = {
-  load: () => loadConfig(),
-  save: (c) => saveConfigAtomic(c),
+/** Default number of grace turns before an agent is force-stopped. */
+export const DEFAULT_GRACE_TURNS = 6;
+
+/** Valid system prompt modes. */
+export const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
+
+/** Default concurrency config — used for resets. */
+export const DEFAULT_CONCURRENCY: SubagentsConfig["concurrency"] = { default: 4 };
+
+/** Default agent settings — merged into loaded config so callers get a complete shape. */
+const DEFAULT_AGENT: AgentSettings = {
+  forceBackground: false,
+  graceTurns: DEFAULT_GRACE_TURNS,
+  systemPromptMode: "replace",
+  includeContextFiles: true,
+  disableDefaultAgents: false,
+  expandListByDefault: true,
+  showTools: true,
+  showTurns: true,
+  showInput: true,
+  showOutput: true,
+  showContext: true,
+  showCost: false,
+  showTime: true,
 };
+
+/**
+ * Known agent setting keys. Unknown keys (legacy dynamic model keys, the
+ * retired `default`) are dropped at load, so the next explicit save writes
+ * the canonical schema. This is schema hygiene, not migration: old model
+ * values are never read or transformed.
+ */
+const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
+  "forceBackground",
+  "graceTurns",
+  "showCost",
+  "systemPromptMode",
+  "includeContextFiles",
+  "loadSkillsImplicitly",
+  "loadExtensionsImplicitly",
+  "disableDefaultAgents",
+  "expandListByDefault",
+  "showTools",
+  "showTurns",
+  "showInput",
+  "showOutput",
+  "showContext",
+  "showTime",
+];
+
+type ConfigSection = "modelRouting" | "agent" | "concurrency";
+
+/** Section-level document access, backed by the configuration module. */
+export interface ConfigSectionIO {
+  reload(): void;
+  read(section: ConfigSection): unknown;
+  commit(section: ConfigSection, assignments: Record<string, JsonValue>): { ok: true } | { ok: false; message: string };
+}
+
+/** Production adapter over the one configuration facade. */
+export function createConfigurationSectionIO(configuration: Configuration): ConfigSectionIO {
+  // The store is the only writer while menus migrate, so tracking the last
+  // observed revision is enough to satisfy optimistic concurrency.
+  let revision = 0;
+  return {
+    reload() {
+      const result = configuration.execute({ kind: "reload" });
+      if (result.ok) revision = result.revision;
+    },
+    read(section) {
+      const result = configuration.execute({ kind: "read-value", path: [section] });
+      if (!result.ok) return undefined;
+      revision = result.revision;
+      return "found" in result && result.found ? result.value : undefined;
+    },
+    commit(section, assignments) {
+      const result = configuration.execute({
+        kind: "commit-fragment",
+        expectedRevision: revision,
+        section,
+        assignments,
+      });
+      if (!result.ok) return { ok: false, message: result.error.message };
+      revision = result.revision;
+      return { ok: true };
+    },
+  };
+}
 
 /** Agent settings with all scalar defaults resolved. */
 export interface ResolvedAgentSettings {
@@ -98,8 +179,8 @@ export class ConfigStore {
   private navigator?: ChildScreenHost;
   private manager?: SubagentRuntime;
 
-  constructor(private readonly io: ConfigIO = fileConfigIO) {
-    this.config = this.io.load();
+  constructor(private readonly io: ConfigSectionIO) {
+    this.config = this.loadFromSections();
   }
 
   // ── Reads ──────────────────────────────────────────────────────
@@ -110,7 +191,7 @@ export class ConfigStore {
     return {
       forceBackground: a.forceBackground === true,
       showCost: a.showCost === true,
-      graceTurns: a.graceTurns ?? 6,
+      graceTurns: a.graceTurns ?? DEFAULT_GRACE_TURNS,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
       includeContextFiles: a.includeContextFiles ?? true,
       loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
@@ -174,16 +255,16 @@ export class ConfigStore {
     routing: {
       setEnabled: (enabled: boolean): void => {
         this.config.modelRouting = applyRoutingEnabled(this.config.modelRouting, enabled);
-        this.persist();
+        this.persist("modelRouting");
       },
       setProviderEnabled: (provider: string, enabled: boolean): void => {
         this.config.modelRouting = applyProviderEnabled(this.config.modelRouting, provider, enabled);
-        this.persist();
+        this.persist("modelRouting");
       },
       /** Replace one canonical Agent/provider rule; an empty exact list deletes it. */
       setAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
         this.config.modelRouting = applyAgentProviderAccess(this.config.modelRouting, type, provider, models);
-        this.persist();
+        this.persist("modelRouting");
       },
       configureAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
         const next = applyQuickAgentProviderAccess(this.config.modelRouting, type, provider, models);
@@ -191,11 +272,11 @@ export class ConfigStore {
         // picker could not leave a written routing/provider half-change.
         if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
         this.config.modelRouting = next;
-        this.persist();
+        this.persist("modelRouting");
       },
       setParentModelAccess: (type: string, allowed: boolean): void => {
         this.config.modelRouting = applyParentModelAccess(this.config.modelRouting, type, allowed);
-        this.persist();
+        this.persist("modelRouting");
       },
       setThinkingAccess: (
         type: string,
@@ -206,64 +287,64 @@ export class ConfigStore {
         const next = applyThinkingAccess(this.config.modelRouting, type, modelKey, allowed, defaultLevel);
         if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
         this.config.modelRouting = next;
-        this.persist();
+        this.persist("modelRouting");
       },
       resetThinkingAccess: (type: string, modelKey: string): void => {
         const next = applyResetThinkingAccess(this.config.modelRouting, type, modelKey);
         if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
         this.config.modelRouting = next;
-        this.persist();
+        this.persist("modelRouting");
       },
       deleteProviderRules: (provider: string): void => {
         this.config.modelRouting = applyDeleteProviderRules(this.config.modelRouting, provider);
-        this.persist();
+        this.persist("modelRouting");
       },
       cleanUnavailableModels: (provider: string, modelIds: readonly string[]): void => {
         this.config.modelRouting = applyCleanUnavailableModels(this.config.modelRouting, provider, modelIds);
-        this.persist();
+        this.persist("modelRouting");
       },
       clearAll: (): void => {
         this.config.modelRouting = applyClearModelAccess();
-        this.persist();
+        this.persist("modelRouting");
       },
     },
     agent: {
       setForceBackground: (enabled: boolean): void => {
         this.config.agent.forceBackground = enabled;
-        this.persist();
+        this.persist("agent");
       },
       setShowCost: (enabled: boolean): void => {
         this.config.agent.showCost = enabled;
-        this.persist();
+        this.persist("agent");
         this.syncStatsVisibility();
       },
       setGraceTurns: (n: number): void => {
         this.config.agent.graceTurns = n;
-        this.persist();
+        this.persist("agent");
       },
       setSystemPromptMode: (mode: SystemPromptMode): void => {
         this.config.agent.systemPromptMode = mode;
-        this.persist();
+        this.persist("agent");
       },
       setIncludeContextFiles: (enabled: boolean): void => {
         this.config.agent.includeContextFiles = enabled;
-        this.persist();
+        this.persist("agent");
       },
       setLoadSkillsImplicitly: (value: boolean): void => {
         this.config.agent.loadSkillsImplicitly = value;
-        this.persist();
+        this.persist("agent");
       },
       setLoadExtensionsImplicitly: (value: boolean): void => {
         this.config.agent.loadExtensionsImplicitly = value;
-        this.persist();
+        this.persist("agent");
       },
       setDisableDefaultAgents: (value: boolean): void => {
         this.config.agent.disableDefaultAgents = value;
-        this.persist();
+        this.persist("agent");
       },
       setExpandListByDefault: (value: boolean): void => {
         this.config.agent.expandListByDefault = value;
-        this.persist();
+        this.persist("agent");
       },
       setShowTools: (enabled: boolean) => this.setAgentVisibility("showTools", enabled),
       setShowTurns: (enabled: boolean) => this.setAgentVisibility("showTurns", enabled),
@@ -275,32 +356,32 @@ export class ConfigStore {
     concurrency: {
       setDefault: (n: number): void => {
         this.config.concurrency.default = n;
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
       setProvider: (key: string, n: number): void => {
         this.config.concurrency.providers = { ...(this.config.concurrency.providers ?? {}), [key]: n };
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
       setModel: (key: string, n: number): void => {
         this.config.concurrency.models = { ...(this.config.concurrency.models ?? {}), [key]: n };
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
       removeProvider: (key: string): void => {
         if (this.config.concurrency.providers) delete this.config.concurrency.providers[key];
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
       removeModel: (key: string): void => {
         if (this.config.concurrency.models) delete this.config.concurrency.models[key];
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
       reset: (): void => {
         this.config.concurrency = { ...DEFAULT_CONCURRENCY };
-        this.persist();
+        this.persist("concurrency");
         this.applyConcurrency();
       },
     },
@@ -308,9 +389,10 @@ export class ConfigStore {
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
-  /** Re-read disk and re-sync deps. Called at session_start. */
+  /** Re-read the persisted document and re-sync deps. Called at session_start. */
   reload(): void {
-    this.config = this.io.load();
+    this.io.reload();
+    this.config = this.loadFromSections();
     this.syncAllDeps();
   }
 
@@ -329,8 +411,41 @@ export class ConfigStore {
 
   // ── Private helpers ────────────────────────────────────────────
 
-  private persist(): void {
-    this.io.save(this.config);
+  /** Resolve raw sections into a complete config with capability defaults. */
+  private loadFromSections(): SubagentsConfig {
+    const agentRaw = this.io.read("agent");
+    const concurrencyRaw = this.io.read("concurrency");
+    const agentSource = isPlainObject(agentRaw) ? agentRaw : {};
+    const concurrencySource = isPlainObject(concurrencyRaw) ? concurrencyRaw : {};
+    const agent: AgentSettings = {} as AgentSettings;
+    for (const key of AGENT_SETTING_KEYS) {
+      const value = agentSource[key];
+      if (value !== undefined) (agent as unknown as Record<string, unknown>)[key] = value;
+    }
+    return {
+      modelRouting: parseModelAccessFragment(this.io.read("modelRouting")),
+      agent: { ...DEFAULT_AGENT, ...agent },
+      concurrency: {
+        ...concurrencySource,
+        default: typeof concurrencySource.default === "number" ? concurrencySource.default : DEFAULT_CONCURRENCY.default,
+      } as SubagentsConfig["concurrency"],
+    };
+  }
+
+  /**
+   * Commit one section's canonical content. Failure keeps the old persisted
+   * value while this store's memory already advanced — the pre-correction
+   * behavior the remaining menus rely on until their settings paths migrate.
+   */
+  private persist(section: ConfigSection): void {
+    const value = section === "modelRouting"
+      ? this.config.modelRouting
+      : section === "agent" ? this.config.agent : this.config.concurrency;
+    const assignments = JSON.parse(JSON.stringify(value)) as Record<string, JsonValue>;
+    const result = this.io.commit(section, assignments);
+    if (!result.ok) {
+      console.error(`[subagents] Failed to save config: ${result.message}`);
+    }
   }
 
   /** Push stats visibility into the navigator below the editor. */
@@ -352,7 +467,7 @@ export class ConfigStore {
   /** Update a stats visibility flag: mutate config → persist → sync navigator. */
   private setAgentVisibility(key: "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showTime", value: boolean): void {
     this.config.agent[key] = value;
-    this.persist();
+    this.persist("agent");
     this.syncStatsVisibility();
   }
 

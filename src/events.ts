@@ -4,7 +4,7 @@ import { Check } from "typebox/value";
 import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import type { AgentConfig } from "./agents/types.js";
 import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
-import { createConfigurationRuntime } from "./bootstrap/configuration.js";
+import { configuration } from "./bootstrap/configuration.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
@@ -32,7 +32,6 @@ import {
 } from "./bootstrap/session-host.js";
 
 const agentCatalogue = createAgentCatalogueRuntime();
-const configuration = createConfigurationRuntime();
 const parentGuidance = createParentGuidanceRuntime();
 
 function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
@@ -90,12 +89,12 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
   const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
-  const configurationResult = await configuration.execute({
+  const configurationResult = configuration.execute({
     kind: "read-value",
     path: ["agent", "disableDefaultAgents"],
   });
   if (!configurationResult.ok) throw new Error(configurationResult.error.message);
-  const catalogueConfiguration = configurationResult.found
+  const catalogueConfiguration = "found" in configurationResult && configurationResult.found
     ? { disableDefaultAgents: configurationResult.value }
     : {};
   if (!Check(AgentCatalogueConfigurationSchema, catalogueConfiguration)) {

@@ -21,7 +21,6 @@ const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/agents/result-delivery.integration.test.ts": 2,
   "test/agents/stop-agent.test.ts": 5,
   "test/agents/tool-execution.test.ts": 4,
-  "test/config/config-io-normalize.test.ts": 1,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
   "test/spawn/session-fallback.integration.test.ts": 1,

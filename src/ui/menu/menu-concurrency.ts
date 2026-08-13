@@ -3,7 +3,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { getAllTypes } from "../../agents/agent-types.js";
-import { DEFAULT_CONCURRENCY } from "../../config/config-io.js";
+import { DEFAULT_CONCURRENCY } from "../../config/config-store.js";
 import { effectiveAlternateModelKeys } from "../../modules/model-access/public.js";
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
 import { getManager, getStore } from "../../shell.js";

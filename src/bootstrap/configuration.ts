@@ -2,18 +2,16 @@ import {
   createConfiguration,
   type Configuration,
 } from "../modules/configuration/public.js";
-import { createConfigStoreDocumentRepository } from "../platform/configuration/config-store-document-repository.js";
-import { getStore } from "../shell.js";
+import { createFileConfigurationDocumentRepository } from "../platform/fs/configuration-document-repository.js";
+import { configFilePath, resolveConfigRoot } from "../platform/fs/config-paths.js";
 
-export function createConfigurationRuntime(): Configuration {
-  return createConfiguration({
-    repository: createConfigStoreDocumentRepository(() => {
-      const store = getStore();
-      return {
-        modelRouting: store.routing,
-        agent: store.agent,
-        concurrency: store.concurrency,
-      };
-    }),
-  });
-}
+/**
+ * The one configuration runtime for the extension process. Module scope keeps
+ * it constructible before the session shell exists; Phase 8 moves ownership
+ * into the explicit composition root.
+ */
+export const configuration: Configuration = createConfiguration({
+  repository: createFileConfigurationDocumentRepository({
+    filePath: configFilePath(resolveConfigRoot(process.env)),
+  }),
+});

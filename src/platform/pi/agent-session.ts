@@ -31,8 +31,11 @@ import { preloadSkills, loadSkillMeta } from "../../prompt/skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGTH } from "../../types.js";
 import type { SubagentType } from "../../agents/types.js";
 import { withSubagentSpawn } from "../../shell.js";
-import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
+import { DEFAULT_GRACE_TURNS } from "../../config/config-store.js";
+import { customPromptFilePath, resolveConfigRoot } from "../fs/config-paths.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
+
+const CUSTOM_PROMPT_PATH = customPromptFilePath(resolveConfigRoot(process.env));
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";
 import { debugFaultMessage, type DebugFaultKind } from "../../agents/debug-fault.js";
 

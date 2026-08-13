@@ -50,16 +50,13 @@ vi.mock("../src/ui/searchable-select.js", () => ({
 
 vi.mock("../src/ui/format.js", () => ({ getDisplayName: vi.fn((type: string) => type) }));
 
-vi.mock("../src/config/config-io.js", () => ({
-  saveConfigAtomic: vi.fn(),
-  DEFAULT_GRACE_TURNS: 6,
-  DEFAULT_CONCURRENCY: { default: 4 },
-  CUSTOM_PROMPT_PATH: "/home/test/.pi/agent/subagents-lite-prompt.md",
-  DEFAULT_CONFIG: {
-    modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} },
-    agent: { forceBackground: false },
-    concurrency: { default: 4 },
-  },
+// Menus never persist through a real file in tests; the mocked store above is
+// authoritative, so the bootstrap configuration document stays empty in memory.
+vi.mock("../src/platform/fs/configuration-document-repository.js", () => ({
+  createFileConfigurationDocumentRepository: () => ({
+    load: () => ({}),
+    persist: () => {},
+  }),
 }));
 
 vi.mock("../src/agents/tool-execution.js", () => ({

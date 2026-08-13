@@ -14,4 +14,4 @@
 ## Implementation-only
 
 - ConfigStore getters, mutation names, and injected manager/navigator dependencies are not configuration concepts.
-- The Phase 1 ConfigStore snapshot repository is read-only migration wiring. It does not become the final persistence adapter or a second write path.
+- The transitional ConfigStore section IO delegates every read and commit to this module, so there is exactly one in-memory document and one write path while menus migrate to settings pages. It is deleted with ConfigStore.

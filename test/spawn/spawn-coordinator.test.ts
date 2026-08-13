@@ -18,10 +18,11 @@ vi.mock("../../src/utils.js", () => ({
   parseThinkingLevel: vi.fn(() => undefined),
 }));
 
-vi.mock("../../src/config/config-io.js", () => ({
-  loadConfig: vi.fn(() => ({ modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } })),
-  saveConfigAtomic: vi.fn(),
-  DEFAULT_CONFIG: { modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} }, agent: { forceBackground: false }, concurrency: { default: 4 } },
+vi.mock("../../src/platform/fs/configuration-document-repository.js", () => ({
+  createFileConfigurationDocumentRepository: () => ({
+    load: () => ({}),
+    persist: () => {},
+  }),
 }));
 
 vi.mock("../../src/agents/tool-execution.js", () => ({

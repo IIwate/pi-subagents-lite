@@ -23,6 +23,42 @@ export const ReadConfigurationValueCommandSchema = Type.Object({
   path: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
 }, { additionalProperties: false });
 
+// One transaction replaces the owning capability's keys inside one physical
+// section. Assignments carry the full canonical fragment content; keys not
+// listed keep their persisted value, so co-owned sections (agent) stay intact.
+export const CommitConfigurationFragmentCommandSchema = Type.Object({
+  kind: Type.Literal("commit-fragment"),
+  expectedRevision: Type.Integer({ minimum: 0 }),
+  section: Type.String({ minLength: 1 }),
+  assignments: Type.Record(Type.String(), JsonValueSchema),
+}, { additionalProperties: false });
+
+export const ReloadConfigurationCommandSchema = Type.Object({
+  kind: Type.Literal("reload"),
+}, { additionalProperties: false });
+
+export const ConfigurationCommandSchema = Type.Union([
+  ReadConfigurationValueCommandSchema,
+  CommitConfigurationFragmentCommandSchema,
+  ReloadConfigurationCommandSchema,
+]);
+
+const ConfigurationErrorSchema = Type.Object({
+  code: Type.Union([
+    Type.Literal("invalid-command"),
+    Type.Literal("repository-failure"),
+    Type.Literal("invalid-repository-result"),
+    Type.Literal("revision-conflict"),
+    Type.Literal("persistence-failure"),
+  ]),
+  message: Type.String(),
+}, { additionalProperties: false });
+
+const ConfigurationFailureSchema = Type.Object({
+  ok: Type.Literal(false),
+  error: ConfigurationErrorSchema,
+}, { additionalProperties: false });
+
 export const ReadConfigurationValueResultSchema = Type.Union([
   Type.Object({
     ok: Type.Literal(true),
@@ -35,21 +71,32 @@ export const ReadConfigurationValueResultSchema = Type.Union([
     revision: Type.Integer({ minimum: 0 }),
     found: Type.Literal(false),
   }, { additionalProperties: false }),
+  ConfigurationFailureSchema,
+]);
+
+export const CommitConfigurationFragmentResultSchema = Type.Union([
   Type.Object({
-    ok: Type.Literal(false),
-    error: Type.Object({
-      code: Type.Union([
-        Type.Literal("invalid-command"),
-        Type.Literal("repository-failure"),
-        Type.Literal("invalid-repository-result"),
-      ]),
-      message: Type.String(),
-    }, { additionalProperties: false }),
+    ok: Type.Literal(true),
+    revision: Type.Integer({ minimum: 0 }),
   }, { additionalProperties: false }),
+  ConfigurationFailureSchema,
+]);
+
+export const ReloadConfigurationResultSchema = Type.Union([
+  Type.Object({
+    ok: Type.Literal(true),
+    revision: Type.Integer({ minimum: 0 }),
+  }, { additionalProperties: false }),
+  ConfigurationFailureSchema,
 ]);
 
 export type JsonValue = Static<typeof JsonValueSchema>;
 export type JsonObject = Static<typeof JsonObjectSchema>;
 export type ConfigurationDocumentSnapshot = Static<typeof ConfigurationDocumentSnapshotSchema>;
 export type ReadConfigurationValueCommand = Static<typeof ReadConfigurationValueCommandSchema>;
+export type CommitConfigurationFragmentCommand = Static<typeof CommitConfigurationFragmentCommandSchema>;
+export type ReloadConfigurationCommand = Static<typeof ReloadConfigurationCommandSchema>;
+export type ConfigurationCommand = Static<typeof ConfigurationCommandSchema>;
 export type ReadConfigurationValueResult = Static<typeof ReadConfigurationValueResultSchema>;
+export type CommitConfigurationFragmentResult = Static<typeof CommitConfigurationFragmentResultSchema>;
+export type ReloadConfigurationResult = Static<typeof ReloadConfigurationResultSchema>;

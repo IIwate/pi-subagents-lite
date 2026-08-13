@@ -17,7 +17,9 @@ import { buildListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SystemPromptMode } from "../../agents/types.js";
 import { getStore } from "../../shell.js";
-import { CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
+import { customPromptFilePath, resolveConfigRoot } from "../../platform/fs/config-paths.js";
+
+const CUSTOM_PROMPT_PATH = customPromptFilePath(resolveConfigRoot(process.env));
 
 export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
