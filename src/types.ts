@@ -1,12 +1,11 @@
 /**
- * Type definitions for the subagent system.
+ * Host-side shared types: prompt environment, runner callbacks, and the
+ * coordinator spawn config. Lifecycle and record shapes live in the
+ * subagent-runtime module contracts.
  */
 
-import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { DebugFaultKind } from "./agents/debug-fault.js";
 import type { LifetimeUsage } from "./agents/usage.js";
-import type { SubagentType } from "./agents/types.js";
 import type {
   AcceptedRunPolicy as AcceptedRunPolicyContract,
   AgentInvocation as AgentInvocationContract,
@@ -14,23 +13,8 @@ import type {
 
 export type {
   AcceptedRunPolicy,
-  AgentInvocation,
   ThinkingLevel,
 } from "./modules/subagent-runtime/public.js";
-
-export interface AgentRecord {
-  id: string;
-  result?: string;
-  error?: string;
-  /** Lifecycle state: status, timestamps. */
-  lifecycle: AgentLifecycle;
-  /** Display-oriented info: type, description, invocation. */
-  display: AgentDisplayInfo;
-  /** Execution internals: session, abort controller, pending steers. */
-  execution: AgentExecutionState;
-  /** Accumulated statistics: usage, tool uses, turns. */
-  stats: AgentAccumulatedStats;
-}
 
 export interface EnvInfo {
   isGitRepo: boolean;
@@ -66,95 +50,4 @@ export interface SpawnConfig {
 
 /** How many characters of agent ID to show in display. */
 export const SHORT_ID_LENGTH = 8;
-
-// ---------------------------------------------------------------------------
-// Sub-object interfaces for decomposed AgentRecord
-// ---------------------------------------------------------------------------
-
-/** Possible agent lifecycle statuses. */
-export type AgentStatus = "queued" | "running" | "completed" | "turn_limited" | "aborted" | "stopped" | "error";
-
-/** Who initiated an agent stop: "user" via UI menu, or "agent" via StopAgent tool. */
-export type StopInitiator = "user" | "agent";
-
-/**
- * Lifecycle state: when the agent started, completed, and its current status.
- * Used by runtime snapshots, menus, and list linger logic.
- */
-export interface AgentLifecycle {
-  status: AgentStatus;
-  startedAt: number;
-  completedAt?: number;
-  stoppedBy?: StopInitiator;
-  /** Session-local pin timestamp. Pinned records are exempt from automatic cleanup. */
-  pinnedAt?: number;
-  /** Terminal cleanup time already spent paused by completed pin intervals. */
-  cleanupExpiryPausedMs?: number;
-  /** True once the final result is safely persisted in the parent session. */
-  resultPersisted?: boolean;
-  /**
-   * Whether the parent has received the result through a foreground return
-   * or a successfully settled background turn.
-   * Cleanup preserves terminal records until this is set or the result is persisted.
-   */
-  resultConsumed?: boolean;
-}
-
-/**
- * Display-oriented fields: type name, description, invocation params.
- * Used by the agent list and management menus.
- */
-interface AgentDisplayInfo {
-  type: SubagentType;
-  description: string;
-  /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-  invocation?: AgentInvocationContract;
-}
-
-/**
- * Execution internals: session handle, abort controller, pending steers.
- * Host-only leftover for Pi session handles. The runtime snapshot stores a session ID.
- */
-interface AgentExecutionState {
-  session?: AgentSession;
-  abortController?: AbortController;
-  promise?: Promise<string>;
-  /** Whether the current execution promise has fully settled. */
-  settled?: boolean;
-  /** Concurrency bucket derived from the accepted model snapshot. */
-  concurrencyKey: string;
-  /** Grace turns retained for direct follow-up prompts. */
-  graceTurns?: number;
-  /** Parent session and branch anchor captured with the accepted invocation. */
-  resultSessionId?: string;
-  resultOriginEntryId?: string | null;
-  /** Unique final-result identity currently represented by the record. */
-  resultDeliveryId?: string;
-  /** Debug fault assigned after the real child session is configured. */
-  debugFaultKind?: DebugFaultKind;
-  /** Steering messages queued before the session was ready. */
-  pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
-}
-
-/**
- * Accumulated statistics: usage breakdown, tool uses, turn count.
- * Used by the agent list and selected-session footer.
- */
-interface AgentAccumulatedStats {
-  /**
-   * Lifetime usage breakdown, accumulated from assistant/tool events and
-   * compactions. Total = input + output + cacheWrite + cost (cacheRead deliberately
-   * excluded — see issue #38). Initialized to zeros at spawn.
-   */
-  lifetimeUsage: LifetimeUsage;
-  toolUses: number;
-  /** Final turn count (set on completion). Used by widget after activity cleanup. */
-  turnCount?: number;
-  /** Max turns limit (from invocation or default). */
-  maxTurns?: number;
-  /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
-  compactionCount: number;
-  /** Last-known context usage percentage (0–100), captured at completion. */
-  contextPercent?: number | null;
-}
 

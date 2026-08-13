@@ -10,7 +10,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 type ScopedModel = ExtensionContext["scopedModels"][number];
 
-/** Canonical model key used in scope sets and menu options. */
+/** Canonical model key used in scope sets and settings views. */
 export function modelKey(model: { provider: string; id: string }): string {
   return `${model.provider}/${model.id}`;
 }
@@ -52,10 +52,6 @@ export function routingDisabledModelError(modelRef: string): string {
   );
 }
 
-export function parentModelDeniedError(agentType: string): string {
-  return `Agent "${agentType}" is not authorized to use the parent model. Enable Use parent model or pass an authorized alternate model.`;
-}
-
 export function providerDisabledError(modelRef: string, provider: string): string {
   return `Model "${modelRef}" is not authorized: provider "${provider}" is disabled in Model access.`;
 }
@@ -87,14 +83,4 @@ export function outOfScopeModelError(
     `Allowed: ${preview}. ` +
     "Adjust with /scoped-models or pick a model from the scope list."
   );
-}
-
-/** List model options for menus, filtered to Pi's active session scope. */
-export function listModelOptionsForMenus(
-  ctx: Pick<ExtensionContext, "modelRegistry" | "scopedModels">,
-): string[] {
-  const models = ctx.scopedModels.length > 0
-    ? ctx.scopedModels.map(({ model }) => model)
-    : ctx.modelRegistry.getAvailable();
-  return models.map(modelKey);
 }

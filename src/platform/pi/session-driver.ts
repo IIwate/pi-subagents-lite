@@ -3,7 +3,6 @@ import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-wor
 import {
   DEFAULT_TEARDOWN_TIMEOUT_MS,
   type SessionDriver,
-  type SessionEvent,
   type SessionInspectResult,
 } from "../../modules/subagent-runtime/public.js";
 import { getSessionContextPercent } from "../../agents/usage.js";
@@ -178,5 +177,3 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
     },
   };
 }
-
-export type { SessionEvent };

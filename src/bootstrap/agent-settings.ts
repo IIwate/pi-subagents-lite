@@ -18,7 +18,7 @@ export const DEFAULT_GRACE_TURNS = 6;
 const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
 
 /** Persisted shape of the `agent` section; every key optional on disk. */
-export interface AgentSettings {
+interface AgentSettings {
   forceBackground?: boolean;
   graceTurns?: number;
   showCost?: boolean;

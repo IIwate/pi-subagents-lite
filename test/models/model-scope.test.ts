@@ -2,10 +2,9 @@
  * model-scope.test.ts — Pi 0.84 resolved Model scope helpers.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   agentProviderDeniedError,
-  listModelOptionsForMenus,
   missingParentModelError,
   missingSubagentModelError,
   modelKey,
@@ -96,30 +95,5 @@ describe("outOfScopeModelError", () => {
     const msg = outOfScopeModelError("x/y", keys);
     expect(msg).toContain("12 total");
     expect(msg).toContain("...");
-  });
-});
-
-describe("listModelOptionsForMenus", () => {
-  it("uses Pi's session scope when present", () => {
-    const getAvailable = vi.fn(() => [gemini]);
-    const result = listModelOptionsForMenus({
-      scopedModels: [{ model: grok, thinkingLevel: "high" }],
-      modelRegistry: { getAvailable } as any,
-    });
-
-    expect(result).toEqual(["cpa-responses/grok-4.5"]);
-    expect(getAvailable).not.toHaveBeenCalled();
-  });
-
-  it("falls back to all available models when unrestricted", () => {
-    const result = listModelOptionsForMenus({
-      scopedModels: [],
-      modelRegistry: { getAvailable: () => [grok, gemini] } as any,
-    });
-
-    expect(result).toEqual([
-      "cpa-responses/grok-4.5",
-      "cpa-gemini/gemini-3.5-flash",
-    ]);
   });
 });

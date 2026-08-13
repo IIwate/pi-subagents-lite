@@ -2,7 +2,7 @@ import type { ConcurrencySettingsView, SettingsRow } from "../contracts/settings
 
 export const CONCURRENCY_LIMIT_MINIMUM = 1;
 
-export function limitLabel(limit: number): string {
+function limitLabel(limit: number): string {
   return `${limit} slot${limit === 1 ? "" : "s"}`;
 }
 

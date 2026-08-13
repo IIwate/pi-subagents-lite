@@ -86,14 +86,14 @@ export function makeTheme(): any {
   };
 }
 
-export function makeComponent(text: string): any {
+function makeComponent(text: string): any {
   return {
     render: () => [text],
     invalidate: vi.fn(),
   };
 }
 
-export function makeContainer(text: string): any {
+function makeContainer(text: string): any {
   return {
     children: [makeComponent(text)],
     render: () => [text],
@@ -101,7 +101,7 @@ export function makeContainer(text: string): any {
   };
 }
 
-export function makeLiveContainer(children: any[]): any {
+function makeLiveContainer(children: any[]): any {
   return {
     children,
     render(width: number) {

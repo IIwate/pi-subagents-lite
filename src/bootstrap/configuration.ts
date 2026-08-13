@@ -44,7 +44,7 @@ export const configuration: Configuration = createConfiguration({
 });
 
 /** Top-level document sections with a live owner. */
-export type ConfigSection = "modelRouting" | "agent" | "concurrency";
+type ConfigSection = "modelRouting" | "agent" | "concurrency";
 
 /** Section-level document access, backed by the configuration module. */
 export interface ConfigSectionIO {
@@ -59,7 +59,7 @@ export interface ConfigSectionIO {
  * fragment at the start of each update can therefore never commit against a
  * revision another owner already advanced.
  */
-export function createConfigurationSectionIO(source: Configuration): ConfigSectionIO {
+function createConfigurationSectionIO(source: Configuration): ConfigSectionIO {
   let revision = 0;
   return {
     reload() {

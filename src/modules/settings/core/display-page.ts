@@ -10,7 +10,7 @@ interface DisplayToggleDefinition {
   detail: string;
 }
 
-export const DISPLAY_TOGGLES: readonly DisplayToggleDefinition[] = [
+const DISPLAY_TOGGLES: readonly DisplayToggleDefinition[] = [
   { id: "expandListByDefault", label: "Expand list by default", detail: "Start each new conversation with the agent list expanded." },
   { id: "showTools", label: "Show tools", detail: "Show tool call count (N calls) in the agent list." },
   { id: "showTurns", label: "Show turns", detail: "Show turn count (⟳ ) in the agent list." },

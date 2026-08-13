@@ -5,7 +5,7 @@ import type { ModelAccessFragment, ThinkingLevel } from "../modules/model-access
 import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 
-export interface GuidanceAgent {
+interface GuidanceAgent {
   name: string;
   description: string;
   registeredTools?: string[];

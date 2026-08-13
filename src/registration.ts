@@ -19,7 +19,7 @@ const SILENT_TOOL_RENDERING = {
 // ============================================================================
 
 /** Register the Agent tool once; per-run guidance lists current Agent types. */
-export function registerAgentTool(runtime: ExtensionRuntime): void {
+function registerAgentTool(runtime: ExtensionRuntime): void {
   const agentParam = Type.Optional(Type.String());
   // @ts-expect-error — description removed to save prompt tokens
   runtime.pi.registerTool({

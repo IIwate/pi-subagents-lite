@@ -70,7 +70,7 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
  * Scan agent files from user and project directories, merge with defaults,
  * and register into the type registry.
  */
-export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
+async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
   const userAgentDir = userAgentsDirPath(configRoot);
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
@@ -98,7 +98,7 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
   ), { disableDefaultAgents: true });
 }
 
-export async function loadConfigAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
+async function loadConfigAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
   // Re-read the persisted document (it may have changed on disk between
   // sessions), then re-sync every consumer that mirrors it.
   configurationSectionIO.reload();

@@ -1,7 +1,7 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 
-export const PI_ROOT_CHILDREN = 7;
-export const PI_DOCUMENT_CHILDREN = 3;
+const PI_ROOT_CHILDREN = 7;
+const PI_DOCUMENT_CHILDREN = 3;
 export const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 
 export interface ScreenSwapState {
@@ -21,19 +21,19 @@ export interface ScreenSwapState {
   active: boolean;
 }
 
-export function isComponent(value: unknown): value is Component {
+function isComponent(value: unknown): value is Component {
   return typeof value === "object"
     && value !== null
     && typeof (value as Component).render === "function"
     && typeof (value as Component).invalidate === "function";
 }
 
-export function isContainerLike(value: unknown): value is Component & { children: Component[] } {
+function isContainerLike(value: unknown): value is Component & { children: Component[] } {
   return isComponent(value)
     && Array.isArray((value as { children?: unknown }).children);
 }
 
-export function isBuiltinFooter(value: Component): boolean {
+function isBuiltinFooter(value: Component): boolean {
   const footer = value as Component & {
     session?: { getContextUsage?: unknown; sessionManager?: { getCwd?: unknown; getEntries?: unknown } };
     footerData?: { getGitBranch?: unknown; getExtensionStatuses?: unknown };
@@ -49,7 +49,7 @@ export function isBuiltinFooter(value: Component): boolean {
     && typeof footer.footerData?.getExtensionStatuses === "function";
 }
 
-export function containsComponent(root: Component & { children: Component[] }, target: Component): boolean {
+function containsComponent(root: Component & { children: Component[] }, target: Component): boolean {
   for (const child of root.children) {
     if (child === target) return true;
     if (isContainerLike(child) && containsComponent(child, target)) return true;
@@ -156,10 +156,4 @@ export function renderChildFooter(
     ? footer.render(width)
     : originalRender.call(footerContainer, width);
   return footer && isBuiltinFooter(footer) ? lines.slice(2) : lines;
-}
-
-export function clearScrollback(tui: TUI | undefined): void {
-  if (!tui) return;
-  try { tui.terminal.write(CLEAR_SCROLLBACK_SEQUENCE); } catch { /* best effort */ }
-  tui.requestRender(true);
 }

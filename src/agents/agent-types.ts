@@ -351,14 +351,6 @@ export function resolveSessionAllowedTools(opts: {
   return opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
 }
 
-/** Get built-in tool names for a type (case-insensitive). */
-export function getToolNamesForType(type: string): string[] {
-  const config = getAgentConfig(type);
-  return config?.registeredTools?.length
-    ? config.registeredTools
-    : [...BUILTIN_TOOL_NAMES];
-}
-
 /** Resolved config shape returned by getConfig. */
 export interface ResolvedAgentConfig {
   displayName: string;

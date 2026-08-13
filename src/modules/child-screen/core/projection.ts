@@ -27,7 +27,7 @@ export function lineText(rendered: RenderedLine): string {
   return rendered.parts.map((part) => part.text).join("");
 }
 
-export function computeListWindow(
+function computeListWindow(
   entryCount: number,
   focusIndex: number,
   rows: number,

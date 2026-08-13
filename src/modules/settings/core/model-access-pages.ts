@@ -100,7 +100,7 @@ export function buildModelAccessRootRows(view: ModelAccessRootView): SettingsRow
 }
 
 /** Multiline confirmation listing every rule the cleanup would delete. */
-export function cleanUnavailableConfirmMessage(view: ModelAccessRootView): string {
+function cleanUnavailableConfirmMessage(view: ModelAccessRootView): string {
   const count = view.unavailableRules.length;
   return [
     `Remove ${count} unavailable model access rule${count === 1 ? "" : "s"}?`,

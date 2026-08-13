@@ -29,7 +29,7 @@ function sanitizeEntries(raw: unknown): Record<string, number> {
   return entries;
 }
 
-export function factoryLimitsFragment(): ConcurrencyLimitsFragment {
+function factoryLimitsFragment(): ConcurrencyLimitsFragment {
   return { default: DEFAULT_CONCURRENCY_LIMIT, providers: {}, models: {} };
 }
 

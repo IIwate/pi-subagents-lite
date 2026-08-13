@@ -29,7 +29,6 @@ export type {
 } from "./contracts/scheduling.js";
 export {
   applyConcurrencyLimitsUpdate,
-  factoryLimitsFragment,
   parseConcurrencyLimitsFragment,
   runtimeLimitsFromFragment,
 } from "./core/limits-fragment.js";

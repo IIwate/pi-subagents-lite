@@ -255,7 +255,6 @@ export function makeAgentMd(overrides: Record<string, unknown> = {}): string {
     tools: "read, bash, edit",
     extensions: "true",
     skills: "true",
-    thinking: "off",
     max_turns: "25",
   };
   const fm: Record<string, string> = { ...defaults };
