@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 50 files, 866 passed | Vitest |
+| Full suite | 56 files, 869 passed | Vitest |
 | Skipped tests | None on this host. Two directory-symlink scenarios still skip when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 9 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
@@ -92,3 +92,17 @@ The audit remains available only to explain how these risks were discovered and 
 - The accepted Agent call snapshot is validated through `subagent-runtime/public.ts` before the spawn path consumes it.
 - The direct contract cycle, configuration-shape drift, undocumented requirement references, and new internal mocks remain absent.
 - The Phase 1 checkpoint records `Review-Result: PASS` after the review and the verification results above.
+
+## Phase 2 verification
+
+- Formal review of `8827566..fe60ce3` found no unresolved blocking issues after the review-fix commit.
+- Agent discovery, merge, loading policy, and Model access authorize/update/query enter through module `public.ts`.
+- Frontmatter scanning lives in `platform/fs`. Config load parses `modelRouting` through `parseModelAccessFragment`.
+- Recorded verification: `bun run typecheck` pass; `bun run test` 56 files, 869 passed; architecture guard 9 passed; `git diff --check` pass.
+
+## Phase 2 exit review
+
+- Catalogue discovery and Model access policy tests do not require Pi, filesystem, menu, or runtime mocks.
+- The Agent tool validates input, calls public use cases, and formats output.
+- Catalogue and Model access policy no longer live in configuration normalizers, menus, `AgentManager`, or tool execution.
+- The Phase 2 checkpoint records `Review-Result: PASS` after the review and the verification results above.
