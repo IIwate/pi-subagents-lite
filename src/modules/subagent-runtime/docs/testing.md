@@ -20,6 +20,7 @@ Lifecycle commands are exercised through `createSubagentRuntime` with in-memory 
 - Retention, pinning, cleanup, late usage, and idempotent shutdown use an injected clock.
 - Special failure retention, selection-paused cleanup, and queue revalidation remain absent regression cases.
 - Worktree validation is delegated through its serializable inspector port.
+- The persisted limits fragment parses tolerantly, updates strictly, and derives the scheduler shape (`test/modules/subagent-runtime/limits-fragment.test.ts`).
 
 ## Fixtures and doubles
 

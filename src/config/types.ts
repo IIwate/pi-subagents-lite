@@ -80,9 +80,4 @@ export interface AgentSettings {
 export interface SubagentsConfig {
   modelRouting: ModelRoutingConfig;
   agent: AgentSettings;
-  concurrency: {
-    default: number;
-    providers?: Record<string, number>;
-    models?: Record<string, number>;
-  };
 }

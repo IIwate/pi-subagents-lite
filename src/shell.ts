@@ -18,8 +18,8 @@ import type {
   BackgroundDelivery,
   BackgroundResultRecord,
 } from "./modules/background-result-delivery/public.js";
-import { ConfigStore, createConfigurationSectionIO } from "./config/config-store.js";
-import { configuration } from "./bootstrap/configuration.js";
+import { ConfigStore } from "./config/config-store.js";
+import { configurationSectionIO } from "./bootstrap/configuration.js";
 
 // ============================================================================
 // Shell type
@@ -65,7 +65,7 @@ const shell: Shell = {
   manager: null,
   delivery: null,
   navigator: null,
-  store: new ConfigStore(createConfigurationSectionIO(configuration)),
+  store: new ConfigStore(configurationSectionIO),
 };
 
 // ============================================================================

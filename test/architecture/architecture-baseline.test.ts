@@ -26,11 +26,8 @@ const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/spawn/session-fallback.integration.test.ts": 1,
   "test/spawn/spawn-coordinator.test.ts": 6,
 
-  "test/ui/menu/helpers.test.ts": 1,
-  "test/ui/menu/menu-concurrency.test.ts": 2,
   "test/ui/menu/menu-debug.test.ts": 2,
   "test/ui/menu/menu-model-routing.test.ts": 2,
-  "test/ui/menu/submenus/confirm.test.ts": 2,
 };
 
 function internalMockCounts(): Record<string, number> {

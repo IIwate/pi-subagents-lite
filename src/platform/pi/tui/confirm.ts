@@ -6,8 +6,8 @@
  */
 
 import { SelectList, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
-import type { Theme } from "../../types.js";
-import { buildListTheme } from "../../../platform/pi/tui/settings-chrome.js";
+import type { Theme } from "./theme.js";
+import { buildListTheme } from "./settings-chrome.js";
 
 export interface MultilineConfirmOptions {
   message: string;

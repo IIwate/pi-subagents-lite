@@ -100,7 +100,7 @@ vi.mock("@earendil-works/pi-tui", () => ({
   }),
 }));
 
-vi.mock("../src/ui/searchable-select.js", () => ({
+vi.mock("../src/platform/pi/tui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 

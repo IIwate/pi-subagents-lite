@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from "vitest";
 import { runSettingsScreen } from "../../../src/platform/pi/tui/settings-screen.js";
 import {
   createSettings,
+  type ConcurrencySettingsOwner,
+  type ConcurrencySettingsView,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
   type PromptSettingsOwner,
@@ -70,11 +72,40 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
       return { ok: true };
     },
   };
+  const concurrencyView: ConcurrencySettingsView = {
+    defaultLimit: 4,
+    factoryDefaultLimit: 4,
+    providerLimits: { anthropic: 2 },
+    modelLimits: {},
+    activeProviders: ["anthropic", "openai"],
+    activeModels: ["anthropic/claude-sonnet-4", "openai/gpt-5"],
+  };
+  const concurrency: ConcurrencySettingsOwner = {
+    read: () => structuredClone(concurrencyView),
+    update(update) {
+      if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
+      if (update.scope === "default") {
+        concurrencyView.defaultLimit = update.limit;
+      } else if (update.scope === "reset") {
+        concurrencyView.defaultLimit = concurrencyView.factoryDefaultLimit;
+        concurrencyView.providerLimits = {};
+        concurrencyView.modelLimits = {};
+      } else {
+        const section = update.scope === "provider"
+          ? concurrencyView.providerLimits
+          : concurrencyView.modelLimits;
+        if (update.limit === null) delete section[update.key];
+        else section[update.key] = update.limit;
+      }
+      return { ok: true };
+    },
+  };
   return createSettings({
     summaries: { read: () => ({ modelAccessEnabled: false, concurrencyDefault: 4 }) },
     display,
     spawn,
     prompt,
+    concurrency,
   });
 }
 
@@ -253,6 +284,95 @@ describe("settings screen renderer contract", () => {
       "Created prompt file: /home/user/.pi/agent/subagent-prompt.md",
       "info",
     );
+  });
+
+  it("edits a keyed limit through the edit-or-remove submenu", async () => {
+    const { ctx, renders, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B"); // move to "Concurrency settings"
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\x1b[B"); // move to "Provider · anthropic"
+        component.handleInput("\r");     // open edit-or-remove
+        component.handleInput("\r");     // choose "Edit limit" → numeric input pre-filled "2"
+        component.handleInput("\x1b[3~"); // clear the pre-filled value
+        component.handleInput("5");
+        component.handleInput("\r");     // submit routes through onChange → update-limit
+        component.handleInput("\x1b");   // back to root
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(renders[1]).toContain("Provider · anthropic");
+    expect(notifications).toHaveBeenCalledWith("anthropic concurrency set to 5", "info");
+  });
+
+  it("removes a keyed limit through the explicit remove gesture", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\x1b[B"); // move to "Provider · anthropic"
+        component.handleInput("\r");     // open edit-or-remove
+        component.handleInput("\x1b[B"); // move to "Remove limit"
+        component.handleInput("\r");
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(notifications).toHaveBeenCalledWith("Removed Provider limit for anthropic", "info");
+  });
+
+  it("adds a model limit through the picker followed by the numeric step", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        // Rows: fallback, Provider · anthropic, Add Provider limit, Add Model limit, Reset.
+        for (let i = 0; i < 3; i++) component.handleInput("\x1b[B");
+        component.handleInput("\r");     // open the searchable picker
+        component.handleInput("\x1b[B"); // move to "openai/gpt-5"
+        component.handleInput("\r");     // pick → numeric input pre-filled "1"
+        component.handleInput("\x1b[3~");
+        component.handleInput("3");
+        component.handleInput("\r");     // submit commits add-limit directly
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(notifications).toHaveBeenCalledWith("openai/gpt-5 concurrency set to 3", "info");
+  });
+
+  it("resets concurrency only after the confirm dialog answers Yes", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\x1b[A"); // wrap upward to the last row: "Reset concurrency"
+        component.handleInput("\r");     // open the confirm dialog
+        component.handleInput("\x1b");   // Escape → no reset
+        component.handleInput("\r");     // reopen
+        component.handleInput("\r");     // Yes is preselected → confirm
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    const resets = notifications.mock.calls.filter(([message]) => message === "Concurrency reset");
+    expect(resets).toHaveLength(1);
   });
 
   it("runs the legacy menu for an un-migrated category and re-renders the root", async () => {

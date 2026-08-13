@@ -7,6 +7,11 @@ import {
   type SystemPromptMode,
 } from "../contracts/settings-contracts.js";
 import {
+  buildConcurrencyRows,
+  CONCURRENCY_LIMIT_MINIMUM,
+  parseLimitRowId,
+} from "../core/concurrency-page.js";
+import {
   buildDisplayRows,
   displayChangeNotice,
   displayToggleDefinition,
@@ -22,6 +27,7 @@ import {
   promptChangeNotice,
   SYSTEM_PROMPT_MODES,
 } from "../core/system-prompt-page.js";
+import type { ConcurrencySettingsOwner } from "../ports/concurrency-settings-owner.js";
 import type { DisplaySettingsOwner } from "../ports/display-settings-owner.js";
 import type { PromptSettingsOwner } from "../ports/prompt-settings-owner.js";
 import type { SettingsSummaryReader } from "../ports/settings-summary-reader.js";
@@ -32,13 +38,14 @@ export interface CreateSettingsOptions {
   display: DisplaySettingsOwner;
   spawn: SpawnSettingsOwner;
   prompt: PromptSettingsOwner;
+  concurrency: ConcurrencySettingsOwner;
 }
 
 export interface Settings {
   execute(command: unknown): SettingsResult;
 }
 
-type PageId = "root" | "display" | "spawn-options" | "system-prompt";
+type PageId = "root" | "display" | "spawn-options" | "system-prompt" | "concurrency";
 
 type SettingsFailureCode = "invalid-command" | "unknown-row" | "invalid-value";
 
@@ -71,6 +78,13 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       title: "System Prompt",
       presentation: "form",
       rows: buildSystemPromptRows(options.prompt.read()),
+      ...(notice ? { notice } : {}),
+    }),
+    "concurrency": (notice) => ({
+      page: "concurrency",
+      title: "Concurrency",
+      presentation: "form",
+      rows: buildConcurrencyRows(options.concurrency.read()),
       ...(notice ? { notice } : {}),
     }),
   };
@@ -154,6 +168,66 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     return failure("unknown-row", `Page system-prompt has no editable row ${id}.`);
   };
 
+  const setConcurrencyValue = (id: string, value: string): SettingsResult => {
+    if (id === "defaultConcurrency") {
+      const trimmed = value.trim();
+      if (!/^\d+$/.test(trimmed) || Number(trimmed) < CONCURRENCY_LIMIT_MINIMUM) {
+        return failure("invalid-value", `Fallback model limit must be an integer >= ${CONCURRENCY_LIMIT_MINIMUM}, not ${value}.`);
+      }
+      const limit = Number(trimmed);
+      return updated(
+        "concurrency",
+        options.concurrency.update({ scope: "default", limit }),
+        `Fallback model limit set to ${limit}`,
+      );
+    }
+    if (id === "resetAll") {
+      return updated("concurrency", options.concurrency.update({ scope: "reset" }), "Concurrency reset");
+    }
+    return failure("unknown-row", `Page concurrency has no editable row ${id}.`);
+  };
+
+  /** Keyed override rows: shared by in-place edits, removals, and additions. */
+  const applyLimitUpdate = (
+    command:
+      | { kind: "update-limit"; id: string; limit: number | null }
+      | { kind: "add-limit"; id: string; key: string; limit: number },
+  ): SettingsResult => {
+    if (page !== "concurrency") {
+      return failure("unknown-row", `Page ${page} has no limit row ${command.id}.`);
+    }
+    const view = options.concurrency.read();
+    if (command.kind === "add-limit") {
+      const scope = command.id === "addProviderLimit"
+        ? "provider" as const
+        : command.id === "addModelLimit" ? "model" as const : undefined;
+      if (!scope) return failure("unknown-row", `Page concurrency has no picker row ${command.id}.`);
+      const inventory = scope === "provider" ? view.activeProviders : view.activeModels;
+      if (!inventory.includes(command.key)) {
+        return failure("invalid-value", `${command.key} is not in the active ${scope} inventory.`);
+      }
+      return updated(
+        "concurrency",
+        options.concurrency.update({ scope, key: command.key, limit: command.limit }),
+        `${command.key} concurrency set to ${command.limit}`,
+      );
+    }
+    const target = parseLimitRowId(command.id);
+    if (!target) return failure("unknown-row", `Page concurrency has no limit row ${command.id}.`);
+    const saved = target.scope === "provider" ? view.providerLimits : view.modelLimits;
+    if (!Object.hasOwn(saved, target.key)) {
+      return failure("unknown-row", `No saved ${target.scope} limit for ${target.key}.`);
+    }
+    const scopeLabel = target.scope === "provider" ? "Provider" : "Model";
+    return updated(
+      "concurrency",
+      options.concurrency.update({ scope: target.scope, key: target.key, limit: command.limit }),
+      command.limit === null
+        ? `Removed ${scopeLabel} limit for ${target.key}`
+        : `${target.key} concurrency set to ${command.limit}`,
+    );
+  };
+
   return {
     execute(command: unknown): SettingsResult {
       if (!Check(SettingsCommandSchema, command)) {
@@ -175,7 +249,12 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           if (page !== "root") {
             return failure("unknown-row", `Page ${page} has no selectable row ${command.id}.`);
           }
-          if (command.id === "display" || command.id === "spawn-options" || command.id === "system-prompt") {
+          if (
+            command.id === "display"
+            || command.id === "spawn-options"
+            || command.id === "system-prompt"
+            || command.id === "concurrency"
+          ) {
             page = command.id;
             return { ok: true, snapshot: snapshots[page]() };
           }
@@ -193,9 +272,13 @@ export function createSettings(options: CreateSettingsOptions): Settings {
             case "display": return setDisplayValue(command.id, command.value);
             case "spawn-options": return setSpawnValue(command.id, command.value);
             case "system-prompt": return setSystemPromptValue(command.id, command.value);
+            case "concurrency": return setConcurrencyValue(command.id, command.value);
             default: return failure("unknown-row", `Page ${page} has no editable row ${command.id}.`);
           }
         }
+        case "update-limit":
+        case "add-limit":
+          return applyLimitUpdate(command);
       }
     },
   };

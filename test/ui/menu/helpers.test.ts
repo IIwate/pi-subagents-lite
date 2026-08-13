@@ -4,36 +4,13 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { SelectList, SettingsList } from "@earendil-works/pi-tui";
-
-// helpers.ts imports SearchableSelectDialog only for createSearchableSelect;
-// these cases never touch it. Mock the dialog so we don't load DynamicBorder/pi.
-vi.mock("../../../src/ui/searchable-select.js", () => ({
-  SearchableSelectDialog: class {},
-}));
-
-import {
-  buildModelOptions,
-  enableSpaceSelection,
-} from "../../../src/ui/menu/helpers.js";
+import { enableSpaceSelection } from "../../../src/ui/menu/helpers.js";
 import { buildListTheme } from "../../../src/platform/pi/tui/settings-chrome.js";
 
 const mockTheme = {
   fg: (color: string, text: string) => `[${color}:${text}]`,
   bold: (text: string) => `**${text}**`,
 };
-
-describe("buildModelOptions", () => {
-  it("returns only explicit registry models", () => {
-    const options = buildModelOptions([
-      "anthropic/claude-sonnet-4",
-      "openai/gpt-4o",
-    ]);
-    expect(options.map((option) => option.value)).toEqual([
-      "anthropic/claude-sonnet-4",
-      "openai/gpt-4o",
-    ]);
-  });
-});
 
 describe("deferred submenu close", () => {
   it("closes a real SettingsList submenu after its factory returns", async () => {
@@ -71,4 +48,3 @@ describe("enableSpaceSelection", () => {
     expect(selected).toHaveBeenCalledWith(expect.objectContaining({ value: "google" }));
   });
 });
-

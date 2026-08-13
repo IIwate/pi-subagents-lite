@@ -19,17 +19,14 @@ import { getSupportedThinkingLevels, clampThinkingLevel } from "@earendil-works/
 import type { ThinkingLevel } from "../../types.js";
 import { getStore } from "../../shell.js";
 import type { Theme } from "../types.js";
-import {
-  createDelegatingComponent,
-  enableSpaceSelection,
-  sectionRow,
-} from "./helpers.js";
+import { enableSpaceSelection, sectionRow } from "./helpers.js";
+import { createDelegatingComponent } from "../../platform/pi/tui/pick-list.js";
 import {
   buildListTheme,
   SettingsListWrapper,
   skipNonSelectableRows,
 } from "../../platform/pi/tui/settings-chrome.js";
-import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
+import { createConfirmSubmenu, createMultilineConfirmComponent } from "../../platform/pi/tui/confirm.js";
 
 type Store = ReturnType<typeof getStore>;
 type ModelRef = { provider: string; id: string };

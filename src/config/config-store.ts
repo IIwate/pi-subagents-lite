@@ -10,11 +10,8 @@
  */
 
 import type { ChildScreenHost } from "../bootstrap/child-screen.js";
-import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
-import type {
-  Configuration,
-  JsonValue,
-} from "../modules/configuration/public.js";
+import type { ConfigSection, ConfigSectionIO } from "../bootstrap/configuration.js";
+import type { JsonValue } from "../modules/configuration/public.js";
 import type { AgentModelAccess, AgentSettings, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import {
   agentTypesForProvider,
@@ -46,9 +43,6 @@ export const DEFAULT_GRACE_TURNS = 6;
 
 /** Valid system prompt modes. */
 export const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
-
-/** Default concurrency config — used for resets. */
-export const DEFAULT_CONCURRENCY: SubagentsConfig["concurrency"] = { default: 4 };
 
 /** Default agent settings — merged into loaded config so callers get a complete shape. */
 const DEFAULT_AGENT: AgentSettings = {
@@ -91,45 +85,6 @@ const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
   "showTime",
 ];
 
-type ConfigSection = "modelRouting" | "agent" | "concurrency";
-
-/** Section-level document access, backed by the configuration module. */
-export interface ConfigSectionIO {
-  reload(): void;
-  read(section: ConfigSection): unknown;
-  commit(section: ConfigSection, assignments: Record<string, JsonValue>): { ok: true } | { ok: false; message: string };
-}
-
-/** Production adapter over the one configuration facade. */
-export function createConfigurationSectionIO(configuration: Configuration): ConfigSectionIO {
-  // The store is the only writer while menus migrate, so tracking the last
-  // observed revision is enough to satisfy optimistic concurrency.
-  let revision = 0;
-  return {
-    reload() {
-      const result = configuration.execute({ kind: "reload" });
-      if (result.ok) revision = result.revision;
-    },
-    read(section) {
-      const result = configuration.execute({ kind: "read-value", path: [section] });
-      if (!result.ok) return undefined;
-      revision = result.revision;
-      return "found" in result && result.found ? result.value : undefined;
-    },
-    commit(section, assignments) {
-      const result = configuration.execute({
-        kind: "commit-fragment",
-        expectedRevision: revision,
-        section,
-        assignments,
-      });
-      if (!result.ok) return { ok: false, message: result.error.message };
-      revision = result.revision;
-      return { ok: true };
-    },
-  };
-}
-
 /** Agent settings with all scalar defaults resolved. */
 export interface ResolvedAgentSettings {
   readonly forceBackground: boolean;
@@ -171,13 +126,11 @@ export interface ResolvedRoutingConfig {
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   navigator?: ChildScreenHost;
-  manager?: SubagentRuntime;
 }
 
 export class ConfigStore {
   private config: SubagentsConfig;
   private navigator?: ChildScreenHost;
-  private manager?: SubagentRuntime;
 
   constructor(private readonly io: ConfigSectionIO) {
     this.config = this.loadFromSections();
@@ -228,18 +181,6 @@ export class ConfigStore {
       enabled: this.config.modelRouting.enabled,
       enabledProviders: [...this.config.modelRouting.enabledProviders],
       agentAccess,
-    };
-  }
-
-  get concurrency(): {
-    default: number;
-    providers: Record<string, number>;
-    models: Record<string, number>;
-  } {
-    return {
-      default: this.config.concurrency.default,
-      providers: this.config.concurrency.providers ?? {},
-      models: this.config.concurrency.models ?? {},
     };
   }
 
@@ -308,38 +249,6 @@ export class ConfigStore {
         this.persist("modelRouting");
       },
     },
-    concurrency: {
-      setDefault: (n: number): void => {
-        this.config.concurrency.default = n;
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-      setProvider: (key: string, n: number): void => {
-        this.config.concurrency.providers = { ...(this.config.concurrency.providers ?? {}), [key]: n };
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-      setModel: (key: string, n: number): void => {
-        this.config.concurrency.models = { ...(this.config.concurrency.models ?? {}), [key]: n };
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-      removeProvider: (key: string): void => {
-        if (this.config.concurrency.providers) delete this.config.concurrency.providers[key];
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-      removeModel: (key: string): void => {
-        if (this.config.concurrency.models) delete this.config.concurrency.models[key];
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-      reset: (): void => {
-        this.config.concurrency = { ...DEFAULT_CONCURRENCY };
-        this.persist("concurrency");
-        this.applyConcurrency();
-      },
-    },
   };
 
   /**
@@ -369,20 +278,18 @@ export class ConfigStore {
   reload(): void {
     this.io.reload();
     this.config = this.loadFromSections();
-    this.syncAllDeps();
+    this.syncStatsVisibility();
   }
 
-  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy navigator/manager). */
+  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy navigator). */
   setDeps(deps: ConfigStoreDeps): void {
     if (deps.navigator !== undefined) this.navigator = deps.navigator;
-    if (deps.manager !== undefined) this.manager = deps.manager;
-    this.syncAllDeps();
+    this.syncStatsVisibility();
   }
 
-  /** Drop deps at session_shutdown. The navigator/manager are disposed by the composition root. */
+  /** Drop deps at session_shutdown. The navigator is disposed by the composition root. */
   dispose(): void {
     this.navigator = undefined;
-    this.manager = undefined;
   }
 
   // ── Private helpers ────────────────────────────────────────────
@@ -390,9 +297,7 @@ export class ConfigStore {
   /** Resolve raw sections into a complete config with capability defaults. */
   private loadFromSections(): SubagentsConfig {
     const agentRaw = this.io.read("agent");
-    const concurrencyRaw = this.io.read("concurrency");
     const agentSource = isPlainObject(agentRaw) ? agentRaw : {};
-    const concurrencySource = isPlainObject(concurrencyRaw) ? concurrencyRaw : {};
     const agent: AgentSettings = {} as AgentSettings;
     for (const key of AGENT_SETTING_KEYS) {
       const value = agentSource[key];
@@ -401,10 +306,6 @@ export class ConfigStore {
     return {
       modelRouting: parseModelAccessFragment(this.io.read("modelRouting")),
       agent: { ...DEFAULT_AGENT, ...agent },
-      concurrency: {
-        ...concurrencySource,
-        default: typeof concurrencySource.default === "number" ? concurrencySource.default : DEFAULT_CONCURRENCY.default,
-      } as SubagentsConfig["concurrency"],
     };
   }
 
@@ -414,9 +315,7 @@ export class ConfigStore {
    * behavior the remaining menus rely on until their settings paths migrate.
    */
   private persist(section: ConfigSection): void {
-    const value = section === "modelRouting"
-      ? this.config.modelRouting
-      : section === "agent" ? this.config.agent : this.config.concurrency;
+    const value = section === "modelRouting" ? this.config.modelRouting : this.config.agent;
     const assignments = JSON.parse(JSON.stringify(value)) as Record<string, JsonValue>;
     const result = this.io.commit(section, assignments);
     if (!result.ok) {
@@ -438,23 +337,5 @@ export class ConfigStore {
       showCost: a.showCost,
       showTime: a.showTime,
     });
-  }
-
-  private applyConcurrency(): void {
-    this.manager?.replaceLimits({
-      defaultModelLimit: Math.max(1, this.config.concurrency.default),
-      modelLimits: Object.fromEntries(
-        Object.entries(this.config.concurrency.models ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
-      ),
-      providerLimits: Object.fromEntries(
-        Object.entries(this.config.concurrency.providers ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
-      ),
-    });
-  }
-
-  /** Full re-sync of all present deps. Used by reload/setDeps. */
-  private syncAllDeps(): void {
-    this.syncStatsVisibility();
-    this.applyConcurrency();
   }
 }

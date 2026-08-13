@@ -10,6 +10,7 @@ import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
 } from "./modules/agent-catalogue/public.js";
+import { concurrencyRuntimeLimits } from "./bootstrap/concurrency.js";
 import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { ChildScreenHost } from "./bootstrap/child-screen.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
@@ -56,11 +57,14 @@ export function ensureManagerAndNavigator(): void {
     const newManager = createHostSubagentRuntime({
       pi: getPiInstance(),
       ctx: getSessionCtx(),
-      limits: getStore().concurrency,
+      limits: concurrencyRuntimeLimits(),
     });
     setManager(newManager);
-    getStore().setDeps({ manager: newManager });
     wireHostDelivery(newManager);
+  } else {
+    // Reload path: the document may have changed on disk while the manager
+    // kept running, so republish the persisted limits into the scheduler.
+    currentManager.replaceLimits(concurrencyRuntimeLimits());
   }
 
   if (!currentNavigator) {

@@ -12,6 +12,7 @@
 - `parseAcceptedRunPolicy` accepts only plain JSON values, verifies the parent-model key and derived output/turn limits, then returns a separately validated JSON copy for runtime consumption.
 
 - `ConcurrencyLimitsSchema` and `ConcurrencyDecisionSchema` define hierarchical reserve/release decisions.
+- `ConcurrencyLimitsFragmentSchema` and `ConcurrencyLimitsUpdateSchema` define the persisted `concurrency` document section this module owns: `parseConcurrencyLimitsFragment` tolerates hand-edited junk (invalid entries drop, an invalid default becomes the capability default), `applyConcurrencyLimitsUpdate` performs strict updates, and `runtimeLimitsFromFragment` derives the scheduler shape.
 - `AgentCommandSchema`, `AgentCommandResultSchema`, and `AgentSnapshotSchema` define the serializable lifecycle seam for spawn, stop, interact, inspect, pin, expire, and close.
 - `SessionStartRequestSchema` and `SessionEventSchema` define the session-driver port traffic.
 

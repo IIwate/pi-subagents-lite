@@ -4,7 +4,9 @@ import { Type, type Static } from "typebox";
 
 // Row kinds drive the renderer's widget choice and the value contract:
 // toggle/choice cycle through `choices`, numeric opens an integer input with
-// `min`/`fallback` hints, action fires with its single choice as the value.
+// `min`/`fallback` hints, action fires with its single choice as the value,
+// limit edits-or-removes a keyed override (`update-limit`), picker selects a
+// key from `choices` and asks for a limit (`add-limit`).
 export const SettingsRowSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   kind: Type.Union([
@@ -13,6 +15,8 @@ export const SettingsRowSchema = Type.Object({
     Type.Literal("choice"),
     Type.Literal("numeric"),
     Type.Literal("action"),
+    Type.Literal("limit"),
+    Type.Literal("picker"),
   ]),
   label: Type.String({ minLength: 1 }),
   detail: Type.Optional(Type.String()),
@@ -20,6 +24,10 @@ export const SettingsRowSchema = Type.Object({
   choices: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
   min: Type.Optional(Type.Integer()),
   fallback: Type.Optional(Type.Integer()),
+  // Raw editable value when `value` is a formatted display string.
+  input: Type.Optional(Type.String()),
+  // Confirmation question the renderer must ask before firing an action row.
+  confirm: Type.Optional(Type.String({ minLength: 1 })),
 }, { additionalProperties: false });
 
 export const SettingsNoticeSchema = Type.Object({
@@ -45,6 +53,18 @@ export const SettingsCommandSchema = Type.Union([
     kind: Type.Literal("set-value"),
     id: Type.String({ minLength: 1 }),
     value: Type.String(),
+  }, { additionalProperties: false }),
+  // Keyed-limit workflow (limit and picker rows): null removes the override.
+  Type.Object({
+    kind: Type.Literal("update-limit"),
+    id: Type.String({ minLength: 1 }),
+    limit: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("add-limit"),
+    id: Type.String({ minLength: 1 }),
+    key: Type.String({ minLength: 1 }),
+    limit: Type.Integer({ minimum: 1 }),
   }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("back") }, { additionalProperties: false }),
 ]);
@@ -165,6 +185,33 @@ export const PromptSettingUpdateSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+// Concurrency view: saved overrides plus the active provider/model inventory
+// the owner computed, so the page can split active, inactive, and addable
+// rows without knowing where the inventory comes from.
+export const ConcurrencySettingsViewSchema = Type.Object({
+  defaultLimit: Type.Integer({ minimum: 1 }),
+  factoryDefaultLimit: Type.Integer({ minimum: 1 }),
+  providerLimits: Type.Record(Type.String(), Type.Integer({ minimum: 1 })),
+  modelLimits: Type.Record(Type.String(), Type.Integer({ minimum: 1 })),
+  activeProviders: Type.Array(Type.String()),
+  activeModels: Type.Array(Type.String()),
+}, { additionalProperties: false });
+
+export const ConcurrencyLimitUpdateSchema = Type.Union([
+  Type.Object({
+    scope: Type.Literal("default"),
+    limit: Type.Integer({ minimum: 1 }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    scope: Type.Union([Type.Literal("provider"), Type.Literal("model")]),
+    key: Type.String({ minLength: 1 }),
+    limit: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    scope: Type.Literal("reset"),
+  }, { additionalProperties: false }),
+]);
+
 export type SettingsRow = Static<typeof SettingsRowSchema>;
 export type SettingsNotice = Static<typeof SettingsNoticeSchema>;
 export type SettingsSnapshot = Static<typeof SettingsSnapshotSchema>;
@@ -180,3 +227,5 @@ export type SpawnSettingUpdate = Static<typeof SpawnSettingUpdateSchema>;
 export type SystemPromptMode = Static<typeof SystemPromptModeSchema>;
 export type PromptSettingsView = Static<typeof PromptSettingsViewSchema>;
 export type PromptSettingUpdate = Static<typeof PromptSettingUpdateSchema>;
+export type ConcurrencySettingsView = Static<typeof ConcurrencySettingsViewSchema>;
+export type ConcurrencyLimitUpdate = Static<typeof ConcurrencyLimitUpdateSchema>;

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createSettings,
+  type ConcurrencyLimitUpdate,
+  type ConcurrencySettingsOwner,
+  type ConcurrencySettingsView,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
   type PromptSettingsOwner,
@@ -15,6 +18,7 @@ interface HarnessOptions {
   display?: Partial<DisplaySettingsView>;
   spawn?: Partial<SpawnSettingsView>;
   prompt?: Partial<PromptSettingsView>;
+  concurrency?: Partial<ConcurrencySettingsView>;
   failUpdatesWith?: string;
 }
 
@@ -50,10 +54,20 @@ function harness(options: HarnessOptions = {}) {
     customPromptFileExists: false,
     ...options.prompt,
   };
+  const concurrencyView: ConcurrencySettingsView = {
+    defaultLimit: 4,
+    factoryDefaultLimit: 4,
+    providerLimits: {},
+    modelLimits: {},
+    activeProviders: ["anthropic", "openai"],
+    activeModels: ["anthropic/opus", "openai/gpt-5"],
+    ...options.concurrency,
+  };
   let failUpdatesWith = options.failUpdatesWith;
   const updates: Array<{ id: string; value: boolean }> = [];
   const spawnUpdates: Array<{ id: string; value: boolean | number }> = [];
   const promptUpdates: Array<{ id: string; value: boolean | string }> = [];
+  const concurrencyUpdates: ConcurrencyLimitUpdate[] = [];
   const display: DisplaySettingsOwner = {
     read: () => ({ ...view }),
     update(id, value) {
@@ -86,11 +100,30 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true };
     },
   };
+  const concurrency: ConcurrencySettingsOwner = {
+    read: () => structuredClone(concurrencyView),
+    update(update) {
+      if (failUpdatesWith) return { ok: false, message: failUpdatesWith };
+      concurrencyUpdates.push(update);
+      if (update.scope === "default") concurrencyView.defaultLimit = update.limit;
+      else if (update.scope === "reset") {
+        concurrencyView.defaultLimit = concurrencyView.factoryDefaultLimit;
+        concurrencyView.providerLimits = {};
+        concurrencyView.modelLimits = {};
+      } else {
+        const section = update.scope === "provider" ? "providerLimits" : "modelLimits";
+        if (update.limit === null) delete concurrencyView[section][update.key];
+        else concurrencyView[section][update.key] = update.limit;
+      }
+      return { ok: true };
+    },
+  };
   const settings = createSettings({
     summaries: { read: () => ({ ...summaries }) },
     display,
     spawn,
     prompt,
+    concurrency,
   });
   return {
     settings,
@@ -98,9 +131,11 @@ function harness(options: HarnessOptions = {}) {
     view,
     spawnView,
     promptView,
+    concurrencyView,
     updates,
     spawnUpdates,
     promptUpdates,
+    concurrencyUpdates,
     setFailure: (message: string | undefined) => { failUpdatesWith = message; },
   };
 }
@@ -347,6 +382,156 @@ describe("REQ-SETTINGS-004 system prompt page", () => {
     const invalid = settings.execute({ kind: "set-value", id: "systemPromptMode", value: "yolo" });
     expect(invalid).toMatchObject({ ok: false, error: { code: "invalid-value" } });
     expect(promptUpdates).toHaveLength(1);
+  });
+});
+
+describe("REQ-SETTINGS-005 concurrency page", () => {
+  it("renders fallback, active overrides, pickers, and the reset action", () => {
+    const { settings } = harness({
+      concurrency: {
+        defaultLimit: 4,
+        providerLimits: { anthropic: 2 },
+        modelLimits: { "openai/gpt-5": 3 },
+      },
+    });
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    expect(result.snapshot.page).toBe("concurrency");
+    expect(result.snapshot.rows.map((row) => row.id)).toEqual([
+      "defaultConcurrency",
+      "provider:anthropic",
+      "model:openai/gpt-5",
+      "addProviderLimit",
+      "addModelLimit",
+      "resetAll",
+    ]);
+    const byId = new Map(result.snapshot.rows.map((row) => [row.id, row]));
+    expect(byId.get("defaultConcurrency")).toMatchObject({ kind: "numeric", value: "4 slots · Default", input: "4", min: 1 });
+    expect(byId.get("provider:anthropic")).toMatchObject({ kind: "limit", value: "2 slots", input: "2" });
+    // Only un-limited inventory entries stay addable.
+    expect(byId.get("addProviderLimit")!.choices).toEqual(["openai"]);
+    expect(byId.get("addModelLimit")!.choices).toEqual(["anthropic/opus"]);
+    expect(byId.get("resetAll")).toMatchObject({ kind: "action", confirm: "Reset all concurrency limits?" });
+  });
+
+  it("hides pickers and reset in the factory state and drops the Default tag after edits", () => {
+    const { settings } = harness({
+      concurrency: { activeProviders: [], activeModels: [] },
+    });
+    settings.execute({ kind: "open" });
+    const factory = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    expect(factory.snapshot.rows.map((row) => row.id)).toEqual(["defaultConcurrency"]);
+
+    const edited = expectOk(settings.execute({ kind: "set-value", id: "defaultConcurrency", value: "9" }));
+    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "Fallback model limit set to 9" });
+    const fallbackRow = edited.snapshot.rows.find((row) => row.id === "defaultConcurrency")!;
+    expect(fallbackRow.value).toBe("9 slots");
+    expect(edited.snapshot.rows.some((row) => row.id === "resetAll")).toBe(true);
+  });
+
+  it("lists saved inactive limits with an explicit edit/remove path after the pickers", () => {
+    const { settings } = harness({
+      concurrency: {
+        providerLimits: { retiredhost: 2 },
+        modelLimits: { "retiredhost/old-model": 1 },
+      },
+    });
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    // Inactive rows keep the legacy menu ordering: scope name ascending, so
+    // Model entries precede Provider entries.
+    expect(result.snapshot.rows.map((row) => row.id)).toEqual([
+      "defaultConcurrency",
+      "addProviderLimit",
+      "addModelLimit",
+      "model:retiredhost/old-model",
+      "provider:retiredhost",
+      "resetAll",
+    ]);
+    const inactive = result.snapshot.rows.find((row) => row.id === "provider:retiredhost")!;
+    expect(inactive.label).toBe("Inactive Provider · retiredhost");
+    expect(inactive.kind).toBe("limit");
+  });
+
+  it("edits and removes keyed limits through update-limit", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: { providerLimits: { anthropic: 2 } },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const edited = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 5 }));
+    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "anthropic concurrency set to 5" });
+
+    const removed = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: null }));
+    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed Provider limit for anthropic" });
+    expect(removed.snapshot.rows.some((row) => row.id === "provider:anthropic")).toBe(false);
+    expect(concurrencyUpdates).toEqual([
+      { scope: "provider", key: "anthropic", limit: 5 },
+      { scope: "provider", key: "anthropic", limit: null },
+    ]);
+  });
+
+  it("adds a limit for an inventory key and rejects keys outside the inventory", () => {
+    const { settings, concurrencyUpdates } = harness();
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const added = expectOk(settings.execute({ kind: "add-limit", id: "addModelLimit", key: "openai/gpt-5", limit: 2 }));
+    expect(added.snapshot.notice).toEqual({ severity: "info", message: "openai/gpt-5 concurrency set to 2" });
+    expect(added.snapshot.rows.some((row) => row.id === "model:openai/gpt-5")).toBe(true);
+
+    const rejected = settings.execute({ kind: "add-limit", id: "addModelLimit", key: "unknown/model", limit: 2 });
+    expect(rejected).toMatchObject({ ok: false, error: { code: "invalid-value" } });
+    expect(concurrencyUpdates).toEqual([{ scope: "model", key: "openai/gpt-5", limit: 2 }]);
+  });
+
+  it("rejects unknown limit rows, zero limits, and limit commands on other pages", () => {
+    const { settings, concurrencyUpdates } = harness();
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const unknown = settings.execute({ kind: "update-limit", id: "provider:ghost", limit: 2 });
+    expect(unknown).toMatchObject({ ok: false, error: { code: "unknown-row" } });
+    const zero = settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 0 });
+    expect(zero).toMatchObject({ ok: false, error: { code: "invalid-command" } });
+    const zeroDefault = settings.execute({ kind: "set-value", id: "defaultConcurrency", value: "0" });
+    expect(zeroDefault).toMatchObject({ ok: false, error: { code: "invalid-value" } });
+
+    settings.execute({ kind: "back" });
+    settings.execute({ kind: "select", id: "display" });
+    const wrongPage = settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 2 });
+    expect(wrongPage).toMatchObject({ ok: false, error: { code: "unknown-row" } });
+    expect(concurrencyUpdates).toEqual([]);
+  });
+
+  it("resets all limits through the confirmed action row", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: { defaultLimit: 9, providerLimits: { anthropic: 2 } },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const result = expectOk(settings.execute({ kind: "set-value", id: "resetAll", value: "Reset" }));
+    expect(result.snapshot.notice).toEqual({ severity: "info", message: "Concurrency reset" });
+    expect(result.snapshot.rows.map((row) => row.id)).toEqual([
+      "defaultConcurrency",
+      "addProviderLimit",
+      "addModelLimit",
+    ]);
+    expect(concurrencyUpdates).toEqual([{ scope: "reset" }]);
+  });
+
+  it("keeps the saved limits and reports an explicit notice when the commit fails", () => {
+    const { settings, concurrencyView } = harness({
+      concurrency: { providerLimits: { anthropic: 2 } },
+      failUpdatesWith: "disk full",
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const result = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 9 }));
+    expect(result.snapshot.notice).toEqual({
+      severity: "error",
+      message: "Failed to save setting: disk full",
+    });
+    expect(result.snapshot.rows.find((row) => row.id === "provider:anthropic")!.value).toBe("2 slots");
+    expect(concurrencyView.providerLimits.anthropic).toBe(2);
   });
 });
 

@@ -1,13 +1,8 @@
 /**
- * helpers.ts — Shared helpers for the remaining menu modules:
- * model-option building, a swappable delegating component, and a
- * searchable pick-list submenu factory. List theming and framing live in
- * `platform/pi/tui/settings-chrome.ts`.
+ * helpers.ts — Shared helpers for the remaining menu modules: section rows
+ * and Space-key selection. List theming, framing, and pick-list plumbing
+ * live in `platform/pi/tui`.
  */
-import type { Component } from "@earendil-works/pi-tui";
-import type { Theme } from "../types.js";
-import { SearchableSelectDialog, type SelectOption } from "../searchable-select.js";
-import { parseModelKey } from "../../utils.js";
 /**
  * Section separator row for SettingsList: a single full-width line with an
  * optional centered title, drawn entirely in the label column so the line
@@ -36,72 +31,3 @@ export function enableSpaceSelection(list: any): void {
   };
 }
 
-/**
- * Build SelectOption[] from raw "provider/model-id" strings.
- */
-export function buildModelOptions(rawOptions: string[]): SelectOption[] {
-  const items: SelectOption[] = [];
-
-  for (const opt of rawOptions) {
-    const parsed = parseModelKey(opt);
-    if (!parsed) continue;
-    items.push({ value: opt, label: parsed.modelId, provider: parsed.provider });
-  }
-  return items;
-}
-
-/**
- * Create a Component that delegates to a swappable inner component.
- * Use in submenus that switch between SelectList → Input (or similar).
- */
-export function createDelegatingComponent(initial: Component): Component & { setActive(c: Component): void; focused?: boolean; items?: any; onSelect?: any; onCancel?: any } {
-  let active = initial;
-  return {
-    invalidate() { active.invalidate?.(); },
-    render(width: number) { return active.render(width); },
-    handleInput(data: string) { active.handleInput?.(data); },
-    setActive(c: Component) { active = c; },
-    // Propagate focused to the active child so isFocusable() returns true,
-    // which tells SettingsListWrapper to passthrough keys instead of converting them.
-    get focused() { return (active as any)?.focused ?? false; },
-    set focused(value: boolean) { if ((active as any)?.focused != null) (active as any).focused = value; },
-    // Proxy SelectList properties so SettingsListWrapper can add "Back" button.
-    get items() { return (active as any)?.items; },
-    set items(v: any) { (active as any).items = v; },
-    get onSelect() { return (active as any)?.onSelect; },
-    set onSelect(v: any) { (active as any).onSelect = v; },
-    get onCancel() { return (active as any)?.onCancel; },
-    set onCancel(v: any) { (active as any).onCancel = v; },
-  };
-}
-
-/**
- * Build a searchable pick-list submenu backed by SearchableSelectDialog.
- *
- * Hides the delegator-forward-declaration dance shared by every menu that
- * needs "type to filter, Enter to pick" over a flat option list
- * (provider/model/type/worktree selection). onSelect may return a Component
- * to chain into next (e.g. a numeric-input submenu); returning void leaves
- * the submenu as-is so the caller can close it via done().
- */
-export function createSearchableSelect(
-  items: SelectOption[],
-  callbacks: { onSelect: (value: string) => Component | void; onCancel: () => void },
-  theme: Theme,
-): Component {
-  let delegator: ReturnType<typeof createDelegatingComponent>;
-  const selector = new SearchableSelectDialog(
-    items,
-    null,
-    {
-      onSelect: (value) => {
-        const next = callbacks.onSelect(value);
-        if (next) delegator.setActive(next);
-      },
-      onCancel: callbacks.onCancel,
-    },
-    theme,
-  );
-  delegator = createDelegatingComponent(selector);
-  return delegator;
-}

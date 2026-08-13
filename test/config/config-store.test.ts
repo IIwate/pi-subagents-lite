@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ConfigStore, createConfigurationSectionIO } from "../../src/config/config-store.ts";
+import { ConfigStore } from "../../src/config/config-store.ts";
+import { createConfigurationSectionIO } from "../../src/bootstrap/configuration.js";
 import {
   createConfiguration,
   type ConfigurationDocumentRepository,
@@ -29,7 +30,6 @@ describe("ConfigStore resolved reads", () => {
     expect(store.agent.graceTurns).toBe(6);
     expect(store.agent.expandListByDefault).toBe(true);
     expect(store.agent).not.toHaveProperty("defaultThinking");
-    expect(store.concurrency).toEqual({ default: 4, providers: {}, models: {} });
   });
 
   it("ignores retired and assignment-era agent keys at load without scrubbing them from disk", () => {
@@ -261,27 +261,19 @@ describe("ConfigStore routing mutations", () => {
 });
 
 describe("ConfigStore persistence boundary", () => {
-  it("persists Agent and concurrency settings as their own sections", () => {
+  it("persists each agent setting change as one section commit", () => {
     const { store, saves, document } = harness();
     store.updateAgentSetting("graceTurns", 9);
     store.updateAgentSetting("showCost", true);
     store.updateAgentSetting("expandListByDefault", false);
-    store.mutate.concurrency.setDefault(2);
-    store.mutate.concurrency.setProvider("openai", 1);
-    store.mutate.concurrency.setModel("openai/gpt-5", 3);
     expect(store.agent.graceTurns).toBe(9);
     expect(store.agent.showCost).toBe(true);
     expect(store.agent.expandListByDefault).toBe(false);
-    expect(store.concurrency).toEqual({
-      default: 2,
-      providers: { openai: 1 },
-      models: { "openai/gpt-5": 3 },
-    });
-    expect(saves).toHaveLength(6);
-    expect(document().concurrency).toEqual({
-      default: 2,
-      providers: { openai: 1 },
-      models: { "openai/gpt-5": 3 },
+    expect(saves).toHaveLength(3);
+    expect(document().agent).toMatchObject({
+      graceTurns: 9,
+      showCost: true,
+      expandListByDefault: false,
     });
   });
 
@@ -300,9 +292,9 @@ describe("ConfigStore persistence boundary", () => {
 
   it("never writes a revision field into the persisted document", () => {
     const { store, saves } = harness();
-    store.mutate.concurrency.setDefault(3);
+    store.updateAgentSetting("graceTurns", 3);
     expect(saves[0]).not.toHaveProperty("revision");
-    expect(Object.keys(saves[0]!.concurrency as object)).toEqual(["default"]);
+    expect(Object.keys(saves[0]!)).toEqual(["agent"]);
   });
 
   it("reloads persisted state", () => {
@@ -343,17 +335,14 @@ describe("ConfigStore persistence boundary", () => {
     expect(visibility.length).toBe(syncsBefore + 1);
   });
 
-  it("syncs injected manager and navigator dependencies", () => {
+  it("syncs the injected navigator immediately and on later changes", () => {
     const { store } = harness();
     const visibility: unknown[] = [];
-    const concurrencies: unknown[] = [];
     store.setDeps({
       navigator: { setStatsVisibility: (value: unknown) => visibility.push(value) } as any,
-      manager: { replaceLimits: (value: unknown) => concurrencies.push(value) } as any,
     });
+    expect(visibility.length).toBe(1);
     store.updateAgentSetting("showTools", false);
-    store.mutate.concurrency.setDefault(8);
-    expect(visibility.length).toBeGreaterThan(1);
-    expect(concurrencies.length).toBeGreaterThan(1);
+    expect(visibility.length).toBe(2);
   });
 });

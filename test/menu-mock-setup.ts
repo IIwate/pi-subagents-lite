@@ -12,7 +12,6 @@ export const mockModules = {
       }>,
     },
     agent: { forceBackground: false } as Record<string, any>,
-    concurrency: { default: 4 } as Record<string, any>,
   },
   mockNavigator: { setDebugStatusPreview: vi.fn() },
   mockManager: {
@@ -34,7 +33,7 @@ vi.mock("../src/agents/agent-types.js", () => ({
 export let selectDialogInstances: Array<{ items: any[]; callbacks: any }> = [];
 export function resetSelectDialogInstances() { selectDialogInstances = []; }
 
-vi.mock("../src/ui/searchable-select.js", () => ({
+vi.mock("../src/platform/pi/tui/searchable-select.js", () => ({
   SearchableSelectDialog: class MockSearchableSelectDialog {
     items: any[];
     callbacks: any;
@@ -111,13 +110,6 @@ vi.mock("../src/shell.js", () => {
     get routing() {
       return structuredClone(mockModules.mockConfig.modelRouting);
     },
-    get concurrency() {
-      return {
-        default: mockModules.mockConfig.concurrency.default,
-        providers: mockModules.mockConfig.concurrency.providers ?? {},
-        models: mockModules.mockConfig.concurrency.models ?? {},
-      };
-    },
     accessTypesForProvider(provider: string) {
       return Object.entries(mockModules.mockConfig.modelRouting.agentAccess)
         .filter(([, access]) => Object.hasOwn(access.providers, provider))
@@ -180,36 +172,6 @@ vi.mock("../src/shell.js", () => {
         clearAll() {
           mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
         },
-      },
-      agent: {
-        setForceBackground(value: boolean) { mockModules.mockConfig.agent.forceBackground = value; },
-        setShowCost(value: boolean) { mockModules.mockConfig.agent.showCost = value; },
-        setGraceTurns(value: number) { mockModules.mockConfig.agent.graceTurns = value; },
-        setSystemPromptMode(value: string) { mockModules.mockConfig.agent.systemPromptMode = value; },
-        setIncludeContextFiles(value: boolean) { mockModules.mockConfig.agent.includeContextFiles = value; },
-        setDefaultThinking(value: string | undefined) { mockModules.mockConfig.agent.defaultThinking = value; },
-        setLoadSkillsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadSkillsImplicitly = value; },
-        setLoadExtensionsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadExtensionsImplicitly = value; },
-        setDisableDefaultAgents(value: boolean) { mockModules.mockConfig.agent.disableDefaultAgents = value; },
-        setExpandListByDefault(value: boolean) { mockModules.mockConfig.agent.expandListByDefault = value; },
-        setShowTools(value: boolean) { mockModules.mockConfig.agent.showTools = value; },
-        setShowTurns(value: boolean) { mockModules.mockConfig.agent.showTurns = value; },
-        setShowInput(value: boolean) { mockModules.mockConfig.agent.showInput = value; },
-        setShowOutput(value: boolean) { mockModules.mockConfig.agent.showOutput = value; },
-        setShowContext(value: boolean) { mockModules.mockConfig.agent.showContext = value; },
-        setShowTime(value: boolean) { mockModules.mockConfig.agent.showTime = value; },
-      },
-      concurrency: {
-        setDefault(value: number) { mockModules.mockConfig.concurrency.default = value; },
-        setProvider(key: string, value: number) {
-          (mockModules.mockConfig.concurrency.providers ??= {})[key] = value;
-        },
-        setModel(key: string, value: number) {
-          (mockModules.mockConfig.concurrency.models ??= {})[key] = value;
-        },
-        removeProvider(key: string) { delete mockModules.mockConfig.concurrency.providers?.[key]; },
-        removeModel(key: string) { delete mockModules.mockConfig.concurrency.models?.[key]; },
-        reset() { mockModules.mockConfig.concurrency = { default: 4 }; },
       },
     },
   };

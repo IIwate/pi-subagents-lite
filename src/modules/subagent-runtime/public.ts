@@ -17,12 +17,22 @@ export type {
 export { parseAcceptedRunPolicy } from "./application/validate-accepted-run-policy.js";
 export {
   ConcurrencyDecisionSchema,
+  ConcurrencyLimitsFragmentSchema,
   ConcurrencyLimitsSchema,
+  ConcurrencyLimitsUpdateSchema,
 } from "./contracts/scheduling.js";
 export type {
   ConcurrencyDecision,
   ConcurrencyLimits,
+  ConcurrencyLimitsFragment,
+  ConcurrencyLimitsUpdate,
 } from "./contracts/scheduling.js";
+export {
+  applyConcurrencyLimitsUpdate,
+  factoryLimitsFragment,
+  parseConcurrencyLimitsFragment,
+  runtimeLimitsFromFragment,
+} from "./core/limits-fragment.js";
 export {
   createConcurrencyScheduler,
   type ConcurrencyScheduler,

@@ -1,4 +1,6 @@
 export {
+  ConcurrencyLimitUpdateSchema,
+  ConcurrencySettingsViewSchema,
   DisplaySettingsViewSchema,
   DisplayToggleIdSchema,
   PromptSettingUpdateSchema,
@@ -16,6 +18,8 @@ export {
   SystemPromptModeSchema,
 } from "./contracts/settings-contracts.js";
 export type {
+  ConcurrencyLimitUpdate,
+  ConcurrencySettingsView,
   DisplaySettingsView,
   DisplayToggleId,
   PromptSettingUpdate,
@@ -32,6 +36,7 @@ export type {
   SpawnSettingsView,
   SystemPromptMode,
 } from "./contracts/settings-contracts.js";
+export type { ConcurrencySettingsOwner } from "./ports/concurrency-settings-owner.js";
 export type { DisplaySettingsOwner } from "./ports/display-settings-owner.js";
 export type { PromptSettingsOwner } from "./ports/prompt-settings-owner.js";
 export type { SettingsSummaryReader } from "./ports/settings-summary-reader.js";
