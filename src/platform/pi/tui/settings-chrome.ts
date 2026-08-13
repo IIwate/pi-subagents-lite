@@ -3,9 +3,8 @@
  * surface: the shared list theme, non-selectable-row skipping, and the framed
  * wrapper that adds the title bar, separators, and key translation.
  *
- * Moved from `ui/menu` so `platform/pi/tui` owns all Pi component styling and
- * input translation. The remaining `ui/menu` files import from here until
- * their categories migrate into settings pages.
+ * Moved from the retired `ui/menu` monolith so `platform/pi/tui` owns all Pi
+ * component styling and input translation.
  */
 
 import { type Component, isFocusable, type SettingsListTheme, type SelectListTheme } from "@earendil-works/pi-tui";

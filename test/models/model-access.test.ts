@@ -4,10 +4,10 @@ import {
   authorizeModelAccess,
   effectiveAlternateModelKeys,
   unavailableModelRules,
+  type ModelAccessFragment,
 } from "../../src/modules/model-access/public.js";
-import type { ModelRoutingConfig } from "../../src/config/types.ts";
 
-function routing(overrides: Partial<ModelRoutingConfig> = {}): ModelRoutingConfig {
+function routing(overrides: Partial<ModelAccessFragment> = {}): ModelAccessFragment {
   return {
     enabled: true,
     enabledProviders: ["openai", "anthropic"],
@@ -244,7 +244,7 @@ describe("provider rule maintenance", () => {
   });
 
   it("preserves prototype-like Agent IDs as own cleanup entries", () => {
-    const agentAccess: ModelRoutingConfig["agentAccess"] = {};
+    const agentAccess: ModelAccessFragment["agentAccess"] = {};
     Object.defineProperty(agentAccess, "__proto__", {
       value: { providers: { openai: { models: ["retired"] } } },
       enumerable: true,

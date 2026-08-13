@@ -16,19 +16,20 @@ import {
   createCustomPromptFile,
   customPromptFileExists,
 } from "../platform/fs/prompt-files.js";
+import { readAgentSettings, updateAgentSetting } from "./agent-settings.js";
 import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
-import { getManager, getNavigator, getStore } from "../shell.js";
+import { createModelAccessSettingsOwner, readModelAccessFragment } from "./model-access.js";
+import { getManager, getNavigator } from "../shell.js";
 import { getAgentConfig, getAllTypes, setDefaultAgentsDisabled } from "../agents/agent-types.js";
-import { showModelRoutingMenu } from "../ui/menu/menu-model-routing.js";
 
-// Transitional owner adapters over ConfigStore. Each settings slice replaces
-// one adapter with the true policy-owning capability; the getStore() reads
-// disappear with the store itself.
+// Owner adapters compose each settings page with the capability that owns
+// its policy: the agent fragment seam, the concurrency seam, the
+// model-access seam, and the live runtime/navigator.
 function createDisplayOwner(): DisplaySettingsOwner {
   return {
     read() {
-      const agent = getStore().agent;
+      const agent = readAgentSettings();
       return {
         expandListByDefault: agent.expandListByDefault,
         showTools: agent.showTools,
@@ -41,7 +42,7 @@ function createDisplayOwner(): DisplaySettingsOwner {
       };
     },
     update(id, value) {
-      return getStore().updateAgentSetting(id, value);
+      return updateAgentSetting(id, value);
     },
   };
 }
@@ -49,7 +50,7 @@ function createDisplayOwner(): DisplaySettingsOwner {
 function createSpawnOwner(): SpawnSettingsOwner {
   return {
     read() {
-      const agent = getStore().agent;
+      const agent = readAgentSettings();
       return {
         forceBackground: agent.forceBackground,
         graceTurns: agent.graceTurns,
@@ -57,7 +58,7 @@ function createSpawnOwner(): SpawnSettingsOwner {
       };
     },
     update(update) {
-      const result = getStore().updateAgentSetting(update.id, update.value);
+      const result = updateAgentSetting(update.id, update.value);
       // Registry availability is an owner-side effect and must not run when
       // the commit failed, otherwise runtime and persisted policy diverge.
       if (result.ok && update.id === "disableDefaultAgents") {
@@ -71,7 +72,7 @@ function createSpawnOwner(): SpawnSettingsOwner {
 function createPromptOwner(): PromptSettingsOwner {
   return {
     read() {
-      const agent = getStore().agent;
+      const agent = readAgentSettings();
       return {
         systemPromptMode: agent.systemPromptMode,
         includeContextFiles: agent.includeContextFiles,
@@ -82,7 +83,7 @@ function createPromptOwner(): PromptSettingsOwner {
       };
     },
     update(update) {
-      return getStore().updateAgentSetting(update.id, update.value);
+      return updateAgentSetting(update.id, update.value);
     },
     createCustomPromptFile() {
       return createCustomPromptFile(customPromptPath);
@@ -102,10 +103,11 @@ function activeModelKeys(ctx: ExtensionCommandContext): string[] {
   const keys = new Set<string>();
   if (parentKey) keys.add(parentKey);
 
+  const routing = readModelAccessFragment();
   for (const type of getAllTypes()) {
     for (const key of effectiveAlternateModelKeys(
       type,
-      getStore().routing,
+      routing,
       [...availableKeys],
       scopedKeys ? [...scopedKeys] : null,
       parentKey,
@@ -202,16 +204,12 @@ function createSummaryReader(): SettingsSummaryReader {
   return {
     read() {
       return {
-        modelAccessEnabled: getStore().routing.enabled,
+        modelAccessEnabled: readModelAccessFragment().enabled,
         concurrencyDefault: readConcurrencyFragment().default,
       };
     },
   };
 }
-
-const legacyCategoryMenus: Readonly<Record<string, (ctx: ExtensionCommandContext) => Promise<void>>> = {
-  "model-access": showModelRoutingMenu,
-};
 
 /** `/agents` entry point: the settings workflow rendered through the Pi host. */
 export async function showAgentsMenu(ctx: ExtensionCommandContext): Promise<void> {
@@ -222,10 +220,7 @@ export async function showAgentsMenu(ctx: ExtensionCommandContext): Promise<void
     prompt: createPromptOwner(),
     concurrency: createConcurrencyOwner(ctx),
     debug: createDebugOwner(),
+    modelAccess: createModelAccessSettingsOwner(ctx),
   });
-  await runSettingsScreen(ctx, settings, {
-    openLegacyCategory: async (category) => {
-      await legacyCategoryMenus[category]?.(ctx);
-    },
-  });
+  await runSettingsScreen(ctx, settings);
 }

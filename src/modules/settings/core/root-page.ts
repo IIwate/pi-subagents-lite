@@ -1,14 +1,5 @@
 import type { RootSummaries, SettingsRow } from "../contracts/settings-contracts.js";
 
-/**
- * Categories still served by monolithic Pi menus. Each migration slice moves
- * one id out of this list and into an in-module page; the list must be empty
- * before ConfigStore and the menu directory can be deleted.
- */
-export const LEGACY_CATEGORY_IDS: readonly string[] = [
-  "model-access",
-];
-
 export function buildRootRows(summaries: RootSummaries): SettingsRow[] {
   return [
     {

@@ -4,12 +4,13 @@ import { Check } from "typebox/value";
 import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import type { AgentConfig } from "./agents/types.js";
 import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
-import { configRoot, configuration } from "./bootstrap/configuration.js";
+import { configRoot, configuration, configurationSectionIO } from "./bootstrap/configuration.js";
 import { userAgentsDirPath } from "./platform/fs/config-paths.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
 } from "./modules/agent-catalogue/public.js";
+import { readAgentSettings, syncNavigatorStats } from "./bootstrap/agent-settings.js";
 import { concurrencyRuntimeLimits } from "./bootstrap/concurrency.js";
 import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { ChildScreenHost } from "./bootstrap/child-screen.js";
@@ -18,7 +19,6 @@ import {
   getDelivery,
   getManager,
   getNavigator,
-  getStore,
   getPiInstance,
   getSessionCtx,
   setDelivery,
@@ -76,11 +76,11 @@ export function ensureManagerAndNavigator(): void {
         return interactAgent(runtime, agentId, text);
       },
       () => getDelivery()?.pendingResultCount(),
-      getStore().agent.expandListByDefault,
+      readAgentSettings().expandListByDefault,
     );
     setNavigator(newNavigator);
-    // ConfigStore synchronizes list stats visibility through dependency injection.
-    getStore().setDeps({ navigator: newNavigator });
+    // Stats visibility follows the persisted display settings.
+    syncNavigatorStats();
   }
   getManager()?.setOnRemove(() => getNavigator()?.update());
 }
@@ -118,9 +118,11 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
 }
 
 export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
-  // ConfigStore is authoritative for config, session overrides, and manager/UI side effects.
-  getStore().reload();
+  // Re-read the persisted document (it may have changed on disk between
+  // sessions), then re-sync every consumer that mirrors it.
+  configurationSectionIO.reload();
   ensureManagerAndNavigator();
+  syncNavigatorStats();
   await scanAndRegisterAgents(ctx);
 }
 
@@ -252,7 +254,6 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     await cleanup(() => {
       try { getDelivery()?.execute({ kind: "dispose" }); } finally { setDelivery(null); }
     });
-    await cleanup(() => getStore().dispose());
 
     if (failures.length > 0) throw failures[0];
   });

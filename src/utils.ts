@@ -3,7 +3,7 @@
  */
 import type { Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "./types.js";
-import { CANONICAL_THINKING_LEVELS } from "./config/types.js";
+import { CANONICAL_THINKING_LEVELS } from "./modules/model-access/public.js";
 
 /**
  * Returns true if a name contains characters not allowed in agent/skill names.

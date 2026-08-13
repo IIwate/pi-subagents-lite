@@ -1,8 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ModelRoutingConfig } from "../config/types.js";
 import { assembleAgentGuidance, type AgentGuidanceRequest } from "../modules/prompt/public.js";
-import type { ThinkingLevel } from "../modules/model-access/public.js";
+import type { ModelAccessFragment, ThinkingLevel } from "../modules/model-access/public.js";
 import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 
@@ -17,7 +16,7 @@ export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
   parentModel: Model<any> | undefined;
   parentThinkingLevel: ThinkingLevel | undefined;
-  routing: Readonly<ModelRoutingConfig>;
+  routing: Readonly<ModelAccessFragment>;
   availableModels: readonly Model<any>[];
   scopedModels: ExtensionContext["scopedModels"];
 }

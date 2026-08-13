@@ -11,12 +11,24 @@ import {
   type DebugStatusPreview,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
+  type ModelAccessSettingsOwner,
+  type ModelAccessUnavailableProvider,
+  type ModelAccessUnavailableRule,
   type PromptSettingsOwner,
   type PromptSettingsView,
   type RootSummaries,
   type SpawnSettingsOwner,
   type SpawnSettingsView,
 } from "../../../src/modules/settings/public.js";
+
+interface ModelAccessFakeOptions {
+  enabled?: boolean;
+  parentModelKey?: string;
+  providers?: Array<{ provider: string; enabled: boolean }>;
+  unavailableProviders?: ModelAccessUnavailableProvider[];
+  unavailableRules?: ModelAccessUnavailableRule[];
+  thinkingLevels?: Array<{ level: string; allowed: boolean; isDefault: boolean }>;
+}
 
 interface HarnessOptions {
   summaries?: Partial<RootSummaries>;
@@ -27,6 +39,7 @@ interface HarnessOptions {
   debugTypes?: DebugAgentType[];
   debugDiagnostics?: DebugDiagnosticsView;
   debugUnavailableWith?: string;
+  modelAccess?: ModelAccessFakeOptions;
   failUpdatesWith?: string;
 }
 
@@ -148,6 +161,108 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true };
     },
   };
+  // Stateful policy fake: mutation verbs record their invocation and apply the
+  // obvious state transition so rebuilt snapshots reflect the change. Policy
+  // legality itself is the model-access module's contract, not this suite's.
+  const modelAccessState = {
+    enabled: options.modelAccess?.enabled ?? false,
+    parentModelKey: options.modelAccess?.parentModelKey ?? "anthropic/opus",
+    providers: options.modelAccess?.providers
+      ?? [{ provider: "openai", enabled: true }, { provider: "google", enabled: false }],
+    unavailableProviders: structuredClone(options.modelAccess?.unavailableProviders ?? []),
+    unavailableRules: structuredClone(options.modelAccess?.unavailableRules ?? []),
+    parentAllowed: true,
+    allModels: false,
+    models: [{ id: "gpt-5", granted: true }, { id: "gpt-5-mini", granted: false }],
+    thinkingLevels: structuredClone(options.modelAccess?.thinkingLevels ?? [
+      { level: "low", allowed: true, isDefault: true },
+      { level: "high", allowed: true, isDefault: false },
+      { level: "max", allowed: false, isDefault: false },
+    ]),
+    calls: [] as string[],
+  };
+  const policyUpdate = (call: string, apply: () => void): { ok: true } | { ok: false; message: string } => {
+    if (failUpdatesWith) return { ok: false, message: failUpdatesWith };
+    modelAccessState.calls.push(call);
+    apply();
+    return { ok: true };
+  };
+  const modelAccess: ModelAccessSettingsOwner = {
+    root: () => ({
+      enabled: modelAccessState.enabled,
+      parentModelKey: modelAccessState.parentModelKey,
+      enabledProviderCount: modelAccessState.providers.filter((entry) => entry.enabled).length,
+      configuredAgentCount: 1,
+      unavailableProviders: structuredClone(modelAccessState.unavailableProviders),
+      unavailableRules: structuredClone(modelAccessState.unavailableRules),
+    }),
+    agents: () => [
+      { type: "general-purpose", registered: true, summary: "Parent only" },
+      { type: "retired-type", registered: false, summary: "1 provider" },
+    ],
+    quickAgents: () => [{ type: "general-purpose", registered: true, summary: "Parent only" }],
+    agentDetail: () => ({
+      parentModelKey: modelAccessState.parentModelKey,
+      parentAllowed: modelAccessState.parentAllowed,
+      parentDefaultLevel: "high",
+      providers: modelAccessState.enabled
+        ? modelAccessState.providers.filter((entry) => entry.enabled).map((entry) => entry.provider)
+        : [],
+      thinkingTargetCount: 2,
+    }),
+    providers: () => ({
+      parentModelKey: modelAccessState.parentModelKey,
+      providers: structuredClone(modelAccessState.providers),
+    }),
+    models: () => ({
+      parentModelKey: modelAccessState.parentModelKey,
+      allModels: modelAccessState.allModels,
+      models: structuredClone(modelAccessState.models),
+    }),
+    thinkingTargets: () => [
+      { key: modelAccessState.parentModelKey, parent: true },
+      { key: "openai/gpt-5", parent: false },
+    ],
+    thinking: () => ({ levels: structuredClone(modelAccessState.thinkingLevels) }),
+    setEnabled: (enabled) => policyUpdate(`setEnabled:${enabled}`, () => {
+      modelAccessState.enabled = enabled;
+    }),
+    setProviderEnabled: (provider, enabled) => policyUpdate(`setProviderEnabled:${provider}:${enabled}`, () => {
+      const entry = modelAccessState.providers.find((candidate) => candidate.provider === provider);
+      if (entry) entry.enabled = enabled;
+      const unavailable = modelAccessState.unavailableProviders.find((candidate) => candidate.provider === provider);
+      if (unavailable) unavailable.routingEnabled = enabled;
+    }),
+    setParentAccess: (type, allowed) => policyUpdate(`setParentAccess:${type}:${allowed}`, () => {
+      modelAccessState.parentAllowed = allowed;
+    }),
+    toggleAllModels: (type, provider, quick) => policyUpdate(`toggleAllModels:${type}:${provider}:${quick}`, () => {
+      modelAccessState.allModels = !modelAccessState.allModels;
+    }),
+    toggleModel: (type, provider, modelId, quick) => policyUpdate(`toggleModel:${type}:${provider}:${modelId}:${quick}`, () => {
+      const entry = modelAccessState.models.find((candidate) => candidate.id === modelId);
+      if (entry) entry.granted = !entry.granted;
+    }),
+    toggleThinkingLevel: (type, modelKey, level) => policyUpdate(`toggleThinkingLevel:${type}:${modelKey}:${level}`, () => {
+      const entry = modelAccessState.thinkingLevels.find((candidate) => candidate.level === level);
+      if (entry) entry.allowed = !entry.allowed;
+    }),
+    setThinkingDefault: (type, modelKey, level) => policyUpdate(`setThinkingDefault:${type}:${modelKey}:${level}`, () => {
+      for (const entry of modelAccessState.thinkingLevels) entry.isDefault = entry.level === level;
+    }),
+    resetThinking: (type, modelKey) => policyUpdate(`resetThinking:${type}:${modelKey}`, () => {}),
+    deleteProviderRules: (provider) => policyUpdate(`deleteProviderRules:${provider}`, () => {
+      const entry = modelAccessState.unavailableProviders.find((candidate) => candidate.provider === provider);
+      if (entry) entry.ruleTypes = [];
+    }),
+    cleanUnavailableRules: () => policyUpdate("cleanUnavailableRules", () => {
+      modelAccessState.unavailableRules = [];
+    }),
+    clearAll: () => policyUpdate("clearAll", () => {
+      modelAccessState.enabled = false;
+      modelAccessState.providers = modelAccessState.providers.map((entry) => ({ ...entry, enabled: false }));
+    }),
+  };
   const settings = createSettings({
     summaries: { read: () => ({ ...summaries }) },
     display,
@@ -155,6 +270,7 @@ function harness(options: HarnessOptions = {}) {
     prompt,
     concurrency,
     debug,
+    modelAccess,
   });
   return {
     settings,
@@ -164,6 +280,7 @@ function harness(options: HarnessOptions = {}) {
     promptView,
     concurrencyView,
     debugState,
+    modelAccessState,
     updates,
     spawnUpdates,
     promptUpdates,
@@ -214,12 +331,13 @@ describe("REQ-SETTINGS-001 settings root workflow", () => {
     expect(closed.effect).toEqual({ kind: "close" });
   });
 
-  it("delegates an un-migrated category to its legacy menu and stays on the root", () => {
+  it("opens every category as a native settings page without effects", () => {
     const { settings } = harness();
     settings.execute({ kind: "open" });
     const result = expectOk(settings.execute({ kind: "select", id: "model-access" }));
-    expect(result.effect).toEqual({ kind: "open-legacy-category", category: "model-access" });
-    expect(result.snapshot.page).toBe("root");
+    expect(result.effect).toBeUndefined();
+    expect(result.snapshot.page).toBe("model-access");
+    expect(result.snapshot.presentation).toBe("menu");
   });
 
   it("rejects commands outside the schema and unknown categories", () => {
@@ -714,5 +832,262 @@ describe("REQ-CONFIG-001 explicit persistence failure", () => {
     const result = expectOk(settings.execute({ kind: "set-value", id: "showTools", value: "OFF" }));
     expect(result.snapshot.notice).toEqual({ severity: "info", message: "Show tools OFF" });
     expect(result.snapshot.rows.find((row) => row.id === "showTools")!.value).toBe("OFF");
+  });
+});
+
+describe("REQ-MODEL-002/007 model access pages", () => {
+  function openModelAccess(options: HarnessOptions = {}) {
+    const h = harness(options);
+    h.settings.execute({ kind: "open" });
+    h.settings.execute({ kind: "select", id: "model-access" });
+    return h;
+  }
+
+  it("hides routing-only rows while alternate models are OFF", () => {
+    const { settings } = harness();
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "model-access" }));
+    expect(result.snapshot.rows.map((row) => row.id)).toEqual([
+      "alternateModels",
+      "quickSetup",
+      "agentAccess",
+      "resetAll",
+    ]);
+    expect(result.snapshot.rows[0]).toMatchObject({ kind: "toggle", value: "OFF" });
+  });
+
+  it("shows provider access, unavailable providers, and cleanup once routing is ON", () => {
+    const { settings } = harness({
+      modelAccess: {
+        enabled: true,
+        unavailableProviders: [{ provider: "gone", routingEnabled: true, ruleTypes: ["general-purpose"] }],
+        unavailableRules: [{ provider: "gone", agentType: "general-purpose", modelId: "old-model" }],
+      },
+    });
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "model-access" }));
+    expect(result.snapshot.rows.map((row) => row.id)).toEqual([
+      "alternateModels",
+      "quickSetup",
+      "providerAccess",
+      "agentAccess",
+      "unavailableProviders",
+      "cleanUnavailableRules",
+      "resetAll",
+    ]);
+    const cleanup = result.snapshot.rows.find((row) => row.id === "cleanUnavailableRules")!;
+    expect(cleanup.confirm).toContain("Remove 1 unavailable model access rule?");
+    expect(cleanup.confirm).toContain("- Provider: gone");
+    expect(cleanup.confirm).toContain("    - Model: old-model");
+  });
+
+  it("toggles alternate models through the owner and reports the transition", () => {
+    const { settings, modelAccessState } = openModelAccess();
+    const result = expectOk(settings.execute({ kind: "select", id: "alternateModels" }));
+    expect(modelAccessState.calls).toEqual(["setEnabled:true"]);
+    expect(result.snapshot.notice).toEqual({ severity: "info", message: "Alternate models enabled" });
+    expect(result.snapshot.rows[0]).toMatchObject({ id: "alternateModels", value: "ON" });
+  });
+
+  it("toggles provider routing from the provider access page and skips stale rows", () => {
+    const { settings, modelAccessState } = openModelAccess({ modelAccess: { enabled: true } });
+    settings.execute({ kind: "select", id: "providerAccess" });
+    const toggled = expectOk(settings.execute({ kind: "select", id: "provider:google" }));
+    expect(modelAccessState.calls).toEqual(["setProviderEnabled:google:true"]);
+    expect(toggled.snapshot.notice).toEqual({ severity: "info", message: "google enabled for routed models" });
+    expect(toggled.snapshot.rows.find((row) => row.id === "provider:google")!.label).toBe("[x] google");
+
+    const stale = expectOk(settings.execute({ kind: "select", id: "provider:vanished" }));
+    expect(stale.snapshot.page).toBe("model-access/providers");
+    expect(modelAccessState.calls).toHaveLength(1);
+  });
+
+  it("walks agent access to models and toggles grants through the owner verbs", () => {
+    const { settings, modelAccessState } = openModelAccess({ modelAccess: { enabled: true } });
+    settings.execute({ kind: "select", id: "agentAccess" });
+    const agents = expectOk(settings.execute({ kind: "select", id: "type:general-purpose" }));
+    expect(agents.snapshot.page).toBe("model-access/agent");
+    expect(agents.snapshot.rows.map((row) => row.id)).toEqual([
+      "parentAccess",
+      "provider:openai",
+      "thinking",
+    ]);
+
+    const models = expectOk(settings.execute({ kind: "select", id: "provider:openai" }));
+    expect(models.snapshot.page).toBe("model-access/models");
+    expect(models.snapshot.rows.map((row) => row.id)).toEqual([
+      "parentDefault",
+      "all",
+      "model:gpt-5",
+      "model:gpt-5-mini",
+    ]);
+
+    expectOk(settings.execute({ kind: "select", id: "all" }));
+    expectOk(settings.execute({ kind: "select", id: "model:gpt-5-mini" }));
+    expect(modelAccessState.calls).toEqual([
+      "toggleAllModels:general-purpose:openai:false",
+      "toggleModel:general-purpose:openai:gpt-5-mini:false",
+    ]);
+
+    // Unwind one level per back: models -> agent -> agent list -> model access root.
+    expect(expectOk(settings.execute({ kind: "back" })).snapshot.page).toBe("model-access/agent");
+    expect(expectOk(settings.execute({ kind: "back" })).snapshot.page).toBe("model-access/agents");
+    expect(expectOk(settings.execute({ kind: "back" })).snapshot.page).toBe("model-access");
+  });
+
+  it("toggles parent access and blocks it without an active parent model", () => {
+    const { settings, modelAccessState } = openModelAccess();
+    settings.execute({ kind: "select", id: "agentAccess" });
+    settings.execute({ kind: "select", id: "type:general-purpose" });
+    const denied = expectOk(settings.execute({ kind: "select", id: "parentAccess" }));
+    expect(modelAccessState.calls).toEqual(["setParentAccess:general-purpose:false"]);
+    expect(denied.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Parent model denied for general-purpose",
+    });
+
+    modelAccessState.parentModelKey = "";
+    const blocked = expectOk(settings.execute({ kind: "select", id: "parentAccess" }));
+    expect(blocked.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Select a parent model before changing Parent model access",
+    });
+    expect(modelAccessState.calls).toHaveLength(1);
+  });
+
+  it("routes quick setup to the parent provider and requires a parent model", () => {
+    const { settings } = openModelAccess();
+    settings.execute({ kind: "select", id: "quickSetup" });
+    const models = expectOk(settings.execute({ kind: "select", id: "type:general-purpose" }));
+    expect(models.snapshot.page).toBe("model-access/models");
+    expect(models.snapshot.title).toBe("Quick Setup · general-purpose · anthropic");
+
+    const { settings: noParent } = openModelAccess({ modelAccess: { parentModelKey: "" } });
+    const refused = expectOk(noParent.execute({ kind: "select", id: "quickSetup" }));
+    expect(refused.snapshot.page).toBe("model-access");
+    expect(refused.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Select a parent model before using Quick model setup",
+    });
+  });
+
+  it("quick setup toggles use the quick transition so routing prerequisites engage", () => {
+    const { settings, modelAccessState } = openModelAccess();
+    settings.execute({ kind: "select", id: "quickSetup" });
+    settings.execute({ kind: "select", id: "type:general-purpose" });
+    expectOk(settings.execute({ kind: "select", id: "model:gpt-5" }));
+    expect(modelAccessState.calls).toEqual(["toggleModel:general-purpose:anthropic:gpt-5:true"]);
+  });
+
+  it("edits thinking policies with a last-allowed-level guard and default cycling", () => {
+    const { settings, modelAccessState } = openModelAccess();
+    settings.execute({ kind: "select", id: "agentAccess" });
+    settings.execute({ kind: "select", id: "type:general-purpose" });
+    const targets = expectOk(settings.execute({ kind: "select", id: "thinking" }));
+    expect(targets.snapshot.rows.map((row) => row.label)).toEqual([
+      "Parent model · anthropic/opus",
+      "openai/gpt-5",
+    ]);
+
+    const levels = expectOk(settings.execute({ kind: "select", id: "target:openai/gpt-5" }));
+    expect(levels.snapshot.rows.map((row) => row.id)).toEqual([
+      "level:low",
+      "level:high",
+      "level:max",
+      "default",
+      "reset",
+    ]);
+    expect(levels.snapshot.rows[0]!.label).toBe("[x] low · default");
+
+    expectOk(settings.execute({ kind: "select", id: "level:max" }));
+    const cycled = expectOk(settings.execute({ kind: "select", id: "default" }));
+    expect(cycled.snapshot.notice).toEqual({ severity: "info", message: "Default thinking level set to high" });
+    expectOk(settings.execute({ kind: "select", id: "reset" }));
+    expect(modelAccessState.calls).toEqual([
+      "toggleThinkingLevel:general-purpose:openai/gpt-5:max",
+      "setThinkingDefault:general-purpose:openai/gpt-5:high",
+      "resetThinking:general-purpose:openai/gpt-5",
+    ]);
+
+    // Disallow high and max again, leaving low as the only allowed level.
+    modelAccessState.thinkingLevels = [
+      { level: "low", allowed: true, isDefault: true },
+      { level: "high", allowed: false, isDefault: false },
+    ];
+    const guarded = expectOk(settings.execute({ kind: "select", id: "level:low" }));
+    expect(guarded.snapshot.notice).toEqual({
+      severity: "info",
+      message: "At least one thinking level must stay allowed",
+    });
+    expect(modelAccessState.calls).toHaveLength(3);
+  });
+
+  it("manages saved unavailable providers: routing toggle, rule deletion, and stale unwind", () => {
+    const { settings, modelAccessState } = openModelAccess({
+      modelAccess: {
+        enabled: true,
+        unavailableProviders: [{ provider: "gone", routingEnabled: true, ruleTypes: ["general-purpose", "reviewer"] }],
+        unavailableRules: [{ provider: "gone", agentType: "general-purpose", modelId: "old-model" }],
+      },
+    });
+    settings.execute({ kind: "select", id: "unavailableProviders" });
+    const page = expectOk(settings.execute({ kind: "select", id: "provider:gone" }));
+    expect(page.snapshot.page).toBe("model-access/unavailable-provider");
+    expect(page.snapshot.rows.map((row) => row.id)).toEqual(["routing", "deleteRules"]);
+    expect(page.snapshot.rows[1]!.confirm).toContain("Delete all saved access rules for gone?");
+    expect(page.snapshot.rows[1]!.confirm).toContain("- Agent: reviewer");
+
+    const toggled = expectOk(settings.execute({ kind: "select", id: "routing" }));
+    expect(toggled.snapshot.notice).toEqual({ severity: "info", message: "gone disabled for routed models" });
+
+    expectOk(settings.execute({ kind: "select", id: "deleteRules" }));
+    expect(modelAccessState.calls).toEqual([
+      "setProviderEnabled:gone:false",
+      "deleteProviderRules:gone",
+    ]);
+
+    // All rules are gone now; the page unwinds to the list with a notice
+    // instead of rendering a stale management page.
+    modelAccessState.unavailableProviders = [];
+    const unwound = expectOk(settings.execute({ kind: "select", id: "routing" }));
+    expect(unwound.snapshot.page).toBe("model-access/unavailable");
+    expect(unwound.snapshot.notice).toEqual({ severity: "info", message: "No saved access rules remain" });
+  });
+
+  it("cleans unavailable rules from the root and reports the removed count", () => {
+    const { settings, modelAccessState } = openModelAccess({
+      modelAccess: {
+        enabled: true,
+        unavailableRules: [
+          { provider: "gone", agentType: "general-purpose", modelId: "old-a" },
+          { provider: "gone", agentType: "general-purpose", modelId: "old-b" },
+        ],
+      },
+    });
+    const result = expectOk(settings.execute({ kind: "select", id: "cleanUnavailableRules" }));
+    expect(modelAccessState.calls).toEqual(["cleanUnavailableRules"]);
+    expect(result.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Removed 2 unavailable model access rules",
+    });
+    expect(result.snapshot.rows.some((row) => row.id === "cleanUnavailableRules")).toBe(false);
+  });
+
+  it("resets all model access policy from the root action", () => {
+    const { settings, modelAccessState } = openModelAccess({ modelAccess: { enabled: true } });
+    const result = expectOk(settings.execute({ kind: "select", id: "resetAll" }));
+    expect(modelAccessState.calls).toEqual(["clearAll"]);
+    expect(result.snapshot.notice).toEqual({ severity: "info", message: "Model access reset" });
+    expect(result.snapshot.rows[0]).toMatchObject({ id: "alternateModels", value: "OFF" });
+  });
+
+  it("surfaces policy commit failures as explicit save errors (REQ-CONFIG-001)", () => {
+    const { settings } = openModelAccess({ failUpdatesWith: "disk full" });
+    const result = expectOk(settings.execute({ kind: "select", id: "alternateModels" }));
+    expect(result.snapshot.notice).toEqual({
+      severity: "error",
+      message: "Failed to save setting: disk full",
+    });
+    expect(result.snapshot.rows[0]).toMatchObject({ id: "alternateModels", value: "OFF" });
   });
 });

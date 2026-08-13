@@ -4,9 +4,7 @@ import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 const sizeWarningBaseline: Readonly<Record<string, number>> = {
-  "src/ui/menu/menu-model-routing.ts": 909,
   "src/platform/pi/agent-session.ts": 738,
-  "src/config/config-store.ts": 457,
   "src/agents/agent-types.ts": 426,
 };
 

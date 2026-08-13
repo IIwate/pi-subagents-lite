@@ -44,6 +44,8 @@ vi.mock("typebox", () => {
         valueType,
       }),
       Union: (variants: any[]) => ({ type: "union", variants }),
+      // Real Type.Unsafe only pins the static type; passthrough matches that.
+      Unsafe: (schema: any) => schema,
       Literal: (value: string | number | boolean) => ({
         type: "literal",
         const: value,
@@ -393,7 +395,6 @@ describe("event listener registration", () => {
     const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
     const delivery = { execute: vi.fn() };
     const manager = { listSnapshots: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
-    const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
     shell.setNavigator(navigator as any);
     shell.setDelivery(delivery as any);
     shell.setManager(manager as any);
@@ -403,13 +404,11 @@ describe("event listener registration", () => {
       await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
 
       expect(delivery.execute).toHaveBeenCalledWith({ kind: "dispose" });
-      expect(storeDispose).toHaveBeenCalledTimes(1);
       expect(manager.dispose).toHaveBeenCalledTimes(1);
       expect(shell.getNavigator()).toBeNull();
       expect(shell.getDelivery()).toBeNull();
       expect(shell.getManager()).toBeNull();
     } finally {
-      storeDispose.mockRestore();
       shell.setNavigator(null);
       shell.setDelivery(null);
       shell.setManager(null);

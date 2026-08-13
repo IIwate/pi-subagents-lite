@@ -104,21 +104,6 @@ vi.mock("../../src/models/model-scope.js", () => ({
 }));
 
 vi.mock("../../src/shell.js", () => ({
-  getStore: () => ({
-    get agent() {
-      return {
-        graceTurns: 5,
-        forceBackground: mockForceBackground.value,
-        loadSkillsImplicitly: true,
-        loadExtensionsImplicitly: true,
-        systemPromptMode: "replace",
-        includeContextFiles: true,
-      };
-    },
-    get routing() {
-      return structuredClone(mockRouting);
-    },
-  }),
   getPiInstance: () => ({ sendMessage: vi.fn(), exec: vi.fn() }),
   getSessionCtx: () => ({ cwd: "/home/test/project" }),
   getManager: () => ({
@@ -127,6 +112,24 @@ vi.mock("../../src/shell.js", () => ({
     listSnapshots: vi.fn(() => []),
     stop: vi.fn(() => false),
   }),
+}));
+
+// The bootstrap seams read the shared configuration document; these tests pin
+// spawn policy and routing per case instead of going through persisted state.
+vi.mock("../../src/bootstrap/agent-settings.js", () => ({
+  DEFAULT_GRACE_TURNS: 6,
+  readAgentSettings: () => ({
+    graceTurns: 5,
+    forceBackground: mockForceBackground.value,
+    loadSkillsImplicitly: true,
+    loadExtensionsImplicitly: true,
+    systemPromptMode: "replace",
+    includeContextFiles: true,
+  }),
+}));
+
+vi.mock("../../src/bootstrap/model-access.js", () => ({
+  currentModelAccess: () => structuredClone(mockRouting),
 }));
 
 // Import after mocks are in place

@@ -10,23 +10,24 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // a resolved entry and may never add a new one.
 const legacyCycleBaseline = new Set<string>();
 
+// Phase 7 retired the ConfigStore mock hub (menu-mock-setup) and the menu
+// suites; the agent suites gained bootstrap-seam mocks in exchange for the
+// getStore one. Phase 8's composition root turns those seams into injected
+// dependencies, which is when these counts are expected to shrink again.
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/events.test.ts": 4,
   "test/fixtures.ts": 3,
   "test/index.test.ts": 8,
-  "test/menu-mock-setup.ts": 6,
   "test/agents/agent-runner.test.ts": 6,
   "test/agents/agent-status.test.ts": 1,
-  "test/agents/queued-model-permission.integration.test.ts": 3,
+  "test/agents/queued-model-permission.integration.test.ts": 5,
   "test/agents/result-delivery.integration.test.ts": 2,
   "test/agents/stop-agent.test.ts": 5,
-  "test/agents/tool-execution.test.ts": 4,
+  "test/agents/tool-execution.test.ts": 6,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
   "test/spawn/session-fallback.integration.test.ts": 1,
   "test/spawn/spawn-coordinator.test.ts": 6,
-
-  "test/ui/menu/menu-model-routing.test.ts": 2,
 };
 
 function internalMockCounts(): Record<string, number> {

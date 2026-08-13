@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => {
       includeContextFiles: false,
       systemPromptMode: "replace",
     },
-    get routing() { return structuredClone(state.routing); },
   };
   state.createAgentSession = vi.fn(async (options: any) => {
     const index = state.created++;
@@ -129,8 +128,6 @@ vi.mock("../../src/prompt/skill-loader.js", () => ({
 }));
 
 vi.mock("../../src/shell.js", () => ({
-  getStore: () => mocks.store,
-
   getManager: () => mocks.manager,
   getDelivery: () => mocks.host?.delivery,
   setDelivery: vi.fn(),
@@ -142,6 +139,17 @@ vi.mock("../../src/shell.js", () => ({
   },
   getSessionCtx: () => mocks.ctx,
   withSubagentSpawn: (operation: () => Promise<unknown>) => operation(),
+}));
+
+// Pin spawn policy and routing at the bootstrap seams so queued-permission
+// behavior is driven by this suite, not by the persisted document.
+vi.mock("../../src/bootstrap/agent-settings.js", () => ({
+  DEFAULT_GRACE_TURNS: 6,
+  readAgentSettings: () => mocks.store.agent,
+}));
+
+vi.mock("../../src/bootstrap/model-access.js", () => ({
+  currentModelAccess: () => structuredClone(mocks.routing),
 }));
 
 import { createTestSubagentRuntime } from "../runtime-harness.js";

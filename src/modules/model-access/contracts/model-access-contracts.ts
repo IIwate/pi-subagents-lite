@@ -1,14 +1,21 @@
 import { Type, type Static } from "typebox";
 
-export const ThinkingLevelSchema = Type.Union([
-  Type.Literal("off"),
-  Type.Literal("minimal"),
-  Type.Literal("low"),
-  Type.Literal("medium"),
-  Type.Literal("high"),
-  Type.Literal("xhigh"),
-  Type.Literal("max"),
-]);
+/** Canonical Pi thinking levels; the schema below is derived from this list. */
+export const CANONICAL_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+// Type.Union cannot infer a literal union from a mapped array, so the static
+// type is pinned to the canonical list the schema is built from.
+export const ThinkingLevelSchema = Type.Unsafe<(typeof CANONICAL_THINKING_LEVELS)[number]>(
+  Type.Union(CANONICAL_THINKING_LEVELS.map((level) => Type.Literal(level))),
+);
 
 export const ProviderModelAccessSchema = Type.Object({
   models: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),

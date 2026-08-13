@@ -31,10 +31,11 @@ import { preloadSkills, loadSkillMeta } from "../../prompt/skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGTH } from "../../types.js";
 import type { SubagentType } from "../../agents/types.js";
 import { withSubagentSpawn } from "../../shell.js";
-import { DEFAULT_GRACE_TURNS } from "../../config/config-store.js";
-// The bootstrap-composed path applies the operational source precedence once
-// for the whole process. Like the shell import above, this outward reference
-// is transitional wiring that the Phase 8 composition root replaces.
+// The bootstrap-composed path applies the operational source precedence and
+// spawn defaults once for the whole process. Like the shell import above,
+// these outward references are transitional wiring that the Phase 8
+// composition root replaces.
+import { DEFAULT_GRACE_TURNS } from "../../bootstrap/agent-settings.js";
 import { customPromptPath as CUSTOM_PROMPT_PATH } from "../../bootstrap/configuration.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";

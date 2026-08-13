@@ -9,6 +9,15 @@ export {
   DebugStatusPreviewSchema,
   DisplaySettingsViewSchema,
   DisplayToggleIdSchema,
+  ModelAccessAgentDetailViewSchema,
+  ModelAccessAgentRowSchema,
+  ModelAccessModelsViewSchema,
+  ModelAccessProvidersViewSchema,
+  ModelAccessRootViewSchema,
+  ModelAccessThinkingTargetSchema,
+  ModelAccessThinkingViewSchema,
+  ModelAccessUnavailableProviderSchema,
+  ModelAccessUnavailableRuleSchema,
   PromptSettingUpdateSchema,
   PromptSettingsViewSchema,
   RootSummariesSchema,
@@ -34,6 +43,15 @@ export type {
   DebugStatusPreview,
   DisplaySettingsView,
   DisplayToggleId,
+  ModelAccessAgentDetailView,
+  ModelAccessAgentRow,
+  ModelAccessModelsView,
+  ModelAccessProvidersView,
+  ModelAccessRootView,
+  ModelAccessThinkingTarget,
+  ModelAccessThinkingView,
+  ModelAccessUnavailableProvider,
+  ModelAccessUnavailableRule,
   PromptSettingUpdate,
   PromptSettingsView,
   RootSummaries,
@@ -51,6 +69,7 @@ export type {
 export type { ConcurrencySettingsOwner } from "./ports/concurrency-settings-owner.js";
 export type { DebugSettingsOwner } from "./ports/debug-settings-owner.js";
 export type { DisplaySettingsOwner } from "./ports/display-settings-owner.js";
+export type { ModelAccessSettingsOwner } from "./ports/model-access-settings-owner.js";
 export type { PromptSettingsOwner } from "./ports/prompt-settings-owner.js";
 export type { SettingsSummaryReader } from "./ports/settings-summary-reader.js";
 export type { SpawnSettingsOwner } from "./ports/spawn-settings-owner.js";

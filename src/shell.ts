@@ -18,8 +18,6 @@ import type {
   BackgroundDelivery,
   BackgroundResultRecord,
 } from "./modules/background-result-delivery/public.js";
-import { ConfigStore } from "./config/config-store.js";
-import { configurationSectionIO } from "./bootstrap/configuration.js";
 
 // ============================================================================
 // Shell type
@@ -31,7 +29,6 @@ interface Shell {
   manager: SubagentRuntime | null;
   delivery: BackgroundDelivery | null;
   navigator: ChildScreenHost | null;
-  store: ConfigStore;
 }
 
 interface ProcessState {
@@ -65,7 +62,6 @@ const shell: Shell = {
   manager: null,
   delivery: null,
   navigator: null,
-  store: new ConfigStore(configurationSectionIO),
 };
 
 // ============================================================================
@@ -95,11 +91,6 @@ export function getDelivery(): BackgroundDelivery | null {
 /** The current keyboard-driven agent navigator, or null if not yet created. */
 export function getNavigator(): ChildScreenHost | null {
   return shell.navigator;
-}
-
-/** The ConfigStore (lives for the lifetime of the extension). */
-export function getStore(): ConfigStore {
-  return shell.store;
 }
 
 // ============================================================================

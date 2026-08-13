@@ -1,7 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes } from "../agents/agent-types.js";
-import { getStore } from "../shell.js";
+import { currentModelAccess } from "./model-access.js";
 import {
   createParentGuidance,
   type AgentGuidanceResult,
@@ -48,7 +48,7 @@ export function createParentGuidanceRuntime() {
         parentScopedThinkingLevel: ctx.model
           ? asThinkingLevel(scopedThinkingLevel(ctx.scopedModels, ctx.model))
           : null,
-        routing: getStore().routing,
+        routing: currentModelAccess(),
         availableModels: ctx.modelRegistry.getAvailable().map((model: Model<any>) => ({
           key: modelKey(model),
           supportedLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],

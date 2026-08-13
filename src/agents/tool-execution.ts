@@ -42,9 +42,10 @@ import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/
 import {
   getPiInstance,
   getSessionCtx,
-  getStore,
   getManager,
 } from "../shell.js";
+import { readAgentSettings } from "../bootstrap/agent-settings.js";
+import { currentModelAccess } from "../bootstrap/model-access.js";
 import { spawnAgent } from "../bootstrap/session-host.js";
 
 // ============================================================================
@@ -121,10 +122,10 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);
   const requestedBackground = params.run_in_background as boolean | undefined;
-  const store = getStore();
+  const agentSettings = readAgentSettings();
   const scopedModels = structuredClone(ctx.scopedModels);
-  const runInBackground = requestedBackground === true || store.agent.forceBackground;
-  const routing = store.routing;
+  const runInBackground = requestedBackground === true || agentSettings.forceBackground;
+  const routing = currentModelAccess();
   const explicitModel = Object.hasOwn(params, "model") && params.model !== undefined;
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
 
@@ -182,10 +183,10 @@ export async function executeAgentTool(
   if (!model) return errorResult(unknownModelError(resolvedModelKey));
 
   const policyInputs = resolveAgentPolicyInputs(resolvedType, {
-    loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
-    loadExtensionsImplicitly: store.agent.loadExtensionsImplicitly,
-    systemPromptMode: store.agent.systemPromptMode,
-    includeContextFiles: store.agent.includeContextFiles,
+    loadSkillsImplicitly: agentSettings.loadSkillsImplicitly,
+    loadExtensionsImplicitly: agentSettings.loadExtensionsImplicitly,
+    systemPromptMode: agentSettings.systemPromptMode,
+    includeContextFiles: agentSettings.includeContextFiles,
     parentModelKey: parentModelRef,
   });
   if (!policyInputs) {
@@ -239,7 +240,7 @@ export async function executeAgentTool(
     thinkingLevel: thinkingLevel ?? null,
     outputTokenLimit: acceptedModel.maxTokens,
     turnLimit,
-    graceTurns: store.agent.graceTurns,
+    graceTurns: agentSettings.graceTurns,
   });
   if (!acceptedPolicy) {
     return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);

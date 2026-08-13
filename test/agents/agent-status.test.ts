@@ -45,6 +45,10 @@ vi.mock("../../src/shell.js", () => shellMock({
   },
 }));
 
+// Load the module graph during collection; the per-test dynamic imports then
+// hit the cache instead of charging the first test's timeout with it.
+import "../../src/agents/agent-status.js";
+
 /* ------------------------------------------------------------------ */
 /*  Execute behavior tests                                            */
 /* ------------------------------------------------------------------ */

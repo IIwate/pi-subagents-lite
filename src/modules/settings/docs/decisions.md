@@ -10,7 +10,10 @@
 
 - Menu callbacks that implement policy or publish in-memory state before persistence are retired. The [UI state matrix](./ui-states.md) owns workflows; capability commands own decisions.
 
+## Superseded (Phase 7 completion)
+
+- The `open-legacy-category` effect and the ConfigStore-backed owner adapters are retired with the last monolithic menu. Every category is a native settings page; owners in `bootstrap/settings.ts` adapt the policy-owning capability directly.
+
 ## Implementation-only
 
-- Existing menu file names, widget callbacks, and ConfigStore mutation names are not public settings concepts.
-- The `open-legacy-category` effect and the ConfigStore-backed owner adapters in `bootstrap/settings.ts` are transitional wiring. Each category slice replaces one adapter with the policy-owning capability and removes its category from the legacy list; both disappear with the last monolithic menu.
+- Page ids, row-id encodings, and the page stack are host-facing wiring, not public settings concepts.

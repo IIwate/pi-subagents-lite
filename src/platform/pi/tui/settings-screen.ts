@@ -5,12 +5,13 @@
  * into serializable settings commands. One `ctx.ui.custom` session renders
  * one page visit; page changes re-enter the loop with a fresh component so
  * no widget state leaks between pages (same lifecycle the menus used).
+ * Same-page updates rebuild the list in place so the cursor stays put.
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { SelectList, SettingsList, type SelectItem, type SettingItem } from "@earendil-works/pi-tui";
-import { buildListTheme, SettingsListWrapper } from "./settings-chrome.js";
-import { createConfirmSubmenu } from "./confirm.js";
+import { SelectList, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
+import { buildListTheme, SettingsListWrapper, skipNonSelectableRows } from "./settings-chrome.js";
+import { createConfirmSubmenu, createMultilineConfirmComponent } from "./confirm.js";
 import { createNumericSubmenu } from "./numeric-input.js";
 import { buildPickOptions, createDelegatingComponent, createSearchableSelect } from "./pick-list.js";
 import type { Theme } from "./theme.js";
@@ -22,18 +23,9 @@ import type {
   SettingsSnapshot,
 } from "../../../modules/settings/public.js";
 
-export interface SettingsScreenHooks {
-  /**
-   * Transitional seam: run the monolithic Pi menu for a category that has not
-   * migrated into a settings page yet. Deleted with the last legacy menu.
-   */
-  openLegacyCategory(category: string): Promise<void>;
-}
-
 export async function runSettingsScreen(
   ctx: ExtensionCommandContext,
   settings: Settings,
-  hooks: SettingsScreenHooks,
 ): Promise<void> {
   let result = settings.execute({ kind: "open" });
   while (true) {
@@ -42,11 +34,6 @@ export async function runSettingsScreen(
       return;
     }
     if (result.effect?.kind === "close") return;
-    if (result.effect?.kind === "open-legacy-category") {
-      await hooks.openLegacyCategory(result.effect.category);
-      result = settings.execute({ kind: "open" });
-      continue;
-    }
     result = await renderPageVisit(ctx, settings, result.snapshot);
   }
 }
@@ -152,14 +139,75 @@ function renderPageVisit(
     const listTheme = buildListTheme(theme);
 
     if (snapshot.presentation === "menu") {
-      const items: SelectItem[] = snapshot.rows.map((row) => ({
-        value: row.id,
-        label: row.label,
-        description: row.detail,
-      }));
-      const list = new SelectList(items, 10, listTheme);
-      list.onSelect = (item) => done(settings.execute({ kind: "select", id: item.value }));
-      return new SettingsListWrapper(list, {
+      // Menu pages are select-driven: one activation toggles a policy, fires
+      // an action, or navigates. Same-page outcomes rebuild the list in place
+      // (cursor preserved); page changes and effects end the visit.
+      let currentRows = snapshot.rows;
+      let delegator: ReturnType<typeof createDelegatingComponent>;
+
+      const apply = (command: SettingsCommand, cursorRowId?: string): void => {
+        const outcome = settings.execute(command);
+        if (!outcome.ok) {
+          ctx.ui.notify(outcome.error.message, "error");
+          return;
+        }
+        const notice = outcome.snapshot.notice;
+        if (notice) ctx.ui.notify(notice.message, notice.severity);
+        if (outcome.effect || outcome.snapshot.page !== snapshot.page) {
+          done(outcome);
+          return;
+        }
+        currentRows = outcome.snapshot.rows;
+        delegator.setActive(buildList(cursorRowId));
+      };
+
+      const buildList = (cursorRowId?: string): SelectList => {
+        const items = currentRows.map((row) => ({
+          value: row.id,
+          label: row.value !== undefined ? `${row.label} · ${row.value}` : row.label,
+          description: row.detail,
+          nonSelectable: row.kind === "note",
+        }));
+        const list = new SelectList(items, 12, listTheme);
+        skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
+        if (cursorRowId) {
+          const index = items.findIndex((item) => item.value === cursorRowId);
+          if (index >= 0) (list as any).selectedIndex = index;
+        }
+        list.onSelect = (item) => {
+          const row = currentRows.find((candidate) => candidate.id === item.value);
+          if (!row || row.kind === "note") return;
+          if (row.kind === "action" && row.confirm) {
+            // The module executes on select; the renderer owns asking first,
+            // exactly like the form path's confirm-before-onChange.
+            delegator.setActive(createMultilineConfirmComponent({
+              message: row.confirm,
+              theme,
+              onConfirm: () => apply({ kind: "select", id: row.id }, row.id),
+              onCancel: () => delegator.setActive(buildList(row.id)),
+              done: () => {},
+            }));
+            return;
+          }
+          apply({ kind: "select", id: row.id }, row.id);
+        };
+        // Space activates the selected row, matching the checkbox gesture the
+        // menus used for toggle lists.
+        const baseInput = list.handleInput.bind(list);
+        list.handleInput = (data: string) => {
+          if (data === " ") {
+            const item = (list as any).items?.[(list as any).selectedIndex ?? 0];
+            if (item && !item.nonSelectable) list.onSelect?.(item);
+            return;
+          }
+          baseInput(data);
+        };
+        list.onCancel = () => done(settings.execute({ kind: "back" }));
+        return list;
+      };
+
+      delegator = createDelegatingComponent(buildList());
+      return new SettingsListWrapper(delegator, {
         title: snapshot.title,
         theme,
         onCancel: () => done(settings.execute({ kind: "back" })),

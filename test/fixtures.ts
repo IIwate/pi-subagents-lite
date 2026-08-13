@@ -83,7 +83,6 @@ export interface ShellMockFns {
   manager?: any;
   pi?: any;
   sessionCtx?: any;
-  store?: any;
   delivery?: any;
   coordinator?: any;
 }
@@ -109,9 +108,6 @@ export function shellMock(fns: ShellMockFns = {}) {
   };
   const pi = fns.pi ?? { sendMessage: vi.fn(), exec: vi.fn() };
   const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };
-  const store = fns.store ?? {
-    agent: { graceTurns: 6, forceBackground: false, showCost: false },
-  };
   const delivery = fns.delivery ?? fns.coordinator ?? { spawn: vi.fn() };
 
   return {
@@ -120,7 +116,6 @@ export function shellMock(fns: ShellMockFns = {}) {
     setDelivery: vi.fn(),
     getPiInstance: () => pi,
     getSessionCtx: () => sessionCtx,
-    getStore: () => store,
   };
 }
 

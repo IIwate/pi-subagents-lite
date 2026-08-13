@@ -16,6 +16,7 @@ import {
   type DebugSettingsOwner,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
+  type ModelAccessSettingsOwner,
   type PromptSettingsOwner,
   type SpawnSettingsOwner,
   type SpawnSettingsView,
@@ -108,14 +109,60 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
     setStatusPreview: () => ({ ok: true }),
     armFault: () => ({ ok: true }),
   };
-  return createSettings({
+  // Minimal stateful policy fake: the renderer suite only needs the root page
+  // toggle and the confirm-gated reset; page composition is the module's test.
+  const modelAccessState = { enabled: false, resets: 0 };
+  const rootView = () => ({
+    enabled: modelAccessState.enabled,
+    parentModelKey: "anthropic/opus",
+    enabledProviderCount: 0,
+    configuredAgentCount: 0,
+    unavailableProviders: [],
+    unavailableRules: [],
+  });
+  const unsupported = (verb: string) => (): never => {
+    throw new Error(`renderer suite does not exercise ${verb}`);
+  };
+  const modelAccess: ModelAccessSettingsOwner = {
+    root: rootView,
+    agents: () => [],
+    quickAgents: () => [],
+    agentDetail: unsupported("agentDetail"),
+    providers: () => ({ parentModelKey: "anthropic/opus", providers: [] }),
+    models: unsupported("models"),
+    thinkingTargets: () => [],
+    thinking: unsupported("thinking"),
+    setEnabled(enabled) {
+      if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
+      modelAccessState.enabled = enabled;
+      return { ok: true };
+    },
+    setProviderEnabled: unsupported("setProviderEnabled"),
+    setParentAccess: unsupported("setParentAccess"),
+    toggleAllModels: unsupported("toggleAllModels"),
+    toggleModel: unsupported("toggleModel"),
+    toggleThinkingLevel: unsupported("toggleThinkingLevel"),
+    setThinkingDefault: unsupported("setThinkingDefault"),
+    resetThinking: unsupported("resetThinking"),
+    deleteProviderRules: unsupported("deleteProviderRules"),
+    cleanUnavailableRules: unsupported("cleanUnavailableRules"),
+    clearAll() {
+      if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
+      modelAccessState.enabled = false;
+      modelAccessState.resets += 1;
+      return { ok: true };
+    },
+  };
+  const settings = createSettings({
     summaries: { read: () => ({ modelAccessEnabled: false, concurrencyDefault: 4 }) },
     display,
     spawn,
     prompt,
     concurrency,
     debug,
+    modelAccess,
   });
+  return Object.assign(settings, { modelAccessState });
 }
 
 /**
@@ -148,14 +195,12 @@ function createScriptedCtx(script: Array<(component: any, done: (value: unknown)
   return { ctx: ctx as any, renders, notifications: ctx.ui.notify };
 }
 
-const noLegacy = { openLegacyCategory: vi.fn(async () => {}) };
-
 describe("settings screen renderer contract", () => {
   it("renders the root categories with summaries and closes on Escape", async () => {
     const { ctx, renders } = createScriptedCtx([
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
     expect(renders[0]).toContain("Agents");
@@ -183,7 +228,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
     expect(renders[1]).toContain("Expand list by default");
@@ -209,7 +254,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings({ failUpdatesWith: "disk full" }), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings({ failUpdatesWith: "disk full" }));
 
     expect(notifications).toHaveBeenCalledWith("Failed to save setting: disk full", "error");
     // The row shows the saved ON value again instead of the failed OFF attempt.
@@ -236,7 +281,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     const graceNotifications = notifications.mock.calls.filter(([message]) =>
       String(message).startsWith("Grace turns"));
@@ -261,7 +306,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(notifications).toHaveBeenCalledWith(expect.stringContaining("Invalid value"), "error");
     expect(notifications).not.toHaveBeenCalledWith(expect.stringContaining("Grace turns set"), "info");
@@ -285,7 +330,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(customModeText).toContain("Create prompt file");
     expect(notifications).toHaveBeenCalledWith("System prompt mode set to custom", "info");
@@ -312,7 +357,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(renders[1]).toContain("Provider · anthropic");
     expect(notifications).toHaveBeenCalledWith("anthropic concurrency set to 5", "info");
@@ -333,7 +378,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(notifications).toHaveBeenCalledWith("Removed Provider limit for anthropic", "info");
   });
@@ -357,7 +402,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(notifications).toHaveBeenCalledWith("openai/gpt-5 concurrency set to 3", "info");
   });
@@ -378,26 +423,62 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     const resets = notifications.mock.calls.filter(([message]) => message === "Concurrency reset");
     expect(resets).toHaveLength(1);
   });
 
-  it("runs the legacy menu for an un-migrated category and re-renders the root", async () => {
-    const openLegacyCategory = vi.fn(async () => {});
-    const { ctx, renders } = createScriptedCtx([
+  it("toggles a menu-page policy in place without leaving the visit", async () => {
+    let toggledText = "";
+    const { ctx, renders, notifications } = createScriptedCtx([
       (component) => {
-        // "Model access" is the first row and the last remaining legacy menu.
+        // "Model access" is the first row; enter its native menu page.
         component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\r"); // toggle "Alternate models" in place
+        toggledText = component.render(120).join("\n");
+        component.handleInput("\x1b"); // back to the root
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), { openLegacyCategory });
+    const settings = createRealSettings();
+    await runSettingsScreen(ctx, settings);
 
-    expect(openLegacyCategory).toHaveBeenCalledExactlyOnceWith("model-access");
-    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
-    expect(renders[1]).toContain("Agents");
+    // Three visits: root, model access, root again. The toggle itself
+    // rebuilt the same visit instead of opening a fourth one.
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
+    expect(renders[1]).toContain("Model Access");
+    expect(renders[1]).toContain("Alternate models · OFF");
+    expect(toggledText).toContain("Alternate models · ON");
+    expect(settings.modelAccessState.enabled).toBe(true);
+    expect(notifications).toHaveBeenCalledWith("Alternate models enabled", "info");
+    expect(renders[2]).toContain("Agents");
+  });
+
+  it("gates destructive menu actions behind a confirm dialog and fires once on Yes", async () => {
+    let dialogText = "";
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => component.handleInput("\r"),
+      (component) => {
+        component.handleInput("\x1b[A"); // wrap upward to "Reset Model access"
+        component.handleInput("\r");     // open the confirm dialog
+        dialogText = component.render(120).join("\n");
+        component.handleInput("\x1b");   // Escape → no reset, back to the list
+        component.handleInput("\r");     // reopen the dialog
+        component.handleInput("\r");     // Yes is preselected → confirm
+        component.handleInput("\x1b");   // leave the page
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    const settings = createRealSettings();
+    await runSettingsScreen(ctx, settings);
+
+    expect(dialogText).toContain("Reset all Model access settings?");
+    expect(settings.modelAccessState.resets).toBe(1);
+    const resets = notifications.mock.calls.filter(([message]) => message === "Model access reset");
+    expect(resets).toHaveLength(1);
   });
 
   it("fires a debug report action and shows the formatted report", async () => {
@@ -413,7 +494,7 @@ describe("settings screen renderer contract", () => {
       },
       (component) => component.handleInput("\x1b"),
     ]);
-    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+    await runSettingsScreen(ctx, createRealSettings());
 
     expect(renders[1]).toContain("Debug");
     expect(renders[1]).toContain("Runtime diagnostics");

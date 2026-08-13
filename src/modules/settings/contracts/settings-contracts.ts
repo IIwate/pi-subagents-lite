@@ -6,7 +6,8 @@ import { Type, type Static } from "typebox";
 // toggle/choice cycle through `choices`, numeric opens an integer input with
 // `min`/`fallback` hints, action fires with its single choice as the value,
 // limit edits-or-removes a keyed override (`update-limit`), picker selects a
-// key from `choices` and asks for a limit (`add-limit`).
+// key from `choices` and asks for a limit (`add-limit`), note is a
+// non-selectable display-only row.
 export const SettingsRowSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   kind: Type.Union([
@@ -17,6 +18,7 @@ export const SettingsRowSchema = Type.Object({
     Type.Literal("action"),
     Type.Literal("limit"),
     Type.Literal("picker"),
+    Type.Literal("note"),
   ]),
   label: Type.String({ minLength: 1 }),
   detail: Type.Optional(Type.String()),
@@ -69,15 +71,8 @@ export const SettingsCommandSchema = Type.Union([
   Type.Object({ kind: Type.Literal("back") }, { additionalProperties: false }),
 ]);
 
-// "open-legacy-category" exists only while un-migrated categories still run
-// their monolithic Pi menus. Each settings slice deletes its category from
-// this effect; the effect itself is deleted with the last legacy menu.
 export const SettingsEffectSchema = Type.Union([
   Type.Object({ kind: Type.Literal("close") }, { additionalProperties: false }),
-  Type.Object({
-    kind: Type.Literal("open-legacy-category"),
-    category: Type.String({ minLength: 1 }),
-  }, { additionalProperties: false }),
 ]);
 
 const SettingsErrorSchema = Type.Object({
@@ -262,6 +257,81 @@ export const DebugSettingsViewSchema = Type.Object({
   armedFault: Type.Optional(DebugFaultSchema),
 }, { additionalProperties: false });
 
+// ── Model access boundary ─────────────────────────────────────────
+// Views carry only what the pages display; the decision tables, fragment
+// shape, and rule transitions stay in the model-access module behind the
+// owner port (REQ-SETTINGS-002). Parent keys are "" when no parent model is
+// active so every view stays plain serializable JSON.
+
+export const ModelAccessUnavailableProviderSchema = Type.Object({
+  provider: Type.String({ minLength: 1 }),
+  routingEnabled: Type.Boolean(),
+  // Agent types with saved rules for this provider; drives counts and the
+  // delete confirmation listing.
+  ruleTypes: Type.Array(Type.String({ minLength: 1 })),
+}, { additionalProperties: false });
+
+export const ModelAccessUnavailableRuleSchema = Type.Object({
+  provider: Type.String({ minLength: 1 }),
+  agentType: Type.String({ minLength: 1 }),
+  modelId: Type.String({ minLength: 1 }),
+}, { additionalProperties: false });
+
+export const ModelAccessRootViewSchema = Type.Object({
+  enabled: Type.Boolean(),
+  parentModelKey: Type.String(),
+  enabledProviderCount: Type.Integer({ minimum: 0 }),
+  configuredAgentCount: Type.Integer({ minimum: 0 }),
+  unavailableProviders: Type.Array(ModelAccessUnavailableProviderSchema),
+  unavailableRules: Type.Array(ModelAccessUnavailableRuleSchema),
+}, { additionalProperties: false });
+
+export const ModelAccessAgentRowSchema = Type.Object({
+  type: Type.String({ minLength: 1 }),
+  registered: Type.Boolean(),
+  summary: Type.String(),
+}, { additionalProperties: false });
+
+export const ModelAccessAgentDetailViewSchema = Type.Object({
+  parentModelKey: Type.String(),
+  parentAllowed: Type.Boolean(),
+  // Effective default thinking level for parent use; "" when unavailable.
+  parentDefaultLevel: Type.String(),
+  // Effective alternate providers; empty while routing is disabled.
+  providers: Type.Array(Type.String()),
+  thinkingTargetCount: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+
+export const ModelAccessProvidersViewSchema = Type.Object({
+  parentModelKey: Type.String(),
+  providers: Type.Array(Type.Object({
+    provider: Type.String({ minLength: 1 }),
+    enabled: Type.Boolean(),
+  }, { additionalProperties: false })),
+}, { additionalProperties: false });
+
+export const ModelAccessModelsViewSchema = Type.Object({
+  parentModelKey: Type.String(),
+  allModels: Type.Boolean(),
+  models: Type.Array(Type.Object({
+    id: Type.String({ minLength: 1 }),
+    granted: Type.Boolean(),
+  }, { additionalProperties: false })),
+}, { additionalProperties: false });
+
+export const ModelAccessThinkingTargetSchema = Type.Object({
+  key: Type.String({ minLength: 1 }),
+  parent: Type.Boolean(),
+}, { additionalProperties: false });
+
+export const ModelAccessThinkingViewSchema = Type.Object({
+  levels: Type.Array(Type.Object({
+    level: Type.String({ minLength: 1 }),
+    allowed: Type.Boolean(),
+    isDefault: Type.Boolean(),
+  }, { additionalProperties: false })),
+}, { additionalProperties: false });
+
 export type SettingsRow = Static<typeof SettingsRowSchema>;
 export type SettingsNotice = Static<typeof SettingsNoticeSchema>;
 export type SettingsSnapshot = Static<typeof SettingsSnapshotSchema>;
@@ -285,3 +355,12 @@ export type DebugAgentType = Static<typeof DebugAgentTypeSchema>;
 export type DebugRuntimeAgent = Static<typeof DebugRuntimeAgentSchema>;
 export type DebugDiagnosticsView = Static<typeof DebugDiagnosticsViewSchema>;
 export type DebugSettingsView = Static<typeof DebugSettingsViewSchema>;
+export type ModelAccessUnavailableProvider = Static<typeof ModelAccessUnavailableProviderSchema>;
+export type ModelAccessUnavailableRule = Static<typeof ModelAccessUnavailableRuleSchema>;
+export type ModelAccessRootView = Static<typeof ModelAccessRootViewSchema>;
+export type ModelAccessAgentRow = Static<typeof ModelAccessAgentRowSchema>;
+export type ModelAccessAgentDetailView = Static<typeof ModelAccessAgentDetailViewSchema>;
+export type ModelAccessProvidersView = Static<typeof ModelAccessProvidersViewSchema>;
+export type ModelAccessModelsView = Static<typeof ModelAccessModelsViewSchema>;
+export type ModelAccessThinkingTarget = Static<typeof ModelAccessThinkingTargetSchema>;
+export type ModelAccessThinkingView = Static<typeof ModelAccessThinkingViewSchema>;

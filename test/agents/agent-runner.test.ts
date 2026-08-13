@@ -72,15 +72,6 @@ vi.mock("../../src/prompt/skill-loader.js", () => ({
 }));
 
 vi.mock("../../src/shell.js", () => ({
-  getStore: () => ({
-    agent: {
-      includeContextFiles: mockModules.mockIncludeContextFiles,
-      systemPromptMode: mockModules.mockSystemPromptMode,
-      graceTurns: 6,
-      forceBackground: false,
-      showCost: false,
-    },
-  }),
   withSubagentSpawn: mockModules.mockWithSubagentSpawn,
 }));
 

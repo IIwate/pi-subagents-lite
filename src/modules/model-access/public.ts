@@ -1,6 +1,7 @@
 export {
   AgentModelAccessSchema,
   AuthorizationDenialReasonSchema,
+  CANONICAL_THINKING_LEVELS,
   AuthorizeModelCommandSchema,
   AuthorizeModelResultSchema,
   ModelAccessFragmentSchema,
