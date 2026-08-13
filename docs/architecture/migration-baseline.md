@@ -15,8 +15,8 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 50 files, 864 passed, 2 skipped, 866 total | Vitest |
-| Skipped tests | Two directory-symlink scenarios when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
+| Full suite | 50 files, 866 passed | Vitest |
+| Skipped tests | None on this host. Two directory-symlink scenarios still skip when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 9 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
 
@@ -84,11 +84,11 @@ The audit remains available only to explain how these risks were discovered and 
 - The filesystem catalogue adapter isolates malformed definitions before returning its schema-valid result, preserving valid definitions in the same request.
 - The architecture guard enforces the full inward matrix inside each capability module, including ports, and requires every module-external consumer to use the target module's `public.ts`.
 - The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
-- The tracer commits run `bun run typecheck`, focused contract tests, architecture guards, and the full suite before the Phase 1 review checkpoint.
+- Formal review of `46728e2..50c89c1` found no unresolved issues. Recorded verification: `bun run typecheck` pass; `bun run test` 50 files, 866 passed; architecture guard 9 passed; `git diff --check` pass.
 
 ## Phase 1 exit review
 
 - The session-start Agent discovery behavior has one production path through `agent-catalogue/public.ts`; no parallel old discovery execution remains for that call site.
 - The accepted Agent call snapshot is validated through `subagent-runtime/public.ts` before the spawn path consumes it.
 - The direct contract cycle, configuration-shape drift, undocumented requirement references, and new internal mocks remain absent.
-- The final Phase 1 review includes the architecture guard, typecheck, focused public-seam tests, and full suite recorded above.
+- The Phase 1 checkpoint records `Review-Result: PASS` after the review and the verification results above.
