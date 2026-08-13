@@ -4,9 +4,11 @@
  * One ExtensionRuntime is created per extension activation (index.ts) and
  * every registration and lifecycle callback closes over it. No module-level
  * getters expose this state, so constructing a second runtime in the same
- * process shares no ordinary session state — only the persisted configuration
- * document (deliberately, it is one file on disk) and the two approved
- * reload-surviving responsibilities in platform/process/process-state.
+ * process shares no ordinary session state. What IS deliberately
+ * process-wide: the persisted configuration document (one file on disk), the
+ * agent-type registry in agents/agent-types.ts (a mirror of that document and
+ * the last scan), and the two approved reload-surviving responsibilities in
+ * platform/process/process-state.
  *
  * This record supersedes the ADR 0004 shared shell. It is not a service
  * locator: nothing can reach it without being handed it explicitly, and its
