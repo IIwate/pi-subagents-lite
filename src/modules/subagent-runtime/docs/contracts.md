@@ -11,6 +11,8 @@
 - `AcceptedModelSnapshotSchema` and `AcceptedScopedModelSchema` describe the serializable Pi model data needed by the platform session driver.
 - `parseAcceptedRunPolicy` accepts only plain JSON values, verifies the parent-model key and derived output/turn limits, then returns a separately validated JSON copy for runtime consumption.
 
+- `ConcurrencyLimitsSchema` and `ConcurrencyDecisionSchema` define hierarchical reserve/release decisions.
+
 Lifecycle commands and snapshots remain planned for the slices that migrate runtime ownership.
 
 Exact fields are owned by TypeBox schemas introduced one vertical slice at a time.

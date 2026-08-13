@@ -22,6 +22,10 @@ import {
   type ArmedDebugFault,
   type DebugFaultKind,
 } from "./debug-fault.js";
+import {
+  createConcurrencyScheduler,
+  type ConcurrencyScheduler,
+} from "../modules/subagent-runtime/public.js";
 
 /** How often to check for expired agent records (milliseconds). */
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -102,18 +106,7 @@ export class AgentManager {
   private onComplete?: OnAgentComplete;
   private onRemove?: OnAgentRemove;
 
-  /** Explicit per-model ceilings keyed by "provider/modelId". */
-  private modelLimits = new Map<string, number>();
-
-  /** Shared hard ceilings keyed by provider. */
-  private providerLimits = new Map<string, number>();
-
-  /** Running counts are independent from mutable limits so config changes preserve live accounting. */
-  private modelRunning = new Map<string, number>();
-  private providerRunning = new Map<string, number>();
-
-  /** Per-model ceiling when no explicit model override exists. */
-  private defaultConcurrency: number;
+  private readonly scheduler: ConcurrencyScheduler;
 
   /** Queue of agents waiting to start, keyed by the accepted model snapshot. */
   private queue: { id: string; concurrencyKey: string; args: SpawnArgs }[] = [];
@@ -140,7 +133,11 @@ export class AgentManager {
     concurrency?: ConcurrencyConfig,
   ) {
     this.onComplete = onComplete;
-    this.defaultConcurrency = DEFAULT_CONCURRENCY_LIMIT;
+    this.scheduler = createConcurrencyScheduler({
+      defaultModelLimit: DEFAULT_CONCURRENCY_LIMIT,
+      modelLimits: {},
+      providerLimits: {},
+    });
     this.setConcurrency(concurrency ?? { default: DEFAULT_CONCURRENCY_LIMIT });
 
     this.cleanupInterval = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
@@ -149,13 +146,19 @@ export class AgentManager {
 
   /** Replace mutable ceilings while preserving live running counts. */
   setConcurrency(config: ConcurrencyConfig): void {
-    this.defaultConcurrency = Math.max(1, config.default);
-    this.providerLimits = new Map(
-      Object.entries(config.providers ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
-    );
-    this.modelLimits = new Map(
-      Object.entries(config.models ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
-    );
+    const modelLimits: Record<string, number> = {};
+    const providerLimits: Record<string, number> = {};
+    for (const [key, limit] of Object.entries(config.models ?? {})) {
+      modelLimits[key] = Math.max(1, limit);
+    }
+    for (const [key, limit] of Object.entries(config.providers ?? {})) {
+      providerLimits[key] = Math.max(1, limit);
+    }
+    this.scheduler.replaceLimits({
+      defaultModelLimit: Math.max(1, config.default),
+      modelLimits,
+      providerLimits,
+    });
     this.drainQueue();
   }
 
@@ -209,42 +212,12 @@ export class AgentManager {
     };
   }
 
-  private providerFromModelKey(modelKey: string): string {
-    const slash = modelKey.indexOf("/");
-    return slash > 0 ? modelKey.slice(0, slash) : modelKey;
-  }
-
-  private runningCount(counts: ReadonlyMap<string, number>, key: string): number {
-    return counts.get(key) ?? 0;
-  }
-
-  /** Provider and model ceilings are independent; every run must satisfy both. */
-  private hasConcurrencyCapacity(modelKey: string): boolean {
-    const modelLimit = this.modelLimits.get(modelKey) ?? this.defaultConcurrency;
-    if (this.runningCount(this.modelRunning, modelKey) >= modelLimit) return false;
-
-    const provider = this.providerFromModelKey(modelKey);
-    const providerLimit = this.providerLimits.get(provider);
-    return providerLimit == null
-      || this.runningCount(this.providerRunning, provider) < providerLimit;
-  }
-
   private reserveConcurrency(modelKey: string): boolean {
-    if (!this.hasConcurrencyCapacity(modelKey)) return false;
-    const provider = this.providerFromModelKey(modelKey);
-    this.modelRunning.set(modelKey, this.runningCount(this.modelRunning, modelKey) + 1);
-    this.providerRunning.set(provider, this.runningCount(this.providerRunning, provider) + 1);
-    return true;
+    return this.scheduler.reserve(modelKey).accepted;
   }
 
   private releaseConcurrency(modelKey: string): void {
-    const provider = this.providerFromModelKey(modelKey);
-    const modelRunning = Math.max(0, this.runningCount(this.modelRunning, modelKey) - 1);
-    const providerRunning = Math.max(0, this.runningCount(this.providerRunning, provider) - 1);
-    if (modelRunning === 0) this.modelRunning.delete(modelKey);
-    else this.modelRunning.set(modelKey, modelRunning);
-    if (providerRunning === 0) this.providerRunning.delete(provider);
-    else this.providerRunning.set(provider, providerRunning);
+    this.scheduler.release(modelKey);
   }
 
   /**

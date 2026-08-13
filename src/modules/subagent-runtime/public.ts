@@ -15,3 +15,15 @@ export type {
   ThinkingLevel,
 } from "./contracts/accepted-run-policy.js";
 export { parseAcceptedRunPolicy } from "./application/validate-accepted-run-policy.js";
+export {
+  ConcurrencyDecisionSchema,
+  ConcurrencyLimitsSchema,
+} from "./contracts/scheduling.js";
+export type {
+  ConcurrencyDecision,
+  ConcurrencyLimits,
+} from "./contracts/scheduling.js";
+export {
+  createConcurrencyScheduler,
+  type ConcurrencyScheduler,
+} from "./application/create-concurrency-scheduler.js";
