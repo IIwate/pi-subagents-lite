@@ -17,6 +17,11 @@ import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import { CANONICAL_THINKING_LEVELS } from "./types.js";
+import {
+  applyAgentProviderAccess,
+  applyParentModelAccess,
+  applyQuickAgentProviderAccess,
+} from "../modules/model-access/public.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
@@ -186,38 +191,19 @@ export class ConfigStore {
       },
       /** Replace one canonical Agent/provider rule; an empty exact list deletes it. */
       setAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
-        this.writeAgentProviderAccess(type, provider, models);
+        this.config.modelRouting = applyAgentProviderAccess(this.config.modelRouting, type, provider, models);
         this.persist();
       },
-      /** Quick setup: enable routing/provider and write the same canonical rule once. */
       configureAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
-        const typeKey = type.trim();
-        const key = provider.trim();
-        const normalized = models === undefined
-          ? undefined
-          : [...new Set(models.map((model) => model.trim()).filter(Boolean))];
-        if (!typeKey || !key || normalized?.length === 0) return;
-        this.config.modelRouting.enabled = true;
-        this.config.modelRouting.enabledProviders = [...new Set([
-          ...this.config.modelRouting.enabledProviders,
-          key,
-        ])];
-        this.writeAgentProviderAccess(typeKey, key, normalized);
+        const next = applyQuickAgentProviderAccess(this.config.modelRouting, type, provider, models);
+        // An invalid selection used to return before persist so a failed
+        // picker could not leave a written routing/provider half-change.
+        if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
+        this.config.modelRouting = next;
         this.persist();
       },
       setParentModelAccess: (type: string, allowed: boolean): void => {
-        const typeKey = type.trim();
-        if (!typeKey) return;
-        const existing = ownValue(this.config.modelRouting.agentAccess, typeKey);
-        if (allowed) {
-          if (!existing || existing.parentModelAccess === undefined) return;
-          delete existing.parentModelAccess;
-          this.pruneAgentAccess(typeKey);
-        } else {
-          const access = existing ?? { providers: {} };
-          if (!existing) setOwn(this.config.modelRouting.agentAccess, typeKey, access);
-          access.parentModelAccess = false;
-        }
+        this.config.modelRouting = applyParentModelAccess(this.config.modelRouting, type, allowed);
         this.persist();
       },
       setThinkingAccess: (
@@ -390,24 +376,6 @@ export class ConfigStore {
 
   private persist(): void {
     this.io.save(this.config);
-  }
-
-  private writeAgentProviderAccess(type: string, provider: string, models?: readonly string[]): void {
-    const typeKey = type.trim();
-    const providerKey = provider.trim();
-    if (!typeKey || !providerKey) return;
-    const normalized = models === undefined
-      ? undefined
-      : [...new Set(models.map((model) => model.trim()).filter(Boolean))];
-    const existing = ownValue(this.config.modelRouting.agentAccess, typeKey);
-    if (normalized?.length === 0) {
-      if (existing) delete existing.providers[providerKey];
-      this.pruneAgentAccess(typeKey);
-      return;
-    }
-    const agent = existing ?? { providers: {} };
-    if (!existing) setOwn(this.config.modelRouting.agentAccess, typeKey, agent);
-    setOwn(agent.providers, providerKey, normalized ? { models: normalized } : {});
   }
 
   private pruneAgentAccess(type: string): void {

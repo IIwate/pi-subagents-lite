@@ -19,6 +19,11 @@ export type {
   ThinkingLevel,
 } from "./contracts/model-access-contracts.js";
 export { authorizeModelAccess } from "./application/authorize-model-access.js";
+export { applyParentModelAccess } from "./application/update-parent-access.js";
+export {
+  applyAgentProviderAccess,
+  applyQuickAgentProviderAccess,
+} from "./application/update-provider-access.js";
 export {
   agentTypesForProvider,
   effectiveAlternateModelKeys,
