@@ -16,7 +16,7 @@ import {
   createCustomPromptFile,
   customPromptFileExists,
 } from "../platform/fs/prompt-files.js";
-import { readAgentSettings, updateAgentSetting } from "./agent-settings.js";
+import { DEFAULT_GRACE_TURNS, readAgentSettings, updateAgentSetting } from "./agent-settings.js";
 import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
 import { createModelAccessSettingsOwner, readModelAccessFragment } from "./model-access.js";
@@ -54,6 +54,7 @@ function createSpawnOwner(): SpawnSettingsOwner {
       return {
         forceBackground: agent.forceBackground,
         graceTurns: agent.graceTurns,
+        graceTurnsFallback: DEFAULT_GRACE_TURNS,
         disableDefaultAgents: agent.disableDefaultAgents,
       };
     },

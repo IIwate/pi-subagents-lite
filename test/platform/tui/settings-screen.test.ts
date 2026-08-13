@@ -44,6 +44,7 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
   const spawnView: SpawnSettingsView = {
     forceBackground: false,
     graceTurns: 6,
+    graceTurnsFallback: 6,
     disableDefaultAgents: false,
   };
   const spawn: SpawnSettingsOwner = {

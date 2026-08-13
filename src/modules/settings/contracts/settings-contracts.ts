@@ -136,6 +136,9 @@ export const RootSummariesSchema = Type.Object({
 export const SpawnSettingsViewSchema = Type.Object({
   forceBackground: Type.Boolean(),
   graceTurns: Type.Integer({ minimum: 0 }),
+  // Owner-provided capability default, used when the numeric input is
+  // submitted empty; the page never hardcodes policy defaults.
+  graceTurnsFallback: Type.Integer({ minimum: 0 }),
   disableDefaultAgents: Type.Boolean(),
 }, { additionalProperties: false });
 

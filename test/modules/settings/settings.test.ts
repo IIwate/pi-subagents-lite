@@ -63,6 +63,7 @@ function harness(options: HarnessOptions = {}) {
   const spawnView: SpawnSettingsView = {
     forceBackground: false,
     graceTurns: 6,
+    graceTurnsFallback: 6,
     disableDefaultAgents: false,
     ...options.spawn,
   };
@@ -471,7 +472,7 @@ describe("REQ-SETTINGS-003 spawn options page", () => {
   });
 });
 
-describe("REQ-SETTINGS-004 system prompt page", () => {
+describe("REQ-SETTINGS-002 system prompt page", () => {
   it("renders the mode choice and hides the create action outside custom mode", () => {
     const { settings } = harness();
     settings.execute({ kind: "open" });

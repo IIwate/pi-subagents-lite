@@ -431,7 +431,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
         }
         return navigate({ id: "ma-quick-agents" });
       case "providerAccess":
-        if (!view.enabled) return failure("unknown-row", "Provider access requires alternate models."); 
+        if (!view.enabled) return failure("unknown-row", "Provider access requires alternate models.");
         return navigate({ id: "ma-providers" });
       case "agentAccess":
         return navigate({ id: "ma-agents" });

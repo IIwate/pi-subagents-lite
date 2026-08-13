@@ -2,8 +2,6 @@ import type { SettingsRow, SpawnSettingsView } from "../contracts/settings-contr
 
 /** Grace turns below this are rejected; 0 means an immediate hard stop after the soft limit. */
 export const GRACE_TURNS_MINIMUM = 0;
-/** Capability default used when the numeric input is submitted empty. */
-export const GRACE_TURNS_FALLBACK = 6;
 
 export function buildSpawnOptionsRows(view: SpawnSettingsView): SettingsRow[] {
   return [
@@ -22,7 +20,7 @@ export function buildSpawnOptionsRows(view: SpawnSettingsView): SettingsRow[] {
       detail: "Extra turns after the soft turn limit before a hard abort.",
       value: String(view.graceTurns),
       min: GRACE_TURNS_MINIMUM,
-      fallback: GRACE_TURNS_FALLBACK,
+      fallback: view.graceTurnsFallback,
     },
     {
       id: "disableDefaultAgents",
