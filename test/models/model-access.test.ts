@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   agentTypesForProvider,
-  authorizeModel,
+  authorizeModelAccess,
   effectiveAlternateModelKeys,
   unavailableModelRules,
-} from "../../src/models/model-access.ts";
+} from "../../src/modules/model-access/public.js";
 import type { ModelRoutingConfig } from "../../src/config/types.ts";
 
 function routing(overrides: Partial<ModelRoutingConfig> = {}): ModelRoutingConfig {
@@ -24,15 +24,25 @@ function routing(overrides: Partial<ModelRoutingConfig> = {}): ModelRoutingConfi
 }
 
 function authorize(overrides: Record<string, unknown> = {}) {
-  return authorizeModel({
+  const availableKeys = overrides.availableKeys instanceof Set
+    ? [...overrides.availableKeys as Set<string>]
+    : ["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"];
+  const scopedKeys = overrides.scopedKeys instanceof Set
+    ? [...overrides.scopedKeys as Set<string>]
+    : overrides.scopedKeys === undefined
+      ? null
+      : overrides.scopedKeys;
+  const { availableKeys: _a, scopedKeys: _s, ...rest } = overrides;
+  return authorizeModelAccess({
+    kind: "authorize",
     agentType: "Explore",
     modelKey: "openai/gpt-5",
     parentModelKey: "anthropic/sonnet",
     routing: routing(),
-    availableKeys: new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]),
-    scopedKeys: null,
-    ...overrides,
-  } as any);
+    availableKeys,
+    scopedKeys,
+    ...rest,
+  });
 }
 
 describe("authorizeModel", () => {
@@ -172,7 +182,7 @@ describe("authorizeModel", () => {
 });
 
 describe("effectiveAlternateModelKeys", () => {
-  const available = new Set(["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"]);
+  const available = ["anthropic/sonnet", "anthropic/haiku", "openai/gpt-5", "openai/o3"];
 
   it("expands all-model rules over available keys and removes the exact parent", () => {
     expect(effectiveAlternateModelKeys("Explore", routing(), available, null, "openai/gpt-5"))
@@ -184,7 +194,7 @@ describe("effectiveAlternateModelKeys", () => {
       "Explore",
       routing({ enabledProviders: ["anthropic"] }),
       available,
-      new Set(["anthropic/sonnet"]),
+      ["anthropic/sonnet"],
       "anthropic/sonnet",
     )).toEqual([]);
   });

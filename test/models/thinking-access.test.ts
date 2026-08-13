@@ -2,33 +2,23 @@ import { describe, expect, it } from "vitest";
 import {
   resolveThinkingAccess,
   selectThinkingLevel,
-} from "../../src/models/thinking-access.ts";
-import type { AgentModelAccess } from "../../src/config/types.ts";
+  type ThinkingAccessOverride,
+  type ThinkingLevel,
+} from "../../src/modules/model-access/public.js";
 
-const reasoningModel = {
-  provider: "openai",
-  id: "gpt-5",
-  reasoning: true,
-  thinkingLevelMap: { xhigh: "xhigh", max: null },
-} as any;
-
-function access(overrides: Partial<AgentModelAccess> = {}): AgentModelAccess {
-  return {
-    providers: {},
-    ...overrides,
-  };
-}
+const reasoningLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 function resolve(overrides: Record<string, unknown> = {}) {
   return resolveThinkingAccess({
-    agentAccess: access(),
-    model: reasoningModel,
     modelKey: "openai/gpt-5",
     parentModelKey: "anthropic/sonnet",
     parentThinkingLevel: "medium",
     scopedThinkingLevel: undefined,
+    supportedLevels: reasoningLevels,
+    fallbackLevel: "high",
+    override: undefined,
     ...overrides,
-  } as any);
+  });
 }
 
 describe("resolveThinkingAccess", () => {
@@ -53,18 +43,14 @@ describe("resolveThinkingAccess", () => {
   });
 
   it("uses the exact Agent/model override across parent and alternate roles", () => {
-    const agentAccess = access({
-      thinking: {
-        "openai/gpt-5": { allowed: ["low", "high"], default: "low" },
-      },
-    });
-    expect(resolve({ agentAccess })).toEqual({
+    const override: ThinkingAccessOverride = { allowed: ["low", "high"], default: "low" };
+    expect(resolve({ override })).toEqual({
       allowed: ["low", "high"],
       default: "low",
       source: "override",
     });
     expect(resolve({
-      agentAccess,
+      override,
       parentModelKey: "openai/gpt-5",
     })).toEqual({
       allowed: ["low", "high"],
@@ -74,12 +60,10 @@ describe("resolveThinkingAccess", () => {
   });
 
   it("lets a Model scope pin replace the saved policy", () => {
-    const agentAccess = access({
-      thinking: {
-        "openai/gpt-5": { allowed: ["low", "high"], default: "low" },
-      },
-    });
-    expect(resolve({ agentAccess, scopedThinkingLevel: "xhigh" })).toEqual({
+    expect(resolve({
+      override: { allowed: ["low", "high"], default: "low" },
+      scopedThinkingLevel: "xhigh",
+    })).toEqual({
       allowed: ["xhigh"],
       default: "xhigh",
       source: "scope",
@@ -87,23 +71,12 @@ describe("resolveThinkingAccess", () => {
   });
 
   it("suspends a model when its saved override has no valid allowed/default combination", () => {
-    const agentAccess = access({
-      thinking: {
-        "openai/gpt-5": { allowed: ["max"], default: "max" },
-      },
-    });
-    expect(resolve({ agentAccess })).toBeNull();
-
-    const unsupportedDefault = access({
-      thinking: {
-        "openai/gpt-5": { allowed: ["low", "max"], default: "max" },
-      },
-    });
-    expect(resolve({ agentAccess: unsupportedDefault })).toBeNull();
+    expect(resolve({ override: { allowed: ["max"], default: "max" } })).toBeNull();
+    expect(resolve({ override: { allowed: ["low", "max"], default: "max" } })).toBeNull();
   });
 
   it("uses off as the only baseline for a non-reasoning model", () => {
-    expect(resolve({ model: { provider: "openai", id: "plain", reasoning: false } })).toEqual({
+    expect(resolve({ supportedLevels: ["off"], fallbackLevel: "off" })).toEqual({
       allowed: ["off"],
       default: "off",
       source: "baseline",

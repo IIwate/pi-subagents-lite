@@ -4,7 +4,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { getAllTypes } from "../../agents/agent-types.js";
 import { DEFAULT_CONCURRENCY } from "../../config/config-io.js";
-import { effectiveAlternateModelKeys } from "../../models/model-access.js";
+import { effectiveAlternateModelKeys } from "../../modules/model-access/public.js";
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
 import { getManager, getStore } from "../../shell.js";
 import {
@@ -39,8 +39,8 @@ function activeModelKeys(ctx: ExtensionCommandContext, store: Store): string[] {
     for (const key of effectiveAlternateModelKeys(
       type,
       store.routing,
-      availableKeys,
-      scopedKeys,
+      [...availableKeys],
+      scopedKeys ? [...scopedKeys] : null,
       parentKey,
     )) keys.add(key);
   }

@@ -32,8 +32,13 @@ import {
   modelDeniedError,
   modelUnavailableError,
 } from "../models/model-scope.js";
-import { authorizeModel } from "../models/model-access.js";
-import { resolveThinkingAccess, selectThinkingLevel } from "../models/thinking-access.js";
+import {
+  authorizeModelAccess,
+  resolveThinkingAccess,
+  selectThinkingLevel,
+  type ThinkingLevel,
+} from "../modules/model-access/public.js";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import {
   getPiInstance,
   getSessionCtx,
@@ -136,14 +141,18 @@ export async function executeAgentTool(
 
   const scopedKeys = scopedModelKeys(scopedModels);
   const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
-  const verdict = authorizeModel({
+  const verdict = authorizeModelAccess({
+    kind: "authorize",
     agentType: resolvedType,
     modelKey: resolvedModelKey,
     parentModelKey: parentModelRef,
     routing,
-    availableKeys,
-    scopedKeys,
+    availableKeys: [...availableKeys],
+    scopedKeys: scopedKeys ? [...scopedKeys] : null,
   });
+  if ("error" in verdict) {
+    return errorResult(`Agent "${resolvedType}" produced an invalid model access decision.`);
+  }
   if (!verdict.ok) {
     const provider = resolvedModelKey.slice(0, resolvedModelKey.indexOf("/"));
     if (verdict.reason === "parent-model-denied") {
@@ -197,12 +206,13 @@ export async function executeAgentTool(
     ? routing.agentAccess[resolvedType]
     : undefined;
   const thinkingPolicy = resolveThinkingAccess({
-    agentAccess,
-    model: acceptedModel,
     modelKey: resolvedModelKey,
     parentModelKey: parentModelRef,
     parentThinkingLevel: ctx.thinkingLevel,
     scopedThinkingLevel: scopedThinkingLevel(scopedModels, model),
+    supportedLevels: getSupportedThinkingLevels(acceptedModel) as ThinkingLevel[],
+    fallbackLevel: clampThinkingLevel(acceptedModel, "high") as ThinkingLevel,
+    override: agentAccess?.thinking?.[resolvedModelKey],
   });
   if (!thinkingPolicy) {
     return errorResult(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);

@@ -1,10 +1,14 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRoutingConfig } from "../config/types.js";
-import { effectiveAlternateModelKeys } from "../models/model-access.js";
+import {
+  effectiveAlternateModelKeys,
+  resolveThinkingAccess,
+  type ThinkingAccessPolicy,
+  type ThinkingLevel,
+} from "../modules/model-access/public.js";
 import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
-import { resolveThinkingAccess, type ThinkingAccessPolicy } from "../models/thinking-access.js";
-import type { ThinkingLevel } from "../types.js";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 
 export interface GuidanceAgent {
   name: string;
@@ -45,30 +49,32 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     const access = ownValue(options.routing.agentAccess, agent.name);
     const parentPolicy = options.parentModel && access?.parentModelAccess !== false
       ? resolveThinkingAccess({
-          agentAccess: access,
-          model: options.parentModel,
           modelKey: parentModelKey,
           parentModelKey,
           parentThinkingLevel: options.parentThinkingLevel,
           scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, options.parentModel),
+          supportedLevels: getSupportedThinkingLevels(options.parentModel) as ThinkingLevel[],
+          fallbackLevel: clampThinkingLevel(options.parentModel, "high") as ThinkingLevel,
+          override: access?.thinking?.[parentModelKey],
         })
       : null;
     const alternates = effectiveAlternateModelKeys(
       agent.name,
       options.routing,
-      availableKeys,
-      scopedKeys,
+      [...availableKeys],
+      scopedKeys ? [...scopedKeys] : null,
       parentModelKey,
     ).flatMap((key) => {
       const model = availableByKey.get(key);
       if (!model) return [];
       const policy = resolveThinkingAccess({
-        agentAccess: access,
-        model,
         modelKey: key,
         parentModelKey,
         parentThinkingLevel: options.parentThinkingLevel,
         scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, model),
+        supportedLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
+        fallbackLevel: clampThinkingLevel(model, "high") as ThinkingLevel,
+        override: access?.thinking?.[key],
       });
       return policy ? [{ key, policy }] : [];
     });

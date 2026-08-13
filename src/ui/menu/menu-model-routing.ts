@@ -5,9 +5,12 @@ import { SelectList, SettingsList, type Component, type SettingItem } from "@ear
 import { getAllTypes } from "../../agents/agent-types.js";
 import type { ModelRoutingConfig } from "../../config/types.js";
 import { CANONICAL_THINKING_LEVELS } from "../../config/types.js";
-import { unavailableModelRules } from "../../models/model-access.js";
+import {
+  resolveThinkingAccess,
+  unavailableModelRules,
+  type ThinkingLevel as AccessThinkingLevel,
+} from "../../modules/model-access/public.js";
 import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../../models/model-scope.js";
-import { resolveThinkingAccess } from "../../models/thinking-access.js";
 import { getSupportedThinkingLevels, clampThinkingLevel } from "@earendil-works/pi-ai/compat";
 import type { ThinkingLevel } from "../../types.js";
 import { getStore } from "../../shell.js";
@@ -247,12 +250,13 @@ function buildThinkingEditor(options: {
     const access = ownValue(store.routing.agentAccess, type);
     const supported = getSupportedThinkingLevels(model as any) as ThinkingLevel[];
     const baseline = resolveThinkingAccess({
-      agentAccess: access,
-      model: model as any,
       modelKey: key,
       parentModelKey: ctx.model ? modelKey(ctx.model) : "",
       parentThinkingLevel: ctx.thinkingLevel,
       scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, model),
+      supportedLevels: supported as AccessThinkingLevel[],
+      fallbackLevel: clampThinkingLevel(model as any, "high") as AccessThinkingLevel,
+      override: access?.thinking?.[key],
     });
     const saved = access?.thinking?.[key];
     const allowed = new Set(saved?.allowed.filter((level) => supported.includes(level)) ?? baseline?.allowed ?? supported);
@@ -742,12 +746,13 @@ function agentAccessSubmenu(
       const access = ownValue(store.routing.agentAccess, type);
       const parentAllowed = access?.parentModelAccess !== false;
       const parentPolicy = ctx.model ? resolveThinkingAccess({
-        agentAccess: access,
-        model: ctx.model,
         modelKey: modelKey(ctx.model),
         parentModelKey: modelKey(ctx.model),
         parentThinkingLevel: ctx.thinkingLevel,
         scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, ctx.model),
+        supportedLevels: getSupportedThinkingLevels(ctx.model) as AccessThinkingLevel[],
+        fallbackLevel: clampThinkingLevel(ctx.model, "high") as AccessThinkingLevel,
+        override: access?.thinking?.[modelKey(ctx.model)],
       }) : null;
       const providers = store.routing.enabled ? [...effectiveProviders].sort() : [];
       const parentRow = ctx.model

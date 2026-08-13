@@ -4,6 +4,7 @@
 
 - Model access is explicit authorization, not automatic routing or Provider installation.
 - One effective policy snapshot is the source for runtime authorization, Agent guidance, and settings projections.
+- Authorization and Thinking decisions enter through `model-access/public.ts`. Callers translate Pi availability, scope, and supported Thinking levels into serializable inputs.
 
 ## Superseded
 
