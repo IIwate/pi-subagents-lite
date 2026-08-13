@@ -113,10 +113,10 @@ vi.mock("../src/agents/agent-types.js", () => ({
   getAllTypes: vi.fn(() => ["general-purpose", "Explore"]),
 }));
 
-vi.mock("../src/agents/agent-discovery.js", () => ({
+vi.mock("../src/platform/fs/agent-frontmatter.js", () => ({
   scanAgentFilesInDir: vi.fn().mockResolvedValue([]),
-  mergeAgents: vi.fn().mockReturnValue(new Map()),
-  AgentConfigFromMd: {},
+  parseAgentFile: vi.fn(),
+  parseExtensions: vi.fn(),
 }));
 
 vi.mock("../src/agents/agent-runner.js", () => ({

@@ -11,7 +11,6 @@ const sizeWarningBaseline: Readonly<Record<string, number>> = {
   "src/config/config-store.ts": 457,
   "src/agents/agent-types.ts": 426,
   "src/spawn/spawn-coordinator.ts": 429,
-  "src/agents/agent-discovery.ts": 417,
 };
 
 describe("size review signals", () => {

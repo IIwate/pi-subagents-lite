@@ -12,9 +12,9 @@
 
 ## Superseded
 
-- Session-start `scanAndMerge` and on-demand `scanAgentFilesInDir`/`mergeAgents` execution are superseded by one catalogue facade. The in-process registry remains the runtime sink until its callers move.
+- Session-start `scanAndMerge`, on-demand `mergeAgents`, and `src/agents/agent-discovery.ts` are superseded by the catalogue facade plus `platform/fs` frontmatter scanning. The in-process registry remains the runtime sink until its callers move.
 
 ## Implementation-only
 
 - Existing source filenames and parser helper names are evidence, not a public contract.
-- The legacy registry Map, `registerAgents`, and `resolveType` remain migration boundaries, not public catalogue contracts.
+- Frontmatter scanning lives in `platform/fs`. The legacy registry Map, `registerAgents`, and `resolveType` remain migration boundaries, not public catalogue contracts.

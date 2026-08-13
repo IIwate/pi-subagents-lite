@@ -5,17 +5,14 @@
  *   - parseAgentFile: parses all frontmatter fields into AgentConfigFromMd
  *   - parseExtensions: handles false/'false'/'none' → false, true/'true'/'all' → true, string → array
  *   - scanAgentFilesInDir: scans directory for .md files
- *   - mergeAgents: per-field merge default < user < project, returns Map<string, AgentConfig>
  */
 
 import { describe, it, expect, vi } from "vitest";
 import {
   parseAgentFile,
   scanAgentFilesInDir,
-  mergeAgents,
   parseExtensions,
-} from "../../src/agents/agent-discovery.ts";
-import type { AgentConfigFromMd } from "../../src/agents/agent-discovery.ts";
+} from "../../src/platform/fs/agent-frontmatter.ts";
 import { makeAgentMd, tempDirWithFiles } from "../fixtures.ts";
 
 /* ------------------------------------------------------------------ */
@@ -313,143 +310,4 @@ describe("scanAgentFilesInDir", () => {
   });
 });
 
-/* ------------------------------------------------------------------ */
-/*  mergeAgents                                                        */
-/* ------------------------------------------------------------------ */
-
-describe("mergeAgents", () => {
-  it("returns empty map when no agents", () => {
-    const result = mergeAgents(new Map(), [], []);
-    expect(result instanceof Map).toBe(true);
-    expect(result.size).toBe(0);
-  });
-
-  it("includes default agents when no user/project agents", () => {
-    const defaults = new Map([
-      [
-        "explorer",
-        {
-          name: "explorer",
-          description: "Explorer agent",
-          extensions: true,
-          skills: true,
-          systemPrompt: "",
-        },
-      ],
-    ]);
-    const result = mergeAgents(defaults, [], []);
-    expect(result.size).toBe(1);
-    expect(result.get("explorer")?.description).toBe("Explorer agent");
-  });
-
-  it("user agents override defaults by name with per-field merge", () => {
-    const defaults = new Map([
-      [
-        "explorer",
-        {
-          name: "explorer",
-          description: "Explorer agent",
-          extensions: true,
-          skills: true,
-          systemPrompt: "default prompt",
-        },
-      ],
-    ]);
-    // User agent overrides description and prompt.
-    const userAgents: AgentConfigFromMd[] = [
-      {
-        name: "explorer",
-        description: "User explorer",
-        source: "user",
-        systemPrompt: "user prompt",
-      },
-    ];
-    const result = mergeAgents(defaults, userAgents, []);
-    const agent = result.get("explorer")!;
-    // User fields override defaults
-    expect(agent.description).toBe("User explorer");
-    expect(agent.systemPrompt).toBe("user prompt");
-    // Default fields preserved when user doesn't override.
-    expect(agent.extensions).toBe(true);
-    expect(agent.skills).toBe(true);
-  });
-
-  it("project agents override user and default by name", () => {
-    const defaults = new Map([
-      [
-        "explorer",
-        {
-          name: "explorer",
-          description: "Default explorer",
-          extensions: true,
-          skills: true,
-          systemPrompt: "default prompt",
-        },
-      ],
-    ]);
-    const userAgents: AgentConfigFromMd[] = [
-      {
-        name: "explorer",
-        description: "User explorer",
-        source: "user",
-        systemPrompt: "user prompt",
-      },
-    ];
-    const projectAgents: AgentConfigFromMd[] = [
-      {
-        name: "explorer",
-        source: "project",
-        systemPrompt: "project prompt",
-      },
-    ];
-    const result = mergeAgents(defaults, userAgents, projectAgents);
-    const agent = result.get("explorer")!;
-    // Project overrides.
-    expect(agent.systemPrompt).toBe("project prompt");
-    // User overrides preserved where project doesn't override
-    expect(agent.description).toBe("User explorer");
-    // Default preserved where neither user nor project override
-    expect(agent.extensions).toBe(true);
-    expect(agent.skills).toBe(true);
-  });
-
-  it("adds user-only agent types not in defaults", () => {
-    const defaults = new Map();
-    const userAgents: AgentConfigFromMd[] = [
-      {
-        name: "custom-agent",
-        description: "A custom agent",
-        source: "user",
-        systemPrompt: "custom",
-      },
-    ];
-    const result = mergeAgents(defaults, userAgents, []);
-    expect(result.size).toBe(1);
-    expect(result.get("custom-agent")?.description).toBe("A custom agent");
-  });
-
-  it("handles empty inputs gracefully", () => {
-    const result = mergeAgents(new Map(), [], []);
-    expect(result.size).toBe(0);
-  });
-
-  it("returns a Map with string keys", () => {
-    const defaults = new Map([
-      [
-        "agent1",
-        {
-          name: "agent1",
-          description: "Agent One",
-          extensions: true,
-          skills: false,
-          systemPrompt: "",
-          promptMode: "append" as const,
-        },
-      ],
-    ]);
-    const result = mergeAgents(defaults, [], []);
-    expect(result.has("agent1")).toBe(true);
-    expect(typeof [...result.keys()][0]).toBe("string");
-  });
-});
 

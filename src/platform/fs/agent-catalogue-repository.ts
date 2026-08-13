@@ -1,4 +1,4 @@
-import { scanAgentFilesInDir, type AgentConfigFromMd } from "../../agents/agent-discovery.js";
+import { scanAgentFilesInDir, type AgentConfigFromMd } from "./agent-frontmatter.js";
 import { Check } from "typebox/value";
 import {
   AgentSourceDefinitionSchema,

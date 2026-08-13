@@ -19,4 +19,4 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 
 Use an in-memory `AgentCatalogueRepository` for policy tests. Filesystem and source-loader doubles are allowed only at the repository contract seam. Expected snapshots are independent literals.
 
-The existing filesystem parser tests remain adapter tests while frontmatter parsing still lives in `agent-discovery.ts`. They are not a public catalogue policy seam.
+Filesystem parser tests cover the `platform/fs` adapter only. They are not a public catalogue policy seam.
