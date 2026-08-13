@@ -8,44 +8,44 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }));
 
 import { ScrollView, VStack } from "@earendil-works/pi-tui";
-import type { AgentManager } from "../../src/agents/agent-manager.js";
+import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { registerAgents } from "../../src/agents/agent-types.js";
 import { AgentNavigator } from "../../src/ui/agent-navigator.js";
 
 function makeRecord(id = "agent-12345678", status = "running"): any {
   return {
     id,
-    display: {
-      type: "Explore",
-      description: "Inspect the project",
-    },
-    lifecycle: {
-      status,
-      startedAt: Date.now(),
-    },
-    execution: {
-      session: {
-        model: { id: "gpt-test", provider: "openai-test", reasoning: true },
-        thinkingLevel: "high",
-        messages: [
-          { role: "user", content: [{ type: "text", text: "Inspect the project" }] },
-          {
-            role: "assistant",
-            content: [
-              { type: "thinking", thinking: "I should inspect files." },
-              { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
-              { type: "text", text: "I found the project structure." },
-            ],
-          },
-          {
-            role: "toolResult",
-            toolName: "read",
-            isError: false,
-            content: [{ type: "text", text: "# Project" }],
-          },
-        ],
-        agent: { state: {} },
-      },
+    type: "Explore",
+    description: "Inspect the project",
+    status,
+    startedAt: Date.now(),
+    settled: false,
+    liveSession: true,
+    invocation: { modelName: "gpt-test", providerName: "openai-test", thinkingLevel: "high" },
+    _session: {
+      found: true,
+      live: true,
+      streaming: false,
+      modelId: "gpt-test",
+      provider: "openai-test",
+      thinkingLevel: "high",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "Inspect the project" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "I should inspect files." },
+            { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+            { type: "text", text: "I found the project structure." },
+          ],
+        },
+        {
+          role: "toolResult",
+          toolName: "read",
+          isError: false,
+          content: [{ type: "text", text: "# Project" }],
+        },
+      ],
     },
     stats: {
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
@@ -56,21 +56,26 @@ function makeRecord(id = "agent-12345678", status = "running"): any {
   };
 }
 
-function makeManager(records: any[]): AgentManager {
+function makeManager(records: any[]): SubagentRuntime {
   return {
-    listAgents: () => records,
-    getRecord: (id: string) => records.find(record => record.id === id),
+    listSnapshots: () => records,
+    getSnapshot: (id: string) => records.find(record => record.id === id),
+    inspectSession: (id: string) => {
+      const record = records.find(candidate => candidate.id === id);
+      if (!record?._session) return { found: false, live: false, streaming: false, messages: [] };
+      return record._session;
+    },
     togglePinned: vi.fn((id: string) => {
       const record = records.find(candidate => candidate.id === id);
       if (!record) return undefined;
-      if (record.lifecycle.pinnedAt == null) {
-        record.lifecycle.pinnedAt = Date.now();
+      if (record.pinnedAt == null) {
+        record.pinnedAt = Date.now();
         return true;
       }
-      record.lifecycle.pinnedAt = undefined;
+      record.pinnedAt = undefined;
       return false;
     }),
-  } as unknown as AgentManager;
+  } as unknown as SubagentRuntime;
 }
 
 function stripAnsi(text: string): string {
@@ -364,7 +369,7 @@ describe("AgentNavigator", () => {
 
   it("shows an error and an undelivered result independently", () => {
     const record = makeRecord("agent-needs-input", "error");
-    record.execution.settled = true;
+    record.settled = true;
     record.error = "temporary provider failure";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(
@@ -470,8 +475,8 @@ describe("AgentNavigator", () => {
 
   it("shows errors without a separate input-waiting count", () => {
     const record = makeRecord();
-    record.lifecycle.status = "error";
-    record.execution.settled = true;
+    record.status = "error";
+    record.settled = true;
     record.error = "503 service unavailable";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -525,7 +530,7 @@ describe("AgentNavigator", () => {
     const records = Array.from({ length: 8 }, (_, index) => {
       const status = index < 2 ? "running" : index === 2 ? "queued" : "completed";
       const record = makeRecord(`agent-${index}`, status);
-      record.display.description = `Task ${index}`;
+      record.description = `Task ${index}`;
       return record;
     });
     const ui = makeUI({ value: "" });
@@ -567,9 +572,9 @@ describe("AgentNavigator", () => {
     const blocked = makeRecord("agent-blocked", "error");
     running.stats.toolUses = 1;
     blocked.stats.toolUses = 81;
-    running.display.description = "Active task";
-    blocked.display.description = "Blocked task";
-    blocked.execution.settled = true;
+    running.description = "Active task";
+    blocked.description = "Blocked task";
+    blocked.settled = true;
     blocked.error = "content was flagged";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([running, blocked]));
@@ -589,10 +594,10 @@ describe("AgentNavigator", () => {
     const done = makeRecord("agent-done", "completed");
     const running = makeRecord("agent-running", "running");
     const blocked = makeRecord("agent-blocked", "error");
-    done.display.description = "Done task";
-    running.display.description = "Running task";
-    blocked.display.description = "Blocked task";
-    blocked.execution.settled = true;
+    done.description = "Done task";
+    running.description = "Running task";
+    blocked.description = "Blocked task";
+    blocked.settled = true;
     blocked.error = "content was flagged";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([done, running, blocked]));
@@ -618,7 +623,7 @@ describe("AgentNavigator", () => {
 
     navigator.setDebugStatusPreview("error");
     expect(selector.render(120).join("\n")).toContain("Error");
-    expect(record.lifecycle.status).toBe("running");
+    expect(record.status).toBe("running");
 
     navigator.setDebugStatusPreview(undefined);
     expect(selector.render(120).join("\n")).toContain("Running");
@@ -626,8 +631,8 @@ describe("AgentNavigator", () => {
 
   it("marks records created by Debug fault injection", () => {
     const record = makeRecord("agent-debug", "error");
-    record.execution.settled = true;
-    record.execution.debugFaultKind = "output_blocked";
+    record.settled = true;
+    record.debugFaultKind = "output_blocked";
     record.error = "debug injected: content was flagged";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -669,10 +674,10 @@ describe("AgentNavigator", () => {
 
   it("keeps Error visible when a narrow terminal truncates other columns", () => {
     const record = makeRecord("agent-blocked", "error");
-    record.execution.settled = true;
-    record.execution.debugFaultKind = "output_blocked";
+    record.settled = true;
+    record.debugFaultKind = "output_blocked";
     record.error = "content was flagged";
-    record.display.description = "A very long security audit description";
+    record.description = "A very long security audit description";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
@@ -696,7 +701,7 @@ describe("AgentNavigator", () => {
       } as any,
     ]]));
     const record = makeRecord("agent-long", "running");
-    record.display.type = "long-agent";
+    record.type = "long-agent";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
@@ -712,7 +717,7 @@ describe("AgentNavigator", () => {
 
   it("shows ordinary navigation controls for highlighted errors", () => {
     const record = makeRecord("agent-error", "error");
-    record.execution.settled = true;
+    record.settled = true;
     record.error = "Provider finish_reason: content_filter";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -746,7 +751,7 @@ describe("AgentNavigator", () => {
     const done = makeRecord("agent-done", "completed");
     const running = makeRecord("agent-running", "running");
     const error = makeRecord("agent-error", "error");
-    error.execution.settled = true;
+    error.settled = true;
     error.error = "provider internal error";
     const records = [done, running, error];
     const ui = makeUI({ value: "" });
@@ -786,7 +791,7 @@ describe("AgentNavigator", () => {
 
   it("renders an inactive pinned indicator with the accent color", () => {
     const record = makeRecord("agent-pinned", "completed");
-    record.lifecycle.pinnedAt = Date.now();
+    record.pinnedAt = Date.now();
     const ui = makeUI({ value: "" });
     const fg = vi.spyOn(ui.theme, "fg");
     navigator = new AgentNavigator(makeManager([record]));
@@ -839,7 +844,7 @@ describe("AgentNavigator", () => {
     mountSelector(ui, tui);
     tui.requestRender.mockClear();
 
-    record.execution.session.model.id = "gpt-updated";
+    record._session.modelId = "gpt-updated";
     navigator.update();
 
     expect(tui.requestRender).toHaveBeenCalledWith(false);
@@ -946,7 +951,7 @@ describe("AgentNavigator", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const record = makeRecord();
-    record.lifecycle.startedAt = Date.now() - 15_000;
+    record.startedAt = Date.now() - 15_000;
     record.stats.toolUses = 0;
     record.stats.turnCount = 0;
     const ui = makeUI({ value: "" });
@@ -975,7 +980,7 @@ describe("AgentNavigator", () => {
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
-    manager.listAgents = vi.fn(() => { throw new Error("navigator state unavailable"); });
+    manager.listSnapshots = vi.fn(() => { throw new Error("navigator state unavailable"); });
 
     expect(() => vi.advanceTimersByTime(1500)).not.toThrow();
 
@@ -995,7 +1000,7 @@ describe("AgentNavigator", () => {
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
-    manager.listAgents = vi.fn(() => { throw new Error("selector state unavailable"); });
+    manager.listSnapshots = vi.fn(() => { throw new Error("selector state unavailable"); });
 
     expect(selector.render(120)).toEqual([]);
     expect((navigator as any).refreshTimer).toBeUndefined();
@@ -1061,7 +1066,7 @@ describe("AgentNavigator", () => {
 
   it("switches error views without mutating lifecycle state", () => {
     const record = makeRecord("agent-error", "error");
-    record.execution.settled = true;
+    record.settled = true;
     record.error = "content was flagged";
     const manager = makeManager([record]) as any;
     const ui = makeUI({ value: "" });
@@ -1074,12 +1079,12 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     expect(navigator.selectedId()).toBe(record.id);
-    expect(record.lifecycle.status).toBe("error");
+    expect(record.status).toBe("error");
 
     navigator.handleTerminalInput("\x1b[A");
     navigator.handleTerminalInput("\r");
     expect(navigator.selectedId()).toBeNull();
-    expect(record.lifecycle.status).toBe("error");
+    expect(record.status).toBe("error");
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {
@@ -1188,7 +1193,7 @@ describe("AgentNavigator", () => {
       .mockResolvedValueOnce({
         accepted: false,
         reason: "concurrency",
-        modelKey: "cliproxyapi/gpt-5.6-sol",
+        concurrencyKey: "cliproxyapi/gpt-5.6-sol",
       })
       .mockResolvedValueOnce({ accepted: true });
     navigator = new AgentNavigator(makeManager([record]), routeInput);
@@ -1227,7 +1232,7 @@ describe("AgentNavigator", () => {
       .mockResolvedValueOnce({
         accepted: false,
         reason: "concurrency",
-        modelKey: "cliproxyapi/gpt-5.6-sol",
+        concurrencyKey: "cliproxyapi/gpt-5.6-sol",
       })
       .mockResolvedValueOnce({ accepted: true });
     navigator = new AgentNavigator(makeManager([record]), routeInput);
@@ -1329,8 +1334,8 @@ describe("AgentNavigator", () => {
 
   it("shows queue waiting text before the child session exists", () => {
     const record = makeRecord();
-    record.lifecycle.status = "queued";
-    record.execution.session = undefined;
+    record.status = "queued";
+    record._session = undefined;
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
@@ -1350,9 +1355,9 @@ describe("AgentNavigator", () => {
 
   it("shows queued start failures when no child session was created", () => {
     const record = makeRecord();
-    record.lifecycle.status = "error";
-    record.execution.session = undefined;
-    record.execution.settled = true;
+    record.status = "error";
+    record._session = undefined;
+    record.settled = true;
     record.error = "Automatic model override is no longer authorized";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
@@ -1373,8 +1378,8 @@ describe("AgentNavigator", () => {
 
   it("uses the Error label in the selected subagent conversation", () => {
     const record = makeRecord();
-    record.lifecycle.status = "error";
-    record.execution.settled = true;
+    record.status = "error";
+    record.settled = true;
     record.error = "503 service unavailable";
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));

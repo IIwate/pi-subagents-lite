@@ -13,9 +13,9 @@ const { mockAbort, mockGetRecord, mockListAgents } = vi.hoisted(() => ({
 
 vi.mock("../../src/shell.js", () => shellMock({
   manager: {
-    abort: mockAbort,
-    getRecord: mockGetRecord,
-    listAgents: mockListAgents,
+    stop: mockAbort,
+    getSnapshot: mockGetRecord,
+    listSnapshots: mockListAgents,
   },
 }));
 
@@ -55,7 +55,9 @@ describe("formatResultContent", () => {
   ])("formats %s results with the status-note contract", (status, stoppedBy, noteFragment) => {
     const content = formatResultContent({
       result: "partial output",
-      lifecycle: { status, startedAt: 0, stoppedBy },
+      status,
+      startedAt: 0,
+      stoppedBy,
     } as any);
 
     if (!noteFragment) {
@@ -69,7 +71,8 @@ describe("formatResultContent", () => {
   it("formats terminal errors with their diagnostic", () => {
     expect(formatResultContent({
       error: "503 service_unavailable",
-      lifecycle: { status: "error", startedAt: 0 },
+      status: "error",
+      startedAt: 0,
     } as any)).toBe("Agent failed: 503 service_unavailable");
   });
 });
@@ -86,7 +89,7 @@ describe("executeStopAgentTool", () => {
   });
 
   it("stops a running agent and returns truncated ID", async () => {
-    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "running" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", type: "builder", status: "running" });
     mockAbort.mockReturnValue(true);
 
     const result = await executeStopAgentTool("call_2", { agent_id: "abc123def456ghi" }, undefined, undefined, {} as any);
@@ -97,7 +100,7 @@ describe("executeStopAgentTool", () => {
   });
 
   it("stops a queued agent and returns truncated ID", async () => {
-    mockGetRecord.mockReturnValue({ id: "xyz789xyz789abc", display: { type: "reviewer" }, lifecycle: { status: "queued" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "xyz789xyz789abc", type: "reviewer", status: "queued" });
     mockAbort.mockReturnValue(true);
 
     const result = await executeStopAgentTool("call_3", { agent_id: "xyz789xyz789abc" }, undefined, undefined, {} as any);
@@ -110,8 +113,8 @@ describe("executeStopAgentTool", () => {
     mockGetRecord.mockReturnValue(undefined);
     mockAbort.mockReturnValue(false);
     mockListAgents.mockReturnValue([
-      { id: "aaa111bbb222ccc", display: { type: "builder" }, lifecycle: { status: "running" } },
-      { id: "ddd333eee444fff", display: { type: "reviewer" }, lifecycle: { status: "running" } },
+      { id: "aaa111bbb222ccc", type: "builder", status: "running" },
+      { id: "ddd333eee444fff", type: "reviewer", status: "running" },
     ]);
 
     const result = await executeStopAgentTool("call_4", { agent_id: "nonexistent-id" }, undefined, undefined, {} as any);
@@ -123,9 +126,9 @@ describe("executeStopAgentTool", () => {
   });
 
   it("returns info when agent already completed", async () => {
-    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "completed" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", type: "builder", status: "completed" });
     mockListAgents.mockReturnValue([
-      { id: "aaa111bbb222ccc", display: { type: "explorer" }, lifecycle: { status: "running" } },
+      { id: "aaa111bbb222ccc", type: "explorer", status: "running" },
     ]);
 
     const result = await executeStopAgentTool("call_5", { agent_id: "abc123def456ghi" }, undefined, undefined, {} as any);
@@ -135,7 +138,7 @@ describe("executeStopAgentTool", () => {
   });
 
   it("returns info when agent already stopped", async () => {
-    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "stopped" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", type: "builder", status: "stopped" });
     mockListAgents.mockReturnValue([]);
 
     const result = await executeStopAgentTool("call_6", { agent_id: "abc123def456ghi" }, undefined, undefined, {} as any);
@@ -145,7 +148,7 @@ describe("executeStopAgentTool", () => {
   });
 
   it("returns info when agent already aborted", async () => {
-    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "aborted" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", type: "builder", status: "aborted" });
     mockListAgents.mockReturnValue([]);
 
     const result = await executeStopAgentTool("call_7", { agent_id: "abc123def456ghi" }, undefined, undefined, {} as any);
@@ -155,12 +158,12 @@ describe("executeStopAgentTool", () => {
   });
 
   it("running agents list shows only running/queued agents", async () => {
-    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "completed" }, execution: {}, stats: {} });
+    mockGetRecord.mockReturnValue({ id: "abc123def456ghi", type: "builder", status: "completed" });
     mockListAgents.mockReturnValue([
-      { id: "r1", display: { type: "builder" }, lifecycle: { status: "running" } },
-      { id: "r2", display: { type: "reviewer" }, lifecycle: { status: "queued" } },
-      { id: "r3", display: { type: "explore" }, lifecycle: { status: "completed" } },
-      { id: "r4", display: { type: "code" }, lifecycle: { status: "stopped" } },
+      { id: "r1", type: "builder", status: "running" },
+      { id: "r2", type: "reviewer", status: "queued" },
+      { id: "r3", type: "explore", status: "completed" },
+      { id: "r4", type: "code", status: "stopped" },
     ]);
 
     const result = await executeStopAgentTool("call_8", { agent_id: "abc123def456ghi" }, undefined, undefined, {} as any);

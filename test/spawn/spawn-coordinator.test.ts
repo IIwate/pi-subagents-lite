@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord } from "../../src/types.js";
+
 import { acceptedRunPolicy } from "../fixtures.js";
 
 vi.mock("../../src/agents/agent-types.js", () => ({
@@ -25,8 +25,8 @@ vi.mock("../../src/config/config-io.js", () => ({
 }));
 
 vi.mock("../../src/agents/tool-execution.js", () => ({
-  formatResultContent: (record: AgentRecord) =>
-    record.lifecycle.status === "error"
+  formatResultContent: (record: { status?: string; error?: string; result?: string }) =>
+    record.status === "error"
       ? `Agent failed: ${record.error || "unknown error"}`
       : record.result ?? "",
 }));
@@ -94,33 +94,57 @@ vi.mock("../../src/shell.js", () => ({
 function makeMockManager() {
   const records = new Map<string, any>();
   return {
-    spawn: vi.fn((_pi: any, _ctx: any, type: string, _prompt: string, options: any) => {
-      const id = `agent-${records.size}`;
-      const record: any = {
-        id,
-        display: { type, description: options.description, invocation: options.invocation },
-        lifecycle: { status: "running", startedAt: Date.now() },
-        execution: {
-          promise: Promise.resolve("done"),
-          resultSessionId: options.resultSessionId,
-          resultOriginEntryId: options.resultOriginEntryId,
-          session: undefined,
-        },
-        stats: {
-          lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
-          toolUses: 0,
-          turnCount: 1,
-          maxTurns: options.maxTurns,
-          compactionCount: 0,
-        },
-        result: "done",
-      };
-      records.set(id, record);
-      return id;
+    execute: vi.fn(async (command: any) => {
+      if (command.kind === "spawn") {
+        const id = `agent-${records.size}`;
+        const record: any = {
+          id,
+          type: command.type,
+          description: command.description,
+          invocation: command.invocation,
+          status: "running",
+          startedAt: Date.now(),
+          settled: true,
+          liveSession: false,
+          resultSessionId: command.resultSessionId,
+          resultOriginEntryId: command.resultOriginEntryId,
+          result: "done",
+          stats: {
+            lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+            toolUses: 0,
+            turnCount: 1,
+            compactionCount: 0,
+          },
+        };
+        records.set(id, record);
+        return { ok: true, snapshot: record };
+      }
+      if (command.kind === "interact") {
+        return { ok: true, interaction: { accepted: true as const } };
+      }
+      if (command.kind === "mark-result") {
+        const record = records.get(command.id);
+        if (!record) return { ok: false, error: { code: "not-found", message: command.id } };
+        if (command.persisted != null) record.resultPersisted = command.persisted;
+        if (command.consumed != null) record.resultConsumed = command.consumed;
+        if (command.deliveryId != null) record.resultDeliveryId = command.deliveryId;
+        return { ok: true, snapshot: record };
+      }
+      return { ok: true };
     }),
-    getRecord: vi.fn((id: string) => records.get(id)),
-    listAgents: vi.fn(() => [...records.values()]),
-    interact: vi.fn(async () => ({ accepted: true as const })),
+    getSnapshot: vi.fn((id: string) => records.get(id)),
+    listSnapshots: vi.fn(() => [...records.values()]),
+    waitUntilSettled: vi.fn(async (id: string) => records.get(id)),
+    markResult: vi.fn((id: string, fields: any) => {
+      const record = records.get(id);
+      if (!record) return undefined;
+      if (fields.persisted != null) record.resultPersisted = fields.persisted;
+      if (fields.consumed != null) record.resultConsumed = fields.consumed;
+      if (fields.deliveryId != null) record.resultDeliveryId = fields.deliveryId;
+      return record;
+    }),
+    stop: vi.fn(() => true),
+    setOnComplete: vi.fn(),
     setRecord: (id: string, record: any) => records.set(id, record),
     deleteRecord: (id: string) => records.delete(id),
     dispose: vi.fn(),
@@ -140,8 +164,8 @@ function makeMockCtx() {
 }
 
 function complete(record: any, status = "completed", result = "result") {
-  record.lifecycle.status = status;
-  record.lifecycle.completedAt = Date.now();
+  record.status = status;
+  record.completedAt = Date.now();
   record.result = result;
 }
 
@@ -186,14 +210,15 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
 
-    expect(result.record.execution).toMatchObject({
+    expect(result.snapshot).toMatchObject({
       resultSessionId: "test-session",
       resultOriginEntryId: "origin-a",
     });
-    expect(result.record.execution).not.toHaveProperty("backgroundDelivery");
-    expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("runInBackground");
-    expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("backgroundDelivery");
-    expect(manager.spawn.mock.calls[0][4]).not.toHaveProperty("modelKey");
+    expect(result.snapshot).not.toHaveProperty("backgroundDelivery");
+    const spawnCommand = manager.execute.mock.calls.find((call: any[]) => call[0].kind === "spawn")?.[0];
+    expect(spawnCommand).not.toHaveProperty("runInBackground");
+    expect(spawnCommand).not.toHaveProperty("backgroundDelivery");
+    expect(spawnCommand).not.toHaveProperty("modelKey");
   });
 
   it("awaits foreground work and marks its direct result consumed", async () => {
@@ -206,9 +231,9 @@ describe("SpawnCoordinator", () => {
       runInBackground: false,
     });
 
-    expect(result.record.lifecycle.resultConsumed).toBe(true);
-    expect(result.record.execution.resultSessionId).toBeUndefined();
-    expect(result.record.execution).not.toHaveProperty("backgroundDelivery");
+    expect(result.snapshot.resultConsumed).toBe(true);
+    expect(result.snapshot.resultSessionId).toBeUndefined();
+    expect(result.snapshot).not.toHaveProperty("backgroundDelivery");
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -221,19 +246,19 @@ describe("SpawnCoordinator", () => {
       acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
-    manager.listAgents()[0].result = "";
+    manager.listSnapshots()[0].result = "";
 
     const result = await pending;
 
-    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(result.snapshot.resultConsumed).toBe(true);
   });
 
   it("persists a background result and requests one parent wake immediately", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "original result");
+    complete(result.snapshot, "completed", "original result");
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "subagents-lite:pending-result",
@@ -249,17 +274,17 @@ describe("SpawnCoordinator", () => {
     );
     expect(mockPi.appendEntry.mock.invocationCallOrder[0])
       .toBeLessThan(mockPi.sendMessage.mock.invocationCallOrder[0]);
-    expect(result.record.lifecycle.resultPersisted).toBe(true);
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultPersisted).toBe(true);
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBeUndefined();
   });
 
   it("persists an empty background completion as a terminal event", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "");
+    complete(result.snapshot, "completed", "");
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "subagents-lite:pending-result",
@@ -276,11 +301,11 @@ describe("SpawnCoordinator", () => {
   ] as const)("persists %s terminal metadata before wake", async (status, error) => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    result.record.display.invocation = { providerName: "test-provider", modelName: "test-model" };
-    complete(result.record, status, status === "error" ? "" : "partial output");
-    result.record.error = error ?? undefined;
+    result.snapshot.invocation = { providerName: "test-provider", modelName: "test-model" };
+    complete(result.snapshot, status, status === "error" ? "" : "partial output");
+    result.snapshot.error = error ?? undefined;
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "subagents-lite:pending-result",
@@ -303,8 +328,8 @@ describe("SpawnCoordinator", () => {
     expect(fallbackMeta.idle).toBe(true);
 
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "preflight result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "preflight result");
+    coordinator.onAgentComplete(result.snapshot);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
 
     coordinator.onParentAgentStart();
@@ -321,8 +346,8 @@ describe("SpawnCoordinator", () => {
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
 
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "settled gap result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "settled gap result");
+    coordinator.onAgentComplete(result.snapshot);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
 
     coordinator.onParentSettled();
@@ -337,11 +362,11 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
-    complete(first.record, "completed", "first");
-    complete(second.record, "completed", "second");
+    complete(first.snapshot, "completed", "first");
+    complete(second.snapshot, "completed", "second");
 
-    coordinator.onAgentComplete(first.record);
-    coordinator.onAgentComplete(second.record);
+    coordinator.onAgentComplete(first.snapshot);
+    coordinator.onAgentComplete(second.snapshot);
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
     expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(2);
@@ -350,9 +375,9 @@ describe("SpawnCoordinator", () => {
   it("restores the session inbox once and maintains pending state in memory", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "cached result");
+    complete(result.snapshot, "completed", "cached result");
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
     coordinator.pendingResultCount();
     coordinator.pendingResultCount();
     coordinator.getStoredResult(result.agentId);
@@ -367,8 +392,8 @@ describe("SpawnCoordinator", () => {
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
     coordinator.onSessionTree();
-    complete(result.record, "completed", "branch-local result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "branch-local result");
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "subagents-lite:pending-result",
@@ -392,8 +417,8 @@ describe("SpawnCoordinator", () => {
   it("re-arms a failed result only after explicit tree navigation returns to its origin", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "retry on return");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "retry on return");
+    coordinator.onAgentComplete(result.snapshot);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
@@ -414,60 +439,60 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
-    complete(first.record, "completed", "first");
-    complete(second.record, "completed", "second");
+    complete(first.snapshot, "completed", "first");
+    complete(second.snapshot, "completed", "second");
 
-    coordinator.onAgentComplete(first.record);
-    coordinator.onAgentComplete(second.record);
+    coordinator.onAgentComplete(first.snapshot);
+    coordinator.onAgentComplete(second.snapshot);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
     await Promise.resolve();
 
-    expect(first.record.lifecycle.resultConsumed).toBe(true);
-    expect(second.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(first.snapshot.resultConsumed).toBe(true);
+    expect(second.snapshot.resultConsumed).toBeUndefined();
     expect(sessionEntries.some(entry =>
       entry.customType === "subagents-lite:result-ack"
-      && entry.data.deliveryIds.includes(first.record.execution.resultDeliveryId),
+      && entry.data.deliveryIds.includes(first.snapshot.resultDeliveryId),
     )).toBe(true);
   });
 
   it("does not let an old wake ack a newer continuation result", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "first result");
-    coordinator.onAgentComplete(result.record);
-    const firstDeliveryId = result.record.execution.resultDeliveryId;
+    complete(result.snapshot, "completed", "first result");
+    coordinator.onAgentComplete(result.snapshot);
+    const firstDeliveryId = result.snapshot.resultDeliveryId;
 
-    complete(result.record, "completed", "continuation result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "continuation result");
+    coordinator.onAgentComplete(result.snapshot);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
     await Promise.resolve();
 
-    expect(result.record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultDeliveryId).not.toBe(firstDeliveryId);
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.getStoredResult(result.agentId)?.result).toContain("continuation result");
   });
 
   it("does not acknowledge results after an aborted parent turn", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record);
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot);
+    coordinator.onAgentComplete(result.snapshot);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "aborted" }]);
     coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBe(1);
   });
 
   it("keeps results pending when acknowledgement persistence fails", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "ack me");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "ack me");
+    coordinator.onAgentComplete(result.snapshot);
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       if (customType === "subagents-lite:result-ack") throw new Error("stale session");
       sessionEntries.push({ type: "custom", customType, data });
@@ -477,7 +502,7 @@ describe("SpawnCoordinator", () => {
     coordinator.onParentSettled();
     await Promise.resolve();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBe(1);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -485,10 +510,10 @@ describe("SpawnCoordinator", () => {
   it("retries persistence when a later parent prompt can append entries", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "retry me");
+    complete(result.snapshot, "completed", "retry me");
     mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
 
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
@@ -496,22 +521,22 @@ describe("SpawnCoordinator", () => {
     });
     const message = coordinator.prepareBeforeAgentStart();
     expect(message?.content).toContain("retry me");
-    expect(result.record.lifecycle.resultPersisted).toBe(true);
+    expect(result.snapshot.resultPersisted).toBe(true);
   });
 
   it("keeps results after a failed parent turn and lets a later completion retry", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
-    complete(first.record, "completed", "first");
-    coordinator.onAgentComplete(first.record);
+    complete(first.snapshot, "completed", "first");
+    coordinator.onAgentComplete(first.snapshot);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
     coordinator.onParentSettled();
     expect(coordinator.pendingResultCount()).toBe(1);
 
     const second = await spawnBackground(coordinator);
-    complete(second.record, "completed", "second");
-    coordinator.onAgentComplete(second.record);
+    complete(second.snapshot, "completed", "second");
+    coordinator.onAgentComplete(second.snapshot);
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
   });
@@ -520,11 +545,11 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
-    complete(first.record, "completed", "first");
-    coordinator.onAgentComplete(first.record);
+    complete(first.snapshot, "completed", "first");
+    coordinator.onAgentComplete(first.snapshot);
 
-    complete(second.record, "completed", "second");
-    coordinator.onAgentComplete(second.record);
+    complete(second.snapshot, "completed", "second");
+    coordinator.onAgentComplete(second.snapshot);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
@@ -550,17 +575,17 @@ describe("SpawnCoordinator", () => {
     const second = await spawnBackground(coordinator);
     const third = await spawnBackground(coordinator);
 
-    complete(first.record, "completed", "first");
-    coordinator.onAgentComplete(first.record);
-    complete(second.record, "completed", "second");
-    coordinator.onAgentComplete(second.record);
+    complete(first.snapshot, "completed", "first");
+    coordinator.onAgentComplete(first.snapshot);
+    complete(second.snapshot, "completed", "second");
+    coordinator.onAgentComplete(second.snapshot);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
     await Promise.resolve();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
 
-    complete(third.record, "completed", "third");
-    coordinator.onAgentComplete(third.record);
+    complete(third.snapshot, "completed", "third");
+    coordinator.onAgentComplete(third.snapshot);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
     await Promise.resolve();
@@ -576,13 +601,13 @@ describe("SpawnCoordinator", () => {
   it("does not let an unpersisted completion retrigger a failed wake", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
-    complete(first.record, "completed", "first");
-    coordinator.onAgentComplete(first.record);
+    complete(first.snapshot, "completed", "first");
+    coordinator.onAgentComplete(first.snapshot);
 
     const second = await spawnBackground(coordinator);
-    complete(second.record, "completed", "second");
+    complete(second.snapshot, "completed", "second");
     mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
-    coordinator.onAgentComplete(second.record);
+    coordinator.onAgentComplete(second.snapshot);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
@@ -607,12 +632,12 @@ describe("SpawnCoordinator", () => {
       sessionEntries.push({ type: "custom", customType, data });
     });
 
-    complete(first.record, "completed", "recovered first");
-    coordinator.onAgentComplete(first.record);
+    complete(first.snapshot, "completed", "recovered first");
+    coordinator.onAgentComplete(first.snapshot);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
 
-    complete(second.record, "completed", "still unpersisted");
-    coordinator.onAgentComplete(second.record);
+    complete(second.snapshot, "completed", "still unpersisted");
+    coordinator.onAgentComplete(second.snapshot);
 
     expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result"))
       .toHaveLength(1);
@@ -627,8 +652,8 @@ describe("SpawnCoordinator", () => {
   it("delivers a failed automatic wake on the next natural parent prompt", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "recovered result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "recovered result");
+    coordinator.onAgentComplete(result.snapshot);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
@@ -642,20 +667,20 @@ describe("SpawnCoordinator", () => {
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(result.snapshot.resultConsumed).toBe(true);
     expect(coordinator.pendingResultCount()).toBeUndefined();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
     expect(sessionEntries.some(entry =>
       entry.customType === "subagents-lite:result-ack"
-      && entry.data.deliveryIds.includes(result.record.execution.resultDeliveryId),
+      && entry.data.deliveryIds.includes(result.snapshot.resultDeliveryId),
     )).toBe(true);
   });
 
   it("keeps a result pending when its natural retry turn also fails", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "retry later");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "retry later");
+    coordinator.onAgentComplete(result.snapshot);
 
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
@@ -663,7 +688,7 @@ describe("SpawnCoordinator", () => {
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBe(1);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -671,31 +696,31 @@ describe("SpawnCoordinator", () => {
   it("acknowledges an explicitly read result only after the parent turn succeeds", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "explicit result");
+    complete(result.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
-    coordinator.onAgentComplete(result.record);
-    const deliveryId = result.record.execution.resultDeliveryId;
+    coordinator.onAgentComplete(result.snapshot);
+    const deliveryId = result.snapshot.resultDeliveryId;
 
     coordinator.markResultPresented(deliveryId);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(result.snapshot.resultConsumed).toBe(true);
     expect(coordinator.pendingResultCount()).toBeUndefined();
   });
 
   it("acknowledges an explicitly read result alongside a concurrent automatic follow-up", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const explicit = await spawnBackground(coordinator);
-    complete(explicit.record, "completed", "explicit result");
+    complete(explicit.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
-    coordinator.onAgentComplete(explicit.record);
-    coordinator.markResultPresented(explicit.record.execution.resultDeliveryId);
+    coordinator.onAgentComplete(explicit.snapshot);
+    coordinator.markResultPresented(explicit.snapshot.resultDeliveryId);
 
     fallbackMeta.idle = false;
     const automatic = await spawnBackground(coordinator);
-    complete(automatic.record, "completed", "automatic result");
-    coordinator.onAgentComplete(automatic.record);
+    complete(automatic.snapshot, "completed", "automatic result");
+    coordinator.onAgentComplete(automatic.snapshot);
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("automatic result") }),
       { deliverAs: "followUp" },
@@ -704,35 +729,35 @@ describe("SpawnCoordinator", () => {
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
 
-    expect(explicit.record.lifecycle.resultConsumed).toBe(true);
-    expect(automatic.record.lifecycle.resultConsumed).toBe(true);
+    expect(explicit.snapshot.resultConsumed).toBe(true);
+    expect(automatic.snapshot.resultConsumed).toBe(true);
     const ack = sessionEntries.findLast(entry => entry.customType === "subagents-lite:result-ack");
     expect(ack?.data.deliveryIds).toEqual(expect.arrayContaining([
-      explicit.record.execution.resultDeliveryId,
-      automatic.record.execution.resultDeliveryId,
+      explicit.snapshot.resultDeliveryId,
+      automatic.snapshot.resultDeliveryId,
     ]));
   });
 
   it("keeps an explicitly read result pending when the parent turn fails", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "explicit result");
+    complete(result.snapshot, "completed", "explicit result");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
-    coordinator.markResultPresented(result.record.execution.resultDeliveryId);
+    coordinator.markResultPresented(result.snapshot.resultDeliveryId);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
     coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
+    expect(result.snapshot.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBe(1);
   });
 
   it("reads a stored result after the manager record is removed", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "durable result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "durable result");
+    coordinator.onAgentComplete(result.snapshot);
     manager.deleteRecord(result.agentId);
 
     expect(coordinator.getStoredResult(result.agentId)?.result).toContain("durable result");
@@ -748,13 +773,13 @@ describe("SpawnCoordinator", () => {
       sessionEntries.push({ type: "custom", customType, data });
     });
 
-    complete(result.record, "completed", "older fallback");
-    coordinator.onAgentComplete(result.record);
-    const olderDeliveryId = result.record.execution.resultDeliveryId;
+    complete(result.snapshot, "completed", "older fallback");
+    coordinator.onAgentComplete(result.snapshot);
+    const olderDeliveryId = result.snapshot.resultDeliveryId;
 
-    complete(result.record, "completed", "current result");
-    coordinator.onAgentComplete(result.record);
-    const currentDeliveryId = result.record.execution.resultDeliveryId;
+    complete(result.snapshot, "completed", "current result");
+    coordinator.onAgentComplete(result.snapshot);
+    const currentDeliveryId = result.snapshot.resultDeliveryId;
 
     expect(currentDeliveryId).not.toBe(olderDeliveryId);
     expect(coordinator.getStoredResult(result.agentId)).toMatchObject({
@@ -781,11 +806,11 @@ describe("SpawnCoordinator", () => {
     });
 
     const now = vi.spyOn(Date, "now").mockReturnValue(1);
-    complete(result.record, "completed", "older fallback");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "older fallback");
+    coordinator.onAgentComplete(result.snapshot);
     now.mockReturnValue(2);
-    complete(result.record, "completed", "newer durable result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "newer durable result");
+    coordinator.onAgentComplete(result.snapshot);
     now.mockRestore();
     manager.deleteRecord(result.agentId);
 
@@ -797,10 +822,10 @@ describe("SpawnCoordinator", () => {
   it("does not re-enqueue a result after the manager record was cleared", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "cleared result");
+    complete(result.snapshot, "completed", "cleared result");
     manager.deleteRecord(result.agentId);
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
@@ -815,8 +840,8 @@ describe("SpawnCoordinator", () => {
       acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
-    complete(result.record, "completed", "continuation result");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "continuation result");
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
@@ -824,10 +849,10 @@ describe("SpawnCoordinator", () => {
   it("retains staged results when the pi runtime rejects delivery", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record);
+    complete(result.snapshot);
     mockPi.sendMessage.mockImplementation(() => { throw new Error("stale context"); });
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "subagents-lite:pending-result",
@@ -840,10 +865,10 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     fallbackMeta.idle = false;
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "failed follow-up");
+    complete(result.snapshot, "completed", "failed follow-up");
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
     coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     coordinator.onParentSettled();
     await Promise.resolve();
@@ -855,10 +880,10 @@ describe("SpawnCoordinator", () => {
   it("keeps append failure visible across tree refresh and same-session reload", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "unpersisted");
+    complete(result.snapshot, "completed", "unpersisted");
     mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
     expect(coordinator.pendingResultCount()).toBe(1);
     coordinator.onSessionTree();
     expect(coordinator.pendingResultCount()).toBe(1);
@@ -872,9 +897,9 @@ describe("SpawnCoordinator", () => {
   it("flushes an in-memory fallback before disposal", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "flush before dispose");
+    complete(result.snapshot, "completed", "flush before dispose");
     mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       sessionEntries.push({ type: "custom", customType, data });
@@ -890,10 +915,10 @@ describe("SpawnCoordinator", () => {
   it("transfers an unpersisted fallback to a replacement coordinator", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
-    complete(result.record, "completed", "reload result");
+    complete(result.snapshot, "completed", "reload result");
     mockPi.appendEntry.mockImplementation(() => { throw new Error("stale session"); });
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
     coordinator.dispose();
     expect(fallbackResults).toHaveLength(1);
 
@@ -904,7 +929,7 @@ describe("SpawnCoordinator", () => {
     const message = replacement.prepareBeforeAgentStart();
 
     expect(message?.content).toContain("reload result");
-    expect(result.record.lifecycle.resultPersisted).toBe(true);
+    expect(result.snapshot.resultPersisted).toBe(true);
   });
 
   it("re-arms restored Auto pending on explicit session reload", async () => {
@@ -913,8 +938,8 @@ describe("SpawnCoordinator", () => {
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
     coordinator.onSessionTree();
-    complete(result.record, "completed", "restore me");
-    coordinator.onAgentComplete(result.record);
+    complete(result.snapshot, "completed", "restore me");
+    coordinator.onAgentComplete(result.snapshot);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
     coordinator.dispose();
 
@@ -933,9 +958,9 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     coordinator.dispose();
-    complete(result.record);
+    complete(result.snapshot);
 
-    coordinator.onAgentComplete(result.record);
+    coordinator.onAgentComplete(result.snapshot);
 
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });

@@ -12,9 +12,9 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentManager } from "./agents/agent-manager.js";
+import type { SubagentRuntime } from "./modules/subagent-runtime/public.js";
 import type { AgentNavigator } from "./ui/agent-navigator.js";
-import type { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
+import type { SpawnCoordinatorApi } from "./spawn/coordinator-api.js";
 import type { PendingResult } from "./spawn/result-inbox.js";
 import { ConfigStore } from "./config/config-store.js";
 
@@ -25,10 +25,10 @@ import { ConfigStore } from "./config/config-store.js";
 interface Shell {
   pi: ExtensionAPI;
   sessionCtx: ExtensionContext;
-  manager: AgentManager | null;
+  manager: SubagentRuntime | null;
   navigator: AgentNavigator | null;
   store: ConfigStore;
-  coordinator: SpawnCoordinator | null;
+  coordinator: SpawnCoordinatorApi | null;
 }
 
 interface ProcessState {
@@ -79,8 +79,8 @@ export function getSessionCtx(): ExtensionContext {
   return shell.sessionCtx;
 }
 
-/** The current AgentManager, or null if not yet created. */
-export function getManager(): AgentManager | null {
+/** The current Subagent runtime, or null if not yet created. */
+export function getManager(): SubagentRuntime | null {
   return shell.manager;
 }
 
@@ -95,7 +95,7 @@ export function getStore(): ConfigStore {
 }
 
 /** The current SpawnCoordinator, or null if not yet created. */
-export function getCoordinator(): SpawnCoordinator | null {
+export function getCoordinator(): SpawnCoordinatorApi | null {
   return shell.coordinator;
 }
 
@@ -111,7 +111,7 @@ export function setSessionCtx(ctx: ExtensionContext): void {
   shell.sessionCtx = ctx;
 }
 
-export function setManager(m: AgentManager | null): void {
+export function setManager(m: SubagentRuntime | null): void {
   shell.manager = m;
 }
 
@@ -119,7 +119,7 @@ export function setNavigator(navigator: AgentNavigator | null): void {
   shell.navigator = navigator;
 }
 
-export function setCoordinator(c: SpawnCoordinator | null): void {
+export function setCoordinator(c: SpawnCoordinatorApi | null): void {
   shell.coordinator = c;
 }
 

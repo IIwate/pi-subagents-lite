@@ -9,9 +9,10 @@ const state = vi.hoisted(() => ({
   pi: undefined as any,
   runAgent: vi.fn(),
   continueAgentSession: vi.fn(),
+  now: 0,
 }));
 
-vi.mock("../../src/agents/agent-runner.js", () => ({
+vi.mock("../../src/platform/pi/agent-session.js", () => ({
   runAgent: state.runAgent,
   continueAgentSession: state.continueAgentSession,
 }));
@@ -26,11 +27,11 @@ vi.mock("../../src/shell.js", () => ({
   setFallbackResults: vi.fn(),
 }));
 
-import { AgentManager } from "../../src/agents/agent-manager.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
 import { acceptedRunPolicy } from "../fixtures.js";
+import { createTestSubagentRuntime } from "../runtime-harness.js";
 
 describe("durable result delivery integration", () => {
   beforeEach(() => {
@@ -40,6 +41,8 @@ describe("durable result delivery integration", () => {
     state.session = {
       model: { provider: "test", id: "model" },
       isStreaming: false,
+      messages: [],
+      agent: { state: {} },
       extensionRunner: { emit: vi.fn(async () => {}) },
       dispose: vi.fn(),
     };
@@ -64,7 +67,12 @@ describe("durable result delivery integration", () => {
       }),
       sendMessage: vi.fn(),
     };
-    state.manager = new AgentManager(undefined);
+    state.now = Date.now();
+    state.manager = createTestSubagentRuntime({
+      pi: state.pi,
+      ctx: state.ctx,
+      clock: { now: () => state.now },
+    });
     state.coordinator = new SpawnCoordinator(state.manager);
     state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
   });
@@ -75,20 +83,21 @@ describe("durable result delivery integration", () => {
   });
 
   it("reads and acknowledges a durable result after TTL cleanup removes the Agent record", async () => {
-    const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
+    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+      type: "reviewer",
+      prompt: "review",
       description: "review",
       acceptedPolicy: acceptedRunPolicy(),
-      resultSessionId: "parent-session",
-      resultOriginEntryId: "origin-a",
       invocation: { providerName: "test", modelName: "model" },
+      runInBackground: true,
     });
-    const record = state.manager.getRecord(id)!;
-    await record.execution.promise;
-    expect(record.lifecycle.resultPersisted).toBe(true);
+    const id = spawned.agentId;
+    await state.manager.waitUntilSettled(id);
+    expect(state.manager.getSnapshot(id)?.resultPersisted).toBe(true);
 
-    record.lifecycle.completedAt = Date.now() - 20 * 60_000;
-    (state.manager as any).cleanup();
-    expect(state.manager.getRecord(id)).toBeUndefined();
+    state.now += 20 * 60_000;
+    await state.manager.execute({ kind: "expire" });
+    expect(state.manager.getSnapshot(id)).toBeUndefined();
 
     const status = await executeAgentStatusTool(
       "status-call",
@@ -116,18 +125,20 @@ describe("durable result delivery integration", () => {
       throw new Error(errorText);
     });
 
-    const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
+    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+      type: "reviewer",
+      prompt: "review",
       description: "review",
       acceptedPolicy: acceptedRunPolicy(),
-      resultSessionId: "parent-session",
-      resultOriginEntryId: "origin-a",
+      runInBackground: true,
     });
-    const record = state.manager.getRecord(id)!;
-    await record.execution.promise;
+    const record = await state.manager.waitUntilSettled(spawned.agentId);
 
     expect(record).toMatchObject({
-      lifecycle: { status: "error", resultPersisted: true },
-      execution: { settled: true, session: state.session },
+      status: "error",
+      resultPersisted: true,
+      settled: true,
+      liveSession: true,
       error: errorText,
     });
     const pending = [...readResultEntries(state.ctx).pending.values()];
@@ -138,17 +149,18 @@ describe("durable result delivery integration", () => {
   });
 
   it("preserves background delivery identity and creates a new delivery ID after continuation", async () => {
-    const id = state.manager.spawn(state.pi, state.ctx, "reviewer", "review", {
+    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+      type: "reviewer",
+      prompt: "review",
       description: "review",
       acceptedPolicy: acceptedRunPolicy(),
-      resultSessionId: "parent-session",
-      resultOriginEntryId: "origin-a",
+      runInBackground: true,
     });
-    const record = state.manager.getRecord(id)!;
-    await record.execution.promise;
-    const firstDeliveryId = record.execution.resultDeliveryId;
+    const id = spawned.agentId;
+    let record = await state.manager.waitUntilSettled(id);
+    const firstDeliveryId = record?.resultDeliveryId;
 
-    state.coordinator.markResultPresented(firstDeliveryId);
+    state.coordinator.markResultPresented(firstDeliveryId!);
     state.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
     state.coordinator.onParentSettled();
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
@@ -159,15 +171,15 @@ describe("durable result delivery integration", () => {
       turnLimited: false,
     });
     await expect(state.coordinator.interact(id, "continue")).resolves.toEqual({ accepted: true });
-    await record.execution.promise;
+    record = await state.manager.waitUntilSettled(id);
 
-    expect(record.execution).toMatchObject({
+    expect(record).toMatchObject({
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
     });
-    expect(record.execution).not.toHaveProperty("backgroundDelivery");
-    expect(record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
-    expect(readResultEntries(state.ctx).pending.get(record.execution.resultDeliveryId)?.result)
+    expect(record).not.toHaveProperty("backgroundDelivery");
+    expect(record?.resultDeliveryId).not.toBe(firstDeliveryId);
+    expect(readResultEntries(state.ctx).pending.get(record!.resultDeliveryId!)?.result)
       .toBe("continued result");
   });
 
@@ -187,10 +199,10 @@ describe("durable result delivery integration", () => {
 
     await expect(state.coordinator.interact(spawned.agentId, "continue"))
       .resolves.toEqual({ accepted: true });
-    await spawned.record.execution.promise;
+    const continued = await state.manager.waitUntilSettled(spawned.agentId);
 
-    expect(spawned.record.execution.resultSessionId).toBeUndefined();
-    expect(spawned.record.execution).not.toHaveProperty("backgroundDelivery");
+    expect(continued?.resultSessionId).toBeUndefined();
+    expect(continued).not.toHaveProperty("backgroundDelivery");
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
   });
 });

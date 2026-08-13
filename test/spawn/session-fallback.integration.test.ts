@@ -4,12 +4,12 @@ const state = vi.hoisted(() => ({
   runAgent: vi.fn(),
 }));
 
-vi.mock("../../src/agents/agent-runner.js", () => ({
+vi.mock("../../src/platform/pi/agent-session.js", () => ({
   runAgent: state.runAgent,
   continueAgentSession: vi.fn(),
 }));
 
-import { AgentManager } from "../../src/agents/agent-manager.js";
+import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import {
   setCoordinator,
@@ -21,6 +21,7 @@ import {
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
 import { acceptedRunPolicy } from "../fixtures.js";
+import { createTestSubagentRuntime } from "../runtime-harness.js";
 
 function createSession() {
   return {
@@ -56,7 +57,7 @@ function createPi(entries: any[], appendFails = false) {
   } as any;
 }
 
-async function disposeRuntime(manager?: AgentManager, coordinator?: SpawnCoordinator) {
+async function disposeRuntime(manager?: SubagentRuntime, coordinator?: SpawnCoordinator) {
   coordinator?.dispose();
   await manager?.dispose();
   setCoordinator(null);
@@ -82,15 +83,15 @@ describe("session-keyed coordinator fallback", () => {
       return { responseText: "result from A", session, aborted: false, turnLimited: false };
     });
 
-    let managerA: AgentManager | undefined;
-    let managerB: AgentManager | undefined;
+    let managerA: SubagentRuntime | undefined;
+    let managerB: SubagentRuntime | undefined;
     let coordinatorA: SpawnCoordinator | undefined;
     let coordinatorB: SpawnCoordinator | undefined;
     let restoredA: SpawnCoordinator | undefined;
     try {
       setSessionCtx(ctxA);
       setPiInstance(piA);
-      managerA = new AgentManager(undefined);
+      managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
       setManager(managerA);
       coordinatorA = new SpawnCoordinator(managerA);
       setCoordinator(coordinatorA);
@@ -103,8 +104,8 @@ describe("session-keyed coordinator fallback", () => {
         acceptedPolicy: acceptedRunPolicy(),
         runInBackground: true,
       });
-      await spawned.record.execution.promise;
-      expect(spawned.record.lifecycle.resultPersisted).toBeUndefined();
+      await managerA.waitUntilSettled(spawned.agentId);
+      expect(managerA.getSnapshot(spawned.agentId)?.resultPersisted).toBeUndefined();
       expect(coordinatorA.pendingResultCount()).toBe(1);
 
       coordinatorA.dispose();
@@ -112,7 +113,7 @@ describe("session-keyed coordinator fallback", () => {
 
       setSessionCtx(ctxB);
       setPiInstance(piB);
-      managerB = new AgentManager(undefined);
+      managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
       setManager(managerB);
       coordinatorB = new SpawnCoordinator(managerB);
       setCoordinator(coordinatorB);
@@ -135,7 +136,7 @@ describe("session-keyed coordinator fallback", () => {
 
       expect(entriesA.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
       expect(piA.sendMessage).toHaveBeenCalledOnce();
-      expect(spawned.record.lifecycle.resultPersisted).toBe(true);
+      expect(managerA.getSnapshot(spawned.agentId)?.resultPersisted).toBe(true);
 
       const status = await executeAgentStatusTool(
         "status",

@@ -8,24 +8,13 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 
 // These are migration baselines, not accepted architecture. A slice must remove
 // a resolved entry and may never add a new one.
-const legacyCycleBaseline = new Set([
-  [
-    "src/agents/agent-manager.ts",
-    "src/agents/agent-runner.ts",
-    "src/agents/tool-execution.ts",
-    "src/config/config-store.ts",
-    "src/shell.ts",
-    "src/spawn/spawn-coordinator.ts",
-    "src/ui/agent-navigator.ts",
-  ].join("|"),
-]);
+const legacyCycleBaseline = new Set<string>();
 
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/events.test.ts": 4,
   "test/fixtures.ts": 3,
   "test/index.test.ts": 8,
   "test/menu-mock-setup.ts": 6,
-  "test/agents/agent-manager.test.ts": 2,
   "test/agents/agent-runner.test.ts": 6,
   "test/agents/agent-status.test.ts": 1,
   "test/agents/queued-model-permission.integration.test.ts": 3,
@@ -37,7 +26,7 @@ const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/prompt/skill-loader.test.ts": 1,
   "test/spawn/session-fallback.integration.test.ts": 1,
   "test/spawn/spawn-coordinator.test.ts": 6,
-  "test/spawn/worktree-validator.test.ts": 1,
+
   "test/ui/agent-navigator.test.ts": 1,
   "test/ui/menu/helpers.test.ts": 1,
   "test/ui/menu/menu-concurrency.test.ts": 2,

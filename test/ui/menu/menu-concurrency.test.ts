@@ -72,7 +72,7 @@ import { showConcurrencySettingsMenu } from "../../../src/ui/menu/menu-concurren
 function resetState(): void {
   mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
   mockModules.mockConfig.concurrency = { default: 4 };
-  mockModules.mockManager.listAgents.mockReturnValue([]);
+  mockModules.mockManager.listSnapshots.mockReturnValue([]);
   settingsListCalls = [];
   inputInstances = [];
   selectListInstances = [];
@@ -178,8 +178,8 @@ describe("showConcurrencySettingsMenu", () => {
       default: 4,
       models: { "google/gemini-2.5-pro": 2 },
     };
-    mockModules.mockManager.listAgents.mockReturnValue([
-      { execution: { concurrencyKey: "google/gemini-2.5-pro" }, lifecycle: { status: "completed" } },
+    mockModules.mockManager.listSnapshots.mockReturnValue([
+      { concurrencyKey: "google/gemini-2.5-pro", status: "completed" },
     ] as any);
     await showConcurrencySettingsMenu(createMockCtx());
 

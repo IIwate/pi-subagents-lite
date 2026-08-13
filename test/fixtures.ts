@@ -64,6 +64,8 @@ export function acceptedRunPolicy(modelKey = "test/model"): AcceptedRunPolicy {
   return policy;
 }
 
+
+
 /* ================================================================== */
 /*  Shared mock factories                                             */
 /*  These return factory bodies for vi.mock() calls.                  */
@@ -98,13 +100,11 @@ export interface ShellMockFns {
  */
 export function shellMock(fns: ShellMockFns = {}) {
   const manager = fns.manager ?? {
-    // AgentManager.abort returns boolean ("was it stopped"), not void — be
-    // explicit so the default fallback states the contract instead of
-    // returning undefined and happening to be falsy.
-    abort: vi.fn(() => false),
-    getRecord: vi.fn(),
-    listAgents: vi.fn(() => []),
-    spawn: vi.fn(),
+    // stop() returns boolean ("was it stopped"), not void.
+    stop: vi.fn(() => false),
+    getSnapshot: vi.fn(),
+    listSnapshots: vi.fn(() => []),
+    execute: vi.fn(),
   };
   const pi = fns.pi ?? { sendMessage: vi.fn(), exec: vi.fn() };
   const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };

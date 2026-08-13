@@ -142,7 +142,7 @@ vi.mock("../../src/shell.js", () => ({
   withSubagentSpawn: (operation: () => Promise<unknown>) => operation(),
 }));
 
-import { AgentManager } from "../../src/agents/agent-manager.js";
+import { createTestSubagentRuntime } from "../runtime-harness.js";
 import {
   registerAgents,
   setAgentScanDirs,
@@ -226,7 +226,11 @@ describe("queued invocation snapshots", () => {
       getSystemPrompt: () => "Parent prompt",
       ui: { notify: vi.fn() },
     };
-    mocks.manager = new AgentManager(undefined, { default: 1 });
+    mocks.manager = createTestSubagentRuntime({
+      pi: mocks.pi,
+      ctx: mocks.ctx,
+      defaultModelLimit: 1,
+    });
     mocks.coordinator = new SpawnCoordinator(mocks.manager);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
   });
@@ -236,8 +240,8 @@ describe("queued invocation snapshots", () => {
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
     await executeAgentTool("second", params("second", "other/worker-model"), undefined, undefined, mocks.ctx);
 
-    const second = mocks.manager.listAgents().find((record: any) => record.display.description === "second")!;
-    expect(second.lifecycle.status).toBe("queued");
+    const second = mocks.manager.listSnapshots().find((record: any) => record.description === "second")!;
+    expect(second.status).toBe("queued");
 
     mocks.routing.enabled = false;
     mocks.routing.enabledProviders = [];
@@ -245,7 +249,7 @@ describe("queued invocation snapshots", () => {
     mocks.ctx.model = model("parent", "next-model");
     mocks.ctx.scopedModels = [{ model: mocks.ctx.model, thinkingLevel: "low" }];
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
@@ -255,7 +259,7 @@ describe("queued invocation snapshots", () => {
       { model: model("other", "worker-model"), thinkingLevel: "high" },
     ]);
     expect(queuedOptions.thinkingLevel).toBe("high");
-    expect(second.lifecycle.status, second.error).toBe("completed");
+    expect((await mocks.manager.waitUntilSettled(second.id))?.status, second.error).toBe("completed");
 
     const future = await executeAgentTool("future", params("future", "other/worker-model"), undefined, undefined, mocks.ctx);
     expect(future.isError).toBe(true);
@@ -269,14 +273,14 @@ describe("queued invocation snapshots", () => {
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
     await executeAgentTool("second", params("queued Explore", undefined, true, "Explore"), undefined, undefined, mocks.ctx);
 
-    const queued = mocks.manager.listAgents().find((record: any) => record.display.description === "queued Explore")!;
-    expect(queued.lifecycle.status).toBe("queued");
+    const queued = mocks.manager.listSnapshots().find((record: any) => record.description === "queued Explore")!;
+    expect(queued.status).toBe("queued");
 
     setDefaultAgentsDisabled(true);
     mocks.store.agent.loadSkillsImplicitly = false;
     mocks.store.agent.loadExtensionsImplicitly = false;
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
     const queuedLoader = mocks.loaderOptions[1];
@@ -287,8 +291,8 @@ describe("queued invocation snapshots", () => {
     expect(queuedLoader.noExtensions).toBe(false);
     expect(queuedLoader.noSkills).toBe(false);
     expect(queuedLoader.systemPromptOverride()).toContain("CRITICAL: READ-ONLY MODE");
-    expect(queued.display.type).toBe("Explore");
-    expect(queued.lifecycle.status, queued.error).toBe("completed");
+    expect(queued.type).toBe("Explore");
+    expect((await mocks.manager.waitUntilSettled(queued.id))?.status, queued.error).toBe("completed");
     expect(mocks.ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("fallback"), expect.anything());
 
     const future = await executeAgentTool(
@@ -340,7 +344,7 @@ describe("queued invocation snapshots", () => {
     };
     registerAgents(new Map([[replacement.name, replacement]]));
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
     const queuedLoader = mocks.loaderOptions[1];
@@ -361,8 +365,8 @@ describe("queued invocation snapshots", () => {
     ]);
 
     await executeAgentTool("future", params("future custom", undefined, true, "custom"), undefined, undefined, mocks.ctx);
-    const future = mocks.manager.listAgents().find((record: any) => record.display.description === "future custom")!;
-    await future.execution.promise;
+    const future = mocks.manager.listSnapshots().find((record: any) => record.description === "future custom")!;
+    await mocks.manager.waitUntilSettled(future.id);
 
     expect(mocks.createAgentSession.mock.calls[2][0].tools).toEqual(["write"]);
     expect(mocks.sessions[2].getActiveToolNames()).toEqual(["write"]);
@@ -375,7 +379,11 @@ describe("queued invocation snapshots", () => {
   it("delivers a setup-complete provider error immediately and only once", async () => {
     await dispose();
     vi.useFakeTimers();
-    mocks.manager = new AgentManager(undefined, { default: 1 });
+    mocks.manager = createTestSubagentRuntime({
+      pi: mocks.pi,
+      ctx: mocks.ctx,
+      defaultModelLimit: 1,
+    });
     mocks.coordinator = new SpawnCoordinator(mocks.manager);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
@@ -384,20 +392,21 @@ describe("queued invocation snapshots", () => {
 
     try {
       await executeAgentTool("error", params("provider error"), undefined, undefined, mocks.ctx);
-      const record = mocks.manager.listAgents()[0];
-      await record.execution.promise;
+      const record = await mocks.manager.waitUntilSettled(mocks.manager.listSnapshots()[0].id);
 
       expect(record).toMatchObject({
-        lifecycle: { status: "error", resultPersisted: true },
-        execution: { settled: true },
+        status: "error",
+        resultPersisted: true,
+        settled: true,
         error: "quota exhausted",
       });
       expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
       expect(mocks.pi.sendMessage).toHaveBeenCalledOnce();
 
       await vi.advanceTimersByTimeAsync(31 * 60_000);
+      await mocks.manager.execute({ kind: "expire" });
 
-      expect(mocks.manager.getRecord(record.id)).toBeUndefined();
+      expect(mocks.manager.getSnapshot(record.id)).toBeUndefined();
       expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
       expect(mocks.entries.filter((entry: any) => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
       expect(mocks.pi.sendMessage).toHaveBeenCalledOnce();
@@ -414,12 +423,11 @@ describe("queued invocation snapshots", () => {
     mocks.transientFailures = 3;
 
     await executeAgentTool("retry", params("retry exhaustion"), undefined, undefined, mocks.ctx);
-    const record = mocks.manager.listAgents()[0];
-    await record.execution.promise;
+    const record = await mocks.manager.waitUntilSettled(mocks.manager.listSnapshots()[0].id);
 
     expect(mocks.transientAttempts).toBe(3);
-    expect(record.lifecycle.status).toBe("error");
-    expect(record.error).toBe("stream_read_error: response closed");
+    expect(record?.status).toBe("error");
+    expect(record?.error).toBe("stream_read_error: response closed");
     expect(mocks.createAgentSession).toHaveBeenCalledOnce();
     expect(mocks.entries.filter((entry: any) => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
     expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
@@ -436,18 +444,17 @@ describe("queued invocation snapshots", () => {
     ];
 
     await executeAgentTool("error", params("continuable error"), undefined, undefined, mocks.ctx);
-    const record = mocks.manager.listAgents()[0];
-    await record.execution.promise;
-    const firstDeliveryId = record.execution.resultDeliveryId;
+    let record = await mocks.manager.waitUntilSettled(mocks.manager.listSnapshots()[0].id);
+    const firstDeliveryId = record?.resultDeliveryId;
 
-    expect(record.lifecycle.status).toBe("error");
-    expect(readResultEntries(mocks.ctx).pending.get(firstDeliveryId)?.error).toBe("content_filter");
-    await expect(mocks.coordinator.interact(record.id, "continue")).resolves.toEqual({ accepted: true });
-    await record.execution.promise;
-    const secondDeliveryId = record.execution.resultDeliveryId;
+    expect(record?.status).toBe("error");
+    expect(readResultEntries(mocks.ctx).pending.get(firstDeliveryId!)?.error).toBe("content_filter");
+    await expect(mocks.coordinator.interact(record!.id, "continue")).resolves.toEqual({ accepted: true });
+    record = await mocks.manager.waitUntilSettled(record!.id);
+    const secondDeliveryId = record?.resultDeliveryId;
 
     expect(secondDeliveryId).not.toBe(firstDeliveryId);
-    expect(record.lifecycle.status).toBe("completed");
+    expect(record?.status).toBe("completed");
     expect(readResultEntries(mocks.ctx).pending.size).toBe(2);
     expect(mocks.entries.filter((entry: any) =>
       entry.customType === "subagents-lite:pending-result"
@@ -485,7 +492,7 @@ describe("queued invocation snapshots", () => {
 
     mocks.ctx.thinkingLevel = "xhigh";
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
     expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBe("medium");
     await dispose();
@@ -499,7 +506,7 @@ describe("queued invocation snapshots", () => {
 
     mocks.ctx.model = { provider: "parent", id: "next-model" };
     mocks.releaseFirst();
-    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
     expect(mocks.createAgentSession.mock.calls[1][0].model)
       .toMatchObject({ provider: "parent", id: "main-model" });
@@ -515,7 +522,7 @@ describe("queued invocation snapshots", () => {
     const foreground = executeAgentTool("second", params("second", undefined, false), undefined, undefined, mocks.ctx)
       .then((result) => { settled = true; return result; });
     await vi.waitFor(() => expect(
-      mocks.manager.listAgents().some((record: any) => record.display.description === "second" && record.lifecycle.status === "queued"),
+      mocks.manager.listSnapshots().some((record: any) => record.description === "second" && record.status === "queued"),
     ).toBe(true));
     expect(settled).toBe(false);
 

@@ -1,4 +1,4 @@
-import type { AgentLifecycle, AgentStatus, StopInitiator } from "./types.js";
+import type { AgentStatus, StopInitiator } from "./modules/subagent-runtime/public.js";
 
 const STATUS_NOTES: Partial<Record<AgentStatus, string>> = {
   // Verbose on purpose. A hard abort is the one terminal state where the parent
@@ -17,7 +17,10 @@ const STOP_NOTES: Record<StopInitiator, string> = {
   agent: "stopped before completion — output is partial; the task was NOT finished",
 };
 
-export function getStatusNote(lifecycle: AgentLifecycle): string {
+export function getStatusNote(lifecycle: {
+  status: AgentStatus;
+  stoppedBy?: StopInitiator;
+}): string {
   const note =
     lifecycle.status === "stopped"
       // A stopped agent with no recorded initiator reads as an agent stop.

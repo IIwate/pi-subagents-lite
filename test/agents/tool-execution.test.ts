@@ -122,19 +122,14 @@ vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => ({ sendMessage: vi.fn(), exec: vi.fn() }),
   getSessionCtx: () => ({ cwd: "/home/test/project" }),
   getManager: () => ({
-    spawn: mockSpawn,
-    getRecord: mockGetRecord,
-    listAgents: vi.fn(() => []),
-    abort: vi.fn(() => false),
+    execute: mockSpawn,
+    getSnapshot: mockGetRecord,
+    listSnapshots: vi.fn(() => []),
+    stop: vi.fn(() => false),
   }),
   getCoordinator: () => ({
     spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
       mockSpawnIntents.push(intent);
-      // Delegate to the mocked manager.spawn
-      const manager = {
-        spawn: mockSpawn,
-        getRecord: mockGetRecord,
-      };
       const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
         description: intent.description,
         signal: intent.signal,
@@ -143,10 +138,14 @@ vi.mock("../../src/shell.js", () => ({
         invocation: intent.invocation,
       });
       const record = mockGetRecord(id);
-      if (!intent.runInBackground && record?.execution?.promise) {
-        await record.execution.promise;
-      }
-      return { agentId: id, record };
+      const snapshot = {
+        id,
+        status: record?.status ?? record?.lifecycle?.status ?? "completed",
+        result: record?.result ?? "ok",
+        error: record?.error,
+        type: record?.type ?? record?.display?.type ?? "general-purpose",
+      };
+      return { agentId: id, snapshot };
     }),
     onAgentComplete: vi.fn(),
     dispose: vi.fn(),

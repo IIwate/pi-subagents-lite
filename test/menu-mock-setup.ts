@@ -16,10 +16,9 @@ export const mockModules = {
   },
   mockNavigator: { setDebugStatusPreview: vi.fn() },
   mockManager: {
-    armDebugFault: vi.fn(),
-    clearDebugFault: vi.fn(),
+    execute: vi.fn(),
     debugDiagnostics: vi.fn(() => ({ agents: [] })),
-    listAgents: vi.fn(() => []),
+    listSnapshots: vi.fn(() => []),
   },
 };
 

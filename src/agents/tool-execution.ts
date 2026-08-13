@@ -8,7 +8,7 @@ import { getStatusNote } from "../status-note.js";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { AgentRecord } from "../types.js";
+import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import { parseAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
 import { resolveType, resolveAgentPolicyInputs, discoverNewAgents } from "./agent-types.js";
@@ -65,11 +65,11 @@ function errorResult(text: string) {
  * Result text plus status note for foreground returns and background nudges.
  * Keeping one formatter prevents their completion semantics from drifting.
  */
-export function formatResultContent(record: AgentRecord): string {
-  if (record.lifecycle.status === "error") {
+export function formatResultContent(record: AgentSnapshot): string {
+  if (record.status === "error") {
     return `Agent failed: ${record.error || "unknown error"}`;
   }
-  return (record.result ?? "") + getStatusNote(record.lifecycle);
+  return (record.result ?? "") + getStatusNote(record);
 }
 
 // ============================================================================
@@ -258,17 +258,16 @@ export async function executeAgentTool(
     runInBackground,
   });
 
-  const { agentId, record } = result;
+  const { agentId, snapshot } = result;
 
   if (runInBackground) {
     const suffix = `The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${agentId}`;
-    const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
+    const label = snapshot.status === "queued" ? "Agent queued" : "Agent running";
     return successResult(`[${label}] ${suffix}`);
   }
 
-  // Foreground: record.execution.promise is already awaited by coordinator.spawn()
-  const content = formatResultContent(record);
-  return record.lifecycle.status === "error" ? errorResult(content) : successResult(content);
+  const content = formatResultContent(snapshot);
+  return snapshot.status === "error" ? errorResult(content) : successResult(content);
 }
 
 // ============================================================================
@@ -280,14 +279,14 @@ export async function executeAgentTool(
  * Format: "short_id (type), short_id (type)" — one line, easy for LLM to parse.
  */
 function formatRunningAgents(): string {
-  const agents = getManager()!.listAgents().filter(
-    (a) => a.lifecycle.status === "running" || a.lifecycle.status === "queued",
+  const agents = getManager()!.listSnapshots().filter(
+    (a) => a.status === "running" || a.status === "queued",
   );
 
   if (agents.length === 0) return "none";
 
   return agents
-    .map((a) => `${a.id.slice(0, SHORT_ID_LENGTH)} (${a.display.type})`)
+    .map((a) => `${a.id.slice(0, SHORT_ID_LENGTH)} (${a.type})`)
     .join(", ");
 }
 
@@ -308,7 +307,7 @@ export async function executeStopAgentTool(
     return errorResult("agent_id is required");
   }
 
-  const record = getManager()!.getRecord(agentId);
+  const record = getManager()!.getSnapshot(agentId);
 
   if (!record) {
     // Agent not found → return error + list of running agents
@@ -318,14 +317,14 @@ export async function executeStopAgentTool(
   }
 
   // Check if already in a terminal state (not running or queued)
-  if (record.lifecycle.status !== "running" && record.lifecycle.status !== "queued") {
+  if (record.status !== "running" && record.status !== "queued") {
     return successResult(
-      `Agent ${agentId} is already ${record.lifecycle.status}. Running agents: ${formatRunningAgents()}`,
+      `Agent ${agentId} is already ${record.status}. Running agents: ${formatRunningAgents()}`,
     );
   }
 
   // Attempt to stop the running/queued agent
-  if (getManager()!.abort(agentId, "agent")) {
+  if (getManager()!.stop(agentId, "agent")) {
     return successResult(`Stopped agent ${agentId.slice(0, SHORT_ID_LENGTH)}`);
   }
 

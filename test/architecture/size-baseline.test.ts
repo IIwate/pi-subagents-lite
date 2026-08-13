@@ -6,8 +6,7 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 const sizeWarningBaseline: Readonly<Record<string, number>> = {
   "src/ui/agent-navigator.ts": 1497,
   "src/ui/menu/menu-model-routing.ts": 909,
-  "src/agents/agent-manager.ts": 811,
-  "src/agents/agent-runner.ts": 738,
+  "src/platform/pi/agent-session.ts": 738,
   "src/config/config-store.ts": 457,
   "src/agents/agent-types.ts": 426,
   "src/spawn/spawn-coordinator.ts": 429,

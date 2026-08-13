@@ -289,7 +289,7 @@ describe("ConfigStore non-routing behavior", () => {
     const concurrencies: unknown[] = [];
     store.setDeps({
       navigator: { setStatsVisibility: (value: unknown) => visibility.push(value) } as any,
-      manager: { setConcurrency: (value: unknown) => concurrencies.push(value) } as any,
+      manager: { replaceLimits: (value: unknown) => concurrencies.push(value) } as any,
     });
     store.mutate.agent.setShowTools(false);
     store.mutate.concurrency.setDefault(8);

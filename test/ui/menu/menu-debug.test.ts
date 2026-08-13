@@ -118,11 +118,14 @@ describe("showDebugMenu — SelectList migration", () => {
     await showDebugMenu(ctx);
 
     await selectListCalls[0].onSelect!({ value: "arm-blocked" });
-    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
+    expect(mockModules.mockManager.execute).toHaveBeenCalledWith({
+      kind: "arm-debug-fault",
+      fault: "output_blocked",
+    });
     expect(ctx.ui.notify).toHaveBeenCalledWith("Armed output_blocked for the next agent", "info");
 
     await selectListCalls[0].onSelect!({ value: "arm-clear" });
-    expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
+    expect(mockModules.mockManager.execute).toHaveBeenCalledWith({ kind: "clear-debug-fault" });
   });
 
   it("rebuilds fault controls from manager state after arm and clear", async () => {
@@ -164,8 +167,11 @@ describe("showDebugMenu — SelectList migration", () => {
       .toBe("Arm: blocked (armed)");
     expect(selectListCalls[2].items.find(item => item.value === "arm-blocked")!.label)
       .toBe("Arm: blocked");
-    expect(mockModules.mockManager.armDebugFault).toHaveBeenCalledWith("output_blocked");
-    expect(mockModules.mockManager.clearDebugFault).toHaveBeenCalledOnce();
+    expect(mockModules.mockManager.execute).toHaveBeenCalledWith({
+      kind: "arm-debug-fault",
+      fault: "output_blocked",
+    });
+    expect(mockModules.mockManager.execute).toHaveBeenCalledWith({ kind: "clear-debug-fault" });
   });
 
   it("prints runtime diagnostics", async () => {

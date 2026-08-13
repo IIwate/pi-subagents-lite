@@ -79,7 +79,7 @@ export type StopInitiator = "user" | "agent";
 
 /**
  * Lifecycle state: when the agent started, completed, and its current status.
- * Used by agent-manager (lifecycle control), menus (status display), widget (linger logic).
+ * Used by runtime snapshots, menus, and list linger logic.
  */
 export interface AgentLifecycle {
   status: AgentStatus;
@@ -113,7 +113,7 @@ interface AgentDisplayInfo {
 
 /**
  * Execution internals: session handle, abort controller, pending steers.
- * Used by agent-manager (session lifecycle), tool-execution (steering, nudge).
+ * Host-only leftover for Pi session handles. The runtime snapshot stores a session ID.
  */
 interface AgentExecutionState {
   session?: AgentSession;

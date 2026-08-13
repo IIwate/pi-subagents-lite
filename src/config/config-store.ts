@@ -14,7 +14,7 @@
  */
 
 import type { AgentNavigator } from "../ui/agent-navigator.js";
-import type { AgentManager } from "../agents/agent-manager.js";
+import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import {
   agentTypesForProvider,
@@ -90,13 +90,13 @@ export interface ResolvedRoutingConfig {
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   navigator?: AgentNavigator;
-  manager?: AgentManager;
+  manager?: SubagentRuntime;
 }
 
 export class ConfigStore {
   private config: SubagentsConfig;
   private navigator?: AgentNavigator;
-  private manager?: AgentManager;
+  private manager?: SubagentRuntime;
 
   constructor(private readonly io: ConfigIO = fileConfigIO) {
     this.config = this.io.load();
@@ -357,7 +357,15 @@ export class ConfigStore {
   }
 
   private applyConcurrency(): void {
-    this.manager?.setConcurrency(this.config.concurrency);
+    this.manager?.replaceLimits({
+      defaultModelLimit: Math.max(1, this.config.concurrency.default),
+      modelLimits: Object.fromEntries(
+        Object.entries(this.config.concurrency.models ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
+      ),
+      providerLimits: Object.fromEntries(
+        Object.entries(this.config.concurrency.providers ?? {}).map(([key, limit]) => [key, Math.max(1, limit)]),
+      ),
+    });
   }
 
   /** Full re-sync of all present deps. Used by reload/setDeps. */

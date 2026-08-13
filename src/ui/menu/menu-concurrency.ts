@@ -46,8 +46,8 @@ function activeModelKeys(ctx: ExtensionCommandContext, store: Store): string[] {
   }
 
   // Accepted sessions remain actionable even after routing or scope changes.
-  for (const record of getManager()?.listAgents() ?? []) {
-    keys.add(record.execution.concurrencyKey);
+  for (const record of getManager()?.listSnapshots() ?? []) {
+    keys.add(record.concurrencyKey);
   }
   return [...keys].sort();
 }

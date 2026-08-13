@@ -13,4 +13,4 @@
 
 ## Implementation-only
 
-- `AgentManager`, `agent-runner`, and shell getter names are not public lifecycle concepts.
+- Host files talk to `createSubagentRuntime`. Live Pi sessions stay in `platform/pi`. Shell getter names are not public lifecycle concepts.

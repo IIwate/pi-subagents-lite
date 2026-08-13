@@ -9,7 +9,7 @@ import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
 } from "./modules/agent-catalogue/public.js";
-import { AgentManager } from "./agents/agent-manager.js";
+import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
@@ -18,6 +18,8 @@ import {
   getNavigator,
   getCoordinator,
   getStore,
+  getPiInstance,
+  getSessionCtx,
   setSessionCtx,
   setManager,
   setNavigator,
@@ -49,15 +51,14 @@ export function ensureManagerAndNavigator(): void {
   if (!currentManager) {
     // Coordinator will be created after manager, so use a placeholder onComplete
     // that we'll replace once coordinator is created.
-    const newManager = new AgentManager(
-      undefined, // onComplete wired below
-      getStore().concurrency as unknown as ConstructorParameters<typeof AgentManager>[1],
-    );
+    const newManager = createHostSubagentRuntime({
+      pi: getPiInstance(),
+      ctx: getSessionCtx(),
+      limits: getStore().concurrency,
+    });
     setManager(newManager);
-    // Sync the manager as a config side-effect target (concurrency setters call setConcurrency).
     getStore().setDeps({ manager: newManager });
 
-    // Now create coordinator with the real manager
     const coordinator = new SpawnCoordinator(newManager);
     setCoordinator(coordinator);
 
@@ -204,8 +205,8 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     await cleanup(() => {
       const currentManager = getManager();
       if (!currentManager) return;
-      const records = currentManager.listAgents();
-      const active = records.filter(r => r.lifecycle.status === "running" || r.lifecycle.status === "queued");
+      const records = currentManager.listSnapshots();
+      const active = records.filter(r => r.status === "running" || r.status === "queued");
       if (active.length > 0 && ctx.hasUI) {
         ctx.ui.notify(`${active.length} agent(s) killed by reload`, "warning");
       }

@@ -17,17 +17,19 @@ vi.mock("../src/shell.js", () => ({
   getNavigator: () => state.navigator,
   getCoordinator: () => state.coordinator,
   getStore: () => state.store,
+  getPiInstance: () => ({}),
+  getSessionCtx: () => ({ cwd: "/tmp" }),
   setManager: (manager: any) => { state.manager = manager; },
   setNavigator: (navigator: any) => { state.navigator = navigator; },
   setCoordinator: (coordinator: any) => { state.coordinator = coordinator; },
   setSessionCtx: vi.fn(),
 }));
 
-vi.mock("../src/agents/agent-manager.js", () => ({
-  AgentManager: class {
-    setOnComplete = vi.fn();
-    setOnRemove = vi.fn();
-  },
+vi.mock("../src/bootstrap/subagent-runtime.js", () => ({
+  createHostSubagentRuntime: () => ({
+    setOnComplete: vi.fn(),
+    setOnRemove: vi.fn(),
+  }),
 }));
 
 vi.mock("../src/spawn/spawn-coordinator.js", () => ({

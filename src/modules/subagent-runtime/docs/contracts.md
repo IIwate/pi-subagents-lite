@@ -12,8 +12,8 @@
 - `parseAcceptedRunPolicy` accepts only plain JSON values, verifies the parent-model key and derived output/turn limits, then returns a separately validated JSON copy for runtime consumption.
 
 - `ConcurrencyLimitsSchema` and `ConcurrencyDecisionSchema` define hierarchical reserve/release decisions.
-
-Lifecycle commands and snapshots remain planned for the slices that migrate runtime ownership.
+- `AgentCommandSchema`, `AgentCommandResultSchema`, and `AgentSnapshotSchema` define the serializable lifecycle seam for spawn, stop, interact, inspect, pin, expire, and close.
+- `SessionStartRequestSchema` and `SessionEventSchema` define the session-driver port traffic.
 
 Exact fields are owned by TypeBox schemas introduced one vertical slice at a time.
 

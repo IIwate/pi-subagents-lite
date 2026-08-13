@@ -23,9 +23,11 @@ import {
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
-import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
-import type { AgentRecord } from "../types.js";
-import { getSessionContextPercent } from "../agents/usage.js";
+import type {
+  AgentSnapshot,
+  InteractionResult,
+  SubagentRuntime,
+} from "../modules/subagent-runtime/public.js";
 import {
   buildStatsParts,
   getDisplayName,
@@ -59,14 +61,14 @@ type NavigatorUICtx = Pick<
   | "theme"
 >;
 
-type NavigationEntry = { id: string | null; record?: AgentRecord };
+type NavigationEntry = { id: string | null; record?: AgentSnapshot };
 
 function pendingLabel(count: number): string {
   return `${count} ${count === 1 ? "result" : "results"} pending`;
 }
 
 /** UI-only preview values exposed through /agents → Debug. */
-export type DebugStatusPreview = AgentRecord["lifecycle"]["status"];
+export type DebugStatusPreview = AgentSnapshot["status"];
 
 type MessageLike = {
   role: string;
@@ -156,8 +158,8 @@ function renderAgentRow(
   return `${leftText}${" ".repeat(padding)}${statsText}`;
 }
 
-function agentStatusValue(record: AgentRecord, preview?: DebugStatusPreview): DebugStatusPreview {
-  return preview ?? record.lifecycle.status;
+function agentStatusValue(record: AgentSnapshot, preview?: DebugStatusPreview): DebugStatusPreview {
+  return preview ?? record.status;
 }
 
 function agentStatusLabel(status: DebugStatusPreview): string {
@@ -172,12 +174,12 @@ function agentStatusLabel(status: DebugStatusPreview): string {
   }
 }
 
-function plainAgentStatus(record: AgentRecord, preview?: DebugStatusPreview): string {
+function plainAgentStatus(record: AgentSnapshot, preview?: DebugStatusPreview): string {
   return agentStatusLabel(agentStatusValue(record, preview));
 }
 
 function renderAgentStatus(
-  record: AgentRecord,
+  record: AgentSnapshot,
   theme: Theme,
   preview?: DebugStatusPreview,
 ): string {
@@ -194,8 +196,8 @@ function renderAgentStatus(
   return theme.fg(color, agentStatusLabel(statusValue));
 }
 
-function renderDebugBadge(record: AgentRecord, theme: Theme): string {
-  return record.execution.debugFaultKind
+function renderDebugBadge(record: AgentSnapshot, theme: Theme): string {
+  return record.debugFaultKind
     ? theme.bold(theme.fg("accent", "[DEBUG]"))
     : "";
 }
@@ -444,7 +446,7 @@ export class AgentNavigator {
   private shrinkClearingTui: TUI | undefined;
   private previousClearOnShrink: boolean | undefined;
   /** Previous lifecycle status per agent — terminal transition forces reflow. */
-  private lastAgentStatus = new Map<string, AgentRecord["lifecycle"]["status"]>();
+  private lastAgentStatus = new Map<string, AgentSnapshot["status"]>();
   private selectorRegistered = false;
   private selectorTui: TUI | undefined;
   /**
@@ -459,7 +461,7 @@ export class AgentNavigator {
   private navigationEditor: AgentNavigationEditor | undefined;
 
   constructor(
-    private manager: AgentManager,
+    private manager: SubagentRuntime,
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
     private getPendingResultCount?: () => number | undefined,
     initialListExpanded = true,
@@ -503,7 +505,7 @@ export class AgentNavigator {
   }
 
   toggleList(): void {
-    if (this.manager.listAgents().length === 0 && !this.pendingResultState()) return;
+    if (this.manager.listSnapshots().length === 0 && !this.pendingResultState()) return;
     this.listExpanded = !this.listExpanded;
     if (!this.listExpanded) {
       this.listFocused = false;
@@ -520,7 +522,7 @@ export class AgentNavigator {
   }
 
   selectedId(): string | null {
-    if (this.selectedAgentId && !this.manager.getRecord(this.selectedAgentId)) {
+    if (this.selectedAgentId && !this.manager.getSnapshot(this.selectedAgentId)) {
       this.selectedAgentId = null;
       this.highlightedAgentId = null;
       this.interactionRequestId++;
@@ -705,8 +707,8 @@ export class AgentNavigator {
 
     // Do not overwrite a newer draft typed while the async continuation was pending.
     if (this.uiCtx?.getEditorText() === "") this.uiCtx.setEditorText(text);
-    this.interactionNotice = result.reason === "concurrency" && result.modelKey
-      ? `Blocked: ${result.modelKey} concurrency limit reached`
+    this.interactionNotice = result.reason === "concurrency" && result.concurrencyKey
+      ? `Blocked: ${result.concurrencyKey} concurrency limit reached`
       : result.reason === "queued"
         ? "Blocked: selected subagent is queued"
         : "Blocked: selected subagent is unavailable";
@@ -748,7 +750,7 @@ export class AgentNavigator {
       this.uiCtx?.notify("Cannot clear the active subagent — switch to Main first", "warning");
       return;
     }
-    if (!this.manager.getRecord(id)) {
+    if (!this.manager.getSnapshot(id)) {
       this.uiCtx?.notify("Agent not found", "warning");
       return;
     }
@@ -793,14 +795,14 @@ export class AgentNavigator {
   }
 
   private navigationEntries(): NavigationEntry[] {
-    const agents = this.manager.listAgents()
+    const agents = this.manager.listSnapshots()
       .map(record => ({ id: record.id, record }));
     return [{ id: null }, ...agents];
   }
 
   private activate(id: string | null): boolean {
     if (id === this.selectedAgentId) return true;
-    if (id && !this.manager.getRecord(id)) return false;
+    if (id && !this.manager.getSnapshot(id)) return false;
 
     if (id) {
       if (!this.swapToSubagentScreen()) {
@@ -950,7 +952,7 @@ export class AgentNavigator {
     tui?.requestRender(force);
   }
 
-  private updateFooterStatus(records: AgentRecord[]): void {
+  private updateFooterStatus(records: AgentSnapshot[]): void {
     const ctx = this.uiCtx;
     if (!ctx) return;
     const pending = this.pendingResultState();
@@ -960,8 +962,8 @@ export class AgentNavigator {
       return;
     }
 
-    const running = records.filter(record => record.lifecycle.status === "running").length;
-    const queued = records.filter(record => record.lifecycle.status === "queued").length;
+    const running = records.filter(record => record.status === "running").length;
+    const queued = records.filter(record => record.status === "queued").length;
     const title = records.length === 1 ? "Subagent" : "Subagents";
     const separator = ctx.theme.fg("dim", " · ");
     const parts: string[] = [];
@@ -994,7 +996,7 @@ export class AgentNavigator {
     // Keep the registered component stable across idle periods. Removing and re-adding the
     // whole below-editor widget corrupts Pi's differential row cache when the next editor
     // update arrives; an empty render preserves identity while contributing zero height.
-    const records = this.manager.listAgents();
+    const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
     if ((records.length === 0 && !pending) || !this.listExpanded) return [];
 
@@ -1013,8 +1015,8 @@ export class AgentNavigator {
     const commandWidth = Math.max(1, cols - 2);
     if (this.listFocused) {
       if (this.confirmingClearId !== null) {
-        const record = this.manager.getRecord(this.confirmingClearId);
-        const target = truncateToWidth(record?.display.description ?? "agent", 32);
+        const record = this.manager.getSnapshot(this.confirmingClearId);
+        const target = truncateToWidth(record?.description ?? "agent", 32);
         const confirmation = [
           theme.fg("dim", `Remove “${target}”? · Enter `),
           theme.fg("error", "Remove"),
@@ -1023,7 +1025,7 @@ export class AgentNavigator {
         lines.push(`  ${truncateToWidth(confirmation, commandWidth)}`);
       } else {
         const pinHint = highlightedRecord
-          ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
+          ? ` · Space ${highlightedRecord.pinnedAt != null ? "Unpin" : "Pin"}`
           : "";
         lines.push(`  ${truncateToWidth(
           theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
@@ -1036,8 +1038,8 @@ export class AgentNavigator {
     const mainIndicator = mainActive ? theme.fg("accent", "●") : theme.fg("dim", "○");
     const mainFocus = mainHighlighted ? theme.fg("accent", "›") : " ";
     const mainLabel = mainActive || mainHighlighted ? theme.bold("Main") : "Main";
-    const running = records.filter(record => record.lifecycle.status === "running").length;
-    const queued = records.filter(record => record.lifecycle.status === "queued").length;
+    const running = records.filter(record => record.status === "running").length;
+    const queued = records.filter(record => record.status === "queued").length;
     const summaryParts: string[] = [];
     if (this.interactionNotice) {
       summaryParts.push(theme.bold(theme.fg("warning", this.interactionNotice)));
@@ -1063,7 +1065,7 @@ export class AgentNavigator {
       const record = entry.record!;
       const active = entry.id === this.selectedAgentId;
       const highlighted = this.listFocused && entry.id === this.highlightedAgentId;
-      const pinned = record.lifecycle.pinnedAt != null;
+      const pinned = record.pinnedAt != null;
       const indicatorText = pinned
         ? active ? "◆" : "◇"
         : active ? "●" : "○";
@@ -1071,17 +1073,17 @@ export class AgentNavigator {
         ? theme.fg("accent", indicatorText)
         : theme.fg("dim", indicatorText);
       const focus = highlighted ? theme.fg("accent", "›") : " ";
-      const name = getDisplayName(record.display.type);
-      const description = record.display.description;
-      const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
-      const sessionModel = record.execution.session?.model;
-      const invocation = record.display.invocation;
-      const modelName = sessionModel?.id ?? invocation?.modelName;
-      const providerName = sessionModel?.provider ?? invocation?.providerName;
+      const name = getDisplayName(record.type);
+      const description = record.description;
+      const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
+      const session = this.manager.inspectSession(record.id);
+      const invocation = record.invocation;
+      const modelName = session.modelId ?? invocation?.modelName;
+      const providerName = session.provider ?? invocation?.providerName;
       const statsParts = buildStatsParts({
         modelName,
         providerName,
-        thinkingLevel: record.execution.session?.thinkingLevel ?? invocation?.thinkingLevel,
+        thinkingLevel: session.thinkingLevel ?? invocation?.thinkingLevel,
         toolUses: record.stats.toolUses,
         turnCount: record.stats.turnCount != null && record.stats.turnCount > 0
           ? record.stats.turnCount
@@ -1089,8 +1091,8 @@ export class AgentNavigator {
         maxTurns: record.stats.maxTurns,
         input: record.stats.lifetimeUsage.input,
         output: record.stats.lifetimeUsage.output,
-        contextPercent: record.execution.session
-          ? getSessionContextPercent(record.execution.session)
+        contextPercent: session.found
+          ? session.contextPercent ?? null
           : record.stats.contextPercent ?? null,
         compactions: record.stats.compactionCount,
         cost: record.stats.lifetimeUsage.cost,
@@ -1150,7 +1152,7 @@ export class AgentNavigator {
 
   private renderActiveTranscript(width: number): string[] {
     const record = this.selectedAgentId
-      ? this.manager.getRecord(this.selectedAgentId)
+      ? this.manager.getSnapshot(this.selectedAgentId)
       : undefined;
     if (!record) return [];
 
@@ -1160,22 +1162,22 @@ export class AgentNavigator {
       .map(line => truncateToWidth(line, width));
   }
 
-  private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
+  private buildTranscriptLines(record: AgentSnapshot, theme: Theme, width: number): string[] {
     const status = plainAgentStatus(record);
-    const debugLabel = record.execution.debugFaultKind ? " [DEBUG]" : "";
+    const debugLabel = record.debugFaultKind ? " [DEBUG]" : "";
     const lines: string[] = [
       theme.fg("accent", theme.bold(
-        `${getDisplayName(record.display.type)}${debugLabel} (${status})`,
+        `${getDisplayName(record.type)}${debugLabel} (${status})`,
       )),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
     ];
 
-    const session = record.execution.session;
-    if (!session) {
+    const session = this.manager.inspectSession(record.id);
+    if (!session.found || !session.live) {
       if (record.error) {
         lines.push(theme.fg("error", `Error: ${record.error}`));
       } else {
-        lines.push(theme.fg("dim", record.lifecycle.status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
+        lines.push(theme.fg("dim", record.status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
       }
       return lines;
     }
@@ -1185,9 +1187,8 @@ export class AgentNavigator {
       this.appendMessage(lines, message, theme, width);
     }
 
-    const streamingMessage = (session.agent.state as unknown as { streamingMessage?: MessageLike }).streamingMessage;
-    if (streamingMessage) {
-      this.appendMessage(lines, streamingMessage, theme, width);
+    if (session.streamingMessage) {
+      this.appendMessage(lines, session.streamingMessage as MessageLike, theme, width);
     }
 
     if (record.error) {
@@ -1269,7 +1270,7 @@ export class AgentNavigator {
   private updateNavigator(): void {
     if (!this.uiCtx) return;
 
-    const records = this.manager.listAgents();
+    const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
     if (records.length === 0 && !pending) {
       this.updateFooterStatus(records);
@@ -1335,7 +1336,7 @@ export class AgentNavigator {
     }
 
     if (!this.selectedAgentId && !records.some(record =>
-      record.lifecycle.status === "running" || record.lifecycle.status === "queued"
+      record.status === "running" || record.status === "queued"
     )) {
       this.stopRefreshTimer();
     }
@@ -1358,18 +1359,18 @@ export class AgentNavigator {
     } catch { /* Notification failures must not reopen the UI error boundary. */ }
   }
 
-  private isTerminalStatus(status: AgentRecord["lifecycle"]["status"]): boolean {
+  private isTerminalStatus(status: AgentSnapshot["status"]): boolean {
     return status !== "running" && status !== "queued";
   }
 
   /** True if any agent newly entered a terminal status since last paint. */
-  private consumeTerminalTransitions(records: AgentRecord[]): boolean {
+  private consumeTerminalTransitions(records: AgentSnapshot[]): boolean {
     let terminalTransition = false;
     const seen = new Set<string>();
     for (const record of records) {
       seen.add(record.id);
       const prev = this.lastAgentStatus.get(record.id);
-      const next = record.lifecycle.status;
+      const next = record.status;
       if (prev !== undefined && prev !== next && this.isTerminalStatus(next)) {
         terminalTransition = true;
       }
@@ -1382,31 +1383,31 @@ export class AgentNavigator {
   }
 
   /** Cheap signature so timer ticks without real list changes do not repaint. */
-  private listRenderSignature(records: AgentRecord[]): string {
+  private listRenderSignature(records: AgentSnapshot[]): string {
     const parts = records.map((record) => {
-      const session = record.execution.session;
-      const invocation = record.display.invocation;
+      const session = this.manager.inspectSession(record.id);
+      const invocation = record.invocation;
       const usage = record.stats.lifetimeUsage;
-      const contextPercent = session
-        ? getSessionContextPercent(session)
+      const contextPercent = session.found
+        ? session.contextPercent ?? null
         : record.stats.contextPercent ?? null;
       const elapsedSec = Math.floor(
-        ((record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt) / 1000,
+        ((record.completedAt ?? Date.now()) - record.startedAt) / 1000,
       );
       return [
         record.id,
-        record.display.type,
-        record.display.description,
-        getDisplayName(record.display.type),
-        record.lifecycle.status,
-        record.lifecycle.completedAt ?? "",
-        record.lifecycle.pinnedAt ?? "",
-        record.execution.settled ? "1" : "0",
-        record.execution.debugFaultKind ?? "",
+        record.type,
+        record.description,
+        getDisplayName(record.type),
+        record.status,
+        record.completedAt ?? "",
+        record.pinnedAt ?? "",
+        record.settled ? "1" : "0",
+        record.debugFaultKind ?? "",
         record.error ?? "",
-        session?.model?.id ?? invocation?.modelName ?? "",
-        session?.model?.provider ?? invocation?.providerName ?? "",
-        session?.thinkingLevel ?? invocation?.thinkingLevel ?? "",
+        session.modelId ?? invocation?.modelName ?? "",
+        session.provider ?? invocation?.providerName ?? "",
+        session.thinkingLevel ?? invocation?.thinkingLevel ?? "",
         record.stats.toolUses,
         record.stats.turnCount,
         record.stats.maxTurns ?? "",

@@ -8,8 +8,12 @@ import {
 } from "../shell.js";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord, SpawnConfig } from "../types.js";
-import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
+import type {
+  AgentSnapshot,
+  InteractionResult,
+  SubagentRuntime,
+} from "../modules/subagent-runtime/public.js";
+import type { SpawnIntent, SpawnResult } from "./coordinator-api.js";
 import { formatResultContent } from "../agents/tool-execution.js";
 import {
   appendPendingResult,
@@ -19,19 +23,7 @@ import {
   type PendingResult,
 } from "./result-inbox.js";
 
-/** Input for spawn(). Built by each caller from its own validation. */
-export interface SpawnIntent extends SpawnConfig {
-  type: string;
-  prompt: string;
-  /** Parent tool-call signal, present only for foreground work. */
-  signal?: AbortSignal;
-  runInBackground: boolean;
-}
-
-export interface SpawnResult {
-  agentId: string;
-  record: AgentRecord;
-}
+export type { SpawnIntent, SpawnResult } from "./coordinator-api.js";
 
 function isParentRunSuccessful(
   messages: readonly { role: string; stopReason?: string; errorMessage?: string }[],
@@ -43,23 +35,22 @@ function isParentRunSuccessful(
     && last.errorMessage === undefined;
 }
 
-function storedResult(record: AgentRecord): PendingResult | undefined {
+function storedResult(record: AgentSnapshot): PendingResult | undefined {
   const result = formatResultContent(record).trim() || "(no output)";
-  const parentSessionId = record.execution.resultSessionId;
+  const parentSessionId = record.resultSessionId;
   if (!parentSessionId) return undefined;
-  const sessionModel = record.execution.session?.model;
-  const invocation = record.display.invocation;
+  const invocation = record.invocation;
   return {
     agentId: record.id,
     parentSessionId,
-    originEntryId: record.execution.resultOriginEntryId ?? null,
-    type: record.display.type,
-    status: record.lifecycle.status,
+    originEntryId: record.resultOriginEntryId ?? null,
+    type: record.type,
+    status: record.status,
     result,
     error: record.error?.trim() || null,
-    provider: sessionModel?.provider ?? invocation?.providerName,
-    model: sessionModel?.id ?? invocation?.modelName,
-    createdAt: record.lifecycle.completedAt ?? Date.now(),
+    provider: invocation?.providerName,
+    model: invocation?.modelName,
+    createdAt: record.completedAt ?? Date.now(),
     deliveryId: randomUUID(),
   };
 }
@@ -101,7 +92,7 @@ export class SpawnCoordinator {
   /** Set during dispose to prevent stale pi usage after session replacement. */
   private disposed = false;
 
-  constructor(private manager: AgentManager) {
+  constructor(private manager: SubagentRuntime) {
     const entries = readResultEntries(getSessionCtx());
     this.pendingResults = entries.pending;
     this.latestResults = entries.latest;
@@ -113,7 +104,7 @@ export class SpawnCoordinator {
 
   /** Spawn + wire tracking + (foreground) await. */
   async spawn(
-    pi: ExtensionAPI,
+    _pi: ExtensionAPI,
     ctx: ExtensionContext,
     intent: SpawnIntent,
   ): Promise<SpawnResult> {
@@ -121,52 +112,68 @@ export class SpawnCoordinator {
     const resultSessionId = runInBackground ? ctx.sessionManager.getSessionId() : undefined;
     const resultOriginEntryId = runInBackground ? ctx.sessionManager.getLeafId() : undefined;
     if (resultOriginEntryId) this.activeBranchIds.add(resultOriginEntryId);
-    const agentId = this.manager.spawn(
-      pi,
-      ctx,
+    const spawned = await this.manager.execute({
+      kind: "spawn",
       type,
       prompt,
-      runInBackground
-        ? { ...spawnOptions, resultSessionId, resultOriginEntryId }
-        : {
-            ...spawnOptions,
-            resultSessionId: undefined,
-            resultOriginEntryId: undefined,
-          },
-    );
+      description: spawnOptions.description,
+      acceptedPolicy: spawnOptions.acceptedPolicy,
+      worktreePath: spawnOptions.worktreePath,
+      parentCwd: spawnOptions.worktreePath ? ctx.cwd : undefined,
+      invocation: spawnOptions.invocation,
+      resultSessionId: runInBackground ? resultSessionId : undefined,
+      resultOriginEntryId: runInBackground ? resultOriginEntryId : undefined,
+      parentAborted: spawnOptions.signal?.aborted === true,
+    });
+    if (!spawned.ok || !spawned.snapshot) {
+      throw new Error(spawned.ok ? "Spawn did not return a snapshot." : spawned.error.message);
+    }
+    const agentId = spawned.snapshot.id;
+    if (spawnOptions.signal && !spawnOptions.signal.aborted) {
+      spawnOptions.signal.addEventListener("abort", () => {
+        this.manager.stop(agentId, "user");
+      }, { once: true });
+    }
 
     getNavigator()?.ensureTimer();
 
-    const record = this.manager.getRecord(agentId)!;
     if (!runInBackground) {
-      await record.execution.promise;
-      record.lifecycle.resultConsumed = true;
+      await this.manager.waitUntilSettled(agentId);
+      this.manager.markResult(agentId, { consumed: true });
     }
 
-    return { agentId, record };
+    return { agentId, snapshot: this.manager.getSnapshot(agentId) ?? spawned.snapshot };
   }
 
   /** Route user input to a running or settled subagent session. */
   async interact(agentId: string, message: string, images?: ImageContent[]): Promise<InteractionResult> {
-    const record = this.manager.getRecord(agentId);
+    const record = this.manager.getSnapshot(agentId);
     if (!record) return { accepted: false, reason: "unavailable" };
 
-    const result = await this.manager.interact(agentId, message, images);
+    const interacted = await this.manager.execute({
+      kind: "interact",
+      id: agentId,
+      message,
+      images: images as unknown[] | undefined,
+    });
+    const result = interacted.ok && interacted.interaction
+      ? interacted.interaction
+      : { accepted: false as const, reason: "unavailable" as const };
     if (result.accepted) getNavigator()?.ensureTimer();
     return result;
   }
 
   /** Persist a background completion and let that completion request a wake-up. */
-  onAgentComplete(record: AgentRecord): void {
+  onAgentComplete(record: AgentSnapshot): void {
     // Manual clear and manager shutdown remove the record before the async run
     // settles. Those completions are intentionally discarded, not re-enqueued.
-    if (!record.execution.resultSessionId || this.disposed || !this.manager.getRecord(record.id)) return;
+    if (!record.resultSessionId || this.disposed || !this.manager.getSnapshot(record.id)) return;
 
     const result = storedResult(record);
     if (!result) return;
 
     this.fallbackResults.set(result.deliveryId, result);
-    record.execution.resultDeliveryId = result.deliveryId;
+    this.manager.markResult(record.id, { deliveryId: result.deliveryId });
     const completionVersion = this.completionVersion;
     this.flushFallbackResults();
     if (this.fallbackResults.has(result.deliveryId)) {
@@ -287,7 +294,7 @@ export class SpawnCoordinator {
 
   /** Read the record's current completion, or the latest durable result after record cleanup. */
   getStoredResult(agentId: string): PendingResult | undefined {
-    const deliveryId = this.manager.getRecord(agentId)?.execution.resultDeliveryId;
+    const deliveryId = this.manager.getSnapshot(agentId)?.resultDeliveryId;
     const latest = this.latestResults.get(agentId);
     if (deliveryId) {
       return this.fallbackResults.get(deliveryId)
@@ -363,8 +370,10 @@ export class SpawnCoordinator {
       this.pendingResults.set(deliveryId, result);
       const latest = this.latestResults.get(result.agentId);
       if (!latest || result.createdAt >= latest.createdAt) this.latestResults.set(result.agentId, result);
-      const record = this.manager.getRecord(result.agentId);
-      if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultPersisted = true;
+      const record = this.manager.getSnapshot(result.agentId);
+      if (record?.resultDeliveryId === deliveryId) {
+        this.manager.markResult(result.agentId, { persisted: true });
+      }
     }
   }
 
@@ -419,8 +428,10 @@ export class SpawnCoordinator {
       const result = this.pendingResults.get(deliveryId);
       this.pendingResults.delete(deliveryId);
       this.failedResultIds.delete(deliveryId);
-      const record = result ? this.manager.getRecord(result.agentId) : undefined;
-      if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultConsumed = true;
+      const record = result ? this.manager.getSnapshot(result.agentId) : undefined;
+      if (record?.resultDeliveryId === deliveryId) {
+        this.manager.markResult(result!.agentId, { consumed: true });
+      }
     }
     return true;
   }

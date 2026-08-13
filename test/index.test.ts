@@ -119,7 +119,7 @@ vi.mock("../src/platform/fs/agent-frontmatter.js", () => ({
   parseExtensions: vi.fn(),
 }));
 
-vi.mock("../src/agents/agent-runner.js", () => ({
+vi.mock("../src/platform/pi/agent-session.js", () => ({
   runAgent: vi.fn(),
 }));
 
@@ -392,7 +392,7 @@ describe("event listener registration", () => {
     const shell = await import("../src/shell.js");
     const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
     const coordinator = { dispose: vi.fn() };
-    const manager = { listAgents: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
+    const manager = { listSnapshots: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
     const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
     shell.setNavigator(navigator as any);
     shell.setCoordinator(coordinator as any);

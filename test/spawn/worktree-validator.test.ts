@@ -434,61 +434,45 @@ describe("validateWorktreePath", () => {
 // Simulates: worktree deleted between validation and agent start.
 // Agent record transitions to errored; parent session unaffected.
 
-const { mockRunAgent } = vi.hoisted(() => ({
-  mockRunAgent: vi.fn(),
-}));
-
-vi.mock("../../src/agents/agent-runner.js", () => ({
-  runAgent: mockRunAgent,
-}));
-
 describe("worktree deletion mid-run", () => {
-  beforeEach(() => {
-    mockRunAgent.mockReset();
-  });
-
-  it("marks agent as errored when runAgent fails (worktree deleted after validation)", async () => {
-    // Simulate runAgent failing immediately as a rejected promise — e.g.,
-    // worktree directory was deleted between validation and when the agent
-    // session starts. Using mockRejectedValue ensures the failure flows
-    // through the promise chain's .catch() (status → "error") rather than
-    // throwing synchronously (which would delete the record in spawn's
-    // try-catch and re-throw to the parent).
-    mockRunAgent.mockRejectedValue(
-      new Error("ENOENT: no such file or directory, cwd '/deleted/worktree'"),
-    );
-
-    // Minimal mock for AgentManager dependencies
-    const mockCtx = {
-      modelRegistry: [],
-      model: undefined,
-      cwd: "/tmp",
-    } as any;
-
-    const { AgentManager } = await import("../../src/agents/agent-manager.js");
-    const manager = new AgentManager();
-
-    // Spawn should not throw — the error is caught inside startAgent.
-    // The agent record transitions to "error" status.
-    const agentId = manager.spawn(
-      { exec: vi.fn() } as any,
-      mockCtx,
-      "general-purpose",
-      "test prompt",
-      {
-        description: "test",
-        acceptedPolicy: acceptedRunPolicy(),
-        worktreePath: "/deleted/worktree",
+  it("marks the snapshot as errored when the session driver fails after accept", async () => {
+    const { createSubagentRuntime } = await import("../../src/modules/subagent-runtime/public.js");
+    const { acceptedRunPolicy } = await import("../fixtures.js");
+    const runtime = createSubagentRuntime({
+      sessionDriver: {
+        async start(_request, emit) {
+          emit({ type: "setup-started", agentId: _request.agentId, sessionId: _request.sessionId });
+          emit({ type: "setup-finished", agentId: _request.agentId, sessionId: _request.sessionId });
+          throw new Error("ENOENT: no such file or directory, cwd '/deleted/worktree'");
+        },
+        async continueRun() {},
+        async steer() { return { accepted: false }; },
+        async abort() {},
+        async close() {},
+        inspect() { return { found: false, live: false, streaming: false, messages: [] }; },
       },
-    );
+      worktreeInspector: {
+        async inspect(request) {
+          return { ok: true, resolvedPath: request.worktreePath };
+        },
+      },
+      clock: { now: () => 1 },
+      ids: { nextId: () => "agent-deleted" },
+      scheduler: { interval: () => ({ clear() {} }), timeout: () => ({ clear() {} }) },
+    });
 
-    // Wait for the promise microtasks to settle (runAgent mock rejects/throws,
-    // promise chain sets status in .catch(), runs .finally()).
-    await new Promise((r) => setTimeout(r, 0));
-
-    const record = manager.getRecord(agentId);
-    expect(record).toBeDefined();
-    expect(record!.lifecycle.status).toBe("error");
-    expect(record!.error).toContain("ENOENT");
+    const spawned = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "test prompt",
+      description: "test",
+      acceptedPolicy: acceptedRunPolicy(),
+      worktreePath: "/deleted/worktree",
+      parentCwd: "/tmp",
+    });
+    expect(spawned.ok).toBe(true);
+    const record = await runtime.waitUntilSettled("agent-deleted");
+    expect(record?.status).toBe("error");
+    expect(record?.error).toContain("ENOENT");
   });
 });

@@ -24,8 +24,8 @@ const mockMarkResultPresented = vi.fn();
 
 vi.mock("../../src/shell.js", () => shellMock({
   manager: {
-    listAgents: mockListAgents,
-    getRecord: mockGetRecord,
+    listSnapshots: mockListAgents,
+    getSnapshot: mockGetRecord,
   },
   coordinator: {
     getStoredResult: mockGetStoredResult,
@@ -47,9 +47,9 @@ describe("AgentStatus tool execute behavior", () => {
   it("looks up one exact result without polling", async () => {
     mockGetRecord.mockReturnValue({
       id: "agent-12345678",
-      display: { type: "reviewer", invocation: { providerName: "openai", modelName: "gpt-test" } },
-      lifecycle: { status: "completed" },
-      execution: {},
+      type: "reviewer",
+      invocation: { providerName: "openai", modelName: "gpt-test" },
+      status: "completed",
       result: "Review-Result: PASS",
     });
 
@@ -71,9 +71,9 @@ describe("AgentStatus tool execute behavior", () => {
   it("rejects an ID prefix instead of resolving it", async () => {
     mockGetRecord.mockImplementation((id: string) => id === "agent-12345678" ? {
       id,
-      display: { type: "reviewer", invocation: {} },
-      lifecycle: { status: "completed" },
-      execution: {},
+      type: "reviewer",
+      invocation: {},
+      status: "completed",
       result: "done",
     } : undefined);
 
@@ -98,9 +98,9 @@ describe("AgentStatus tool execute behavior", () => {
   it("uses the durable result when a live record has no result text", async () => {
     mockGetRecord.mockReturnValue({
       id: "agent-12345678",
-      display: { type: "reviewer", invocation: {} },
-      lifecycle: { status: "error" },
-      execution: {},
+      type: "reviewer",
+      invocation: {},
+      status: "error",
       result: undefined,
       error: "temporary failure",
     });
@@ -154,7 +154,7 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("formats each agent as {id} ({type}) {status}", async () => {
     mockListAgents.mockReturnValue([
-      { id: "abc123def456ghi", display: { type: "builder" }, lifecycle: { status: "running" } },
+      { id: "abc123def456ghi", type: "builder", status: "running" },
     ]);
 
     const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
@@ -175,8 +175,8 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("separates multiple agents with commas", async () => {
     mockListAgents.mockReturnValue([
-      { id: "aaa111bbb222ccc", display: { type: "builder" }, lifecycle: { status: "running" } },
-      { id: "ddd333eee444fff", display: { type: "reviewer" }, lifecycle: { status: "completed" } },
+      { id: "aaa111bbb222ccc", type: "builder", status: "running" },
+      { id: "ddd333eee444fff", type: "reviewer", status: "completed" },
     ]);
 
     const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
@@ -200,11 +200,9 @@ describe("AgentStatus tool execute behavior", () => {
   it("does not expose Debug diagnostics to the parent LLM", async () => {
     mockListAgents.mockReturnValue([{
       id: "abc123def456ghi",
-      display: { type: "builder" },
-      lifecycle: { status: "error" },
-      execution: {
-        debugFaultKind: "output_blocked",
-      },
+      type: "builder",
+      status: "error",
+      debugFaultKind: "output_blocked",
     }]);
 
     const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
@@ -225,11 +223,11 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("renders all status types in the output", async () => {
     mockListAgents.mockReturnValue([
-      { id: "id1", display: { type: "a" }, lifecycle: { status: "running" } },
-      { id: "id2", display: { type: "b" }, lifecycle: { status: "queued" } },
-      { id: "id3", display: { type: "c" }, lifecycle: { status: "completed" } },
-      { id: "id4", display: { type: "d" }, lifecycle: { status: "stopped" } },
-      { id: "id5", display: { type: "e" }, lifecycle: { status: "error" } },
+      { id: "id1", type: "a", status: "running" },
+      { id: "id2", type: "b", status: "queued" },
+      { id: "id3", type: "c", status: "completed" },
+      { id: "id4", type: "d", status: "stopped" },
+      { id: "id5", type: "e", status: "error" },
     ]);
 
     const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
@@ -271,7 +269,7 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("keeps the full internal ID for follow-up tool calls", async () => {
     mockListAgents.mockReturnValue([
-      { id: "a-very-long-agent-id-that-exceeds-short-length", display: { type: "reviewer" }, lifecycle: { status: "completed" } },
+      { id: "a-very-long-agent-id-that-exceeds-short-length", type: "reviewer", status: "completed" },
     ]);
 
     const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");

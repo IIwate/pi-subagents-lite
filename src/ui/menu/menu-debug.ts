@@ -156,10 +156,10 @@ export async function showDebugMenu(ctx: ExtensionCommandContext): Promise<void>
             return;
           }
           if (faultTest.fault) {
-            manager.armDebugFault(faultTest.fault);
+            void manager.execute({ kind: "arm-debug-fault", fault: faultTest.fault });
             ctx.ui.notify(`Armed ${faultTest.fault} for the next agent`, "info");
           } else {
-            manager.clearDebugFault();
+            void manager.execute({ kind: "clear-debug-fault" });
             ctx.ui.notify("Cleared armed fault", "info");
           }
           done("refresh");
