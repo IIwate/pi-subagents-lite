@@ -8,7 +8,10 @@
 import { createAgentCatalogueRuntime } from "../bootstrap/agent-catalogue.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AgentConfig, SystemPromptMode } from "./types.js";
-import type { AgentDefinitionSnapshot } from "../modules/agent-catalogue/public.js";
+import {
+  resolveAgentDefinitionPolicy,
+  type AgentDefinitionSnapshot,
+} from "../modules/agent-catalogue/public.js";
 
 /**
  * All tool names that Pi can provide to a session.
@@ -168,27 +171,22 @@ export function resolveAgentPolicyInputs(
   // The registry still contains optional undefined properties from the legacy
   // parser. Canonicalize once here so the accepted boundary receives JSON,
   // while direct callers with functions or custom serializers remain rejected.
-  const definition = JSON.parse(JSON.stringify(config)) as AgentConfig;
-  const resolved = applyGlobalDefaults(
-    definition.skills,
-    definition.extensions,
-    defaults.loadSkillsImplicitly,
-    defaults.loadExtensionsImplicitly,
-  );
-  const policy = {
-    definition,
-    registeredTools: definition.registeredTools?.length
-      ? [...definition.registeredTools]
-      : [...BUILTIN_TOOL_NAMES],
-    restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
-    tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
-    extensions: Array.isArray(resolved.extensions) ? [...resolved.extensions] : resolved.extensions,
-    skills: Array.isArray(resolved.skills) ? [...resolved.skills] : resolved.skills,
+  const resolved = resolveAgentDefinitionPolicy({
+    kind: "resolve-policy",
+    definition: JSON.parse(JSON.stringify(config)),
+    configuration: {
+      loadSkillsImplicitly: defaults.loadSkillsImplicitly,
+      loadExtensionsImplicitly: defaults.loadExtensionsImplicitly,
+      defaultRegisteredTools: [...BUILTIN_TOOL_NAMES],
+    },
+  });
+  if (!resolved.ok) return undefined;
+  return JSON.parse(JSON.stringify({
+    ...resolved.policy,
     systemPromptMode: defaults.systemPromptMode,
     includeContextFiles: defaults.includeContextFiles,
     parentModelKey: defaults.parentModelKey,
-  };
-  return JSON.parse(JSON.stringify(policy));
+  }));
 }
 /** Get all visible type names (for spawning and tool descriptions). */
 export function getAvailableTypes(): string[] {
@@ -372,23 +370,6 @@ export interface ResolvedAgentConfig {
   skills: true | string[] | false;
 }
 
-/**
- * Apply global implicit defaults to skills/extensions.
- * undefined means "not explicitly set" → resolve from global default.
- * Concrete values (true, false, string[]) pass through unchanged.
- */
-function applyGlobalDefaults(
-  skills: true | string[] | false | undefined,
-  extensions: true | string[] | false | undefined,
-  loadSkillsImplicitly: boolean,
-  loadExtensionsImplicitly: boolean,
-): { skills: true | string[] | false; extensions: true | string[] | false } {
-  return {
-    skills: skills === undefined ? loadSkillsImplicitly : skills,
-    extensions: extensions === undefined ? loadExtensionsImplicitly : extensions,
-  };
-}
-
 /** Find the first non-hidden config: resolved type, then general-purpose, then undefined. */
 function findActiveConfig(type: string): AgentConfig | undefined {
   const key = resolveType(type);
@@ -397,32 +378,41 @@ function findActiveConfig(type: string): AgentConfig | undefined {
   return agents.get("general-purpose");
 }
 
+function loadingPolicyFor(config: AgentConfig, loadSkillsImplicitly: boolean, loadExtensionsImplicitly: boolean) {
+  return resolveAgentDefinitionPolicy({
+    kind: "resolve-policy",
+    definition: JSON.parse(JSON.stringify(config)),
+    configuration: {
+      loadSkillsImplicitly,
+      loadExtensionsImplicitly,
+      defaultRegisteredTools: [...BUILTIN_TOOL_NAMES],
+    },
+  });
+}
+
 /** Get config for a type (case-insensitive). Falls back to general-purpose. */
 export function getConfig(
   type: string,
   loadSkillsImplicitly: boolean = true,
   loadExtensionsImplicitly: boolean = true,
 ): ResolvedAgentConfig {
-  const config = findActiveConfig(type);
-  if (config) {
-    const { skills, extensions, ...rest } = config;
-    const defaults = applyGlobalDefaults(skills, extensions, loadSkillsImplicitly, loadExtensionsImplicitly);
+  const config = findActiveConfig(type) ?? DEFAULT_AGENTS.get("general-purpose")!;
+  const resolved = loadingPolicyFor(config, loadSkillsImplicitly, loadExtensionsImplicitly);
+  if (!resolved.ok) {
     return {
-      displayName: rest.displayName ?? rest.name,
-      description: rest.description,
-      registeredTools: rest.registeredTools ?? BUILTIN_TOOL_NAMES,
-      tools: rest.tools,
-      ...defaults,
+      displayName: config.displayName ?? config.name,
+      description: config.description,
+      registeredTools: [...BUILTIN_TOOL_NAMES],
+      skills: loadSkillsImplicitly,
+      extensions: loadExtensionsImplicitly,
     };
   }
-
-  // Absolute fallback — no config found at all
-  const defaults = applyGlobalDefaults(undefined, undefined, loadSkillsImplicitly, loadExtensionsImplicitly);
-  const generalPurpose = DEFAULT_AGENTS.get("general-purpose")!;
   return {
-    displayName: generalPurpose.displayName ?? generalPurpose.name,
-    description: generalPurpose.description,
-    registeredTools: BUILTIN_TOOL_NAMES,
-    ...defaults,
+    displayName: config.displayName ?? config.name,
+    description: resolved.policy.definition.description,
+    registeredTools: resolved.policy.registeredTools,
+    tools: resolved.policy.tools,
+    extensions: resolved.policy.extensions,
+    skills: resolved.policy.skills,
   };
 }

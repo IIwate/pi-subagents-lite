@@ -12,7 +12,7 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 - Same-name custom definition preserved when a built-in definition is disabled.
 - Worktree-only names are added; a worktree file does not replace a global or project definition of the same name.
 - Malformed frontmatter rejected without hiding valid definitions.
-- Tool, skill, extension, system-prompt, model, and runtime settings are resolved into an immutable snapshot.
+- Tool, skill, and extension loading is resolved through the public policy command, including implicit defaults and a host-supplied fallback tool list.
 - A repository failure produces a serializable failure result.
 
 ## Fixtures and doubles

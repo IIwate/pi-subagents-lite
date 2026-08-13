@@ -8,6 +8,7 @@
 - The `disableDefaultAgents` value is read through `configuration/public.ts`, then validated as a catalogue-owned fragment without creating a new persisted section.
 - A malformed source file is rejected at the filesystem adapter boundary without hiding valid definitions from the same discovery request.
 - Worktree-local definitions use project source attribution and only fill names absent from the built-in, global, and project merge.
+- Tool, skill, and extension loading is resolved through `resolveAgentDefinitionPolicy`. The host supplies the fallback registered-tool list so the catalogue does not own Pi's built-in roster.
 
 ## Superseded
 

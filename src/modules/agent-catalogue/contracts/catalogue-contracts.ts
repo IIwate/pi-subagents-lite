@@ -90,6 +90,44 @@ export const AgentCatalogueResultSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+export const ResolveAgentPolicyConfigurationSchema = Type.Object({
+  loadSkillsImplicitly: Type.Boolean(),
+  loadExtensionsImplicitly: Type.Boolean(),
+  defaultRegisteredTools: StringArraySchema,
+}, { additionalProperties: false });
+
+export const ResolveAgentPolicyCommandSchema = Type.Object({
+  kind: Type.Literal("resolve-policy"),
+  definition: AgentDefinitionSnapshotSchema,
+  configuration: ResolveAgentPolicyConfigurationSchema,
+}, { additionalProperties: false });
+
+export const ResolvedAgentLoadingPolicySchema = Type.Object({
+  definition: AgentDefinitionSnapshotSchema,
+  registeredTools: StringArraySchema,
+  restrictToRegisteredTools: Type.Boolean(),
+  tools: Type.Optional(SelectionSchema),
+  extensions: SelectionSchema,
+  skills: SelectionSchema,
+}, { additionalProperties: false });
+
+export const ResolveAgentPolicyResultSchema = Type.Union([
+  Type.Object({
+    ok: Type.Literal(true),
+    policy: ResolvedAgentLoadingPolicySchema,
+  }, { additionalProperties: false }),
+  Type.Object({
+    ok: Type.Literal(false),
+    error: Type.Object({
+      code: Type.Union([
+        Type.Literal("invalid-command"),
+        Type.Literal("invalid-policy"),
+      ]),
+      message: Type.String(),
+    }, { additionalProperties: false }),
+  }, { additionalProperties: false }),
+]);
+
 export type AgentDefinitionSnapshot = Static<typeof AgentDefinitionSnapshotSchema>;
 export type AgentSourceDefinition = Static<typeof AgentSourceLoadResultSchema>["definitions"][number];
 export type AgentCatalogueConfiguration = Static<typeof AgentCatalogueConfigurationSchema>;
@@ -98,3 +136,7 @@ export type AgentSourceLoadResult = Static<typeof AgentSourceLoadResultSchema>;
 export type DiscoverAgentCatalogueCommand = Static<typeof DiscoverAgentCatalogueCommandSchema>;
 export type AgentCatalogueSnapshot = Static<typeof AgentCatalogueSnapshotSchema>;
 export type AgentCatalogueResult = Static<typeof AgentCatalogueResultSchema>;
+export type ResolveAgentPolicyConfiguration = Static<typeof ResolveAgentPolicyConfigurationSchema>;
+export type ResolveAgentPolicyCommand = Static<typeof ResolveAgentPolicyCommandSchema>;
+export type ResolvedAgentLoadingPolicy = Static<typeof ResolvedAgentLoadingPolicySchema>;
+export type ResolveAgentPolicyResult = Static<typeof ResolveAgentPolicyResultSchema>;
