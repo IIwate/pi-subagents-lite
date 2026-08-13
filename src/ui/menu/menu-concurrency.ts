@@ -8,14 +8,13 @@ import { effectiveAlternateModelKeys } from "../../modules/model-access/public.j
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
 import { getManager, getStore } from "../../shell.js";
 import {
-  buildListTheme,
   buildModelOptions,
   createDelegatingComponent,
   createSearchableSelect,
 } from "./helpers.js";
+import { buildListTheme, SettingsListWrapper } from "../../platform/pi/tui/settings-chrome.js";
 import { createConfirmSubmenu } from "./submenus/confirm.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SelectOption } from "../searchable-select.js";
 import type { Theme } from "../types.js";
 

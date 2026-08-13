@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
-import { showAgentsMenu } from "./ui/menu/menus.js";
+import { showAgentsMenu } from "./bootstrap/settings.js";
 import { getNavigator } from "./shell.js";
 
 // Subagent state belongs to the below-editor list. Results still reach the LLM,

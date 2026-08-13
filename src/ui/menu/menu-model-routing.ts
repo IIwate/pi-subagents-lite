@@ -20,14 +20,16 @@ import type { ThinkingLevel } from "../../types.js";
 import { getStore } from "../../shell.js";
 import type { Theme } from "../types.js";
 import {
-  buildListTheme,
   createDelegatingComponent,
   enableSpaceSelection,
   sectionRow,
-  skipNonSelectableRows,
 } from "./helpers.js";
+import {
+  buildListTheme,
+  SettingsListWrapper,
+  skipNonSelectableRows,
+} from "../../platform/pi/tui/settings-chrome.js";
 import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
 
 type Store = ReturnType<typeof getStore>;
 type ModelRef = { provider: string; id: string };

@@ -2,7 +2,7 @@
 
 ## Primary seam
 
-Test settings navigation, snapshots, delegation, and action results through `settings/public.ts`. Test Pi menu rendering through a narrow platform contract.
+Test settings navigation, snapshots, delegation, and action results through `settings/public.ts` with plain JSON values and in-memory owners (`test/modules/settings/settings.test.ts`). Test Pi menu rendering through the narrow renderer contract in `test/platform/tui/settings-screen.test.ts` and the shared chrome in `test/platform/tui/settings-chrome.test.ts`.
 
 ## Required scenarios
 

@@ -13,8 +13,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { getAgentConfig, getAllTypes } from "../../agents/agent-types.js";
-import { buildListTheme } from "./helpers.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
+import { buildListTheme, SettingsListWrapper } from "../../platform/pi/tui/settings-chrome.js";
 import { getManager, getNavigator } from "../../shell.js";
 import { type DebugFaultKind } from "../../agents/debug-fault.js";
 import type { DebugStatusPreview } from "../../bootstrap/child-screen.js";

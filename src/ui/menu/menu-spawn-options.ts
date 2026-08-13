@@ -11,9 +11,8 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildListTheme } from "./helpers.js";
+import { buildListTheme, SettingsListWrapper } from "../../platform/pi/tui/settings-chrome.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-store.js";
 import { getStore } from "../../shell.js";
 import { setDefaultAgentsDisabled } from "../../agents/agent-types.js";

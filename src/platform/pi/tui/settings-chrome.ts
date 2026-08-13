@@ -1,21 +1,69 @@
 /**
- * settings-list-wrapper.ts — Frames a list component with a title bar and separators.
+ * settings-chrome.ts — Pi list styling and framing shared by every settings
+ * surface: the shared list theme, non-selectable-row skipping, and the framed
+ * wrapper that adds the title bar, separators, and key translation.
  *
- * Wraps a SettingsList or SelectList with:
- * - Top separator line
- * - Header with title
- * - List content (SettingsList renders the highlighted item's description and a
- *   hint line below the items itself; SelectList renders inline descriptions)
- * - Bottom separator line
- *
- * The Back button has been removed. Menus still close via Escape, the
- * back-arrow key, and Ctrl-C — the underlying list components call their
- * `onCancel` on those keys, and the wrapper wires that to `closeMenu` for
- * SelectList (SettingsList receives its own `onCancel` at construction).
+ * Moved from `ui/menu` so `platform/pi/tui` owns all Pi component styling and
+ * input translation. The remaining `ui/menu` files import from here until
+ * their categories migrate into settings pages.
  */
 
-import { type Component, isFocusable } from "@earendil-works/pi-tui";
-import { skipNonSelectableRows } from "../helpers.js";
+import { type Component, isFocusable, type SettingsListTheme, type SelectListTheme } from "@earendil-works/pi-tui";
+
+/**
+ * Build the shared list theme (SettingsList + SelectList use the same
+ * accent/muted/dim visual style; each takes the keys it needs).
+ */
+export function buildListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): SettingsListTheme & SelectListTheme {
+  return {
+    label: (text, selected) => selected ? theme.fg("accent", text) : text,
+    value: (text, selected) => selected ? theme.fg("accent", text) : theme.fg("muted", text),
+    description: (text) => theme.fg("dim", text),
+    // Use "→ " (2 chars) to match non-selected prefix "  " (2 spaces)
+    // This prevents menu items from shifting left/right when cursor moves
+    cursor: theme.fg("accent", "→ "),
+    hint: (text) => theme.fg("dim", text),
+    selectedPrefix: () => theme.fg("accent", "→ "),
+    selectedText: (text) => theme.fg("accent", text),
+    scrollInfo: (text) => theme.fg("dim", text),
+    noMatch: (text) => theme.fg("dim", text),
+  };
+}
+
+/** Keep a list cursor off explicit headers, separators, and locked rows. */
+export function skipNonSelectableRows(
+  list: any,
+  isNonSelectable: (item: any) => boolean,
+): void {
+  if (!Array.isArray(list.items) || list.items.length === 0) return;
+  const rawIndex = Symbol("rawIndex");
+  const initialIndex = list.selectedIndex ?? 0;
+  const firstSelectableFrom = (start: number, step: number): number => {
+    let next = start;
+    for (let count = 0; count < list.items.length; count++) {
+      next = (next + step + list.items.length) % list.items.length;
+      if (!isNonSelectable(list.items[next])) return next;
+    }
+    return start;
+  };
+  Object.defineProperty(list, "selectedIndex", {
+    get() { return list[rawIndex] ?? 0; },
+    set(index) {
+      const current = list[rawIndex] ?? initialIndex;
+      const clamped = Math.max(0, Math.min(index, list.items.length - 1));
+      if (!isNonSelectable(list.items[clamped])) {
+        list[rawIndex] = clamped;
+        return;
+      }
+      const wrappedDown = current === list.items.length - 1 && index === 0;
+      const wrappedUp = current === 0 && index === list.items.length - 1;
+      const step = index === current || wrappedDown ? 1 : wrappedUp || index < current ? -1 : 1;
+      list[rawIndex] = firstSelectableFrom(clamped, step);
+    },
+    configurable: true,
+  });
+  list.selectedIndex = initialIndex;
+}
 
 export interface SettingsListWrapperTheme {
   bold: (text: string) => string;
@@ -57,12 +105,15 @@ export class SettingsListWrapper implements Component {
 
     // Expose rebuild callback. Items are set directly without appending any
     // wrapper-controlled items: descriptions are read dynamically at render
-    // time, so they remain correct after a rebuild.
+    // time, so they remain correct after a rebuild. The cursor stays on the
+    // clamped previous index so value corrections (e.g. a failed save) do not
+    // teleport the user back to the top of the list.
     if (options.onRebuild) {
       const rebuild = (newItems: any[], preserveSubmenu = false) => {
+        const previousIndex = list.selectedIndex ?? 0;
         list.items = newItems;
         list.filteredItems = newItems;
-        list.selectedIndex = 0;
+        list.selectedIndex = Math.max(0, Math.min(previousIndex, newItems.length - 1));
         if (!preserveSubmenu) list.submenuComponent = null;
       };
       options.onRebuild(rebuild);

@@ -314,9 +314,7 @@ export class ConfigStore {
         this.persist("agent");
       },
       setShowCost: (enabled: boolean): void => {
-        this.config.agent.showCost = enabled;
-        this.persist("agent");
-        this.syncStatsVisibility();
+        this.updateDisplaySetting("showCost", enabled);
       },
       setGraceTurns: (n: number): void => {
         this.config.agent.graceTurns = n;
@@ -343,15 +341,14 @@ export class ConfigStore {
         this.persist("agent");
       },
       setExpandListByDefault: (value: boolean): void => {
-        this.config.agent.expandListByDefault = value;
-        this.persist("agent");
+        this.updateDisplaySetting("expandListByDefault", value);
       },
-      setShowTools: (enabled: boolean) => this.setAgentVisibility("showTools", enabled),
-      setShowTurns: (enabled: boolean) => this.setAgentVisibility("showTurns", enabled),
-      setShowInput: (enabled: boolean) => this.setAgentVisibility("showInput", enabled),
-      setShowOutput: (enabled: boolean) => this.setAgentVisibility("showOutput", enabled),
-      setShowContext: (enabled: boolean) => this.setAgentVisibility("showContext", enabled),
-      setShowTime: (enabled: boolean) => this.setAgentVisibility("showTime", enabled),
+      setShowTools: (enabled: boolean) => { this.updateDisplaySetting("showTools", enabled); },
+      setShowTurns: (enabled: boolean) => { this.updateDisplaySetting("showTurns", enabled); },
+      setShowInput: (enabled: boolean) => { this.updateDisplaySetting("showInput", enabled); },
+      setShowOutput: (enabled: boolean) => { this.updateDisplaySetting("showOutput", enabled); },
+      setShowContext: (enabled: boolean) => { this.updateDisplaySetting("showContext", enabled); },
+      setShowTime: (enabled: boolean) => { this.updateDisplaySetting("showTime", enabled); },
     },
     concurrency: {
       setDefault: (n: number): void => {
@@ -386,6 +383,25 @@ export class ConfigStore {
       },
     },
   };
+
+  /**
+   * Commit-first display update (REQ-CONFIG-001): the candidate fragment is
+   * persisted before it becomes the effective value, and the navigator is
+   * only synchronized after a successful commit. Failure keeps the previous
+   * value and reports an explicit message to the settings workflow.
+   */
+  updateDisplaySetting(
+    key: "expandListByDefault" | "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showCost" | "showTime",
+    value: boolean,
+  ): { ok: true } | { ok: false; message: string } {
+    const candidate = { ...this.config.agent, [key]: value };
+    const assignments = JSON.parse(JSON.stringify(candidate)) as Record<string, JsonValue>;
+    const result = this.io.commit("agent", assignments);
+    if (!result.ok) return result;
+    this.config.agent = candidate;
+    this.syncStatsVisibility();
+    return { ok: true };
+  }
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -462,13 +478,6 @@ export class ConfigStore {
       showCost: a.showCost,
       showTime: a.showTime,
     });
-  }
-
-  /** Update a stats visibility flag: mutate config → persist → sync navigator. */
-  private setAgentVisibility(key: "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showTime", value: boolean): void {
-    this.config.agent[key] = value;
-    this.persist("agent");
-    this.syncStatsVisibility();
   }
 
   private applyConcurrency(): void {

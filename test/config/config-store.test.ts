@@ -316,6 +316,31 @@ describe("ConfigStore persistence boundary", () => {
     expect(next.store.routing.enabled).toBe(true);
   });
 
+  it("persists a display setting before publishing it and keeps the old value on failure", () => {
+    // REQ-CONFIG-001: the navigator must never be synchronized with a value
+    // that is not on disk.
+    const { store } = harness();
+    const visibility: Array<Record<string, boolean>> = [];
+    store.setDeps({
+      navigator: { setStatsVisibility: (value: Record<string, boolean>) => visibility.push(value) } as any,
+    });
+    const syncsBefore = visibility.length;
+
+    const failing = new ConfigStore({
+      reload() {},
+      read: () => undefined,
+      commit: () => ({ ok: false, message: "disk full" }),
+    });
+    const failed = failing.updateDisplaySetting("showTools", false);
+    expect(failed).toEqual({ ok: false, message: "disk full" });
+    expect(failing.agent.showTools).toBe(true);
+
+    const succeeded = store.updateDisplaySetting("showTools", false);
+    expect(succeeded).toEqual({ ok: true });
+    expect(store.agent.showTools).toBe(false);
+    expect(visibility.length).toBe(syncsBefore + 1);
+  });
+
   it("syncs injected manager and navigator dependencies", () => {
     const { store } = harness();
     const visibility: unknown[] = [];

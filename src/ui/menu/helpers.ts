@@ -1,10 +1,10 @@
 /**
- * helpers.ts — Shared helpers for menu modules:
- * theme builders for SettingsList/SelectList, numeric validation,
+ * helpers.ts — Shared helpers for the remaining menu modules:
  * model-option building, a swappable delegating component, and a
- * searchable pick-list submenu factory.
+ * searchable pick-list submenu factory. List theming and framing live in
+ * `platform/pi/tui/settings-chrome.ts`.
  */
-import type { Component, SettingsListTheme, SelectListTheme } from "@earendil-works/pi-tui";
+import type { Component } from "@earendil-works/pi-tui";
 import type { Theme } from "../types.js";
 import { SearchableSelectDialog, type SelectOption } from "../searchable-select.js";
 import { parseModelKey } from "../../utils.js";
@@ -36,41 +36,6 @@ export function enableSpaceSelection(list: any): void {
   };
 }
 
-/** Keep a list cursor off explicit headers, separators, and locked rows. */
-export function skipNonSelectableRows(
-  list: any,
-  isNonSelectable: (item: any) => boolean,
-): void {
-  if (!Array.isArray(list.items) || list.items.length === 0) return;
-  const rawIndex = Symbol("rawIndex");
-  const initialIndex = list.selectedIndex ?? 0;
-  const firstSelectableFrom = (start: number, step: number): number => {
-    let next = start;
-    for (let count = 0; count < list.items.length; count++) {
-      next = (next + step + list.items.length) % list.items.length;
-      if (!isNonSelectable(list.items[next])) return next;
-    }
-    return start;
-  };
-  Object.defineProperty(list, "selectedIndex", {
-    get() { return list[rawIndex] ?? 0; },
-    set(index) {
-      const current = list[rawIndex] ?? initialIndex;
-      const clamped = Math.max(0, Math.min(index, list.items.length - 1));
-      if (!isNonSelectable(list.items[clamped])) {
-        list[rawIndex] = clamped;
-        return;
-      }
-      const wrappedDown = current === list.items.length - 1 && index === 0;
-      const wrappedUp = current === 0 && index === list.items.length - 1;
-      const step = index === current || wrappedDown ? 1 : wrappedUp || index < current ? -1 : 1;
-      list[rawIndex] = firstSelectableFrom(clamped, step);
-    },
-    configurable: true,
-  });
-  list.selectedIndex = initialIndex;
-}
-
 /**
  * Build SelectOption[] from raw "provider/model-id" strings.
  */
@@ -83,26 +48,6 @@ export function buildModelOptions(rawOptions: string[]): SelectOption[] {
     items.push({ value: opt, label: parsed.modelId, provider: parsed.provider });
   }
   return items;
-}
-
-/**
- * Build the shared list theme (SettingsList + SelectList use the same
- * accent/muted/dim visual style; each takes the keys it needs).
- */
-export function buildListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): SettingsListTheme & SelectListTheme {
-  return {
-    label: (text, selected) => selected ? theme.fg("accent", text) : text,
-    value: (text, selected) => selected ? theme.fg("accent", text) : theme.fg("muted", text),
-    description: (text) => theme.fg("dim", text),
-    // Use "→ " (2 chars) to match non-selected prefix "  " (2 spaces)
-    // This prevents menu items from shifting left/right when cursor moves
-    cursor: theme.fg("accent", "→ "),
-    hint: (text) => theme.fg("dim", text),
-    selectedPrefix: () => theme.fg("accent", "→ "),
-    selectedText: (text) => theme.fg("accent", text),
-    scrollInfo: (text) => theme.fg("dim", text),
-    noMatch: (text) => theme.fg("dim", text),
-  };
 }
 
 /**

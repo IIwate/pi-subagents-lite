@@ -50,7 +50,8 @@ vi.mock("@earendil-works/pi-tui", () => ({
   },
 }));
 
-vi.mock("../../../src/ui/menu/wrappers/settings-list.js", () => ({
+vi.mock("../../../src/platform/pi/tui/settings-chrome.js", async (importOriginal) => ({
+  ...await importOriginal<object>(),
   SettingsListWrapper: class MockSettingsListWrapper {
     constructor(component: any, options: any) {
       wrapperCalls.push({ component, options });

@@ -1,16 +1,26 @@
 /**
- * settings-list.test.ts — Tests for the SettingsListWrapper frame component.
- *
- * Runs the real wrapper against minimal fake list components (no pi-tui import),
- * exercising the contract the wrapper must uphold now that the Back button is gone.
+ * settings-chrome.test.ts — Contract tests for the shared settings chrome:
+ * the SettingsListWrapper frame, non-selectable-row skipping, and the list
+ * theme. Runs the real wrapper against minimal fake list components and real
+ * pi-tui lists where cursor behavior matters.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { SettingsListWrapper } from "../../../../src/ui/menu/wrappers/settings-list.js";
+import { SelectList } from "@earendil-works/pi-tui";
+import {
+  buildListTheme,
+  SettingsListWrapper,
+  skipNonSelectableRows,
+} from "../../../src/platform/pi/tui/settings-chrome.js";
 
 const theme = {
   fg: (_color: string, text: string) => text,
   bold: (text: string) => text,
+};
+
+const taggingTheme = {
+  fg: (color: string, text: string) => `[${color}:${text}]`,
+  bold: (text: string) => `**${text}**`,
 };
 
 function makeSettingsList(items: any[]) {
@@ -135,6 +145,30 @@ describe("SettingsListWrapper — onRebuild sets items directly", () => {
     expect(list.selectedIndex).toBe(0);
   });
 
+  it("keeps the cursor on the previous row when a value correction rebuilds the same rows", () => {
+    // A failed save rebuilds the form to revert the widget's value; the user
+    // must not be teleported back to the first row while doing so.
+    const list = makeSettingsList([
+      { id: "a", label: "A", currentValue: "ON" },
+      { id: "b", label: "B", currentValue: "ON" },
+      { id: "c", label: "C", currentValue: "ON" },
+    ]);
+    let rebuild: ((items: any[], preserveSubmenu?: boolean) => void) | undefined;
+    new SettingsListWrapper(list, {
+      title: "T",
+      theme,
+      onCancel: () => {},
+      onRebuild: (r) => { rebuild = r; },
+    });
+    (list as any).selectedIndex = 2;
+    rebuild!([
+      { id: "a", label: "A", currentValue: "ON" },
+      { id: "b", label: "B", currentValue: "ON" },
+      { id: "c", label: "C", currentValue: "OFF" },
+    ]);
+    expect(list.selectedIndex).toBe(2);
+  });
+
   it("can refresh parent items without detaching an active nested page", () => {
     const list = makeSettingsList([{ id: "a", label: "A", currentValue: "" }]) as any;
     const submenu = { render: () => ["nested"], handleInput: () => {} };
@@ -170,5 +204,44 @@ describe("SettingsListWrapper — render frame", () => {
     expect(lines[2]).toBe("  My Title");
     expect(lines[4]).toBe("  → A     value");
     expect(lines[lines.length - 1]).toBe("─".repeat(40));
+  });
+});
+
+describe("skipNonSelectableRows", () => {
+  it("starts on the first selectable row and skips section headers", () => {
+    const list = new SelectList([
+      { value: "available", label: "Available", nonSelectable: true },
+      { value: "anthropic", label: "anthropic" },
+      { value: "saved", label: "Saved", nonSelectable: true },
+      { value: "__proto__", label: "__proto__" },
+    ] as any, 10, buildListTheme(taggingTheme));
+    skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
+
+    expect(list.selectedIndex).toBe(1);
+    list.handleInput("\x1b[B");
+    expect(list.selectedIndex).toBe(3);
+    list.handleInput("\x1b[A");
+    expect(list.selectedIndex).toBe(1);
+    list.handleInput("\x1b[A");
+    expect(list.selectedIndex).toBe(3);
+    list.handleInput("\x1b[B");
+    expect(list.selectedIndex).toBe(1);
+  });
+});
+
+describe("buildListTheme", () => {
+  it("styles selection, values, and hints with the shared accent/muted/dim roles", () => {
+    const listTheme = buildListTheme(taggingTheme);
+    expect(listTheme.label("test", true)).toBe("[accent:test]");
+    expect(listTheme.label("test", false)).toBe("test");
+    expect(listTheme.value("val", true)).toBe("[accent:val]");
+    expect(listTheme.value("val", false)).toBe("[muted:val]");
+    expect(listTheme.description("desc")).toBe("[dim:desc]");
+    expect(listTheme.cursor).toBe("[accent:→ ]");
+    expect(listTheme.hint("hint")).toBe("[dim:hint]");
+    expect(listTheme.selectedPrefix("item")).toBe("[accent:→ ]");
+    expect(listTheme.selectedText("text")).toBe("[accent:text]");
+    expect(listTheme.scrollInfo("1-5")).toBe("[dim:1-5]");
+    expect(listTheme.noMatch("none")).toBe("[dim:none]");
   });
 });
