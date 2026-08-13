@@ -13,7 +13,7 @@ import * as promptFiles from "../../src/platform/fs/prompt-files.js";
 
 const fakePi = makeFakePi();
 
-// --- Mock module-level dependencies ---
+// --- Vendor session/loader doubles (the only mocked seam) ---
 
 const _loaderOpts: any[] = [];
 const _loaderGetExtensionsResult: any = { extensions: [], errors: [], runtime: {} };
@@ -27,50 +27,23 @@ function MockDefaultResourceLoader(this: any, opts: any) {
 }
 
 const mockModules = vi.hoisted(() => ({
-  mockGetConfig: vi.fn(),
-  mockGetAgentConfig: vi.fn(),
-  mockGetToolNamesForType: vi.fn(),
-  mockBuildAgentPrompt: vi.fn(),
-  mockExtractText: vi.fn(),
-  mockPreloadSkills: vi.fn().mockReturnValue([]),
-  mockLoadSkillMeta: vi.fn().mockReturnValue([]),
   mockCreateAgentSession: vi.fn(),
   mockSessionManagerInMemory: vi.fn(),
   mockDefaultResourceLoader: MockDefaultResourceLoader,
   mockGetAgentDir: vi.fn(),
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
-  mockIncludeContextFiles: true as boolean,
-  mockSystemPromptMode: "replace" as string,
   getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
   clearLoaderExtensions: () => { _loaderGetExtensionsResult.extensions = []; },
 }));
 
-vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/agents/agent-types.js")>();
-  return {
-    ...actual,
-    getConfig: mockModules.mockGetConfig,
-    getAgentConfig: mockModules.mockGetAgentConfig,
-    getToolNamesForType: mockModules.mockGetToolNamesForType,
-  };
-});
-
-vi.mock("../../src/prompt/prompts.js", () => ({
-  buildAgentPrompt: mockModules.mockBuildAgentPrompt,
-}));
-
-vi.mock("../../src/prompt/context.js", () => ({
-  extractText: mockModules.mockExtractText,
-}));
-
-vi.mock("../../src/prompt/skill-loader.js", () => ({
-  preloadSkills: mockModules.mockPreloadSkills,
-  loadSkillMeta: mockModules.mockLoadSkillMeta,
-}));
-
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+// Vendor seam only: session creation and resource loading are replaced; the
+// rest of the package stays real. Agent types, prompt assembly, and skill
+// loading run for real, so prompt-mode behavior is asserted on the generated
+// system prompt instead of on internal call wiring.
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createAgentSession: mockModules.mockCreateAgentSession,
   DefaultResourceLoader: mockModules.mockDefaultResourceLoader,
   SessionManager: { inMemory: mockModules.mockSessionManagerInMemory },
@@ -87,8 +60,8 @@ const defaultConfig = {
   displayName: "Agent",
   description: "Test agent",
   registeredTools: ["read", "bash", "edit"],
-  extensions: true,
-  skills: true,
+  extensions: true as (true | string[] | false),
+  skills: true as (true | string[] | false),
 };
 
 const defaultAgentConfig = {
@@ -100,9 +73,17 @@ const defaultAgentConfig = {
   tools: undefined as (true | string[] | false | undefined),
 };
 
+// Accepted-policy ingredients, assigned per test. The runner receives a
+// frozen policy; these locals replace the old agent-types registry mocks.
+let currentDefinition: any;
+let currentConfig: any;
+let currentRegisteredTools: string[];
+let currentSystemPromptMode: string;
+let currentIncludeContextFiles: boolean;
+
 function runAgent(ctx: any, type: string, prompt: string, options: any) {
-  const definition = structuredClone(mockModules.mockGetAgentConfig() ?? defaultAgentConfig);
-  const config = mockModules.mockGetConfig();
+  const definition = structuredClone(currentDefinition ?? defaultAgentConfig);
+  const config = currentConfig;
   const model = options.model ?? ctx.model;
   const scopedModels = options.scopedModels ?? ctx.scopedModels;
   const configuredTurnLimit = options.maxTurns ?? definition.maxTurns;
@@ -114,13 +95,13 @@ function runAgent(ctx: any, type: string, prompt: string, options: any) {
     ...options,
     acceptedPolicy: {
       definition,
-      registeredTools: [...mockModules.mockGetToolNamesForType(type)],
+      registeredTools: [...currentRegisteredTools],
       restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
       tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
       extensions: Array.isArray(config.extensions) ? [...config.extensions] : config.extensions,
       skills: Array.isArray(config.skills) ? [...config.skills] : config.skills,
-      systemPromptMode: mockModules.mockSystemPromptMode,
-      includeContextFiles: mockModules.mockIncludeContextFiles,
+      systemPromptMode: currentSystemPromptMode,
+      includeContextFiles: currentIncludeContextFiles,
       parentModelKey: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "",
       model: acceptedModel,
       parentModel: ctx.model ?? null,
@@ -137,6 +118,11 @@ function runAgent(ctx: any, type: string, prompt: string, options: any) {
   });
 }
 
+/** The system prompt the runner handed to the resource loader. */
+function generatedPrompt(): string {
+  return mockModules.getLoaderOpts()?.systemPromptOverride() ?? "";
+}
+
 /**
  * Reset all mocks to their default state.
  */
@@ -144,25 +130,15 @@ function resetMocks() {
   vi.clearAllMocks();
   mockModules.clearLoaderOpts();
   mockModules.clearLoaderExtensions();
-  mockModules.mockIncludeContextFiles = true;
-  mockModules.mockSystemPromptMode = "replace";
+  currentIncludeContextFiles = true;
+  currentSystemPromptMode = "replace";
   mockModules.mockLoadProjectContextFiles.mockReturnValue([]);
 
-  mockModules.mockGetConfig.mockReturnValue({ ...defaultConfig });
-  mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
-  mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash", "edit"]);
-  mockModules.mockBuildAgentPrompt.mockReturnValue("system prompt");
-  mockModules.mockExtractText.mockImplementation((content: any) => {
-    if (typeof content === "string") return content;
-    if (!Array.isArray(content)) return "";
-    return content
-      .filter((item: any) => item?.type === "text")
-      .map((item: any) => item.text)
-      .join("");
-  });
+  currentConfig = { ...defaultConfig };
+  currentDefinition = { ...defaultAgentConfig };
+  currentRegisteredTools = ["read", "bash", "edit"];
   mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
-  mockModules.mockPreloadSkills.mockReturnValue([]);
 }
 
 /**
@@ -368,12 +344,12 @@ describe("runAgent — tool visibility wiring", () => {
       ].map(name => ({ name })));
     });
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       extensions: ["tavily"],
       tools: ["read", "tavily/*"],
     });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: ["tavily"],
       tools: ["read", "tavily/*"],
@@ -396,11 +372,11 @@ describe("runAgent — tool visibility wiring", () => {
     const session = createMockSession();
     session.getAllTools.mockReturnValue(["read", "bash"].map(name => ({ name })));
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       registeredTools: ["read", "bash"],
     });
-    mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash"]);
+    currentRegisteredTools = (["read", "bash"]);
     mockModules.setLoaderExtensions([{
       path: "/home/test/.pi/agent/extensions/tavily/index.ts",
       tools: new Map([["web_search", {}]]),
@@ -490,7 +466,7 @@ describe("runAgent — tool visibility wiring", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: false,
     });
@@ -504,7 +480,7 @@ describe("runAgent — tool visibility wiring", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: ["read", "missing-tool"],
     });
@@ -904,7 +880,7 @@ describe("runAgent — extension name-based filtering", () => {
       "read", "bash", "edit", "web_search", "glob",
     ]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: ["tavily"],
     });
@@ -937,7 +913,7 @@ describe("runAgent — extension name-based filtering", () => {
       "read", "bash", "edit", "web_search",
     ]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: ["tavily/web_search"],
     });
@@ -965,7 +941,7 @@ describe("runAgent — extension name-based filtering", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: true,
     });
@@ -981,7 +957,7 @@ describe("runAgent — extension name-based filtering", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: false,
     });
@@ -1008,11 +984,11 @@ describe("runAgent — excludeExtensions (blacklist mode)", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: true,
     });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       extensions: true,
       excludeExtensions: ["quality-monitor"],
@@ -1042,11 +1018,11 @@ describe("runAgent — excludeExtensions (blacklist mode)", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockGetConfig.mockReturnValue({
+    currentConfig = ({
       ...defaultConfig,
       extensions: ["tavily"],
     });
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       extensions: ["tavily"],
       excludeExtensions: ["quality-monitor"], // ignored
@@ -1362,7 +1338,7 @@ describe("runAgent — maxTokens: front matter to native model limit", () => {
   }
 
   it("applies max_tokens to the child model without mutating the source model", async () => {
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       maxTokens: 4096,
     });
@@ -1380,7 +1356,7 @@ describe("runAgent — maxTokens: front matter to native model limit", () => {
   });
 
   it("preserves the model limit when max_tokens is omitted", async () => {
-    mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
+    currentDefinition = ({ ...defaultAgentConfig });
     const model = makeMockModel();
     const ctx = fakeCtx();
     ctx.model = model;
@@ -1392,7 +1368,7 @@ describe("runAgent — maxTokens: front matter to native model limit", () => {
   });
 
   it("ignores a zero max_tokens override", async () => {
-    mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig, maxTokens: 0 });
+    currentDefinition = ({ ...defaultAgentConfig, maxTokens: 0 });
     const model = makeMockModel();
     const ctx = fakeCtx();
     ctx.model = model;
@@ -1418,7 +1394,7 @@ describe("runAgent — context file gating", () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockIncludeContextFiles = true;
+    currentIncludeContextFiles = true;
     mockModules.mockLoadProjectContextFiles.mockReturnValue([
       { path: "AGENTS.md", content: "project instructions" },
     ]);
@@ -1426,40 +1402,28 @@ describe("runAgent — context file gating", () => {
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
     expect(mockModules.mockLoadProjectContextFiles).toHaveBeenCalled();
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        contextFiles: [{ path: "AGENTS.md", content: "project instructions" }],
-      }),
-      expect.anything(),
-    );
+    const prompt = generatedPrompt();
+    expect(prompt).toContain('<project_instructions path="AGENTS.md">');
+    expect(prompt).toContain("project instructions");
   });
 
   it("does NOT load context files when includeContextFiles is false", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockIncludeContextFiles = false;
+    currentIncludeContextFiles = false;
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
     expect(mockModules.mockLoadProjectContextFiles).not.toHaveBeenCalled();
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.not.objectContaining({ contextFiles: expect.anything() }),
-      expect.anything(),
-    );
+    expect(generatedPrompt()).not.toContain("<project_context>");
   });
 
   it("context file loading failure is non-fatal", async () => {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-    mockModules.mockIncludeContextFiles = true;
+    currentIncludeContextFiles = true;
     mockModules.mockLoadProjectContextFiles.mockImplementation(() => {
       throw new Error("permission denied");
     });
@@ -1468,8 +1432,10 @@ describe("runAgent — context file gating", () => {
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
     expect(mockModules.mockLoadProjectContextFiles).toHaveBeenCalled();
-    // buildAgentPrompt still called (without contextFiles)
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalled();
+    // The prompt is still assembled — just without the context section.
+    const prompt = generatedPrompt();
+    expect(prompt).toContain("You are a test agent.");
+    expect(prompt).not.toContain("<project_context>");
   });
 });
 
@@ -1483,25 +1449,21 @@ describe("runAgent — system prompt modes", () => {
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
   });
 
-  it("uses replace mode by default — passes 'replace' to buildAgentPrompt", async () => {
-    mockModules.mockSystemPromptMode = "replace";
+  it("uses the generic header and agent instructions in replace mode", async () => {
+    currentSystemPromptMode = "replace";
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      "replace",
-    );
+    const prompt = generatedPrompt();
+    expect(prompt).toContain("You are a Pi, an expert coding sub-agent.");
+    expect(prompt).toContain("You are a test agent.");
   });
 
-  it("calls ctx.getSystemPrompt() when mode is inherit", async () => {
-    mockModules.mockSystemPromptMode = "inherit";
+  it("uses ctx.getSystemPrompt() as the header when mode is inherit", async () => {
+    currentSystemPromptMode = "inherit";
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
@@ -1512,17 +1474,14 @@ describe("runAgent — system prompt modes", () => {
     await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
 
     expect(ctx.getSystemPrompt).toHaveBeenCalled();
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ parentSystemPrompt: "parent prompt content" }),
-      "inherit",
-    );
+    const prompt = generatedPrompt();
+    expect(prompt).toContain("parent prompt content");
+    expect(prompt).not.toContain("You are a Pi, an expert coding sub-agent.");
+    expect(prompt).toContain("You are a test agent.");
   });
 
   it("falls back gracefully when getSystemPrompt throws in inherit mode", async () => {
-    mockModules.mockSystemPromptMode = "inherit";
+    currentSystemPromptMode = "inherit";
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
@@ -1538,14 +1497,10 @@ describe("runAgent — system prompt modes", () => {
       expect.stringContaining("Failed to get parent system prompt"),
       "warning",
     );
-    // buildAgentPrompt still called — without parentSystemPrompt
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.not.objectContaining({ parentSystemPrompt: expect.anything() }),
-      "inherit",
-    );
+    // The prompt still assembles — with the generic header instead of the parent's
+    const prompt = generatedPrompt();
+    expect(prompt).toContain("You are a Pi, an expert coding sub-agent.");
+    expect(prompt).not.toContain("parent prompt content");
   });
 });
 
@@ -1559,7 +1514,7 @@ describe("runAgent — custom mode", () => {
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
-    mockModules.mockSystemPromptMode = "custom";
+    currentSystemPromptMode = "custom";
     readCustomPromptSpy = vi.spyOn(promptFiles, "readCustomPromptFile");
   });
 
@@ -1567,7 +1522,7 @@ describe("runAgent — custom mode", () => {
     readCustomPromptSpy.mockRestore();
   });
 
-  it("reads custom prompt file and passes content to buildAgentPrompt", async () => {
+  it("reads the custom prompt file and uses it as the header", async () => {
     readCustomPromptSpy.mockReturnValue({ ok: true, content: "My custom system prompt" });
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
@@ -1578,13 +1533,9 @@ describe("runAgent — custom mode", () => {
     expect(readCustomPromptSpy).toHaveBeenCalledWith(
       expect.stringContaining("subagents-lite-prompt.md"),
     );
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ customSystemPrompt: "My custom system prompt" }),
-      "custom",
-    );
+    const prompt = generatedPrompt();
+    expect(prompt).toContain("My custom system prompt");
+    expect(prompt).not.toContain("You are a Pi, an expert coding sub-agent.");
   });
 
   it("falls back when custom file is missing (ENOENT)", async () => {
@@ -1606,14 +1557,8 @@ describe("runAgent — custom mode", () => {
       expect.stringContaining("Custom prompt file not found"),
       "warning",
     );
-    // buildAgentPrompt called without customSystemPrompt
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.not.objectContaining({ customSystemPrompt: expect.anything() }),
-      "custom",
-    );
+    // Falls back to the generic header
+    expect(generatedPrompt()).toContain("You are a Pi, an expert coding sub-agent.");
   });
 
   it("falls back when custom file is empty", async () => {
@@ -1635,13 +1580,7 @@ describe("runAgent — custom mode", () => {
       expect.stringContaining("Custom prompt file is empty"),
       "warning",
     );
-    expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.not.objectContaining({ customSystemPrompt: expect.anything() }),
-      "custom",
-    );
+    expect(generatedPrompt()).toContain("You are a Pi, an expert coding sub-agent.");
   });
 
   it("falls back when custom file is unreadable (other error)", async () => {
@@ -1719,7 +1658,7 @@ describe("runAgent — notify buffering", () => {
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     // Trigger mutual exclusion warning (tools + excludeTools both set)
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: ["read", "bash"],
       excludeTools: ["write"],
@@ -1752,7 +1691,7 @@ describe("runAgent — notify buffering", () => {
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     // Trigger mutual exclusion warning (tools + excludeTools)
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: ["read", "bash"],
       excludeTools: ["write"],
@@ -1777,7 +1716,7 @@ describe("runAgent — notify buffering", () => {
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     // Trigger mutual exclusion warning
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: ["read", "bash"],
       excludeTools: ["write"],
@@ -1799,7 +1738,7 @@ describe("runAgent — notify buffering", () => {
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     // Trigger mutual exclusion warning
-    mockModules.mockGetAgentConfig.mockReturnValue({
+    currentDefinition = ({
       ...defaultAgentConfig,
       tools: ["read", "bash"],
       excludeTools: ["write"],

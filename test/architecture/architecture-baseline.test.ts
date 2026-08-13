@@ -17,7 +17,7 @@ const legacyCycleBaseline = new Set<string>();
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/events.test.ts": 3,
   "test/index.test.ts": 8,
-  "test/agents/agent-runner.test.ts": 5,
+  "test/agents/agent-runner.test.ts": 1,
   "test/agents/queued-model-permission.integration.test.ts": 1,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
