@@ -41,7 +41,6 @@ import {
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionRuntime } from "../bootstrap/extension-runtime.js";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
-import { currentModelAccess } from "../bootstrap/model-access.js";
 import { spawnAgent } from "../bootstrap/session-host.js";
 
 // ============================================================================
@@ -133,7 +132,7 @@ async function executeAgentTool(
   const agentSettings = runtime.agentSettings.read();
   const scopedModels = structuredClone(ctx.scopedModels);
   const runInBackground = requestedBackground === true || agentSettings.forceBackground;
-  const routing = currentModelAccess();
+  const routing = runtime.modelAccess();
   const explicitModel = Object.hasOwn(params, "model") && params.model !== undefined;
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
 

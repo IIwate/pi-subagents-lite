@@ -18,9 +18,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
 import type { BackgroundDelivery } from "../modules/background-result-delivery/public.js";
+import type { ModelAccessFragment } from "../modules/model-access/public.js";
 import type { ChildScreenHost } from "./child-screen.js";
 import { configurationSectionIO } from "./configuration.js";
 import { createAgentSettingsStore, type AgentSettingsStore } from "./agent-settings.js";
+import { currentModelAccess } from "./model-access.js";
 
 export interface ExtensionRuntime {
   readonly pi: ExtensionAPI;
@@ -34,6 +36,8 @@ export interface ExtensionRuntime {
   navigator: ChildScreenHost | null;
   /** Agent fragment seam bound to this runtime's navigator for stats sync. */
   readonly agentSettings: AgentSettingsStore;
+  /** Fresh model-routing policy read; injected so executors never reach the document directly. */
+  readonly modelAccess: () => ModelAccessFragment;
 }
 
 export function createExtensionRuntime(pi: ExtensionAPI): ExtensionRuntime {
@@ -46,6 +50,7 @@ export function createExtensionRuntime(pi: ExtensionAPI): ExtensionRuntime {
     // The thunk reads the runtime's own navigator lazily: the store exists
     // from activation, the navigator only after session_start.
     agentSettings: createAgentSettingsStore(configurationSectionIO, () => runtime.navigator),
+    modelAccess: currentModelAccess,
   };
   return runtime;
 }

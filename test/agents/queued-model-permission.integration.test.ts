@@ -127,12 +127,6 @@ vi.mock("../../src/prompt/skill-loader.js", () => ({
   }),
 }));
 
-// Pin routing at the bootstrap seam so queued-permission behavior is driven
-// by this suite, not by the persisted document.
-vi.mock("../../src/bootstrap/model-access.js", () => ({
-  currentModelAccess: () => structuredClone(mocks.routing),
-}));
-
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 import {
   registerAgents,
@@ -152,8 +146,8 @@ import {
 } from "../../src/bootstrap/session-host.js";
 import { fakeExtensionRuntime, inertAgentSettings } from "../fixtures.js";
 
-// Spawn policy comes from the runtime record; the fake settings store reads
-// mocks.store.agent live so per-test mutation keeps working.
+// Spawn policy and routing come from the runtime record; the fakes read
+// mocks.store.agent / mocks.routing live so per-test mutation keeps working.
 function buildRuntime(): ExtensionRuntime {
   const runtime = fakeExtensionRuntime({
     pi: mocks.pi,
@@ -163,6 +157,7 @@ function buildRuntime(): ExtensionRuntime {
       ...inertAgentSettings(),
       read: () => ({ ...inertAgentSettings().read(), ...mocks.store.agent }),
     },
+    modelAccess: () => structuredClone(mocks.routing),
   });
   return runtime;
 }

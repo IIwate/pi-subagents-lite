@@ -5,35 +5,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeExtensionRuntime } from "../fixtures.ts";
 
-const { mockAbort, mockGetRecord, mockListAgents } = vi.hoisted(() => ({
-  mockAbort: vi.fn(() => false),
-  mockGetRecord: vi.fn(),
-  mockListAgents: vi.fn(),
-}));
-
-// StopAgent does not use the spawn/model path. Stub those imports so this focused
-// suite does not pay for tool-execution.ts's unrelated dependency graph.
-vi.mock("../../src/agents/agent-types.js", () => ({
-  resolveType: () => undefined,
-  getAgentConfig: () => undefined,
-  discoverNewAgents: async () => 0,
-}));
-vi.mock("../../src/spawn/worktree-validator.js", () => ({
-  validateWorktreePath: async () => ({ ok: false, error: "unused" }),
-}));
-vi.mock("../../src/utils.js", () => ({
-  parseThinkingLevel: () => undefined,
-  parseModelSpec: () => ({ modelRef: undefined }),
-  resolveExactModel: () => undefined,
-  unknownModelError: () => "unused",
-}));
-vi.mock("../../src/models/model-scope.js", () => ({
-  scopedModelKeys: () => null,
-  outOfScopeModelError: () => "unused",
-  modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
-}));
-
 import { createStopAgentToolExecutor, formatResultContent } from "../../src/agents/tool-execution.js";
+
+const mockAbort = vi.fn(() => false);
+const mockGetRecord = vi.fn();
+const mockListAgents = vi.fn();
 
 const executeStopAgentTool = createStopAgentToolExecutor(fakeExtensionRuntime({
   manager: {

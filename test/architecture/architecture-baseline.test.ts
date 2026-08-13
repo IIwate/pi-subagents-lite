@@ -10,18 +10,16 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // a resolved entry and may never add a new one.
 const legacyCycleBaseline = new Set<string>();
 
-// Phase 8's ExtensionRuntime removed every shell.js mock: executor suites now
-// construct the runtime record directly. The remaining entries are platform or
-// vendor seams (pi-coding-agent, agent-session, fs scanners) plus the routing
-// pin in bootstrap/model-access; Phase 9 decides which of those stay.
+// Phase 9 removes these mock by mock: executor suites are already mock-free
+// (dependencies enter through the ExtensionRuntime record). The remaining
+// entries are platform or vendor seams (pi-coding-agent, agent-session, fs
+// scanners) still being converted to injected ports or contract tests.
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
   "test/events.test.ts": 3,
   "test/index.test.ts": 8,
   "test/agents/agent-runner.test.ts": 5,
-  "test/agents/queued-model-permission.integration.test.ts": 3,
+  "test/agents/queued-model-permission.integration.test.ts": 2,
   "test/agents/result-delivery.integration.test.ts": 1,
-  "test/agents/stop-agent.test.ts": 4,
-  "test/agents/tool-execution.test.ts": 4,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
   "test/spawn/session-fallback.integration.test.ts": 1,

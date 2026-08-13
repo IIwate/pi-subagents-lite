@@ -22,6 +22,12 @@ import type {
   AgentSettingsStore,
   ResolvedAgentSettings,
 } from "../src/bootstrap/agent-settings.js";
+import type { ModelAccessFragment } from "../src/modules/model-access/public.js";
+
+/** The parse-time default routing policy: alternates OFF, no saved rules. */
+export function disabledModelAccess(): ModelAccessFragment {
+  return { enabled: false, enabledProviders: [], agentAccess: {} };
+}
 
 /** Build a complete accepted policy for tests that enter the runtime spawn seam. */
 export function acceptedRunPolicy(modelKey = "test/model"): AcceptedRunPolicy {
@@ -117,6 +123,7 @@ export function fakeExtensionRuntime(
     delivery: null,
     navigator: null,
     agentSettings: inertAgentSettings(),
+    modelAccess: disabledModelAccess,
     ...overrides,
   };
 }
@@ -303,7 +310,11 @@ export function tempDirWithFiles(
 export function fakeCtx(): any {
   return {
     cwd: "/home/test/project",
-    sessionManager: { getBranch: () => [] },
+    sessionManager: {
+      getBranch: () => [],
+      getSessionId: () => "parent-session",
+      getLeafId: () => "leaf-entry",
+    },
     modelRegistry: { find: vi.fn(), getAll: vi.fn(() => []), getAvailable: vi.fn(() => []) },
     model: {
       id: "model",
