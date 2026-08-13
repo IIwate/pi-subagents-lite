@@ -11,7 +11,7 @@ import {
   type ThinkingAccessPolicy,
   type ThinkingSelection,
 } from "../core/thinking-access.js";
-import type { ThinkingAccessOverride, ThinkingLevel } from "../contracts/model-access-contracts.js";
+import type { ThinkingLevel } from "../contracts/model-access-contracts.js";
 
 function asFragment(routing: unknown): ModelAccessFragment | undefined {
   return Check(ModelAccessFragmentSchema, routing) ? routing : undefined;
@@ -59,15 +59,28 @@ export function unavailableModelRules(
 }
 
 export function resolveThinkingAccess(input: {
+  routing: unknown;
+  agentType: string;
   modelKey: string;
   parentModelKey: string;
   parentThinkingLevel: string | undefined;
   scopedThinkingLevel: string | undefined;
   supportedLevels: readonly ThinkingLevel[];
   fallbackLevel: ThinkingLevel;
-  override: ThinkingAccessOverride | undefined;
 }): ThinkingAccessPolicy | null {
-  return decideThinkingAccess(input);
+  const fragment = asFragment(input.routing);
+  const override = fragment
+    ? fragment.agentAccess[input.agentType]?.thinking?.[input.modelKey]
+    : undefined;
+  return decideThinkingAccess({
+    modelKey: input.modelKey,
+    parentModelKey: input.parentModelKey,
+    parentThinkingLevel: input.parentThinkingLevel,
+    scopedThinkingLevel: input.scopedThinkingLevel,
+    supportedLevels: input.supportedLevels,
+    fallbackLevel: input.fallbackLevel,
+    override,
+  });
 }
 
 export function selectThinkingLevel(

@@ -16,4 +16,4 @@ Test authorization commands and effective policy snapshots through `model-access
 
 ## Fixtures and doubles
 
-Use in-memory availability, scope, and configuration ports. Do not mock settings menus, runtime services, prompt assembly, or internal policy functions.
+Use plain JSON fragments and independent literals. Do not mock settings menus, runtime services, prompt assembly, or internal policy functions. Persistence remains covered by ConfigStore tests until Phase 7.

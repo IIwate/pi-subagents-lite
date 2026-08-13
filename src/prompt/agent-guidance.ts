@@ -3,6 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRoutingConfig } from "../config/types.js";
 import {
   effectiveAlternateModelKeys,
+  isParentModelAllowed,
   resolveThinkingAccess,
   type ThinkingAccessPolicy,
   type ThinkingLevel,
@@ -26,10 +27,6 @@ export interface AgentGuidanceOptions {
   scopedModels: ExtensionContext["scopedModels"];
 }
 
-function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
-  return Object.hasOwn(record, key) ? record[key] : undefined;
-}
-
 function thinkingSummary(policy: ThinkingAccessPolicy): string {
   return `allowed: ${policy.allowed.join(", ")}; default: ${policy.default}`;
 }
@@ -46,16 +43,16 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
   const alternateSections: string[] = [];
 
   for (const agent of agents) {
-    const access = ownValue(options.routing.agentAccess, agent.name);
-    const parentPolicy = options.parentModel && access?.parentModelAccess !== false
+    const parentPolicy = options.parentModel && isParentModelAllowed(options.routing, agent.name)
       ? resolveThinkingAccess({
+          routing: options.routing,
+          agentType: agent.name,
           modelKey: parentModelKey,
           parentModelKey,
           parentThinkingLevel: options.parentThinkingLevel,
           scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, options.parentModel),
           supportedLevels: getSupportedThinkingLevels(options.parentModel) as ThinkingLevel[],
           fallbackLevel: clampThinkingLevel(options.parentModel, "high") as ThinkingLevel,
-          override: access?.thinking?.[parentModelKey],
         })
       : null;
     const alternates = effectiveAlternateModelKeys(
@@ -68,13 +65,14 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
       const model = availableByKey.get(key);
       if (!model) return [];
       const policy = resolveThinkingAccess({
+        routing: options.routing,
+        agentType: agent.name,
         modelKey: key,
         parentModelKey,
         parentThinkingLevel: options.parentThinkingLevel,
         scopedThinkingLevel: scopedThinkingLevel(options.scopedModels, model),
         supportedLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
         fallbackLevel: clampThinkingLevel(model, "high") as ThinkingLevel,
-        override: access?.thinking?.[key],
       });
       return policy ? [{ key, policy }] : [];
     });

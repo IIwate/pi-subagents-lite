@@ -12,8 +12,12 @@ export function listAgentTypesForProvider(
   routing: ModelAccessFragment,
   provider: string,
 ): string[] {
+  const prefix = `${provider}/`;
   return Object.entries(routing.agentAccess)
-    .filter(([, access]) => Object.hasOwn(access.providers, provider))
+    .filter(([, access]) =>
+      Object.hasOwn(access.providers, provider)
+      || Object.keys(access.thinking ?? {}).some((key) => key.startsWith(prefix)),
+    )
     .map(([type]) => type)
     .sort();
 }

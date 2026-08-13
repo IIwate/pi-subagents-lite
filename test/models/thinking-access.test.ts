@@ -2,22 +2,39 @@ import { describe, expect, it } from "vitest";
 import {
   resolveThinkingAccess,
   selectThinkingLevel,
+  type ModelAccessFragment,
   type ThinkingAccessOverride,
   type ThinkingLevel,
 } from "../../src/modules/model-access/public.js";
 
 const reasoningLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
+function routingWith(override?: ThinkingAccessOverride): ModelAccessFragment {
+  return {
+    enabled: true,
+    enabledProviders: ["openai"],
+    agentAccess: {
+      Explore: {
+        providers: {},
+        ...(override ? { thinking: { "openai/gpt-5": override } } : {}),
+      },
+    },
+  };
+}
+
 function resolve(overrides: Record<string, unknown> = {}) {
+  const override = overrides.override as ThinkingAccessOverride | undefined;
+  const { override: _ignored, ...rest } = overrides;
   return resolveThinkingAccess({
+    routing: routingWith(override),
+    agentType: "Explore",
     modelKey: "openai/gpt-5",
     parentModelKey: "anthropic/sonnet",
     parentThinkingLevel: "medium",
     scopedThinkingLevel: undefined,
     supportedLevels: reasoningLevels,
     fallbackLevel: "high",
-    override: undefined,
-    ...overrides,
+    ...rest,
   });
 }
 

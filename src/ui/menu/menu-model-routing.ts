@@ -4,9 +4,13 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type Component, type SettingItem } from "@earendil-works/pi-tui";
 import { getAllTypes } from "../../agents/agent-types.js";
 import type { ModelRoutingConfig } from "../../config/types.js";
-import { CANONICAL_THINKING_LEVELS } from "../../config/types.js";
+
 import {
+  effectiveAlternateModelKeys,
+  isParentModelAllowed,
+  replacementThinkingDefault,
   resolveThinkingAccess,
+  snapshotVisibleSelectedModels,
   unavailableModelRules,
   type ThinkingLevel as AccessThinkingLevel,
 } from "../../modules/model-access/public.js";
@@ -172,26 +176,21 @@ function agentSummary(
   snapshot: RegistrySnapshot,
   ctx: ExtensionCommandContext,
 ): string {
-  const providers = ownValue(store.routing.agentAccess, type)?.providers;
-  if (!providers) return "Parent only";
-  const scopedKeys = scopedModelKeys(ctx.scopedModels);
-  const parentKey = ctx.model ? modelKey(ctx.model) : undefined;
-  const summaries = Object.keys(providers)
-    .filter((provider) => effectiveProviders.has(provider))
-    .sort()
-    .flatMap((provider) => {
-      const rule = providers[provider];
-      const availableIds = providerModelIds(snapshot.availableModels, provider);
-      const effectiveIds = (rule.models ?? [...availableIds]).filter((modelId) => {
-        const key = `${provider}/${modelId}`;
-        return key !== parentKey && availableIds.has(modelId) && (!scopedKeys || scopedKeys.has(key));
-      });
-      if (effectiveIds.length === 0) return [];
-      const access = rule.models
-        ? `${effectiveIds.length} model${effectiveIds.length === 1 ? "" : "s"}`
-        : "All models";
-      return [`${provider} (${access})`];
-    });
+  const keys = effectiveAlternateModelKeys(
+    type,
+    store.routing,
+    snapshot.availableModels.map(modelKey),
+    scopedModelKeys(ctx.scopedModels) ? [...scopedModelKeys(ctx.scopedModels)!] : null,
+    ctx.model ? modelKey(ctx.model) : "",
+  );
+  const summaries = [...effectiveProviders].sort().flatMap((provider) => {
+    const prefix = `${provider}/`;
+    const ids = keys.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    if (ids.length === 0) return [];
+    const rule = ownValue(store.routing.agentAccess, type)?.providers[provider];
+    const access = rule?.models ? `${ids.length} model${ids.length === 1 ? "" : "s"}` : "All models";
+    return [`${provider} (${access})`];
+  });
   return summaries.length > 0 ? summaries.join(" · ") : "Parent only";
 }
 
@@ -220,17 +219,10 @@ function enableEnterAction(list: any, action: (item: any) => void): void {
 }
 
 function replacementDefault(model: ModelRef, allowed: readonly ThinkingLevel[]): ThinkingLevel {
-  const preferred = clampThinkingLevel(model as any, "high") as ThinkingLevel;
-  const preferredIndex = CANONICAL_THINKING_LEVELS.indexOf(preferred);
-  for (let index = preferredIndex; index < CANONICAL_THINKING_LEVELS.length; index++) {
-    const candidate = CANONICAL_THINKING_LEVELS[index];
-    if (allowed.includes(candidate)) return candidate;
-  }
-  for (let index = preferredIndex - 1; index >= 0; index--) {
-    const candidate = CANONICAL_THINKING_LEVELS[index];
-    if (allowed.includes(candidate)) return candidate;
-  }
-  return allowed[0]!;
+  return replacementThinkingDefault(
+    allowed as AccessThinkingLevel[],
+    clampThinkingLevel(model as any, "high") as AccessThinkingLevel,
+  );
 }
 
 function buildThinkingEditor(options: {
@@ -250,13 +242,14 @@ function buildThinkingEditor(options: {
     const access = ownValue(store.routing.agentAccess, type);
     const supported = getSupportedThinkingLevels(model as any) as ThinkingLevel[];
     const baseline = resolveThinkingAccess({
+      routing: store.routing,
+      agentType: type,
       modelKey: key,
       parentModelKey: ctx.model ? modelKey(ctx.model) : "",
       parentThinkingLevel: ctx.thinkingLevel,
       scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, model),
       supportedLevels: supported as AccessThinkingLevel[],
       fallbackLevel: clampThinkingLevel(model as any, "high") as AccessThinkingLevel,
-      override: access?.thinking?.[key],
     });
     const saved = access?.thinking?.[key];
     const allowed = new Set(saved?.allowed.filter((level) => supported.includes(level)) ?? baseline?.allowed ?? supported);
@@ -402,7 +395,7 @@ function buildModelEditor(options: {
       if (kind === "model") {
         if (allModels) {
           selected.clear();
-          for (const modelId of modelIds) selected.add(modelId);
+          for (const modelId of snapshotVisibleSelectedModels(modelIds)) selected.add(modelId);
           allModels = false;
         }
         if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
@@ -422,7 +415,7 @@ function buildModelEditor(options: {
       if (kind !== "model") return;
       if (allModels) {
         selected.clear();
-        for (const modelId of modelIds) selected.add(modelId);
+        for (const modelId of snapshotVisibleSelectedModels(modelIds)) selected.add(modelId);
         allModels = false;
       }
       if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
@@ -743,16 +736,16 @@ function agentAccessSubmenu(
       const type = item.value;
       const snapshot = registrySnapshot(ctx, store);
       const effectiveProviders = effectiveProviderSet(store, snapshot, ctx);
-      const access = ownValue(store.routing.agentAccess, type);
-      const parentAllowed = access?.parentModelAccess !== false;
+      const parentAllowed = isParentModelAllowed(store.routing, type);
       const parentPolicy = ctx.model ? resolveThinkingAccess({
+        routing: store.routing,
+        agentType: type,
         modelKey: modelKey(ctx.model),
         parentModelKey: modelKey(ctx.model),
         parentThinkingLevel: ctx.thinkingLevel,
         scopedThinkingLevel: scopedThinkingLevel(ctx.scopedModels, ctx.model),
         supportedLevels: getSupportedThinkingLevels(ctx.model) as AccessThinkingLevel[],
         fallbackLevel: clampThinkingLevel(ctx.model, "high") as AccessThinkingLevel,
-        override: access?.thinking?.[modelKey(ctx.model)],
       }) : null;
       const providers = store.routing.enabled ? [...effectiveProviders].sort() : [];
       const parentRow = ctx.model

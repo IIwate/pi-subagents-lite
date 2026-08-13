@@ -17,13 +17,16 @@ import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import {
+  agentTypesForProvider,
   applyAgentProviderAccess,
   applyCleanUnavailableModels,
   applyClearModelAccess,
   applyDeleteProviderRules,
   applyParentModelAccess,
+  applyProviderEnabled,
   applyQuickAgentProviderAccess,
   applyResetThinkingAccess,
+  applyRoutingEnabled,
   applyThinkingAccess,
 } from "../modules/model-access/public.js";
 import type { SystemPromptMode } from "../agents/types.js";
@@ -161,14 +164,7 @@ export class ConfigStore {
 
   /** Agent types with saved Provider access or Thinking policy for one provider. */
   accessTypesForProvider(provider: string): string[] {
-    const prefix = `${provider}/`;
-    return Object.entries(this.config.modelRouting.agentAccess)
-      .filter(([, access]) =>
-        Object.hasOwn(access.providers, provider)
-        || Object.keys(access.thinking ?? {}).some((key) => key.startsWith(prefix)),
-      )
-      .map(([type]) => type)
-      .sort();
+    return agentTypesForProvider(this.config.modelRouting, provider);
   }
 
   // ── Mutations ──────────────────────────────────────────────────
@@ -177,16 +173,11 @@ export class ConfigStore {
   readonly mutate = {
     routing: {
       setEnabled: (enabled: boolean): void => {
-        this.config.modelRouting.enabled = enabled;
+        this.config.modelRouting = applyRoutingEnabled(this.config.modelRouting, enabled);
         this.persist();
       },
-      /** Pause or restore one provider without touching dormant agent rules. */
       setProviderEnabled: (provider: string, enabled: boolean): void => {
-        const key = provider.trim();
-        if (!key) return;
-        const providers = new Set(this.config.modelRouting.enabledProviders);
-        if (enabled) providers.add(key); else providers.delete(key);
-        this.config.modelRouting.enabledProviders = [...providers];
+        this.config.modelRouting = applyProviderEnabled(this.config.modelRouting, provider, enabled);
         this.persist();
       },
       /** Replace one canonical Agent/provider rule; an empty exact list deletes it. */

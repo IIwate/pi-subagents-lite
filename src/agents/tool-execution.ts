@@ -202,17 +202,15 @@ export async function executeAgentTool(
   const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
-  const agentAccess = Object.hasOwn(routing.agentAccess, resolvedType)
-    ? routing.agentAccess[resolvedType]
-    : undefined;
   const thinkingPolicy = resolveThinkingAccess({
+    routing,
+    agentType: resolvedType,
     modelKey: resolvedModelKey,
     parentModelKey: parentModelRef,
     parentThinkingLevel: ctx.thinkingLevel,
     scopedThinkingLevel: scopedThinkingLevel(scopedModels, model),
     supportedLevels: getSupportedThinkingLevels(acceptedModel) as ThinkingLevel[],
     fallbackLevel: clampThinkingLevel(acceptedModel, "high") as ThinkingLevel,
-    override: agentAccess?.thinking?.[resolvedModelKey],
   });
   if (!thinkingPolicy) {
     return errorResult(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);

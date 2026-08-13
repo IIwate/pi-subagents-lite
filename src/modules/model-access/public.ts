@@ -19,6 +19,15 @@ export type {
   ThinkingLevel,
 } from "./contracts/model-access-contracts.js";
 export { authorizeModelAccess } from "./application/authorize-model-access.js";
+export {
+  applyProviderEnabled,
+  applyRoutingEnabled,
+  applySelectedModelSnapshot,
+  isParentModelAllowed,
+  parseModelAccessFragment,
+  replacementThinkingDefault,
+  snapshotVisibleSelectedModels,
+} from "./application/parse-and-project.js";
 export { applyParentModelAccess } from "./application/update-parent-access.js";
 export {
   applyAgentProviderAccess,
