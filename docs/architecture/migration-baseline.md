@@ -72,7 +72,7 @@ The history audit is frozen planning evidence, not a maintenance backlog. Each a
 | Public test seams and architecture debt baselines | [Migration baseline](./migration-baseline.md#approved-seams) |
 | Single-owner documentation and audit retirement policy | [Refactoring plan](../refactoring-plan.md#documentation-baseline-gate) |
 
-The audit remains available only to explain how these risks were discovered and is retired in Phase 9 with the other migration-only evidence.
+The audit file itself was retired in Phase 9 with the other migration-only evidence; this table is the final record of where each finding lives.
 
 ## Phase 1 tracer verification
 

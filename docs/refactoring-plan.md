@@ -6,9 +6,9 @@
 
 The refactor must make later maintenance and feature development local. Except for the explicitly approved configuration-persistence failure correction below, it must not change user-visible behavior, add a second execution path, or pause normal releases for a repository-wide rewrite.
 
-This plan is based on local `re` branch commit `37162c8`. During migration it implements [ADR 0009](adr/0009-super-architecture-boundaries.md); the final documentation set absorbs that ADR under the retirement rule below.
+This plan is based on local `re` branch commit `37162c8`. During migration it implemented ADR 0009, whose content now lives in [architecture decisions](architecture/decisions.md) under the retirement rule below.
 
-The migration priorities initially use the author-scoped evidence in the [refactoring history audit](refactoring-history-audit.md). That file is a temporary anti-survivor-bias ledger: it records how repeated patches exposed unstable boundaries and missed scenarios. It is not a product requirement, architecture authority, or permanent maintenance guide. Each actionable finding must be internalized into the document that owns it, then the audit is retired.
+The migration priorities initially used the author-scoped evidence in the refactoring history audit, a temporary anti-survivor-bias ledger recording how repeated patches exposed unstable boundaries and missed scenarios. It was never a product requirement, architecture authority, or maintenance guide. Every actionable finding was internalized into the document that owns it — the mapping is recorded in the [migration baseline](architecture/migration-baseline.md#history-finding-ownership) — and the audit file was retired in Phase 9.
 
 The `re` branch carries the plan and will carry the complete refactoring implementation. Work remains a sequence of independently verified vertical slices on that branch; no second refactoring branch or parallel implementation tree is created. The repository owner freezes feature development on `main` for the duration, so routine synchronization from `main` is not part of the plan. An exceptional `main` change stops the active slice and requires an explicit integration decision.
 

@@ -69,7 +69,6 @@ tools:
   - read
   - grep
   - find
-thinking: high
 max_turns: 12
 extensions: false
 skills:
@@ -83,7 +82,9 @@ Supported frontmatter fields:
 
 - Identity: `name`, `display_name`, `description`, `hidden`.
 - Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
-- Runtime: `thinking`, `max_turns`, `max_tokens`.
+- Runtime: `max_turns`, `max_tokens`.
+
+A `thinking` frontmatter field is retired and ignored with a warning; thinking is selected per call and governed by Thinking policies under Model access.
 
 Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. A positive `max_tokens` is applied to a child-only copy of the selected model through Pi's native `model.maxTokens`; Pi remains responsible for provider-specific request fields, thinking budgets, and context-window clamping. Omitting `max_tokens` or setting it to a non-positive value preserves the model's configured limit, and the parent model and Pi's `onPayload` chain are not modified. Subagents cannot spawn further subagents.
 
@@ -94,16 +95,16 @@ Frontmatter supports flat values and lists, not nested YAML objects. Extension t
 - `prompt` — required task text.
 - `description` — short list label; defaults to the first prompt line.
 - `agent` — agent type; defaults to `general-purpose`.
-- `model` — `id`, `provider/id`, or either form with a `:thinking` suffix. The model must resolve exactly and remain inside Pi's active model scope.
-- `thinking` — a non-empty provider thinking level; common values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
+- `model` — an exact canonical `provider/model` key for an authorized alternate. Bare model IDs and `:thinking` suffixes are not accepted. Omit it to use the parent model.
+- `thinking` — one of Pi's canonical levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. The value must be inside the effective Thinking policy for the selected Agent type and exact model; a disallowed value is rejected with the allowed levels, never silently clamped.
 - `run_in_background` — return immediately and notify the parent when complete.
 - `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
 
-## Model Routing
+## Model access
 
-By default, every subagent requests the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. The selected Agent type must have **Parent model access**; that access is an explicit policy and is not bypassed by omitting `model`.
+By default, every subagent requests the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. The selected Agent type must have **Parent model access**; that access is an explicit policy and is not bypassed by omitting `model`. When it is denied, omitting `model` fails directly — no alternate is chosen automatically.
 
-With **Model routing** OFF (`/agents` > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
+With **Alternate models** OFF (`/agents` > Model access), any other model is rejected. With it ON, an alternate model is authorized only when all of these are true:
 
 - its Provider is explicitly enabled for routing, including when it is the current parent Provider;
 - the selected agent type has access to that provider;
@@ -111,7 +112,7 @@ With **Model routing** OFF (`/agents` > Model routing), any other model is rejec
 - Pi reports the exact model through `modelRegistry.getAvailable()`;
 - the model is inside Pi's active model scope.
 
-The current parent Provider never bypasses an explicit Provider restriction. Same-provider alternates still need an explicit Agent tool `model` argument, routing ON, a saved Agent/provider/model rule, Pi availability, and active scope. A rejected explicit choice is never replaced silently with the Parent model. The exact Parent model remains subject to the Agent type's Parent model access.
+The current parent Provider never bypasses an explicit Provider restriction. Same-provider alternates still need an explicit Agent tool `model` argument, Alternate models ON, a saved Agent/provider/model rule, Pi availability, and active scope. A rejected explicit choice is never replaced silently with the Parent model. The exact Parent model remains subject to the Agent type's Parent model access.
 
 The canonical configuration is:
 
@@ -135,29 +136,30 @@ The canonical configuration is:
 
 An omitted `models` property means all models that Pi currently or later reports available from that provider. It does not authorize unauthenticated entries from Pi's full built-in catalogue. A non-empty array means only those exact IDs. Empty arrays are removed and never interpreted as all-model access.
 
-Each agent access page begins with a locked dynamic row and a separator:
+Each Agent access page begins with the Parent model access toggle, showing the current parent key and its effective default thinking, followed by that agent's Provider rules and its Thinking policies entry:
 
 ```text
-[✓] Default · anthropic/claude-sonnet-4
-────────────────────────────────────────
-anthropic · Parent alternates
+[x] Use parent model · openai/gpt-5 · high
 openai
-google
+anthropic
+Thinking policies
 ```
 
-**Quick model setup** grants one agent alternate access to models from the current parent provider in one short flow. Its model checkboxes save immediately, enabling routing and the concrete provider when access is added. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no Apply row or separate quick configuration.
+**Quick model setup** grants one agent alternate access to models from the current parent provider in one short flow. Its model checkboxes save immediately, enabling Alternate models and the concrete provider when access is added. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no Apply row or separate quick configuration.
 
-**Provider access** is a direct switch list built fresh from `modelRegistry.getAvailable()`. It starts with the locked Parent default and one separator, excludes the current parent provider, and contains no availability diagnostics or Provider detail pages. Its summary counts only enabled alternate providers currently visible as mutable switches; unavailable saved providers and a redundantly persisted current parent do not count.
+**Provider access** is a direct switch list built fresh from `modelRegistry.getAvailable()`. It starts with a non-actionable Parent default row, then every currently available provider — including the current parent provider — as an ordinary toggle; there are no availability diagnostics or Provider detail pages. The top-level summary counts providers that are both enabled and currently available.
 
-Saved routing state for providers absent from Pi availability is shown separately as **Saved unavailable providers**. That exception flow can toggle dormant routing state or explicitly delete every saved Agent rule after multiline confirmation. Toggling never deletes rules, zero rule counts are omitted, and the current parent provider is excluded.
+Saved routing state for providers absent from Pi availability is shown separately as **Saved unavailable providers**. That exception flow can toggle dormant routing state or explicitly delete every saved Agent rule after multiline confirmation. Toggling never deletes rules, and zero rule counts are omitted.
 
-After selecting an Agent, its Provider picker shows only providers that passed Provider access and remain available, plus the current parent provider as `Parent alternates`. Disabled or unavailable providers are hidden while their rules remain dormant.
+After selecting an Agent, its page shows providers that are enabled for routing and currently available. Disabled or unavailable providers are hidden while their rules remain dormant.
 
-The normal Agent model picker shows only actionable alternates: Provider models from `getAvailable()` intersected with Pi's active model scope, excluding the exact parent model. `All models` and exact-model checkboxes save immediately and remain open at the changed row; there is no Apply row or normal-state status text. Scope-excluded and unavailable models stay hidden, while saved exact IDs remain dormant in configuration and reappear if their prerequisite returns.
+The Agent model picker shows only actionable alternates: Provider models from `getAvailable()` intersected with Pi's active model scope, excluding the exact parent model. `All models` and exact-model checkboxes save immediately; there is no Apply row or normal-state status text. Scope-excluded and unavailable models stay hidden, while saved exact IDs remain dormant in configuration and reappear if their prerequisite returns.
+
+**Thinking policies** are saved per Agent type and exact model, and follow that model whether it is currently the Parent default or an alternate. Without a saved override, a Parent default allows every model-supported level and inherits the parent session's current thinking, while an alternate defaults to `high` clamped to the model's capability. The policy page toggles allowed levels per model, cycles the default among allowed levels, and can reset to the dynamic baseline; the final allowed level cannot be removed. A Pi Model scope thinking pin overrides the saved policy with that one mandatory level. **Reset Model access** restores the fresh-install state: Alternate models OFF, no Provider or Agent rules, no Parent access or Thinking overrides.
 
 **Clean unavailable rules** appears only when a reliable fresh `modelRegistry.getAll()` catalogue proves that saved exact model IDs are missing while their provider remains in the catalogue. Its global multiline confirmation lists every affected Provider, Agent, and model ID, then re-reads the catalogue and removes only IDs still unavailable. Credential or `getAvailable()` loss, scope changes, all-model rules, and an absent/unreliable catalogue provider never create cleanup candidates. Persisted dormant exact IDs remain intact until an explicit rule change or cleanup action.
 
-Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
+Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key with its allowed and default thinking levels, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Agent types with no callable model are listed as unavailable, and guidance states when a `model` argument is required because Parent access is denied. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
 
 The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts.
 

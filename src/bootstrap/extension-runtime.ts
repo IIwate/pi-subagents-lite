@@ -10,9 +10,10 @@
  * the last scan), and the two approved reload-surviving responsibilities in
  * platform/process/process-state.
  *
- * This record supersedes the ADR 0004 shared shell. It is not a service
- * locator: nothing can reach it without being handed it explicitly, and its
- * fields are a closed, typed set rather than a keyed registry.
+ * This record supersedes the retired shared shell holder (history in
+ * docs/architecture/decisions.md). It is not a service locator: nothing can
+ * reach it without being handed it explicitly, and its fields are a closed,
+ * typed set rather than a keyed registry.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

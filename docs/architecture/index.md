@@ -2,12 +2,11 @@
 
 This directory is the system-level map for the S.U.P.E.R. modular monolith. It is not a second PRD and does not duplicate module contracts or decision rationale.
 
-## During migration
+## Authorities
 
-- [S.U.P.E.R. boundaries ADR](../adr/0009-super-architecture-boundaries.md) is the migration-time authority for module direction, serializable contracts, composition-root wiring, and replacement rules.
-- [Refactoring plan](../refactoring-plan.md) owns evidence, phases, gates, and delivery cadence.
-- [Migration baseline](./migration-baseline.md) owns the measured Phase 0 starting values and approved test seams.
-- [History audit](../refactoring-history-audit.md) is temporary planning evidence only. It is transferred into the owning documents and retired in Phase 9.
+- [Architecture decisions](./decisions.md) owns cross-module decisions: module direction, serializable contracts, composition-root ownership, tool-registration and configuration-precedence rules, and their supersession history. The migration ADRs and the temporary history audit were consolidated into this file and the module decision documents, then retired.
+- [Refactoring plan](../refactoring-plan.md) is the historical record of migration evidence, phases, gates, and delivery cadence.
+- [Migration baseline](./migration-baseline.md) is the historical record of measured starting values, approved test seams, and per-phase verification.
 
 ## Module map
 
@@ -20,6 +19,4 @@ This directory is the system-level map for the S.U.P.E.R. modular monolith. It i
 - [Prompt support](../../src/modules/prompt/docs/index.md)
 - [Configuration support](../../src/modules/configuration/docs/index.md)
 
-## Final ownership
-
-After the refactor, cross-module decisions will be consolidated into `docs/architecture/decisions.md`. That file is intentionally not created as a competing authority before the migration ADR content and its rationale can be transferred in one reviewed step.
+Module-specific rationale lives in each module's `docs/decisions.md`; `CONTEXT.md` remains a glossary and carries no architecture rationale.
