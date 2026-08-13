@@ -93,7 +93,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   const queue: QueueEntry[] = [];
   const pendingSteers = new Map<string, PendingSteer[]>();
   const waiters = new Map<string, Array<(snapshot: AgentSnapshot | undefined) => void>>();
-  const reserved = new Set<string>();
+  const reservedKeys = new Map<string, string>();
   const pendingSetups = new Set<Promise<void>>();
   const closing = new Set<Promise<void>>();
   const scheduler = createConcurrencyScheduler(options.limits ?? {
@@ -143,18 +143,33 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   }
 
   function releaseReservation(id: string): void {
-    const snapshot = snapshots.get(id);
-    if (!snapshot || !reserved.has(id)) return;
-    reserved.delete(id);
-    scheduler.release(snapshot.concurrencyKey);
+    const key = reservedKeys.get(id);
+    if (!key) return;
+    reservedKeys.delete(id);
+    scheduler.release(key);
+  }
+
+  function rejectLateSession(sessionId: string): void {
+    pendingSteers.delete(sessionId);
+    void options.sessionDriver.abort({ sessionId });
+    void options.sessionDriver.close({ sessionId });
   }
 
   function emitSessionEvent(event: SessionEvent): void {
     const snapshot = snapshots.get(event.agentId);
-    if (!snapshot) return;
+    if (!snapshot) {
+      if (event.type === "session-ready") rejectLateSession(event.sessionId);
+      return;
+    }
     if (event.type === "setup-started" || event.type === "setup-finished") return;
     if (event.type === "session-ready") {
       snapshot.sessionId = event.sessionId;
+      if (snapshot.status === "stopped" || snapshot.status === "error") {
+        snapshot.liveSession = false;
+        pendingSteers.delete(snapshot.id);
+        rejectLateSession(event.sessionId);
+        return;
+      }
       snapshot.liveSession = true;
       const invocation = { ...(snapshot.invocation ?? {}) };
       if (event.modelId) invocation.modelName = event.modelId;
@@ -269,7 +284,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       const snapshot = snapshots.get(entry.id);
       if (!snapshot || snapshot.status !== "queued") continue;
       if (!scheduler.reserve(entry.concurrencyKey).accepted) continue;
-      reserved.add(entry.id);
+      reservedKeys.set(entry.id, entry.concurrencyKey);
       started.add(entry.id);
       void startAgent(entry.command, snapshot).catch((error) => {
         snapshot.status = "error";
@@ -309,7 +324,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       acceptedPolicy.model.id,
     );
     const reservedNow = scheduler.reserve(concurrencyKey).accepted;
-    if (reservedNow) reserved.add(id);
+    if (reservedNow) reservedKeys.set(id, concurrencyKey);
     const queued = !reservedNow;
     const snapshot: AgentSnapshot = {
       id,
@@ -375,7 +390,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     if (wasQueued) {
       snapshot.settled = true;
       if (notify) notifyComplete(snapshot);
-    } else if (snapshot.sessionId) {
+    } else if (snapshot.liveSession && snapshot.sessionId) {
       void options.sessionDriver.abort({ sessionId: snapshot.sessionId });
     }
     return true;
@@ -417,7 +432,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         snapshot: copyJson(snapshot),
       });
     }
-    reserved.add(id);
+    reservedKeys.set(id, snapshot.concurrencyKey);
 
     const previousTurns = snapshot.stats.turnCount ?? 0;
     snapshot.settled = false;
@@ -494,9 +509,11 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     snapshot.liveSession = false;
     snapshots.delete(id);
     pendingSteers.delete(id);
+    releaseReservation(id);
     resolveWaiters(id, undefined);
     if (sessionId) void closeSession(sessionId);
     notifyRemove(snapshot);
+    drainQueue();
   }
 
   async function expireRecords(): Promise<string[]> {

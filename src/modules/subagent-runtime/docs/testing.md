@@ -13,6 +13,8 @@ Lifecycle commands are exercised through `createSubagentRuntime` with in-memory 
 - Authorization acceptance locks the complete run policy.
 - Concurrency accounting derives its model bucket only from the accepted model snapshot, even when an untyped caller supplies a conflicting extra field.
 - Model and Provider ceilings queue and release work hierarchically.
+- Closing a reserved running snapshot releases its slot and starts the next queued snapshot.
+- Stop during setup aborts the session when it becomes ready and does not flush pending steers.
 - Foreground interruption stops and retains records while background work remains detached.
 - Setup, provider, abort, timeout, continuation, and close failures produce ordinary terminal outcomes.
 - Retention, pinning, cleanup, late usage, and idempotent shutdown use an injected clock.

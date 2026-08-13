@@ -310,6 +310,38 @@ describe("REQ-RUNTIME-001 queue release", () => {
     expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
     expect(memory.runs.has("agent-00000002")).toBe(true);
   });
+
+  it("releases a reserved slot and starts the queue when the occupant is closed", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      limits: { defaultModelLimit: 1, modelLimits: {}, providerLimits: {} },
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "one",
+      description: "one",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "two",
+      description: "two",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("queued");
+    expect(await runtime.execute({ kind: "close", id: "agent-00000001", initiator: "user" })).toEqual({
+      ok: true,
+      closed: true,
+    });
+    await Promise.resolve();
+    expect(runtime.getSnapshot("agent-00000001")).toBeUndefined();
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(memory.runs.has("agent-00000002")).toBe(true);
+  });
 });
 
 describe("REQ-RUNTIME-003 foreground interruption", () => {
@@ -330,6 +362,58 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
       snapshot: { status: "stopped", settled: true, stoppedBy: "user" },
     });
     expect(memory.runs.size).toBe(0);
+  });
+
+  it("aborts a session that becomes ready after stop", async () => {
+    const aborts: string[] = [];
+    const steers: string[] = [];
+    let emitReady: ((event: SessionEvent) => void) | undefined;
+    let resolveStart: (() => void) | undefined;
+    const driver: SessionDriver = {
+      start(request, emit) {
+        emit({ type: "setup-started", agentId: request.agentId, sessionId: request.sessionId });
+        emit({ type: "setup-finished", agentId: request.agentId, sessionId: request.sessionId });
+        emitReady = emit;
+        return new Promise<void>((resolve) => { resolveStart = resolve; });
+      },
+      async continueRun() {},
+      async steer(request) {
+        steers.push(request.sessionId);
+        return { accepted: true };
+      },
+      async abort(request) { aborts.push(request.sessionId); },
+      async close() {},
+      inspect() { return { found: false, live: false, streaming: false, messages: [] }; },
+    };
+    const runtime = createRuntime(driver);
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.execute({ kind: "interact", id: "agent-00000001", message: "too early" });
+    expect(await runtime.execute({ kind: "stop", id: "agent-00000001", initiator: "user" })).toMatchObject({
+      ok: true,
+      stopped: true,
+      snapshot: { status: "stopped" },
+    });
+
+    emitReady?.({
+      type: "session-ready",
+      agentId: "agent-00000001",
+      sessionId: "agent-00000001",
+      modelId: "model",
+      provider: "test",
+    });
+    resolveStart?.();
+    await Promise.resolve();
+
+    expect(aborts).toEqual(["agent-00000001"]);
+    expect(steers).toEqual([]);
+    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("stopped");
   });
 });
 
