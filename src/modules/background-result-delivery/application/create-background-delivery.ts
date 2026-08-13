@@ -4,6 +4,7 @@ import {
   type BackgroundResultRecord,
   type DeliveryCommand,
   type DeliveryCommandResult,
+  type DeliveryEvent,
   type DeliverySnapshot,
   type ParentPhase,
 } from "../contracts/delivery.js";
@@ -52,6 +53,11 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     options.fallback.take(options.context.parentSessionId()).map((result) => [result.deliveryId, result]),
   );
   let disposed = false;
+  let events: DeliveryEvent[] = [];
+
+  function emit(event: DeliveryEvent): void {
+    events.push(event);
+  }
 
   function snapshot(): DeliverySnapshot {
     const visible = pendingState().filter((result) => !parentTurnResultIds.has(result.deliveryId));
@@ -70,7 +76,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   }
 
   function ok(extra: Partial<Extract<DeliveryCommandResult, { ok: true }>> = {}): DeliveryCommandResult {
-    return { ok: true, snapshot: snapshot(), ...extra };
+    return { ok: true, snapshot: snapshot(), events, ...extra };
   }
 
   function pendingState(): BackgroundResultRecord[] {
@@ -98,6 +104,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       pendingResults.set(deliveryId, result);
       const latest = latestResults.get(result.agentId);
       if (!latest || result.createdAt >= latest.createdAt) latestResults.set(result.agentId, result);
+      emit({ type: "persisted", deliveryId });
     }
   }
 
@@ -123,12 +130,17 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     ]);
     lastWakeFailed = false;
     const mode = parentRunPhase === "running" || !options.context.isIdle() ? "follow-up" : "turn";
-    if (options.messenger.send(message, mode)) return;
+    const deliveryIds = pending.map((result) => result.deliveryId);
+    if (options.messenger.send(message, mode)) {
+      emit({ type: "wake-requested", deliveryIds, mode });
+      return;
+    }
     parentWakeActive = false;
     parentRunSucceeded = previousRunSucceeded;
     parentTurnResultIds = previousTurnIds;
     for (const result of pending) failedResultIds.add(result.deliveryId);
     lastWakeFailed = true;
+    emit({ type: "wake-failed", deliveryIds });
   }
 
   function acknowledge(ids: readonly string[]): boolean {
@@ -141,6 +153,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       pendingResults.delete(deliveryId);
       failedResultIds.delete(deliveryId);
     }
+    emit({ type: "acknowledged", deliveryIds: [...ids] });
     return true;
   }
 
@@ -150,11 +163,16 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     const version = completionVersion;
     flushFallbackResults();
     if (fallbackResults.has(record.deliveryId)) {
+      emit({ type: "fallback-retained", deliveryId: record.deliveryId });
       lastWakeFailed = true;
       if (completionVersion > version) requestParentWake();
       return ok();
     }
     lastWakeFailed = false;
+    if (!belongsToActiveBranch(record, options.context.parentSessionId(), activeBranchIds)) {
+      emit({ type: "hidden", deliveryId: record.deliveryId });
+      return ok();
+    }
     requestParentWake();
     return ok();
   }
@@ -190,6 +208,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
 
   return {
     execute(command: unknown): DeliveryCommandResult {
+      events = [];
       if (!Check(DeliveryCommandSchema, command)) {
         return failure("invalid-command", "Delivery command is invalid.");
       }
@@ -210,6 +229,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
           parentRunSucceeded = false;
           parentTurnResultIds = new Set(results.map((result) => result.deliveryId));
           lastWakeFailed = false;
+          emit({ type: "injected", deliveryIds: results.map((result) => result.deliveryId) });
           return ok({ injection });
         }
         case "parent-start":
@@ -228,7 +248,11 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
           if (!disposed) {
             refreshActiveBranch();
             flushFallbackResults();
-            if (eligiblePendingResults().length > 0) requestParentWake();
+            const restored = eligiblePendingResults();
+            if (restored.length > 0) {
+              emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
+              requestParentWake();
+            }
           }
           return ok();
         case "session-tree":
@@ -240,7 +264,11 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
             parentWakeCompletionVersion = completionVersion;
             lastWakeFailed = false;
             flushFallbackResults();
-            if (eligiblePendingResults().length > 0) requestParentWake();
+            const restored = eligiblePendingResults();
+            if (restored.length > 0) {
+              emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
+              requestParentWake();
+            }
           }
           return ok();
         case "mark-presented":

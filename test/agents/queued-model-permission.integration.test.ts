@@ -91,7 +91,7 @@ const mocks = vi.hoisted(() => {
     return { session, extensionsResult: {} };
   });
   return Object.assign(state, {
-    coordinator: undefined as any,
+    host: undefined as any,
     manager: undefined as any,
     ctx: undefined as any,
     pi: {
@@ -132,6 +132,8 @@ vi.mock("../../src/shell.js", () => ({
   getStore: () => mocks.store,
 
   getManager: () => mocks.manager,
+  getDelivery: () => mocks.host?.delivery,
+  setDelivery: vi.fn(),
   getNavigator: () => undefined,
   getPiInstance: () => mocks.pi,
   takeFallbackResults: (_sessionId?: string) => mocks.fallbackResults.splice(0),
@@ -150,8 +152,14 @@ import {
 } from "../../src/agents/agent-types.js";
 import type { AgentConfig } from "../../src/agents/types.js";
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
-import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
+import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
+import {
+  applyDeliveryCommand,
+  createHostDelivery,
+  interactAgent,
+  isParentRunSuccessful,
+  recordTerminalResult,
+} from "../../src/bootstrap/session-host.js";
 
 function params(description: string, model?: string, background = true, agent = "general-purpose") {
   return {
@@ -163,8 +171,28 @@ function params(description: string, model?: string, background = true, agent = 
   };
 }
 
+function storedPending() {
+  return createPiResultRepository(mocks.pi, mocks.ctx).read();
+}
+
+function createHost(runtime: any) {
+  const delivery = createHostDelivery();
+  const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
+    applyDeliveryCommand(runtime, delivery, command);
+  return {
+    delivery,
+    interact: (agentId: string, message: string) => interactAgent(runtime, agentId, message),
+    onParentAgentEnd: (messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]) => {
+      run({ kind: "parent-end", succeeded: isParentRunSuccessful(messages) });
+    },
+    onParentSettled: () => { run({ kind: "parent-settled" }); },
+    dispose: () => { run({ kind: "dispose" }); },
+    onComplete: (snapshot: any) => recordTerminalResult(runtime, delivery, snapshot),
+  };
+}
+
 async function dispose(): Promise<void> {
-  mocks.coordinator.dispose();
+  mocks.host?.dispose();
   await mocks.manager.dispose();
 }
 
@@ -231,9 +259,8 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.coordinator = createSessionHost(mocks.manager);
-    bindSessionHost(mocks.coordinator);
-    mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
+    mocks.host = createHost(mocks.manager);
+    mocks.manager.setOnComplete((record: any) => mocks.host.onComplete(record));
   });
 
   it("keeps queued model, scope, and thinking after policy and session edits", async () => {
@@ -385,9 +412,8 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.coordinator = createSessionHost(mocks.manager);
-    bindSessionHost(mocks.coordinator);
-    mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
+    mocks.host = createHost(mocks.manager);
+    mocks.manager.setOnComplete((record: any) => mocks.host.onComplete(record));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
     mocks.blockFirst = false;
     mocks.promptOutcomes = [{ error: "quota exhausted" }];
@@ -402,14 +428,14 @@ describe("queued invocation snapshots", () => {
         settled: true,
         error: "quota exhausted",
       });
-      expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
+      expect(storedPending().pending.length).toBe(1);
       expect(mocks.pi.sendMessage).toHaveBeenCalledOnce();
 
       await vi.advanceTimersByTimeAsync(31 * 60_000);
       await mocks.manager.execute({ kind: "expire" });
 
       expect(mocks.manager.getSnapshot(record.id)).toBeUndefined();
-      expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
+      expect(storedPending().pending.length).toBe(1);
       expect(mocks.entries.filter((entry: any) => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
       expect(mocks.pi.sendMessage).toHaveBeenCalledOnce();
       expect(mocks.createAgentSession).toHaveBeenCalledOnce();
@@ -432,7 +458,7 @@ describe("queued invocation snapshots", () => {
     expect(record?.error).toBe("stream_read_error: response closed");
     expect(mocks.createAgentSession).toHaveBeenCalledOnce();
     expect(mocks.entries.filter((entry: any) => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
-    expect(readResultEntries(mocks.ctx).pending.size).toBe(1);
+    expect(storedPending().pending.length).toBe(1);
     expect(mocks.pi.sendMessage).toHaveBeenCalledOnce();
     await dispose();
   });
@@ -450,21 +476,21 @@ describe("queued invocation snapshots", () => {
     const firstDeliveryId = record?.resultDeliveryId;
 
     expect(record?.status).toBe("error");
-    expect(readResultEntries(mocks.ctx).pending.get(firstDeliveryId!)?.error).toBe("content_filter");
-    await expect(mocks.coordinator.interact(record!.id, "continue")).resolves.toEqual({ accepted: true });
+    expect(storedPending().pending.find((item) => item.deliveryId === firstDeliveryId)?.error).toBe("content_filter");
+    await expect(mocks.host.interact(record!.id, "continue")).resolves.toEqual({ accepted: true });
     record = await mocks.manager.waitUntilSettled(record!.id);
     const secondDeliveryId = record?.resultDeliveryId;
 
     expect(secondDeliveryId).not.toBe(firstDeliveryId);
     expect(record?.status).toBe("completed");
-    expect(readResultEntries(mocks.ctx).pending.size).toBe(2);
+    expect(storedPending().pending.length).toBe(2);
     expect(mocks.entries.filter((entry: any) =>
       entry.customType === "subagents-lite:pending-result"
       && entry.data.deliveryId === firstDeliveryId,
     )).toHaveLength(1);
 
-    mocks.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    mocks.coordinator.onParentSettled();
+    mocks.host.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    mocks.host.onParentSettled();
     await Promise.resolve();
 
     const firstAck = mocks.entries.find((entry: any) =>
@@ -472,12 +498,12 @@ describe("queued invocation snapshots", () => {
       && entry.data.deliveryIds.includes(firstDeliveryId),
     );
     expect(firstAck.data.deliveryIds).not.toContain(secondDeliveryId);
-    expect(readResultEntries(mocks.ctx).pending.has(secondDeliveryId)).toBe(true);
+    expect(storedPending().pending.some((item) => item.deliveryId === secondDeliveryId)).toBe(true);
     expect(mocks.pi.sendMessage).toHaveBeenCalledTimes(2);
 
-    mocks.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    mocks.coordinator.onParentSettled();
-    expect(readResultEntries(mocks.ctx).pending.size).toBe(0);
+    mocks.host.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    mocks.host.onParentSettled();
+    expect(storedPending().pending.length).toBe(0);
     const acknowledgedIds = mocks.entries
       .filter((entry: any) => entry.customType === "subagents-lite:result-ack")
       .flatMap((entry: any) => entry.data.deliveryIds);

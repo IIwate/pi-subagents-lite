@@ -134,10 +134,10 @@ import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
 import * as sessionHost from "../../src/bootstrap/session-host.js";
 
-const sessionHostStub = {
-  spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
+beforeEach(() => {
+  vi.spyOn(sessionHost, "spawnAgent").mockImplementation(async (_runtime: any, _ctx: any, intent: any) => {
     mockSpawnIntents.push(intent);
-    const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
+    const id = mockSpawn(undefined, _ctx, intent.type, intent.prompt, {
       description: intent.description,
       signal: intent.signal,
       acceptedPolicy: intent.acceptedPolicy,
@@ -153,13 +153,7 @@ const sessionHostStub = {
       type: record?.type ?? record?.display?.type ?? "general-purpose",
     };
     return { agentId: id, snapshot };
-  }),
-  onAgentComplete: vi.fn(),
-  dispose: vi.fn(),
-};
-
-beforeEach(() => {
-  vi.spyOn(sessionHost, "currentSessionHost").mockReturnValue(sessionHostStub as any);
+  });
   mockRouting.enabled = false;
   mockRouting.enabledProviders = [];
   mockRouting.agentAccess = {};

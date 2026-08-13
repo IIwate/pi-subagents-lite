@@ -391,30 +391,27 @@ describe("event listener registration", () => {
   it("continues shutdown cleanup after a display disposer fails", async () => {
     const shell = await import("../src/shell.js");
     const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
-    const coordinator = { dispose: vi.fn() };
+    const delivery = { execute: vi.fn() };
     const manager = { listSnapshots: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
     const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
     shell.setNavigator(navigator as any);
-    const { bindSessionHost } = await import("../src/bootstrap/session-host.js");
-    bindSessionHost(coordinator as any);
+    shell.setDelivery(delivery as any);
     shell.setManager(manager as any);
 
     try {
       const shutdown = api.listeners.find(listener => listener.event === "session_shutdown")?.handler;
       await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
 
-      expect(coordinator.dispose).toHaveBeenCalledTimes(1);
+      expect(delivery.execute).toHaveBeenCalledWith({ kind: "dispose" });
       expect(storeDispose).toHaveBeenCalledTimes(1);
       expect(manager.dispose).toHaveBeenCalledTimes(1);
       expect(shell.getNavigator()).toBeNull();
-      const { currentSessionHost } = await import("../src/bootstrap/session-host.js");
-      expect(currentSessionHost()).toBeNull();
+      expect(shell.getDelivery()).toBeNull();
       expect(shell.getManager()).toBeNull();
     } finally {
       storeDispose.mockRestore();
       shell.setNavigator(null);
-      const { bindSessionHost } = await import("../src/bootstrap/session-host.js");
-      bindSessionHost(null);
+      shell.setDelivery(null);
       shell.setManager(null);
     }
   });

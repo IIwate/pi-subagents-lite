@@ -33,7 +33,7 @@ import type { SubagentType } from "../../agents/types.js";
 import { withSubagentSpawn } from "../../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
-import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "../../spawn/result-inbox.js";
+import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";
 import { debugFaultMessage, type DebugFaultKind } from "../../agents/debug-fault.js";
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */

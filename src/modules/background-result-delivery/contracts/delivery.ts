@@ -100,10 +100,47 @@ export const DeliverySnapshotSchema = Type.Object({
   visiblePendingCount: Type.Optional(Type.Integer({ minimum: 1 })),
 }, { additionalProperties: false });
 
+export const DeliveryEventSchema = Type.Union([
+  Type.Object({
+    type: Type.Literal("persisted"),
+    deliveryId: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("fallback-retained"),
+    deliveryId: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("hidden"),
+    deliveryId: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("wake-requested"),
+    deliveryIds: Type.Array(Type.String({ minLength: 1 })),
+    mode: Type.Union([Type.Literal("turn"), Type.Literal("follow-up")]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("wake-failed"),
+    deliveryIds: Type.Array(Type.String({ minLength: 1 })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("injected"),
+    deliveryIds: Type.Array(Type.String({ minLength: 1 })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("acknowledged"),
+    deliveryIds: Type.Array(Type.String({ minLength: 1 })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("restored"),
+    deliveryIds: Type.Array(Type.String({ minLength: 1 })),
+  }, { additionalProperties: false }),
+]);
+
 export const DeliveryCommandResultSchema = Type.Union([
   Type.Object({
     ok: Type.Literal(true),
     snapshot: DeliverySnapshotSchema,
+    events: Type.Array(DeliveryEventSchema),
     injection: Type.Optional(Type.Object({
       customType: Type.String(),
       content: Type.String(),
@@ -114,11 +151,7 @@ export const DeliveryCommandResultSchema = Type.Union([
   Type.Object({
     ok: Type.Literal(false),
     error: Type.Object({
-      code: Type.Union([
-        Type.Literal("invalid-command"),
-        Type.Literal("disposed"),
-        Type.Literal("repository-failure"),
-      ]),
+      code: Type.Literal("invalid-command"),
       message: Type.String(),
     }, { additionalProperties: false }),
   }, { additionalProperties: false }),
@@ -129,4 +162,5 @@ export type BackgroundResultRecord = Static<typeof BackgroundResultRecordSchema>
 export type ParentPhase = Static<typeof ParentPhaseSchema>;
 export type DeliveryCommand = Static<typeof DeliveryCommandSchema>;
 export type DeliverySnapshot = Static<typeof DeliverySnapshotSchema>;
+export type DeliveryEvent = Static<typeof DeliveryEventSchema>;
 export type DeliveryCommandResult = Static<typeof DeliveryCommandResultSchema>;

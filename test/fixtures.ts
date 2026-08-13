@@ -84,6 +84,7 @@ export interface ShellMockFns {
   pi?: any;
   sessionCtx?: any;
   store?: any;
+  delivery?: any;
   coordinator?: any;
 }
 
@@ -111,14 +112,15 @@ export function shellMock(fns: ShellMockFns = {}) {
   const store = fns.store ?? {
     agent: { graceTurns: 6, forceBackground: false, showCost: false },
   };
-  const coordinator = fns.coordinator ?? { spawn: vi.fn() };
+  const delivery = fns.delivery ?? fns.coordinator ?? { spawn: vi.fn() };
 
   return {
     getManager: () => manager,
+    getDelivery: () => delivery,
+    setDelivery: vi.fn(),
     getPiInstance: () => pi,
     getSessionCtx: () => sessionCtx,
     getStore: () => store,
-    getCoordinator: () => coordinator,
   };
 }
 

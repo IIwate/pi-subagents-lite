@@ -34,13 +34,16 @@ vi.mock("../../src/shell.js", () => shellMock({
     listSnapshots: mockListAgents,
     getSnapshot: mockGetRecord,
   },
-  coordinator: {
+  delivery: {
     getStoredResult: mockGetStoredResult,
-    markResultPresented: mockMarkResultPresented,
+    execute: (command: { kind?: string; deliveryId?: string }) => {
+      if (command.kind === "mark-presented" && command.deliveryId) {
+        mockMarkResultPresented(command.deliveryId);
+      }
+      return { ok: true };
+    },
   },
 }));
-
-import * as sessionHost from "../../src/bootstrap/session-host.js";
 
 /* ------------------------------------------------------------------ */
 /*  Execute behavior tests                                            */
@@ -51,10 +54,6 @@ describe("AgentStatus tool execute behavior", () => {
     vi.clearAllMocks();
     mockGetRecord.mockReturnValue(undefined);
     mockGetStoredResult.mockReturnValue(undefined);
-    vi.spyOn(sessionHost, "currentSessionHost").mockReturnValue({
-      getStoredResult: mockGetStoredResult,
-      markResultPresented: mockMarkResultPresented,
-    } as any);
   });
 
   it("looks up one exact result without polling", async () => {

@@ -12,17 +12,43 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import {
-
+  setDelivery,
   setManager,
   setPiInstance,
   setSessionCtx,
   takeFallbackResults,
 } from "../../src/shell.js";
-import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
-import type { SpawnCoordinatorApi } from "../../src/spawn/coordinator-api.js";
+import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
+import {
+  applyDeliveryCommand,
+  createHostDelivery,
+  isParentRunSuccessful,
+  recordTerminalResult,
+  spawnAgent,
+} from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
+
+function createHost(runtime: SubagentRuntime) {
+  const delivery = createHostDelivery();
+  const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
+    applyDeliveryCommand(runtime, delivery, command);
+  return {
+    delivery,
+    spawn: (ctx: any, intent: any) => spawnAgent(runtime, ctx, intent),
+    restorePending: () => { run({ kind: "restore" }); },
+    onParentAgentEnd: (messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]) => {
+      run({ kind: "parent-end", succeeded: isParentRunSuccessful(messages) });
+    },
+    onParentSettled: () => { run({ kind: "parent-settled" }); },
+    pendingResultCount: () => delivery.pendingResultCount(),
+    dispose: () => { run({ kind: "dispose" }); },
+    bind: () => {
+      setDelivery(delivery);
+      runtime.setOnComplete((record) => recordTerminalResult(runtime, delivery, record));
+    },
+  };
+}
 
 function createSession() {
   return {
@@ -58,14 +84,14 @@ function createPi(entries: any[], appendFails = false) {
   } as any;
 }
 
-async function disposeRuntime(manager?: SubagentRuntime, coordinator?: SpawnCoordinatorApi) {
-  coordinator?.dispose();
+async function disposeRuntime(manager?: SubagentRuntime, host?: { dispose(): void }) {
+  host?.dispose();
   await manager?.dispose();
-  bindSessionHost(null);
+  setDelivery(null);
   setManager(null);
 }
 
-describe("session-keyed coordinator fallback", () => {
+describe("session-keyed delivery fallback", () => {
   afterEach(() => {
     takeFallbackResults("session-a");
     takeFallbackResults("session-b");
@@ -86,19 +112,18 @@ describe("session-keyed coordinator fallback", () => {
 
     let managerA: SubagentRuntime | undefined;
     let managerB: SubagentRuntime | undefined;
-    let coordinatorA: SpawnCoordinatorApi | undefined;
-    let coordinatorB: SpawnCoordinatorApi | undefined;
-    let restoredA: SpawnCoordinatorApi | undefined;
+    let hostA: ReturnType<typeof createHost> | undefined;
+    let hostB: ReturnType<typeof createHost> | undefined;
+    let restoredA: ReturnType<typeof createHost> | undefined;
     try {
       setSessionCtx(ctxA);
       setPiInstance(piA);
       managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
       setManager(managerA);
-      coordinatorA = createSessionHost(managerA);
-      bindSessionHost(coordinatorA);
-      managerA.setOnComplete(record => coordinatorA!.onAgentComplete(record));
+      hostA = createHost(managerA);
+      hostA.bind();
 
-      const spawned = await coordinatorA.spawn(piA, ctxA, {
+      const spawned = await hostA.spawn(ctxA, {
         type: "reviewer",
         prompt: "review",
         description: "review",
@@ -107,32 +132,31 @@ describe("session-keyed coordinator fallback", () => {
       });
       await managerA.waitUntilSettled(spawned.agentId);
       expect(managerA.getSnapshot(spawned.agentId)?.resultPersisted).toBeUndefined();
-      expect(coordinatorA.pendingResultCount()).toBe(1);
+      expect(hostA.pendingResultCount()).toBe(1);
 
-      coordinatorA.dispose();
-      coordinatorA = undefined;
+      hostA.dispose();
+      hostA = undefined;
 
       setSessionCtx(ctxB);
       setPiInstance(piB);
       managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
       setManager(managerB);
-      coordinatorB = createSessionHost(managerB);
-      bindSessionHost(coordinatorB);
-      coordinatorB.restorePending();
+      hostB = createHost(managerB);
+      hostB.bind();
+      hostB.restorePending();
 
       expect(entriesB).toEqual([]);
-      expect(coordinatorB.pendingResultCount()).toBeUndefined();
+      expect(hostB.pendingResultCount()).toBeUndefined();
       expect(piB.sendMessage).not.toHaveBeenCalled();
-      coordinatorB.dispose();
-      coordinatorB = undefined;
+      hostB.dispose();
+      hostB = undefined;
 
       piA.appendFails = false;
       setSessionCtx(ctxA);
       setPiInstance(piA);
       setManager(managerA);
-      restoredA = createSessionHost(managerA);
-      bindSessionHost(restoredA);
-      managerA.setOnComplete(record => restoredA!.onAgentComplete(record));
+      restoredA = createHost(managerA);
+      restoredA.bind();
       restoredA.restorePending();
 
       expect(entriesA.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
@@ -150,12 +174,12 @@ describe("session-keyed coordinator fallback", () => {
 
       restoredA.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
       restoredA.onParentSettled();
-      expect(readResultEntries(ctxA).pending.size).toBe(0);
+      expect(createPiResultRepository(piA, ctxA).read().pending).toHaveLength(0);
       expect(entriesA.filter(entry => entry.customType === "subagents-lite:result-ack")).toHaveLength(1);
       expect(entriesB).toEqual([]);
     } finally {
-      await disposeRuntime(managerB, coordinatorB);
-      await disposeRuntime(managerA, restoredA ?? coordinatorA);
+      await disposeRuntime(managerB, hostB);
+      await disposeRuntime(managerA, restoredA ?? hostA);
     }
   });
 });

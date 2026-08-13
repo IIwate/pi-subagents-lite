@@ -7,9 +7,8 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
-import { getManager } from "../shell.js";
-import { currentSessionHost } from "../bootstrap/session-host.js";
-import { findStoredResult } from "../spawn/result-inbox.js";
+import type { BackgroundResultRecord } from "../modules/background-result-delivery/public.js";
+import { getDelivery, getManager } from "../shell.js";
 import { formatResultContent } from "./tool-execution.js";
 
 function formatAgent(record: AgentSnapshot): string {
@@ -26,7 +25,7 @@ function modelProvider(record: AgentSnapshot): { provider?: string; model?: stri
 function resultLookupText(
   agentId: string,
   record: AgentSnapshot | undefined,
-  stored: ReturnType<typeof findStoredResult>,
+  stored: BackgroundResultRecord | undefined,
 ): string | undefined {
   if (!record && !stored) return undefined;
 
@@ -62,9 +61,8 @@ export async function executeAgentStatusTool(
 
   if (requestedId) {
     const record = manager.getSnapshot(requestedId);
-    const coordinator = currentSessionHost();
-    const stored = coordinator?.getStoredResult(requestedId)
-      ?? (record?.result ? undefined : findStoredResult(_ctx, requestedId));
+    const delivery = getDelivery();
+    const stored = delivery?.getStoredResult(requestedId, record?.resultDeliveryId);
     const text = resultLookupText(requestedId, record, stored);
     if (!text) {
       return {
@@ -73,7 +71,7 @@ export async function executeAgentStatusTool(
       };
     }
 
-    if (stored) coordinator?.markResultPresented(stored.deliveryId);
+    if (stored) delivery?.execute({ kind: "mark-presented", deliveryId: stored.deliveryId });
     return { content: [{ type: "text", text: `${text}\n\n${nudge}` }] };
   }
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   manager: null as any,
   navigator: null as any,
-  coordinator: null as any,
+  delivery: null as any,
   navigatorArgs: [] as any[][],
   store: {
     concurrency: { default: 4, providers: {}, models: {} },
@@ -14,12 +14,14 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../src/shell.js", () => ({
   getManager: () => state.manager,
+  getDelivery: () => state.delivery,
   getNavigator: () => state.navigator,
 
   getStore: () => state.store,
   getPiInstance: () => ({}),
   getSessionCtx: () => ({ cwd: "/tmp" }),
   setManager: (manager: any) => { state.manager = manager; },
+  setDelivery: (delivery: any) => { state.delivery = delivery; },
   setNavigator: (navigator: any) => { state.navigator = navigator; },
 
   setSessionCtx: vi.fn(),
@@ -33,12 +35,12 @@ vi.mock("../src/bootstrap/subagent-runtime.js", () => ({
 }));
 
 vi.mock("../src/bootstrap/session-host.js", () => ({
-  createSessionHost: () => ({
+  wireHostDelivery: () => ({
     pendingResultCount: vi.fn(),
-    interact: vi.fn(),
   }),
-  bindSessionHost: vi.fn(),
-  currentSessionHost: () => state.coordinator,
+  interactAgent: vi.fn(),
+  applyDeliveryCommand: vi.fn(),
+  isParentRunSuccessful: vi.fn(),
 }));
 
 vi.mock("../src/ui/agent-navigator.js", () => ({
@@ -55,7 +57,7 @@ describe("ensureManagerAndNavigator", () => {
   beforeEach(() => {
     state.manager = null;
     state.navigator = null;
-    state.coordinator = null;
+    state.delivery = null;
     state.navigatorArgs = [];
     state.store.agent.expandListByDefault = false;
     state.store.setDeps.mockClear();

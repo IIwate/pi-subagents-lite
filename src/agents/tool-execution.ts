@@ -3,7 +3,7 @@ import { getStatusNote } from "../status-note.js";
  * tool-execution.ts — Agent tool execution handlers.
  *
  * Contains the execute callbacks registered for the Agent tool.
- * Spawn coordination and background delivery live in the session host.
+ * Spawn translation lives in the composition root; delivery is a separate facade.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -45,7 +45,7 @@ import {
   getStore,
   getManager,
 } from "../shell.js";
-import { currentSessionHost } from "../bootstrap/session-host.js";
+import { spawnAgent } from "../bootstrap/session-host.js";
 
 // ============================================================================
 // Tool result helpers
@@ -245,9 +245,7 @@ export async function executeAgentTool(
     return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);
   }
 
-  // Use the session host for unified spawn and delivery.
-  const coordinator = currentSessionHost()!;
-  const result = await coordinator.spawn(getPiInstance(), ctx, {
+  const result = await spawnAgent(getManager()!, ctx, {
     type: resolvedType,
     prompt,
     description,

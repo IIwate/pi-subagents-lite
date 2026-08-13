@@ -18,6 +18,10 @@ terminal -> persisted -> eligible -> presented -> acknowledged
 | `failed` | Append, wake, or presentation fails | A later eligible lifecycle event retries according to the approved rule |
 | `restored` | Reload or explicit navigation returns to the origin subtree | Eligibility is recalculated; it does not bypass branch checks |
 
+The named states are conceptual transitions. The snapshot stores `parentRunPhase`,
+`parentWakeActive`, `lastWakeFailed`, `pending`, and `fallback`. `DeliveryEvent`
+records each transition the public command returns.
+
 Required invariants:
 
 - A failed automatic wake does not retry itself indefinitely.

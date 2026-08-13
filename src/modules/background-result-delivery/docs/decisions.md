@@ -11,4 +11,4 @@
 
 ## Implementation-only
 
-- Result-inbox helper names, debounce constants, and manager refresh calls are not delivery concepts. The session host only translates Pi lifecycle into delivery commands.
+- Result-inbox helper names, debounce constants, and manager refresh calls are not delivery concepts. Bootstrap translates Pi lifecycle into delivery commands; spawn and delivery stay separate functions.

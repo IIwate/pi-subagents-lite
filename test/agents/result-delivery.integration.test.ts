@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   entries: [] as any[],
   manager: undefined as any,
-  coordinator: undefined as any,
+  host: undefined as any,
   session: undefined as any,
   ctx: undefined as any,
   pi: undefined as any,
@@ -19,7 +19,8 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 
 vi.mock("../../src/shell.js", () => ({
   getManager: () => state.manager,
-
+  getDelivery: () => state.host?.delivery,
+  setDelivery: vi.fn(),
   getNavigator: () => undefined,
   getPiInstance: () => state.pi,
   getSessionCtx: () => state.ctx,
@@ -28,10 +29,39 @@ vi.mock("../../src/shell.js", () => ({
 }));
 
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
-import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
+import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
+import {
+  applyDeliveryCommand,
+  createHostDelivery,
+  interactAgent,
+  isParentRunSuccessful,
+  recordTerminalResult,
+  spawnAgent,
+} from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
+
+function storedPending() {
+  return createPiResultRepository(state.pi, state.ctx).read();
+}
+
+function createHost(runtime: any) {
+  const delivery = createHostDelivery();
+  const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
+    applyDeliveryCommand(runtime, delivery, command);
+  return {
+    delivery,
+    spawn: (_pi: any, ctx: any, intent: any) => spawnAgent(runtime, ctx, intent),
+    interact: (agentId: string, message: string) => interactAgent(runtime, agentId, message),
+    markResultPresented: (deliveryId: string) => { run({ kind: "mark-presented", deliveryId }); },
+    onParentAgentEnd: (messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]) => {
+      run({ kind: "parent-end", succeeded: isParentRunSuccessful(messages) });
+    },
+    onParentSettled: () => { run({ kind: "parent-settled" }); },
+    dispose: () => { run({ kind: "dispose" }); },
+    onComplete: (snapshot: any) => recordTerminalResult(runtime, delivery, snapshot),
+  };
+}
 
 describe("durable result delivery integration", () => {
   beforeEach(() => {
@@ -73,18 +103,17 @@ describe("durable result delivery integration", () => {
       ctx: state.ctx,
       clock: { now: () => state.now },
     });
-    state.coordinator = createSessionHost(state.manager);
-    bindSessionHost(state.coordinator);
-    state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
+    state.host = createHost(state.manager);
+    state.manager.setOnComplete((record: any) => state.host.onComplete(record));
   });
 
   afterEach(async () => {
-    state.coordinator.dispose();
+    state.host.dispose();
     await state.manager.dispose();
   });
 
   it("reads and acknowledges a durable result after TTL cleanup removes the Agent record", async () => {
-    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+    const spawned = await state.host.spawn(state.pi, state.ctx, {
       type: "reviewer",
       prompt: "review",
       description: "review",
@@ -108,12 +137,12 @@ describe("durable result delivery integration", () => {
       state.ctx,
     );
     expect(status.content[0].text).toContain("durable result");
-    expect(readResultEntries(state.ctx).pending.size).toBe(1);
+    expect(storedPending().pending).toHaveLength(1);
 
-    state.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    state.coordinator.onParentSettled();
+    state.host.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    state.host.onParentSettled();
 
-    expect(readResultEntries(state.ctx).pending.size).toBe(0);
+    expect(storedPending().pending).toHaveLength(0);
   });
 
   it.each([
@@ -126,7 +155,7 @@ describe("durable result delivery integration", () => {
       throw new Error(errorText);
     });
 
-    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+    const spawned = await state.host.spawn(state.pi, state.ctx, {
       type: "reviewer",
       prompt: "review",
       description: "review",
@@ -142,7 +171,7 @@ describe("durable result delivery integration", () => {
       liveSession: true,
       error: errorText,
     });
-    const pending = [...readResultEntries(state.ctx).pending.values()];
+    const pending = storedPending().pending;
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({ status: "error", error: errorText });
     expect(pending[0].result).toContain(errorText);
@@ -150,7 +179,7 @@ describe("durable result delivery integration", () => {
   });
 
   it("preserves background delivery identity and creates a new delivery ID after continuation", async () => {
-    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+    const spawned = await state.host.spawn(state.pi, state.ctx, {
       type: "reviewer",
       prompt: "review",
       description: "review",
@@ -161,17 +190,17 @@ describe("durable result delivery integration", () => {
     let record = await state.manager.waitUntilSettled(id);
     const firstDeliveryId = record?.resultDeliveryId;
 
-    state.coordinator.markResultPresented(firstDeliveryId!);
-    state.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    state.coordinator.onParentSettled();
-    expect(readResultEntries(state.ctx).pending.size).toBe(0);
+    state.host.markResultPresented(firstDeliveryId!);
+    state.host.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    state.host.onParentSettled();
+    expect(storedPending().pending).toHaveLength(0);
 
     state.continueAgentSession.mockResolvedValue({
       responseText: "continued result",
       aborted: false,
       turnLimited: false,
     });
-    await expect(state.coordinator.interact(id, "continue")).resolves.toEqual({ accepted: true });
+    await expect(state.host.interact(id, "continue")).resolves.toEqual({ accepted: true });
     record = await state.manager.waitUntilSettled(id);
 
     expect(record).toMatchObject({
@@ -180,12 +209,12 @@ describe("durable result delivery integration", () => {
     });
     expect(record).not.toHaveProperty("backgroundDelivery");
     expect(record?.resultDeliveryId).not.toBe(firstDeliveryId);
-    expect(readResultEntries(state.ctx).pending.get(record!.resultDeliveryId!)?.result)
+    expect(storedPending().pending.find((item) => item.deliveryId === record!.resultDeliveryId)?.result)
       .toBe("continued result");
   });
 
   it("keeps foreground continuation results out of the inbox", async () => {
-    const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
+    const spawned = await state.host.spawn(state.pi, state.ctx, {
       type: "reviewer",
       prompt: "review",
       description: "review",
@@ -198,12 +227,12 @@ describe("durable result delivery integration", () => {
       turnLimited: false,
     });
 
-    await expect(state.coordinator.interact(spawned.agentId, "continue"))
+    await expect(state.host.interact(spawned.agentId, "continue"))
       .resolves.toEqual({ accepted: true });
     const continued = await state.manager.waitUntilSettled(spawned.agentId);
 
     expect(continued?.resultSessionId).toBeUndefined();
     expect(continued).not.toHaveProperty("backgroundDelivery");
-    expect(readResultEntries(state.ctx).pending.size).toBe(0);
+    expect(storedPending().pending).toHaveLength(0);
   });
 });

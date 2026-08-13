@@ -13,16 +13,23 @@ import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
 import {
+  getDelivery,
   getManager,
   getNavigator,
   getStore,
   getPiInstance,
   getSessionCtx,
+  setDelivery,
   setSessionCtx,
   setManager,
   setNavigator,
 } from "./shell.js";
-import { bindSessionHost, createSessionHost, currentSessionHost } from "./bootstrap/session-host.js";
+import {
+  applyDeliveryCommand,
+  interactAgent,
+  isParentRunSuccessful,
+  wireHostDelivery,
+} from "./bootstrap/session-host.js";
 
 const agentCatalogue = createAgentCatalogueRuntime();
 const configuration = createConfigurationRuntime();
@@ -38,17 +45,14 @@ function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
 // ============================================================================
 
 /**
- * Ensure the manager, coordinator, and navigator exist.
+ * Ensure the manager, delivery, and navigator exist.
  * Idempotent — safe to call on every session_start.
  */
 export function ensureManagerAndNavigator(): void {
   const currentManager = getManager();
   const currentNavigator = getNavigator();
 
-  // Create manager if missing
   if (!currentManager) {
-    // Coordinator will be created after manager, so use a placeholder onComplete
-    // that we'll replace once coordinator is created.
     const newManager = createHostSubagentRuntime({
       pi: getPiInstance(),
       ctx: getSessionCtx(),
@@ -56,19 +60,18 @@ export function ensureManagerAndNavigator(): void {
     });
     setManager(newManager);
     getStore().setDeps({ manager: newManager });
-
-    const coordinator = createSessionHost(newManager);
-    bindSessionHost(coordinator);
-
-    newManager.setOnComplete(record => coordinator.onAgentComplete(record));
+    wireHostDelivery(newManager);
   }
 
   if (!currentNavigator) {
     const newNavigator = new AgentNavigator(
       getManager()!,
-      async (agentId, text) => currentSessionHost()?.interact(agentId, text)
-        ?? { accepted: false, reason: "unavailable" },
-      () => currentSessionHost()?.pendingResultCount(),
+      async (agentId, text) => {
+        const runtime = getManager();
+        if (!runtime) return { accepted: false as const, reason: "unavailable" as const };
+        return interactAgent(runtime, agentId, text);
+      },
+      () => getDelivery()?.pendingResultCount(),
       getStore().agent.expandListByDefault,
     );
     setNavigator(newNavigator);
@@ -125,7 +128,12 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event, ctx) => {
-    const resultMessage = currentSessionHost()?.prepareBeforeAgentStart();
+    const runtime = getManager();
+    const delivery = getDelivery();
+    const prepared = runtime && delivery
+      ? applyDeliveryCommand(runtime, delivery, { kind: "parent-preflight" })
+      : undefined;
+    const resultMessage = prepared?.ok ? prepared.injection : undefined;
     if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
       return resultMessage ? { message: resultMessage } : undefined;
     }
@@ -149,34 +157,48 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
     const navigator = getNavigator();
     const requestId = navigator?.beginInteraction(selectedAgentId) ?? -1;
-    const result = await currentSessionHost()?.interact(
-      selectedAgentId,
-      event.text,
-      event.images,
-    ) ?? { accepted: false as const, reason: "unavailable" as const };
+    const runtime = getManager();
+    const result = runtime
+      ? await interactAgent(runtime, selectedAgentId, event.text, event.images)
+      : { accepted: false as const, reason: "unavailable" as const };
     navigator?.completeInteraction(requestId, selectedAgentId, event.text, result);
     return { action: "handled" as const };
   });
 
   pi.on("agent_start", () => {
-    currentSessionHost()?.onParentAgentStart();
+    const runtime = getManager();
+    const delivery = getDelivery();
+    if (runtime && delivery) applyDeliveryCommand(runtime, delivery, { kind: "parent-start" });
   });
 
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
   // setTimeout(0) lets Pi remove the Working row before relayout on the next event-loop turn.
   pi.on("agent_end", (event, ctx) => {
-    currentSessionHost()?.onParentAgentEnd(event.messages);
+    const runtime = getManager();
+    const delivery = getDelivery();
+    if (runtime && delivery) {
+      applyDeliveryCommand(runtime, delivery, {
+        kind: "parent-end",
+        succeeded: isParentRunSuccessful(event.messages),
+      });
+    }
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
   });
 
   pi.on("agent_settled", () => {
-    currentSessionHost()?.onParentSettled();
+    const runtime = getManager();
+    const delivery = getDelivery();
+    if (runtime && delivery) applyDeliveryCommand(runtime, delivery, { kind: "parent-settled" });
+    getNavigator()?.update();
   });
 
   pi.on("session_tree", () => {
-    currentSessionHost()?.onSessionTree();
+    const runtime = getManager();
+    const delivery = getDelivery();
+    if (runtime && delivery) applyDeliveryCommand(runtime, delivery, { kind: "session-tree" });
+    getNavigator()?.update();
   });
 
   // session_start — load config and refresh the Agent catalogue used by guidance.
@@ -186,7 +208,10 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }
-    currentSessionHost()?.restorePending();
+    const runtime = getManager();
+    const delivery = getDelivery();
+    if (runtime && delivery) applyDeliveryCommand(runtime, delivery, { kind: "restore" });
+    getNavigator()?.update();
   });
 
   // session_shutdown — abort all, dispose manager
@@ -215,14 +240,14 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     await cleanup(() => {
       try { getNavigator()?.dispose(); } finally { setNavigator(null); }
     });
-    // Let the manager abort and settle its runs while the coordinator can still
-    // receive legitimate completion callbacks. The coordinator is disposed
+    // Let the manager abort and settle its runs while delivery can still
+    // receive legitimate completion callbacks. Delivery is disposed
     // afterwards so its durable fallback handoff is not cut off first.
     await cleanup(async () => {
       try { await getManager()?.dispose(); } finally { setManager(null); }
     });
     await cleanup(() => {
-      try { currentSessionHost()?.dispose(); } finally { bindSessionHost(null); }
+      try { getDelivery()?.execute({ kind: "dispose" }); } finally { setDelivery(null); }
     });
     await cleanup(() => getStore().dispose());
 

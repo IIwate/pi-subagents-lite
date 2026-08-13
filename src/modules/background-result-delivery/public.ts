@@ -2,12 +2,14 @@ export {
   BackgroundResultRecordSchema,
   DeliveryCommandSchema,
   DeliveryCommandResultSchema,
+  DeliveryEventSchema,
   DeliverySnapshotSchema,
 } from "./contracts/delivery.js";
 export type {
   BackgroundResultRecord,
   DeliveryCommand,
   DeliveryCommandResult,
+  DeliveryEvent,
   DeliverySnapshot,
 } from "./contracts/delivery.js";
 export type {

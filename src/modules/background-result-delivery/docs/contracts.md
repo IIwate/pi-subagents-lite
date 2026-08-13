@@ -2,7 +2,7 @@
 
 ## Public boundary
 
-`public.ts` exports serialized delivery commands, events, snapshots, and application entry points. Parent-session entries and Pi lifecycle handles remain behind ports.
+`public.ts` exports serialized delivery commands, events, snapshots, and application entry points. Parent-session entries and Pi lifecycle handles remain behind ports. Events are returned from each successful command; they are not a separate subscription.
 
 ## Implemented schemas
 
