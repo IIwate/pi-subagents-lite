@@ -7,10 +7,9 @@
 ## Implemented schemas
 
 - `AgentGuidanceRequestSchema` and `AgentGuidanceResultSchema` assemble Parent Agent guidance from serializable catalogue and Model access inputs.
+- `SubagentPromptRequestSchema` and `SubagentPromptResultSchema` assemble the Subagent system prompt from serializable fragments.
 
 ## Planned schemas
-
-- `SubagentPromptRequest` and `SubagentPromptResult`.
 - `PromptSourceSnapshot` for deterministic source provenance inside tests, not persisted runtime state.
 
 Exact fields are defined by TypeBox in the prompt slices.

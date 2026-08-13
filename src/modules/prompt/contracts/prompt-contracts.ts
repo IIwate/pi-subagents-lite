@@ -45,5 +45,42 @@ export const AgentGuidanceResultSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+export const SubagentPromptEnvSchema = Type.Object({
+  isGitRepo: Type.Boolean(),
+  branch: Type.Union([Type.String(), Type.Null()]),
+  platform: Type.String(),
+}, { additionalProperties: false });
+
+export const SubagentPromptRequestSchema = Type.Object({
+  kind: Type.Literal("assemble-subagent-prompt"),
+  mode: Type.Union([Type.Literal("replace"), Type.Literal("inherit"), Type.Literal("custom")]),
+  agentName: Type.String({ minLength: 1 }),
+  agentInstructions: Type.String(),
+  cwd: Type.String(),
+  env: SubagentPromptEnvSchema,
+  header: Type.Union([Type.String(), Type.Null()]),
+  contextFiles: Type.Array(Type.Object({
+    path: Type.String(),
+    content: Type.String(),
+  }, { additionalProperties: false })),
+  skillElements: Type.Array(Type.String()),
+}, { additionalProperties: false });
+
+export const SubagentPromptResultSchema = Type.Union([
+  Type.Object({
+    ok: Type.Literal(true),
+    prompt: Type.String(),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ok: Type.Literal(false),
+    error: Type.Object({
+      code: Type.Literal("invalid-command"),
+      message: Type.String(),
+    }, { additionalProperties: false }),
+  }, { additionalProperties: false }),
+]);
+
 export type AgentGuidanceRequest = Static<typeof AgentGuidanceRequestSchema>;
 export type AgentGuidanceResult = Static<typeof AgentGuidanceResultSchema>;
+export type SubagentPromptRequest = Static<typeof SubagentPromptRequestSchema>;
+export type SubagentPromptResult = Static<typeof SubagentPromptResultSchema>;
