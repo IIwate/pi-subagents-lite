@@ -4,7 +4,8 @@ import { Check } from "typebox/value";
 import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import type { AgentConfig } from "./agents/types.js";
 import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
-import { configuration } from "./bootstrap/configuration.js";
+import { configRoot, configuration } from "./bootstrap/configuration.js";
+import { userAgentsDirPath } from "./platform/fs/config-paths.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
@@ -85,8 +86,7 @@ export function ensureManagerAndNavigator(): void {
  * and register into the type registry.
  */
 export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
-  const homeDir = process.env.HOME || "";
-  const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
+  const userAgentDir = userAgentsDirPath(configRoot);
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
   const configurationResult = configuration.execute({

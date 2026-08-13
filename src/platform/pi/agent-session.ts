@@ -32,10 +32,11 @@ import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGT
 import type { SubagentType } from "../../agents/types.js";
 import { withSubagentSpawn } from "../../shell.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-store.js";
-import { customPromptFilePath, resolveConfigRoot } from "../fs/config-paths.js";
+// The bootstrap-composed path applies the operational source precedence once
+// for the whole process. Like the shell import above, this outward reference
+// is transitional wiring that the Phase 8 composition root replaces.
+import { customPromptPath as CUSTOM_PROMPT_PATH } from "../../bootstrap/configuration.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
-
-const CUSTOM_PROMPT_PATH = customPromptFilePath(resolveConfigRoot(process.env));
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";
 import { debugFaultMessage, type DebugFaultKind } from "../../agents/debug-fault.js";
 

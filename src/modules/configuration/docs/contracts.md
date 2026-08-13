@@ -11,8 +11,11 @@
 - `CommitConfigurationFragmentCommandSchema` submits one section's assignments together with the `expectedRevision` the caller last observed. `CommitConfigurationFragmentResultSchema` returns the next revision or an explicit `revision-conflict`/`persistence-failure`.
 - `ReloadConfigurationCommandSchema` re-reads the persisted document and advances the revision.
 
-The persisted JSON remains in its current unversioned shape; the revision is runtime transaction metadata only. Source-precedence contracts join this surface when operational source resolution migrates.
+The persisted JSON remains in its current unversioned shape; the revision is runtime transaction metadata only.
 
-## Port
+- `OperationalValueCandidatesSchema` carries the already-read source values for one operational setting; `resolveOperationalValue` applies the fixed environment > `.env` > configured > fallback order. Interactive product policies never pass through this contract.
 
-`ConfigurationDocumentRepository` loads the serialized document and atomically replaces it. `persist` throws on failure instead of swallowing it, so the application layer can keep the prior snapshot effective and report `persistence-failure` to the caller. File handles and temporary paths remain inside the platform implementation.
+## Ports
+
+- `ConfigurationDocumentRepository` loads the serialized document and atomically replaces it. `persist` throws on failure instead of swallowing it, so the application layer can keep the prior snapshot effective and report `persistence-failure` to the caller. File handles and temporary paths remain inside the platform implementation.
+- `EnvironmentSource` exposes the process environment and the composition-root-selected `.env` file as separate raw sources, keeping the precedence decision in the configuration core.

@@ -5,6 +5,7 @@ export {
   ConfigurationDocumentSnapshotSchema,
   JsonObjectSchema,
   JsonValueSchema,
+  OperationalValueCandidatesSchema,
   ReadConfigurationValueCommandSchema,
   ReadConfigurationValueResultSchema,
   ReloadConfigurationCommandSchema,
@@ -17,12 +18,15 @@ export type {
   ConfigurationDocumentSnapshot,
   JsonObject,
   JsonValue,
+  OperationalValueCandidates,
   ReadConfigurationValueCommand,
   ReadConfigurationValueResult,
   ReloadConfigurationCommand,
   ReloadConfigurationResult,
 } from "./contracts/configuration-contracts.js";
+export { resolveOperationalValue } from "./core/resolve-operational-value.js";
 export type { ConfigurationDocumentRepository } from "./ports/configuration-document-repository.js";
+export type { EnvironmentSource } from "./ports/environment-source.js";
 export {
   createConfiguration,
   type Configuration,

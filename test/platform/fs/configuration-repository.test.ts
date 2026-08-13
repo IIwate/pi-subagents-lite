@@ -7,6 +7,7 @@ import {
   configFilePath,
   customPromptFilePath,
   resolveConfigRoot,
+  userAgentsDirPath,
 } from "../../../src/platform/fs/config-paths.js";
 
 const tempRoots: string[] = [];
@@ -71,14 +72,15 @@ describe("file configuration document repository contract", () => {
 });
 
 describe("config path policy", () => {
-  it("derives all persisted locations from the HOME environment value", () => {
-    const root = resolveConfigRoot({ HOME: join("H:", "users", "demo") });
+  it("derives all persisted locations from the resolved home directory", () => {
+    const root = resolveConfigRoot(join("H:", "users", "demo"));
     expect(root).toBe(join("H:", "users", "demo", ".pi", "agent"));
     expect(configFilePath(root)).toBe(join(root, "subagents-lite.json"));
     expect(customPromptFilePath(root)).toBe(join(root, "subagents-lite-prompt.md"));
+    expect(userAgentsDirPath(root)).toBe(join(root, "agents"));
   });
 
-  it("falls back to a relative root when HOME is unset", () => {
-    expect(resolveConfigRoot({})).toBe(join(".pi", "agent"));
+  it("falls back to a relative root when no home source resolves", () => {
+    expect(resolveConfigRoot("")).toBe(join(".pi", "agent"));
   });
 });

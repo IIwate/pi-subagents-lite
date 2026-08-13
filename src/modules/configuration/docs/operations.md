@@ -9,7 +9,9 @@ For operational settings only, the resolver uses:
 3. the persisted `subagents-lite.json` file;
 4. defaults owned by the capability that consumes the setting.
 
-Interactive product policies such as Model access and Thinking access are not silently overridden by environment values.
+Interactive product policies such as Model access and Thinking access are not silently overridden by environment values: the document facade has no environment port, and only the composition root resolves operational values.
+
+The home directory is the one operational setting today. Its config-file step is inapplicable because the document's own location derives from it; a set-but-empty variable counts as absent so it cannot blank out a usable lower-precedence source.
 
 ## Physical format
 
