@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 56 files, 869 passed | Vitest |
+| Full suite | 60 files, 880 passed | Vitest |
 | Skipped tests | None on this host. Two directory-symlink scenarios still skip when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
 | Architecture guard | 9 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
@@ -106,3 +106,15 @@ The audit remains available only to explain how these risks were discovered and 
 - The Agent tool validates input, calls public use cases, and formats output.
 - Catalogue and Model access policy no longer live in configuration normalizers, menus, `AgentManager`, or tool execution.
 - The Phase 2 checkpoint records `Review-Result: PASS` after the review and the verification results above.
+
+## Phase 3 verification
+
+- Formal review of `6a83821..ca6d77d` found no unresolved blocking issues after the review-fix commits.
+- Parent guidance and Subagent system prompts assemble through `prompt/public.ts`. Custom prompt and context files are read in `platform/fs`.
+- Recorded verification: `bun run typecheck` pass; `bun run test` 60 files, 880 passed; architecture guard 9 passed; `git diff --check` pass.
+
+## Phase 3 exit review
+
+- Every documented prompt fragment has a public-seam owner test.
+- Prompt-module tests do not require Pi, filesystem, configuration store, or runtime services.
+- The Phase 3 checkpoint records `Review-Result: PASS` after the review and the verification results above.
