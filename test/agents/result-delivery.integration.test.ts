@@ -1,23 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({
-  entries: [] as any[],
-  manager: undefined as any,
-  host: undefined as any,
-  session: undefined as any,
-  ctx: undefined as any,
-  pi: undefined as any,
-  runtime: undefined as any,
-  runAgent: vi.fn(),
-  continueAgentSession: vi.fn(),
-  now: 0,
-}));
-
-vi.mock("../../src/platform/pi/agent-session.js", () => ({
-  runAgent: state.runAgent,
-  continueAgentSession: state.continueAgentSession,
-}));
-
 import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
@@ -30,7 +12,24 @@ import {
   spawnAgent,
 } from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy, fakeExtensionRuntime } from "../fixtures.js";
-import { createTestSubagentRuntime } from "../runtime-harness.js";
+import {
+  createScriptedSessionDriver,
+  createTestSubagentRuntime,
+  type ScriptedRunOutcome,
+} from "../runtime-harness.js";
+
+const state = {
+  entries: [] as any[],
+  manager: undefined as any,
+  host: undefined as any,
+  ctx: undefined as any,
+  pi: undefined as any,
+  runtime: undefined as any,
+  // Scripted through the SessionDriver port; reassigned per test.
+  startRun: undefined as unknown as (ready: () => void) => Promise<ScriptedRunOutcome>,
+  continueRun: undefined as unknown as () => Promise<ScriptedRunOutcome>,
+  now: 0,
+};
 
 function storedPending() {
   return createPiResultRepository(state.pi, state.ctx).read();
@@ -59,22 +58,10 @@ function createHost(runtime: ExtensionRuntime) {
 describe("durable result delivery integration", () => {
   beforeEach(() => {
     state.entries.length = 0;
-    state.runAgent.mockReset();
-    state.continueAgentSession.mockReset();
-    state.session = {
-      model: { provider: "test", id: "model" },
-      isStreaming: false,
-      messages: [],
-      agent: { state: {} },
-      extensionRunner: { emit: vi.fn(async () => {}) },
-      dispose: vi.fn(),
+    state.startRun = async () => ({ responseText: "durable result" });
+    state.continueRun = async () => {
+      throw new Error("No scripted continuation.");
     };
-    state.runAgent.mockResolvedValue({
-      responseText: "durable result",
-      session: state.session,
-      aborted: false,
-      turnLimited: false,
-    });
     state.ctx = {
       isIdle: () => true,
       sessionManager: {
@@ -92,9 +79,11 @@ describe("durable result delivery integration", () => {
     };
     state.now = Date.now();
     state.manager = createTestSubagentRuntime({
-      pi: state.pi,
-      ctx: state.ctx,
       clock: { now: () => state.now },
+      sessionDriver: createScriptedSessionDriver({
+        start: (_request, ready) => state.startRun(ready),
+        continueRun: () => state.continueRun(),
+      }),
     });
     state.runtime = fakeExtensionRuntime({
       pi: state.pi,
@@ -148,10 +137,10 @@ describe("durable result delivery integration", () => {
     "invalid API key",
     "content_filter",
   ])("persists a live-session error immediately: %s", async (errorText) => {
-    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
-      await options.onSessionCreated(state.session);
+    state.startRun = async (ready) => {
+      ready();
       throw new Error(errorText);
-    });
+    };
 
     const spawned = await state.host.spawn(state.pi, state.ctx, {
       type: "reviewer",
@@ -193,11 +182,7 @@ describe("durable result delivery integration", () => {
     state.host.onParentSettled();
     expect(storedPending().pending).toHaveLength(0);
 
-    state.continueAgentSession.mockResolvedValue({
-      responseText: "continued result",
-      aborted: false,
-      turnLimited: false,
-    });
+    state.continueRun = async () => ({ responseText: "continued result" });
     await expect(state.host.interact(id, "continue")).resolves.toEqual({ accepted: true });
     record = await state.manager.waitUntilSettled(id);
 
@@ -219,11 +204,7 @@ describe("durable result delivery integration", () => {
       acceptedPolicy: acceptedRunPolicy(),
       runInBackground: false,
     });
-    state.continueAgentSession.mockResolvedValue({
-      responseText: "foreground continuation",
-      aborted: false,
-      turnLimited: false,
-    });
+    state.continueRun = async () => ({ responseText: "foreground continuation" });
 
     await expect(state.host.interact(spawned.agentId, "continue"))
       .resolves.toEqual({ accepted: true });

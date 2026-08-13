@@ -9,8 +9,6 @@ const mocks = vi.hoisted(() => {
     state.loaderOptions = [];
     state.sessions = [];
     state.entries = [];
-    state.preloadCalls = [];
-    state.skillMetaCalls = [];
     state.promptOutcomes = [];
     state.blockFirst = true;
     state.transientAttempts = 0;
@@ -103,7 +101,11 @@ const mocks = vi.hoisted(() => {
   });
 });
 
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+// Vendor seam only: session creation and resource loading are replaced, while
+// the rest of the package (skill loading, prompt formatting) stays real so
+// accepted skill lists are proven through real files on disk.
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createAgentSession: mocks.createAgentSession,
   DefaultResourceLoader: class {
     constructor(options: any) { mocks.loaderOptions.push(options); }
@@ -114,17 +116,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   loadProjectContextFiles: () => [],
   SessionManager: { inMemory: () => ({ appendCustomEntry: vi.fn() }) },
   SettingsManager: { create: () => ({}) },
-}));
-
-vi.mock("../../src/prompt/skill-loader.js", () => ({
-  preloadSkills: vi.fn((names: string[]) => {
-    mocks.preloadCalls.push([...names]);
-    return [];
-  }),
-  loadSkillMeta: vi.fn((names: string[]) => {
-    mocks.skillMetaCalls.push([...names]);
-    return [];
-  }),
 }));
 
 import { createTestSubagentRuntime } from "../runtime-harness.js";
@@ -144,7 +135,12 @@ import {
   isParentRunSuccessful,
   recordTerminalResult,
 } from "../../src/bootstrap/session-host.js";
-import { fakeExtensionRuntime, inertAgentSettings } from "../fixtures.js";
+import {
+  createFlatSkill,
+  fakeExtensionRuntime,
+  inertAgentSettings,
+  tempDirWithFiles,
+} from "../fixtures.js";
 
 // Spawn policy and routing come from the runtime record; the fakes read
 // mocks.store.agent / mocks.routing live so per-test mutation keeps working.
@@ -344,6 +340,15 @@ describe("queued invocation snapshots", () => {
   });
 
   it("deep-copies a queued custom policy while future calls use its replacement", async () => {
+    // Real skill files: which lists were accepted is proven by which skill
+    // bodies and descriptions reach the generated system prompt.
+    const skillRoot = tempDirWithFiles([], "queued-skills");
+    createFlatSkill(skillRoot.dir, "original-preload", "Original preload skill", "ORIGINAL PRELOAD SKILL BODY");
+    createFlatSkill(skillRoot.dir, "original-skill", "Original whitelist skill", "Original whitelist body.");
+    createFlatSkill(skillRoot.dir, "replacement-preload", "Replacement preload skill", "REPLACEMENT PRELOAD SKILL BODY");
+    createFlatSkill(skillRoot.dir, "replacement-skill", "Replacement whitelist skill", "Replacement whitelist body.");
+    mocks.ctx.cwd = skillRoot.dir;
+
     const config: AgentConfig = {
       name: "custom",
       description: "Custom agent",
@@ -357,59 +362,68 @@ describe("queued invocation snapshots", () => {
     registerAgents(new Map([[config.name, config]]));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
 
-    await executeAgentTool("first", params("blocker"), undefined, undefined, mocks.ctx);
-    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
-    await executeAgentTool("second", params("queued custom", undefined, true, "custom"), undefined, undefined, mocks.ctx);
+    try {
+      await executeAgentTool("first", params("blocker"), undefined, undefined, mocks.ctx);
+      await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
+      await executeAgentTool("second", params("queued custom", undefined, true, "custom"), undefined, undefined, mocks.ctx);
 
-    (config.registeredTools as string[]).push("write");
-    (config.tools as string[]).push("write");
-    (config.extensions as string[]).push("mutated-extension");
-    (config.skills as string[]).push("mutated-skill");
-    (config.preloadSkills as string[]).push("mutated-preload");
-    config.systemPrompt = "Mutated prompt.";
+      (config.registeredTools as string[]).push("write");
+      (config.tools as string[]).push("write");
+      (config.extensions as string[]).push("mutated-extension");
+      (config.skills as string[]).push("mutated-skill");
+      (config.preloadSkills as string[]).push("mutated-preload");
+      config.systemPrompt = "Mutated prompt.";
 
-    const replacement: AgentConfig = {
-      name: "custom",
-      description: "Replacement agent",
-      systemPrompt: "Replacement prompt.",
-      registeredTools: ["write"],
-      tools: ["write"],
-      extensions: ["replacement-extension"],
-      skills: ["replacement-skill"],
-      preloadSkills: ["replacement-preload"],
-    };
-    registerAgents(new Map([[replacement.name, replacement]]));
-    mocks.releaseFirst();
-    await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
+      const replacement: AgentConfig = {
+        name: "custom",
+        description: "Replacement agent",
+        systemPrompt: "Replacement prompt.",
+        registeredTools: ["write"],
+        tools: ["write"],
+        extensions: ["replacement-extension"],
+        skills: ["replacement-skill"],
+        preloadSkills: ["replacement-preload"],
+      };
+      registerAgents(new Map([[replacement.name, replacement]]));
+      mocks.releaseFirst();
+      await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 
-    const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
-    const queuedLoader = mocks.loaderOptions[1];
-    expect(queuedOptions.tools).toEqual(["read"]);
-    expect(mocks.sessions[1].getActiveToolNames()).toEqual(["read"]);
-    expect(queuedLoader.systemPromptOverride()).toContain("Original accepted prompt.");
-    expect(queuedLoader.systemPromptOverride()).not.toContain("Mutated prompt.");
-    expect(mocks.preloadCalls[0]).toEqual(["original-preload"]);
-    expect(mocks.skillMetaCalls[0]).toEqual(["original-skill"]);
-    const filtered = queuedLoader.extensionsOverride({
-      extensions: [
-        { path: "/tmp/extensions/original-extension/index.ts" },
-        { path: "/tmp/extensions/mutated-extension/index.ts" },
-      ],
-    });
-    expect(filtered.extensions.map((extension: any) => extension.path)).toEqual([
-      "/tmp/extensions/original-extension/index.ts",
-    ]);
+      const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
+      const queuedLoader = mocks.loaderOptions[1];
+      const queuedPrompt = queuedLoader.systemPromptOverride();
+      expect(queuedOptions.tools).toEqual(["read"]);
+      expect(mocks.sessions[1].getActiveToolNames()).toEqual(["read"]);
+      expect(queuedPrompt).toContain("Original accepted prompt.");
+      expect(queuedPrompt).not.toContain("Mutated prompt.");
+      expect(queuedPrompt).toContain("ORIGINAL PRELOAD SKILL BODY");
+      expect(queuedPrompt).toContain("Original whitelist skill");
+      expect(queuedPrompt).not.toContain("mutated-preload");
+      expect(queuedPrompt).not.toContain("mutated-skill");
+      const filtered = queuedLoader.extensionsOverride({
+        extensions: [
+          { path: "/tmp/extensions/original-extension/index.ts" },
+          { path: "/tmp/extensions/mutated-extension/index.ts" },
+        ],
+      });
+      expect(filtered.extensions.map((extension: any) => extension.path)).toEqual([
+        "/tmp/extensions/original-extension/index.ts",
+      ]);
 
-    await executeAgentTool("future", params("future custom", undefined, true, "custom"), undefined, undefined, mocks.ctx);
-    const future = mocks.manager.listSnapshots().find((record: any) => record.description === "future custom")!;
-    await mocks.manager.waitUntilSettled(future.id);
+      await executeAgentTool("future", params("future custom", undefined, true, "custom"), undefined, undefined, mocks.ctx);
+      const future = mocks.manager.listSnapshots().find((record: any) => record.description === "future custom")!;
+      await mocks.manager.waitUntilSettled(future.id);
 
-    expect(mocks.createAgentSession.mock.calls[2][0].tools).toEqual(["write"]);
-    expect(mocks.sessions[2].getActiveToolNames()).toEqual(["write"]);
-    expect(mocks.loaderOptions[2].systemPromptOverride()).toContain("Replacement prompt.");
-    expect(mocks.preloadCalls[1]).toEqual(["replacement-preload"]);
-    expect(mocks.skillMetaCalls[1]).toEqual(["replacement-skill"]);
-    await dispose();
+      const futurePrompt = mocks.loaderOptions[2].systemPromptOverride();
+      expect(mocks.createAgentSession.mock.calls[2][0].tools).toEqual(["write"]);
+      expect(mocks.sessions[2].getActiveToolNames()).toEqual(["write"]);
+      expect(futurePrompt).toContain("Replacement prompt.");
+      expect(futurePrompt).toContain("REPLACEMENT PRELOAD SKILL BODY");
+      expect(futurePrompt).toContain("Replacement whitelist skill");
+      expect(futurePrompt).not.toContain("ORIGINAL PRELOAD SKILL BODY");
+      await dispose();
+    } finally {
+      skillRoot.cleanup();
+    }
   });
 
   it("delivers a setup-complete provider error immediately and only once", async () => {

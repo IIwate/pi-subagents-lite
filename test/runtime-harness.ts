@@ -1,19 +1,109 @@
 import {
   createSubagentRuntime,
+  type SessionDriver,
   type SubagentRuntime,
 } from "../src/modules/subagent-runtime/public.js";
 import { createPiSessionDriver } from "../src/platform/pi/session-driver.js";
 import { createCryptoIdGenerator } from "../src/platform/process/runtime-services.js";
 
-/** Host-shaped runtime for integration tests that still drive Pi session adapters. */
+type StartRequest = Parameters<SessionDriver["start"]>[0];
+type ContinueRequest = Parameters<SessionDriver["continueRun"]>[0];
+
+/** Outcome of one scripted provider run. */
+export interface ScriptedRunOutcome {
+  responseText: string;
+  aborted?: boolean;
+  turnLimited?: boolean;
+}
+
+export interface ScriptedSessionDriverOptions {
+  /**
+   * One scripted run per start command. Call ready() to emit session-ready
+   * (the runtime marks the session live); throw afterwards to simulate a
+   * provider failure on an already-live session.
+   */
+  start: (request: StartRequest, ready: () => void) => Promise<ScriptedRunOutcome>;
+  /** Scripted continuation; tests that never interact can omit it. */
+  continueRun?: (request: ContinueRequest) => Promise<ScriptedRunOutcome>;
+}
+
+/**
+ * SessionDriver port double for delivery-focused integration tests. The
+ * provider conversation is out of scope there; what matters is that runs
+ * settle with scripted results and inspect() reports live sessions, so
+ * settled continuations stay reachable.
+ */
+export function createScriptedSessionDriver(script: ScriptedSessionDriverOptions): SessionDriver {
+  const live = new Set<string>();
+  return {
+    async start(request, emit) {
+      const ready = () => {
+        live.add(request.sessionId);
+        emit({
+          type: "session-ready",
+          agentId: request.agentId,
+          sessionId: request.sessionId,
+          modelId: request.acceptedPolicy.model.id,
+          provider: request.acceptedPolicy.model.provider,
+        });
+      };
+      const outcome = await script.start(request, ready);
+      live.add(request.sessionId);
+      emit({
+        type: "completed",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        responseText: outcome.responseText,
+        aborted: outcome.aborted ?? false,
+        turnLimited: outcome.turnLimited ?? false,
+      });
+    },
+    async continueRun(request, emit) {
+      if (!script.continueRun) {
+        emit({
+          type: "failed",
+          agentId: request.agentId,
+          sessionId: request.sessionId,
+          error: "No scripted continuation.",
+        });
+        return;
+      }
+      const outcome = await script.continueRun(request);
+      emit({
+        type: "completed",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        responseText: outcome.responseText,
+        aborted: outcome.aborted ?? false,
+        turnLimited: outcome.turnLimited ?? false,
+      });
+    },
+    async steer() {
+      return { accepted: false };
+    },
+    async abort() {},
+    async close(request) {
+      live.delete(request.sessionId);
+    },
+    inspect(request) {
+      return live.has(request.sessionId)
+        ? { found: true, live: true, streaming: false, messages: [] }
+        : { found: false, live: false, streaming: false, messages: [] };
+    },
+  };
+}
+
+/** Host-shaped runtime for integration tests. Defaults to the real Pi session driver. */
 export function createTestSubagentRuntime(options: {
-  pi: any;
-  ctx: any;
+  pi?: any;
+  ctx?: any;
+  sessionDriver?: SessionDriver;
   clock?: { now(): number };
   defaultModelLimit?: number;
 }): SubagentRuntime {
   return createSubagentRuntime({
-    sessionDriver: createPiSessionDriver({ pi: options.pi, ctx: options.ctx }),
+    sessionDriver: options.sessionDriver
+      ?? createPiSessionDriver({ pi: options.pi, ctx: options.ctx }),
     worktreeInspector: {
       async inspect(request) {
         return { ok: true, resolvedPath: request.worktreePath };

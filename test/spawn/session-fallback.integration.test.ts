@@ -1,14 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({
-  runAgent: vi.fn(),
-}));
-
-vi.mock("../../src/platform/pi/agent-session.js", () => ({
-  runAgent: state.runAgent,
-  continueAgentSession: vi.fn(),
-}));
-
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
@@ -22,7 +13,10 @@ import {
   spawnAgent,
 } from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy, fakeExtensionRuntime } from "../fixtures.js";
-import { createTestSubagentRuntime } from "../runtime-harness.js";
+import {
+  createScriptedSessionDriver,
+  createTestSubagentRuntime,
+} from "../runtime-harness.js";
 
 function createHost(ext: ExtensionRuntime) {
   const delivery = createHostDelivery(ext);
@@ -46,13 +40,14 @@ function createHost(ext: ExtensionRuntime) {
   };
 }
 
-function createSession() {
-  return {
-    model: { provider: "test", id: "model" },
-    isStreaming: false,
-    extensionRunner: { emit: vi.fn(async () => {}) },
-    dispose: vi.fn(),
-  } as any;
+/** Every run reaches a live session and settles with the scripted text. */
+function scriptedDriver(responseText: string) {
+  return createScriptedSessionDriver({
+    start: async (_request, ready) => {
+      ready();
+      return { responseText };
+    },
+  });
 }
 
 function createContext(sessionId: string, entries: any[]) {
@@ -100,11 +95,6 @@ describe("session-keyed delivery fallback", () => {
     const ctxB = createContext("session-b", entriesB);
     const piA = createPi(entriesA, true);
     const piB = createPi(entriesB);
-    const session = createSession();
-    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
-      await options.onSessionCreated(session);
-      return { responseText: "result from A", session, aborted: false, turnLimited: false };
-    });
 
     let managerA: SubagentRuntime | undefined;
     let managerB: SubagentRuntime | undefined;
@@ -112,7 +102,7 @@ describe("session-keyed delivery fallback", () => {
     let hostB: ReturnType<typeof createHost> | undefined;
     let restoredA: ReturnType<typeof createHost> | undefined;
     try {
-      managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
+      managerA = createTestSubagentRuntime({ sessionDriver: scriptedDriver("result from A") });
       const runtimeA = fakeExtensionRuntime({ pi: piA, sessionCtx: ctxA, manager: managerA });
       hostA = createHost(runtimeA);
       hostA.bind();
@@ -131,7 +121,7 @@ describe("session-keyed delivery fallback", () => {
       hostA.dispose();
       hostA = undefined;
 
-      managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
+      managerB = createTestSubagentRuntime({ sessionDriver: scriptedDriver("result from B") });
       const runtimeB = fakeExtensionRuntime({ pi: piB, sessionCtx: ctxB, manager: managerB });
       hostB = createHost(runtimeB);
       hostB.bind();
