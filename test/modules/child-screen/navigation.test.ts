@@ -68,6 +68,211 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
       },
     });
   });
+
+  it("requires Enter before changing the active Child", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    const highlighted = screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    expect(highlighted).toMatchObject({
+      ok: true,
+      snapshot: { selectedAgentId: null, highlightedAgentId: "agent-1" },
+    });
+
+    expect(screen.execute({ kind: "key", key: "enter", editorEmpty: true })).toMatchObject({
+      ok: true,
+      snapshot: { selectedAgentId: "agent-1" },
+    });
+  });
+
+  it("keeps list focus after confirmation so Up navigates without re-entering", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "enter", editorEmpty: true });
+
+    const moved = screen.execute({ kind: "key", key: "up", editorEmpty: true });
+    expect(moved).toMatchObject({
+      ok: true,
+      consume: true,
+      snapshot: {
+        selectedAgentId: "agent-1",
+        highlightedAgentId: null,
+        listFocused: true,
+      },
+    });
+  });
+
+  it("Escape cancels a highlighted candidate without switching", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+
+    const cancelled = screen.execute({ kind: "key", key: "escape", editorEmpty: true });
+    expect(cancelled).toMatchObject({
+      ok: true,
+      consume: true,
+      snapshot: { selectedAgentId: null, listFocused: false },
+    });
+  });
+
+  it("does not enter the list while the editor contains text", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+
+    expect(screen.execute({ kind: "key", key: "down", editorEmpty: false })).toMatchObject({
+      ok: true,
+      consume: false,
+      snapshot: { listFocused: false, selectedAgentId: null },
+    });
+  });
+
+  it("returns focus to the editor on printable input without consuming it", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+
+    expect(screen.execute({ kind: "key", key: "printable", editorEmpty: true })).toMatchObject({
+      ok: true,
+      consume: false,
+      snapshot: { listFocused: false },
+    });
+  });
+
+  it("switches views without mutating record lifecycle state", () => {
+    const screen = createChildScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ status: "error", error: "content was flagged" })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-1" });
+    const back = screen.execute({ kind: "select", agentId: null });
+    expect(back.ok && back.snapshot.records[0]!.status).toBe("error");
+  });
+});
+
+describe("REQ-CHILD-001 clear confirmation", () => {
+  function focusedScreen() {
+    const screen = createChildScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [
+        record({ id: "agent-11111111", description: "Inspect the project" }),
+        record({ id: "agent-22222222", description: "Second task" }),
+      ],
+    });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    return screen;
+  }
+
+  it("Ctrl+D then Enter emits a clear effect and the follow-up highlight index", () => {
+    const screen = focusedScreen();
+    const confirming = screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true });
+    expect(confirming).toMatchObject({
+      ok: true,
+      consume: true,
+      snapshot: { confirmingClearId: "agent-11111111" },
+    });
+
+    const cleared = screen.execute({ kind: "key", key: "enter", editorEmpty: true });
+    expect(cleared).toMatchObject({
+      ok: true,
+      consume: true,
+      effect: { type: "clear", agentId: "agent-11111111", index: 1 },
+    });
+
+    const moved = screen.execute({
+      kind: "replace-records",
+      records: [record({ id: "agent-22222222", description: "Second task" })],
+      highlightIndex: 1,
+    });
+    expect(moved).toMatchObject({
+      ok: true,
+      snapshot: { highlightedAgentId: "agent-22222222", confirmingClearId: null },
+    });
+  });
+
+  it("Ctrl+C cancels the confirmation and passes the key upward", () => {
+    const screen = focusedScreen();
+    screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true });
+
+    const cancelled = screen.execute({ kind: "key", key: "ctrl-c", editorEmpty: true });
+    expect(cancelled).toMatchObject({
+      ok: true,
+      consume: false,
+      snapshot: { confirmingClearId: null },
+    });
+  });
+
+  it("consumes unrelated keys while the confirmation is open", () => {
+    const screen = focusedScreen();
+    screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true });
+
+    expect(screen.execute({ kind: "key", key: "down", editorEmpty: true })).toMatchObject({
+      ok: true,
+      consume: true,
+      snapshot: { confirmingClearId: "agent-11111111", highlightedAgentId: "agent-11111111" },
+    });
+  });
+
+  it("refuses to clear the active Child before returning to Main", () => {
+    const screen = focusedScreen();
+    screen.execute({ kind: "key", key: "enter", editorEmpty: true });
+
+    expect(screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true })).toMatchObject({
+      ok: true,
+      consume: true,
+      notify: {
+        message: "Cannot clear the active subagent — switch to Main first",
+        level: "warning",
+      },
+    });
+  });
+});
+
+describe("REQ-CHILD-004 interaction requests", () => {
+  it("issues increasing request ids only for the selected Child", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "select", agentId: "agent-1" });
+
+    const begun = screen.execute({ kind: "begin-interaction", agentId: "agent-1" });
+    expect(begun.ok && begun.interactionRequestId).toBeGreaterThan(0);
+    expect(begun.ok && begun.snapshot.interactionRequestId).toBe(
+      begun.ok ? begun.interactionRequestId : undefined,
+    );
+
+    const mismatched = screen.execute({ kind: "begin-interaction", agentId: "agent-other" });
+    expect(mismatched.ok && mismatched.interactionRequestId).toBe(-1);
+  });
+
+  it("invalidates in-flight interactions when the selection changes", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "select", agentId: "agent-1" });
+    const begun = screen.execute({ kind: "begin-interaction", agentId: "agent-1" });
+    const requestId = begun.ok ? begun.interactionRequestId : -1;
+
+    const back = screen.execute({ kind: "select", agentId: null });
+    expect(back.ok && back.snapshot.interactionRequestId).not.toBe(requestId);
+  });
+
+  it("stores and clears the interaction notice with the selection", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "select", agentId: "agent-1" });
+    screen.execute({ kind: "set-interaction-notice", notice: "Blocked: selected subagent is queued" });
+    const inspected = screen.execute({ kind: "inspect" });
+    expect(inspected.ok && inspected.snapshot.interactionNotice).toBe(
+      "Blocked: selected subagent is queued",
+    );
+
+    const cleared = screen.execute({ kind: "select", agentId: null });
+    expect(cleared.ok && cleared.snapshot.interactionNotice).toBeUndefined();
+  });
 });
 
 describe("REQ-CHILD-002 expanded and folded presentation", () => {
@@ -93,6 +298,27 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
     expect(projected.ok && projected.snapshot.listLines?.map(lineText).some((text) =>
       text.includes("● Main") && text.includes("1 running") && text.includes("Alt+A collapse"),
     )).toBe(true);
+  });
+
+  it("preserves the collapsed choice while the record list is empty", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "toggle-fold" });
+
+    const emptied = screen.execute({ kind: "replace-records", records: [] });
+    expect(emptied).toMatchObject({
+      ok: true,
+      snapshot: { listExpanded: false, visible: false },
+    });
+
+    const refilled = screen.execute({
+      kind: "replace-records",
+      records: [record({ id: "agent-next" })],
+    });
+    expect(refilled).toMatchObject({
+      ok: true,
+      snapshot: { listExpanded: false, visible: true },
+    });
   });
 
   it("toggles fold only while records or pending results exist", () => {

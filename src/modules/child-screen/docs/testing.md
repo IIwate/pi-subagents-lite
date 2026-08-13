@@ -4,6 +4,14 @@
 
 Test navigation commands and snapshots without Pi TUI. Test Pi behavior separately through a small renderer contract suite.
 
+## Suite ownership
+
+- `test/modules/child-screen/navigation.test.ts` — command decisions: selection, folding, key handling, clear confirmation, interaction request identity.
+- `test/modules/child-screen/projection.test.ts` — list, footer status, and transcript snapshots with literal expectations.
+- `test/platform/tui/layout.test.ts` — pure layout contracts: validation, swap, restoration, and child footer rendering.
+- `test/platform/tui/child-screen-host.test.ts` — `ChildScreenHost` renderer contract: widget/status wiring, screen swap, footer preservation, fail-closed layouts, timers, editor interception.
+- `test/platform/tui/paint.test.ts` — color-role to theme translation.
+
 ## Required scenarios
 
 - Main/Child selection and return.
@@ -13,4 +21,4 @@ Test navigation commands and snapshots without Pi TUI. Test Pi behavior separate
 
 ## Fixtures and doubles
 
-Use literal serialized snapshots and deterministic runtime events. Mock only the renderer port in application tests; do not mock navigator internals.
+Use literal serialized snapshots and deterministic runtime events. Renderer contract tests build on the verified Pi 0.84 layout fixtures in `test/platform/tui/fixtures.ts`; do not mock navigator internals or Pi packages.
