@@ -7,7 +7,6 @@ import type { RootSummaries, SettingsRow } from "../contracts/settings-contracts
  */
 export const LEGACY_CATEGORY_IDS: readonly string[] = [
   "model-access",
-  "debug",
 ];
 
 export function buildRootRows(summaries: RootSummaries): SettingsRow[] {

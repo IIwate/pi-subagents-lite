@@ -12,6 +12,15 @@ import {
   parseLimitRowId,
 } from "../core/concurrency-page.js";
 import {
+  buildDebugRows,
+  faultForRow,
+  formatAgentTypesReport,
+  formatDiagnosticsReport,
+  previewForRow,
+  previewLabel,
+  previewNotice,
+} from "../core/debug-page.js";
+import {
   buildDisplayRows,
   displayChangeNotice,
   displayToggleDefinition,
@@ -28,6 +37,7 @@ import {
   SYSTEM_PROMPT_MODES,
 } from "../core/system-prompt-page.js";
 import type { ConcurrencySettingsOwner } from "../ports/concurrency-settings-owner.js";
+import type { DebugSettingsOwner } from "../ports/debug-settings-owner.js";
 import type { DisplaySettingsOwner } from "../ports/display-settings-owner.js";
 import type { PromptSettingsOwner } from "../ports/prompt-settings-owner.js";
 import type { SettingsSummaryReader } from "../ports/settings-summary-reader.js";
@@ -39,13 +49,14 @@ export interface CreateSettingsOptions {
   spawn: SpawnSettingsOwner;
   prompt: PromptSettingsOwner;
   concurrency: ConcurrencySettingsOwner;
+  debug: DebugSettingsOwner;
 }
 
 export interface Settings {
   execute(command: unknown): SettingsResult;
 }
 
-type PageId = "root" | "display" | "spawn-options" | "system-prompt" | "concurrency";
+type PageId = "root" | "display" | "spawn-options" | "system-prompt" | "concurrency" | "debug";
 
 type SettingsFailureCode = "invalid-command" | "unknown-row" | "invalid-value";
 
@@ -85,6 +96,13 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       title: "Concurrency",
       presentation: "form",
       rows: buildConcurrencyRows(options.concurrency.read()),
+      ...(notice ? { notice } : {}),
+    }),
+    "debug": (notice) => ({
+      page: "debug",
+      title: "Debug",
+      presentation: "form",
+      rows: buildDebugRows(options.debug.read()),
       ...(notice ? { notice } : {}),
     }),
   };
@@ -187,6 +205,58 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     return failure("unknown-row", `Page concurrency has no editable row ${id}.`);
   };
 
+  const setDebugValue = (id: string): SettingsResult => {
+    // Debug operations are session-local, never persisted (REQ-RUNTIME-007).
+    // Owner failures mean the runtime or child screen is unavailable in this
+    // session; the frozen menu behavior reports that as an informational
+    // notice, not a save error.
+    const unavailable = (message: string): SettingsResult =>
+      ({ ok: true, snapshot: snapshots.debug({ severity: "info", message }) });
+
+    if (id === "agentTypes") {
+      return {
+        ok: true,
+        snapshot: snapshots.debug({
+          severity: "info",
+          message: formatAgentTypesReport(options.debug.agentTypes()),
+        }),
+      };
+    }
+    if (id === "runtimeDiagnostics") {
+      const result = options.debug.diagnostics();
+      if (!result.ok) return unavailable(result.message);
+      return {
+        ok: true,
+        snapshot: snapshots.debug({
+          severity: "info",
+          message: formatDiagnosticsReport(result.diagnostics),
+        }),
+      };
+    }
+    const preview = previewForRow(id);
+    if (preview !== undefined) {
+      const result = options.debug.setStatusPreview(preview);
+      if (!result.ok) return unavailable(result.message);
+      return {
+        ok: true,
+        snapshot: snapshots.debug({ severity: "info", message: previewNotice(preview, previewLabel(id)) }),
+      };
+    }
+    const fault = faultForRow(id);
+    if (fault !== undefined) {
+      const result = options.debug.armFault(fault);
+      if (!result.ok) return unavailable(result.message);
+      return {
+        ok: true,
+        snapshot: snapshots.debug({
+          severity: "info",
+          message: fault ? `Armed ${fault} for the next agent` : "Cleared armed fault",
+        }),
+      };
+    }
+    return failure("unknown-row", `Page debug has no editable row ${id}.`);
+  };
+
   /** Keyed override rows: shared by in-place edits, removals, and additions. */
   const applyLimitUpdate = (
     command:
@@ -254,6 +324,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
             || command.id === "spawn-options"
             || command.id === "system-prompt"
             || command.id === "concurrency"
+            || command.id === "debug"
           ) {
             page = command.id;
             return { ok: true, snapshot: snapshots[page]() };
@@ -273,6 +344,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
             case "spawn-options": return setSpawnValue(command.id, command.value);
             case "system-prompt": return setSystemPromptValue(command.id, command.value);
             case "concurrency": return setConcurrencyValue(command.id, command.value);
+            case "debug": return setDebugValue(command.id);
             default: return failure("unknown-row", `Page ${page} has no editable row ${command.id}.`);
           }
         }

@@ -4,6 +4,11 @@ import {
   type ConcurrencyLimitUpdate,
   type ConcurrencySettingsOwner,
   type ConcurrencySettingsView,
+  type DebugAgentType,
+  type DebugDiagnosticsView,
+  type DebugFault,
+  type DebugSettingsOwner,
+  type DebugStatusPreview,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
   type PromptSettingsOwner,
@@ -19,6 +24,9 @@ interface HarnessOptions {
   spawn?: Partial<SpawnSettingsView>;
   prompt?: Partial<PromptSettingsView>;
   concurrency?: Partial<ConcurrencySettingsView>;
+  debugTypes?: DebugAgentType[];
+  debugDiagnostics?: DebugDiagnosticsView;
+  debugUnavailableWith?: string;
   failUpdatesWith?: string;
 }
 
@@ -118,12 +126,35 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true };
     },
   };
+  const debugState = {
+    armedFault: undefined as DebugFault | undefined,
+    previews: [] as Array<DebugStatusPreview | null>,
+  };
+  const debug: DebugSettingsOwner = {
+    read: () => (debugState.armedFault ? { armedFault: debugState.armedFault } : {}),
+    agentTypes: () => structuredClone(options.debugTypes ?? []),
+    diagnostics() {
+      if (options.debugUnavailableWith) return { ok: false, message: options.debugUnavailableWith };
+      return { ok: true, diagnostics: structuredClone(options.debugDiagnostics ?? { agents: [] }) };
+    },
+    setStatusPreview(preview) {
+      if (options.debugUnavailableWith) return { ok: false, message: options.debugUnavailableWith };
+      debugState.previews.push(preview);
+      return { ok: true };
+    },
+    armFault(fault) {
+      if (options.debugUnavailableWith) return { ok: false, message: options.debugUnavailableWith };
+      debugState.armedFault = fault ?? undefined;
+      return { ok: true };
+    },
+  };
   const settings = createSettings({
     summaries: { read: () => ({ ...summaries }) },
     display,
     spawn,
     prompt,
     concurrency,
+    debug,
   });
   return {
     settings,
@@ -132,6 +163,7 @@ function harness(options: HarnessOptions = {}) {
     spawnView,
     promptView,
     concurrencyView,
+    debugState,
     updates,
     spawnUpdates,
     promptUpdates,
@@ -185,8 +217,8 @@ describe("REQ-SETTINGS-001 settings root workflow", () => {
   it("delegates an un-migrated category to its legacy menu and stays on the root", () => {
     const { settings } = harness();
     settings.execute({ kind: "open" });
-    const result = expectOk(settings.execute({ kind: "select", id: "debug" }));
-    expect(result.effect).toEqual({ kind: "open-legacy-category", category: "debug" });
+    const result = expectOk(settings.execute({ kind: "select", id: "model-access" }));
+    expect(result.effect).toEqual({ kind: "open-legacy-category", category: "model-access" });
     expect(result.snapshot.page).toBe("root");
   });
 
@@ -532,6 +564,129 @@ describe("REQ-SETTINGS-005 concurrency page", () => {
     });
     expect(result.snapshot.rows.find((row) => row.id === "provider:anthropic")!.value).toBe("2 slots");
     expect(concurrencyView.providerLimits.anthropic).toBe(2);
+  });
+});
+
+describe("REQ-RUNTIME-007 debug page", () => {
+  it("renders reports, previews, and fault rows with the armed fault marked", () => {
+    const { settings } = harness();
+    settings.execute({ kind: "open" });
+    const opened = expectOk(settings.execute({ kind: "select", id: "debug" }));
+    expect(opened.snapshot.page).toBe("debug");
+    expect(opened.snapshot.presentation).toBe("form");
+    expect(opened.snapshot.rows.map((row) => row.id)).toEqual([
+      "agentTypes",
+      "runtimeDiagnostics",
+      "preview-clear",
+      "preview-queued",
+      "preview-running",
+      "preview-done",
+      "preview-turn-limit",
+      "preview-aborted",
+      "preview-stopped",
+      "preview-error",
+      "arm-blocked",
+      "arm-provider",
+      "arm-clear",
+    ]);
+
+    const armed = expectOk(settings.execute({ kind: "set-value", id: "arm-blocked", value: "Arm" }));
+    expect(armed.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Armed output_blocked for the next agent",
+    });
+    expect(armed.snapshot.rows.find((row) => row.id === "arm-blocked")!.label).toBe("Arm: blocked (armed)");
+    expect(armed.snapshot.rows.find((row) => row.id === "arm-provider")!.label).toBe("Arm: provider error");
+
+    const cleared = expectOk(settings.execute({ kind: "set-value", id: "arm-clear", value: "Clear" }));
+    expect(cleared.snapshot.notice).toEqual({ severity: "info", message: "Cleared armed fault" });
+    expect(cleared.snapshot.rows.find((row) => row.id === "arm-blocked")!.label).toBe("Arm: blocked");
+  });
+
+  it("formats the agent types report from the owner's structured catalogue", () => {
+    const { settings } = harness({
+      debugTypes: [
+        { name: "general-purpose", description: "General agent", hidden: false },
+        { name: "reviewer", description: "Reads diffs", tools: ["Grep", "Read"], source: "user", hidden: true },
+      ],
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    const result = expectOk(settings.execute({ kind: "set-value", id: "agentTypes", value: "Show" }));
+    const report = result.snapshot.notice!.message;
+    expect(result.snapshot.notice!.severity).toBe("info");
+    expect(report).toContain("Available agent types:");
+    expect(report).toContain("  general-purpose\n    General agent\n  Tools: all built-in tools");
+    expect(report).toContain("  reviewer [HIDDEN]\n    Reads diffs\n  Tools: Grep, Read\n  Source: user");
+  });
+
+  it("reports an empty catalogue without pretending types exist", () => {
+    const { settings } = harness({ debugTypes: [] });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    const result = expectOk(settings.execute({ kind: "set-value", id: "agentTypes", value: "Show" }));
+    expect(result.snapshot.notice).toEqual({ severity: "info", message: "No agent types available" });
+  });
+
+  it("formats runtime diagnostics with armed fault, per-agent state, and the empty case", () => {
+    const { settings } = harness({
+      debugDiagnostics: {
+        armedFault: "provider_error",
+        agents: [{
+          id: "0123456789abcdef",
+          type: "Explore",
+          status: "running",
+          session: "live",
+          settled: false,
+          resultPersisted: false,
+          resultConsumed: false,
+          debugFaultKind: "provider_error",
+          error: "boom",
+        }],
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    const result = expectOk(settings.execute({ kind: "set-value", id: "runtimeDiagnostics", value: "Show" }));
+    const report = result.snapshot.notice!.message;
+    expect(report).toContain("Armed fault: provider_error · next started Agent");
+    expect(report).toContain("01234567 (Explore) running");
+    expect(report).toContain("  Session: live · Settled: no · Persisted: no · Consumed: no");
+    expect(report).toContain("  Debug fault: provider_error");
+    expect(report).toContain("  Error: boom");
+
+    const empty = expectOk(settings.execute({ kind: "set-value", id: "agentTypes", value: "Show" }));
+    expect(empty.snapshot.notice!.message).toBe("No agent types available");
+  });
+
+  it("applies and clears the UI-only status preview through the owner", () => {
+    const { settings, debugState } = harness();
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    const applied = expectOk(settings.execute({ kind: "set-value", id: "preview-turn-limit", value: "Apply" }));
+    expect(applied.snapshot.notice).toEqual({ severity: "info", message: "Status preview set to Turn limit" });
+    const cleared = expectOk(settings.execute({ kind: "set-value", id: "preview-clear", value: "Apply" }));
+    expect(cleared.snapshot.notice).toEqual({ severity: "info", message: "Status preview cleared" });
+    expect(debugState.previews).toEqual(["turn_limited", null]);
+  });
+
+  it("reports session unavailability as an informational notice, not a save failure", () => {
+    const { settings, debugState } = harness({
+      debugUnavailableWith: "Agent manager is not available in this session",
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    for (const id of ["runtimeDiagnostics", "preview-queued", "arm-blocked"]) {
+      const result = expectOk(settings.execute({ kind: "set-value", id, value: "x" }));
+      expect(result.snapshot.notice).toEqual({
+        severity: "info",
+        message: "Agent manager is not available in this session",
+      });
+    }
+    expect(debugState.previews).toEqual([]);
+
+    const unknown = settings.execute({ kind: "set-value", id: "nonexistent", value: "x" });
+    expect(unknown).toMatchObject({ ok: false, error: { code: "unknown-row" } });
   });
 });
 

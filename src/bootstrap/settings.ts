@@ -2,6 +2,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   createSettings,
   type ConcurrencySettingsOwner,
+  type DebugSettingsOwner,
   type DisplaySettingsOwner,
   type PromptSettingsOwner,
   type SettingsSummaryReader,
@@ -17,10 +18,9 @@ import {
 } from "../platform/fs/prompt-files.js";
 import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
-import { getManager, getStore } from "../shell.js";
-import { getAllTypes, setDefaultAgentsDisabled } from "../agents/agent-types.js";
+import { getManager, getNavigator, getStore } from "../shell.js";
+import { getAgentConfig, getAllTypes, setDefaultAgentsDisabled } from "../agents/agent-types.js";
 import { showModelRoutingMenu } from "../ui/menu/menu-model-routing.js";
-import { showDebugMenu } from "../ui/menu/menu-debug.js";
 
 // Transitional owner adapters over ConfigStore. Each settings slice replaces
 // one adapter with the true policy-owning capability; the getStore() reads
@@ -139,6 +139,65 @@ function createConcurrencyOwner(ctx: ExtensionCommandContext): ConcurrencySettin
   };
 }
 
+const RUNTIME_UNAVAILABLE = "Agent manager is not available in this session";
+const CHILD_SCREEN_UNAVAILABLE = "Agent list is not available in this session";
+
+function createDebugOwner(): DebugSettingsOwner {
+  return {
+    read() {
+      const armedFault = getManager()?.debugDiagnostics().armedFault?.kind;
+      return armedFault ? { armedFault } : {};
+    },
+    agentTypes() {
+      return getAllTypes().flatMap((name) => {
+        const config = getAgentConfig(name);
+        if (!config) return [];
+        return [{
+          name,
+          description: config.description,
+          ...(config.registeredTools ? { tools: [...config.registeredTools] } : {}),
+          ...(config.source ? { source: config.source } : {}),
+          hidden: config.hidden === true,
+        }];
+      });
+    },
+    diagnostics() {
+      const manager = getManager();
+      if (!manager) return { ok: false, message: RUNTIME_UNAVAILABLE };
+      const diagnostics = manager.debugDiagnostics();
+      return {
+        ok: true,
+        diagnostics: {
+          ...(diagnostics.armedFault ? { armedFault: diagnostics.armedFault.kind } : {}),
+          agents: diagnostics.agents.map((agent) => ({
+            id: agent.id,
+            type: agent.type,
+            status: agent.status,
+            session: agent.session,
+            settled: agent.settled,
+            resultPersisted: agent.resultPersisted,
+            resultConsumed: agent.resultConsumed,
+            ...(agent.debugFaultKind ? { debugFaultKind: agent.debugFaultKind } : {}),
+            ...(agent.error !== undefined ? { error: agent.error } : {}),
+          })),
+        },
+      };
+    },
+    setStatusPreview(preview) {
+      const navigator = getNavigator();
+      if (!navigator) return { ok: false, message: CHILD_SCREEN_UNAVAILABLE };
+      navigator.setDebugStatusPreview(preview ?? undefined);
+      return { ok: true };
+    },
+    armFault(fault) {
+      const manager = getManager();
+      if (!manager) return { ok: false, message: RUNTIME_UNAVAILABLE };
+      void manager.execute(fault ? { kind: "arm-debug-fault", fault } : { kind: "clear-debug-fault" });
+      return { ok: true };
+    },
+  };
+}
+
 function createSummaryReader(): SettingsSummaryReader {
   return {
     read() {
@@ -152,7 +211,6 @@ function createSummaryReader(): SettingsSummaryReader {
 
 const legacyCategoryMenus: Readonly<Record<string, (ctx: ExtensionCommandContext) => Promise<void>>> = {
   "model-access": showModelRoutingMenu,
-  "debug": showDebugMenu,
 };
 
 /** `/agents` entry point: the settings workflow rendered through the Pi host. */
@@ -163,6 +221,7 @@ export async function showAgentsMenu(ctx: ExtensionCommandContext): Promise<void
     spawn: createSpawnOwner(),
     prompt: createPromptOwner(),
     concurrency: createConcurrencyOwner(ctx),
+    debug: createDebugOwner(),
   });
   await runSettingsScreen(ctx, settings, {
     openLegacyCategory: async (category) => {

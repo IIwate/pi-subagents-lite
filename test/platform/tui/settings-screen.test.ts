@@ -13,6 +13,7 @@ import {
   createSettings,
   type ConcurrencySettingsOwner,
   type ConcurrencySettingsView,
+  type DebugSettingsOwner,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
   type PromptSettingsOwner,
@@ -100,12 +101,20 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
       return { ok: true };
     },
   };
+  const debug: DebugSettingsOwner = {
+    read: () => ({}),
+    agentTypes: () => [{ name: "general-purpose", description: "General agent", hidden: false }],
+    diagnostics: () => ({ ok: true, diagnostics: { agents: [] } }),
+    setStatusPreview: () => ({ ok: true }),
+    armFault: () => ({ ok: true }),
+  };
   return createSettings({
     summaries: { read: () => ({ modelAccessEnabled: false, concurrencyDefault: 4 }) },
     display,
     spawn,
     prompt,
     concurrency,
+    debug,
   });
 }
 
@@ -379,16 +388,40 @@ describe("settings screen renderer contract", () => {
     const openLegacyCategory = vi.fn(async () => {});
     const { ctx, renders } = createScriptedCtx([
       (component) => {
-        // "Debug" is the last row; \x1b[A wraps upward to it.
-        component.handleInput("\x1b[A");
+        // "Model access" is the first row and the last remaining legacy menu.
         component.handleInput("\r");
       },
       (component) => component.handleInput("\x1b"),
     ]);
     await runSettingsScreen(ctx, createRealSettings(), { openLegacyCategory });
 
-    expect(openLegacyCategory).toHaveBeenCalledExactlyOnceWith("debug");
+    expect(openLegacyCategory).toHaveBeenCalledExactlyOnceWith("model-access");
     expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
     expect(renders[1]).toContain("Agents");
+  });
+
+  it("fires a debug report action and shows the formatted report", async () => {
+    const { ctx, renders, notifications } = createScriptedCtx([
+      (component) => {
+        // "Debug" is the last row; \x1b[A wraps upward to it.
+        component.handleInput("\x1b[A");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\r"); // "Agent types" action row
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings(), noLegacy);
+
+    expect(renders[1]).toContain("Debug");
+    expect(renders[1]).toContain("Runtime diagnostics");
+    // The list shows 10 rows at a time; fault rows sit below the fold.
+    expect(renders[1]).toContain("Preview: Queued");
+    expect(notifications).toHaveBeenCalledWith(
+      expect.stringContaining("Available agent types:"),
+      "info",
+    );
   });
 });

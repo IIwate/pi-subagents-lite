@@ -12,6 +12,7 @@
 - `DisplayToggleId`, `DisplaySettingsView`, `SettingsUpdateResult`, and `RootSummaries` define the owner-facing fragment boundaries.
 - `SpawnSettingsView`/`SpawnSettingUpdate` and `PromptSettingsView`/`PromptSettingUpdate` (with `SystemPromptMode`) define the spawn-options and system-prompt fragment boundaries.
 - `ConcurrencySettingsView`/`ConcurrencyLimitUpdate` define the concurrency boundary: saved overrides plus the active provider/model inventory computed by the owner.
+- `DebugSettingsView`, `DebugAgentType`, `DebugDiagnosticsView`, `DebugFault`, and `DebugStatusPreview` define the debug boundary; the page formats reports from this structured JSON so owners never emit display text.
 
 Pages added by later slices extend these schemas rather than bypassing them.
 
@@ -21,6 +22,7 @@ Pages added by later slices extend these schemas rather than bypassing them.
 - `SpawnSettingsOwner` reads and commits the spawn fragment (force background, grace turns, default-agent availability); owner-side effects such as the agent registry flag run only after a successful commit.
 - `PromptSettingsOwner` reads and commits the prompt fragment and owns the custom prompt file lifecycle (`createCustomPromptFile`); the file path and existence come from the owner so settings never touches the filesystem.
 - `ConcurrencySettingsOwner` reads the concurrency view and commits limit updates; the fragment's shape and runtime effect belong to the subagent-runtime module, and the live scheduler is republished only after a successful commit.
+- `DebugSettingsOwner` supplies the agent-type catalogue and runtime diagnostics as structured JSON and applies the session-local status preview and one-shot fault (REQ-RUNTIME-007); owner failures mean session unavailability, reported as informational notices rather than save errors.
 - `SettingsSummaryReader` provides live root-page summaries.
 
 The configuration document repository is reached only through the owner of the setting; the Pi renderer consumes snapshots through `platform/pi/tui/settings-screen.ts`.

@@ -1,6 +1,12 @@
 export {
   ConcurrencyLimitUpdateSchema,
   ConcurrencySettingsViewSchema,
+  DebugAgentTypeSchema,
+  DebugDiagnosticsViewSchema,
+  DebugFaultSchema,
+  DebugRuntimeAgentSchema,
+  DebugSettingsViewSchema,
+  DebugStatusPreviewSchema,
   DisplaySettingsViewSchema,
   DisplayToggleIdSchema,
   PromptSettingUpdateSchema,
@@ -20,6 +26,12 @@ export {
 export type {
   ConcurrencyLimitUpdate,
   ConcurrencySettingsView,
+  DebugAgentType,
+  DebugDiagnosticsView,
+  DebugFault,
+  DebugRuntimeAgent,
+  DebugSettingsView,
+  DebugStatusPreview,
   DisplaySettingsView,
   DisplayToggleId,
   PromptSettingUpdate,
@@ -37,6 +49,7 @@ export type {
   SystemPromptMode,
 } from "./contracts/settings-contracts.js";
 export type { ConcurrencySettingsOwner } from "./ports/concurrency-settings-owner.js";
+export type { DebugSettingsOwner } from "./ports/debug-settings-owner.js";
 export type { DisplaySettingsOwner } from "./ports/display-settings-owner.js";
 export type { PromptSettingsOwner } from "./ports/prompt-settings-owner.js";
 export type { SettingsSummaryReader } from "./ports/settings-summary-reader.js";

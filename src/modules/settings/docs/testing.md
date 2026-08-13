@@ -13,6 +13,7 @@ Test settings navigation, snapshots, delegation, and action results through `set
 - Inactive-limit management and future-call-only effect boundaries.
 - Numeric input validation (digits-only, minimum bound) rejecting host garbage before the owner is called.
 - Conditional actions (create prompt file) appearing only while actionable and reporting explicit failure.
+- Debug reports formatted from structured owner JSON, armed-fault row marking, and session unavailability surfacing as informational notices.
 
 ## Fixtures and doubles
 

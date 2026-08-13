@@ -212,6 +212,56 @@ export const ConcurrencyLimitUpdateSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+// ── Debug page boundary ───────────────────────────────────────────
+// The one-shot fault stays UI-only and unpersisted (REQ-RUNTIME-007); the
+// page only arms/clears it and mirrors runtime-reported provenance.
+
+export const DebugFaultSchema = Type.Union([
+  Type.Literal("output_blocked"),
+  Type.Literal("provider_error"),
+]);
+
+// UI-only lifecycle presentation override for the child screen list.
+export const DebugStatusPreviewSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("running"),
+  Type.Literal("completed"),
+  Type.Literal("turn_limited"),
+  Type.Literal("aborted"),
+  Type.Literal("stopped"),
+  Type.Literal("error"),
+]);
+
+export const DebugAgentTypeSchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  description: Type.String(),
+  // Absent means the type may use all built-in tools.
+  tools: Type.Optional(Type.Array(Type.String())),
+  source: Type.Optional(Type.String()),
+  hidden: Type.Boolean(),
+}, { additionalProperties: false });
+
+export const DebugRuntimeAgentSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  type: Type.String(),
+  status: Type.String(),
+  session: Type.Union([Type.Literal("live"), Type.Literal("none")]),
+  settled: Type.Boolean(),
+  resultPersisted: Type.Boolean(),
+  resultConsumed: Type.Boolean(),
+  debugFaultKind: Type.Optional(DebugFaultSchema),
+  error: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+
+export const DebugDiagnosticsViewSchema = Type.Object({
+  armedFault: Type.Optional(DebugFaultSchema),
+  agents: Type.Array(DebugRuntimeAgentSchema),
+}, { additionalProperties: false });
+
+export const DebugSettingsViewSchema = Type.Object({
+  armedFault: Type.Optional(DebugFaultSchema),
+}, { additionalProperties: false });
+
 export type SettingsRow = Static<typeof SettingsRowSchema>;
 export type SettingsNotice = Static<typeof SettingsNoticeSchema>;
 export type SettingsSnapshot = Static<typeof SettingsSnapshotSchema>;
@@ -229,3 +279,9 @@ export type PromptSettingsView = Static<typeof PromptSettingsViewSchema>;
 export type PromptSettingUpdate = Static<typeof PromptSettingUpdateSchema>;
 export type ConcurrencySettingsView = Static<typeof ConcurrencySettingsViewSchema>;
 export type ConcurrencyLimitUpdate = Static<typeof ConcurrencyLimitUpdateSchema>;
+export type DebugFault = Static<typeof DebugFaultSchema>;
+export type DebugStatusPreview = Static<typeof DebugStatusPreviewSchema>;
+export type DebugAgentType = Static<typeof DebugAgentTypeSchema>;
+export type DebugRuntimeAgent = Static<typeof DebugRuntimeAgentSchema>;
+export type DebugDiagnosticsView = Static<typeof DebugDiagnosticsViewSchema>;
+export type DebugSettingsView = Static<typeof DebugSettingsViewSchema>;
