@@ -25,6 +25,13 @@ export {
   applyQuickAgentProviderAccess,
 } from "./application/update-provider-access.js";
 export {
+  applyCleanUnavailableModels,
+  applyClearModelAccess,
+  applyDeleteProviderRules,
+  applyResetThinkingAccess,
+  applyThinkingAccess,
+} from "./application/update-thinking-and-cleanup.js";
+export {
   agentTypesForProvider,
   effectiveAlternateModelKeys,
   resolveThinkingAccess,

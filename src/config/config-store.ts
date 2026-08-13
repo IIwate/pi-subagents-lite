@@ -16,19 +16,19 @@
 import type { AgentNavigator } from "../ui/agent-navigator.js";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
-import { CANONICAL_THINKING_LEVELS } from "./types.js";
 import {
   applyAgentProviderAccess,
+  applyCleanUnavailableModels,
+  applyClearModelAccess,
+  applyDeleteProviderRules,
   applyParentModelAccess,
   applyQuickAgentProviderAccess,
+  applyResetThinkingAccess,
+  applyThinkingAccess,
 } from "../modules/model-access/public.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
-
-function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
-  return Object.hasOwn(record, key) ? record[key] : undefined;
-}
 
 function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
@@ -212,63 +212,27 @@ export class ConfigStore {
         allowed: readonly ThinkingLevel[],
         defaultLevel: ThinkingLevel,
       ): void => {
-        const typeKey = type.trim();
-        const key = modelKey.trim();
-        const slash = key.indexOf("/");
-        const validLevels = new Set<string>(CANONICAL_THINKING_LEVELS);
-        const normalized = [...new Set(allowed.filter((level) => validLevels.has(level)))];
-        if (!typeKey || slash <= 0 || slash === key.length - 1 || normalized.length === 0 || !normalized.includes(defaultLevel)) return;
-        const access = ownValue(this.config.modelRouting.agentAccess, typeKey) ?? { providers: {} };
-        if (!Object.hasOwn(this.config.modelRouting.agentAccess, typeKey)) {
-          setOwn(this.config.modelRouting.agentAccess, typeKey, access);
-        }
-        const thinking = access.thinking ?? {};
-        if (!access.thinking) access.thinking = thinking;
-        setOwn(thinking, key, { allowed: normalized, default: defaultLevel });
+        const next = applyThinkingAccess(this.config.modelRouting, type, modelKey, allowed, defaultLevel);
+        if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
+        this.config.modelRouting = next;
         this.persist();
       },
       resetThinkingAccess: (type: string, modelKey: string): void => {
-        const typeKey = type.trim();
-        const key = modelKey.trim();
-        const access = ownValue(this.config.modelRouting.agentAccess, typeKey);
-        if (!access?.thinking || !Object.hasOwn(access.thinking, key)) return;
-        delete access.thinking[key];
-        if (Object.keys(access.thinking).length === 0) delete access.thinking;
-        this.pruneAgentAccess(typeKey);
+        const next = applyResetThinkingAccess(this.config.modelRouting, type, modelKey);
+        if (JSON.stringify(next) === JSON.stringify(this.config.modelRouting)) return;
+        this.config.modelRouting = next;
         this.persist();
       },
-      /** Remove one provider's access and Thinking policy from every agent type. */
       deleteProviderRules: (provider: string): void => {
-        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
-          const access = this.config.modelRouting.agentAccess[type];
-          delete access.providers[provider];
-          for (const key of Object.keys(access.thinking ?? {})) {
-            if (key.startsWith(`${provider}/`)) delete access.thinking![key];
-          }
-          if (access.thinking && Object.keys(access.thinking).length === 0) delete access.thinking;
-          this.pruneAgentAccess(type);
-        }
+        this.config.modelRouting = applyDeleteProviderRules(this.config.modelRouting, provider);
         this.persist();
       },
-      /** Remove exact unavailable IDs only; all-model rules and unrelated Thinking overrides are untouched. */
       cleanUnavailableModels: (provider: string, modelIds: readonly string[]): void => {
-        const stale = new Set(modelIds);
-        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
-          const access = this.config.modelRouting.agentAccess[type];
-          const rule = ownValue(access.providers, provider);
-          if (!rule?.models) continue;
-          const removed = rule.models.filter((modelId) => stale.has(modelId));
-          if (removed.length === 0) continue;
-          rule.models = rule.models.filter((modelId) => !stale.has(modelId));
-          if (rule.models.length === 0) delete access.providers[provider];
-          for (const modelId of removed) delete access.thinking?.[`${provider}/${modelId}`];
-          if (access.thinking && Object.keys(access.thinking).length === 0) delete access.thinking;
-          this.pruneAgentAccess(type);
-        }
+        this.config.modelRouting = applyCleanUnavailableModels(this.config.modelRouting, provider, modelIds);
         this.persist();
       },
       clearAll: (): void => {
-        this.config.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
+        this.config.modelRouting = applyClearModelAccess();
         this.persist();
       },
     },
@@ -376,18 +340,6 @@ export class ConfigStore {
 
   private persist(): void {
     this.io.save(this.config);
-  }
-
-  private pruneAgentAccess(type: string): void {
-    const access = ownValue(this.config.modelRouting.agentAccess, type);
-    if (
-      access
-      && Object.keys(access.providers).length === 0
-      && access.parentModelAccess === undefined
-      && Object.keys(access.thinking ?? {}).length === 0
-    ) {
-      delete this.config.modelRouting.agentAccess[type];
-    }
   }
 
   /** Push stats visibility into the navigator below the editor. */
