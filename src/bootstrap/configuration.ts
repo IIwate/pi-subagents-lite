@@ -32,9 +32,10 @@ export const configRoot = resolveConfigRoot(home);
 export const customPromptPath = customPromptFilePath(configRoot);
 
 /**
- * The one configuration runtime for the extension process. Module scope keeps
- * it constructible before the session shell exists; Phase 8 moves ownership
- * into the explicit composition root.
+ * The one configuration runtime for the extension process. Deliberately
+ * process-scoped rather than per-ExtensionRuntime: the document is one file
+ * on disk, and two runtimes observing different revisions of it would turn
+ * every cross-runtime commit into a spurious revision conflict.
  */
 export const configuration: Configuration = createConfiguration({
   repository: createFileConfigurationDocumentRepository({

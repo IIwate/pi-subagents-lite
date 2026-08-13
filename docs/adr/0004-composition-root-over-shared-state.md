@@ -2,7 +2,26 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0009](./0009-super-architecture-boundaries.md) at the
+Phase 8 composition-root cutover.
+
+`src/shell.ts` and its getters/setters were deleted. The replacement is the
+explicit composition-root record in `src/bootstrap/extension-runtime.ts`:
+`index.ts` creates one `ExtensionRuntime` per activation and every
+registration and lifecycle callback closes over it. The original rejection of
+a closure-captured root ("callbacks are registered across separate handler
+modules and still need a shared lookup point") stopped holding once
+registration was funneled through `registerTools(runtime)` and
+`setupEventListeners(runtime)` — there is exactly one registration path, so
+the closures share one record without any module-level lookup.
+
+The two cross-reload responsibilities this ADR approved (session-keyed
+fallback result buckets, the child-spawn `AsyncLocalStorage` marker) moved to
+`src/platform/process/process-state.ts` and remain the only process-global
+state. Isolation of ordinary session state between two runtimes in one
+process is pinned by `test/bootstrap/extension-runtime.test.ts`.
+
+The decision text below is retained for history.
 
 ## Decision
 

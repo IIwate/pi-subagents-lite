@@ -77,11 +77,11 @@ The application owns serializable state. Concrete session handles and TUI compon
 
 ### Runtime ownership
 
-The mutable service locator in `shell.ts` will be removed. `bootstrap` will create one runtime for one Pi extension instance and register callbacks that close over explicit application and adapter dependencies.
+The mutable service locator in `shell.ts` was removed at the Phase 8 cutover. `bootstrap/extension-runtime.ts` creates one runtime record for one Pi extension instance, and registration plus lifecycle callbacks close over explicit application and adapter dependencies.
 
-Process state that must survive Jiti reload remains isolated behind a dedicated process-state port. Its only accepted responsibilities are the session-keyed fallback result inbox and the async child-spawn marker already justified by ADR 0004. No ordinary runtime service may be stored on `globalThis`.
+Process state that must survive Jiti reload remains isolated in `platform/process/process-state.ts`. Its only accepted responsibilities are the session-keyed fallback result inbox and the async child-spawn marker already justified by ADR 0004. No ordinary runtime service may be stored on `globalThis`.
 
-When the explicit composition root is active, this ADR supersedes ADR 0004's module-level shell decision. ADR 0004 continues to describe the current implementation until that cutover is complete.
+This ADR supersedes ADR 0004's module-level shell decision; ADR 0004 is retained as history of the pre-cutover implementation.
 
 ### Configuration
 
