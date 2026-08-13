@@ -80,10 +80,11 @@ describe("documentation guards", () => {
     expect([...defined].filter((id) => !referenced.has(id))).toEqual([]);
   });
 
-  it("keeps every active requirement exercised by at least one tagged test", () => {
-    // Acceptance examples are test titles carrying the requirement ID. A
-    // text-level match is the enforced proxy: an ID that appears nowhere in
-    // the test tree has no acceptance example at all.
+  it("keeps every active requirement exercised by at least one tagged test title", () => {
+    // An acceptance example is a describe/it title carrying the requirement
+    // ID. Matching the title argument rather than the whole file is what makes
+    // this a real check: a passing mention in a comment would otherwise let a
+    // requirement claim coverage it does not have.
     const { defined } = requirementIds();
     const tagged = new Set<string>();
     const visit = (directory: string): void => {
@@ -94,8 +95,9 @@ describe("documentation guards", () => {
           continue;
         }
         if (!path.endsWith(".ts")) continue;
-        for (const match of readFileSync(path, "utf8").matchAll(/REQ-[A-Z]+-\d+/g)) {
-          tagged.add(match[0]);
+        const source = readFileSync(path, "utf8");
+        for (const call of source.matchAll(/\b(?:describe|it|test)(?:\.\w+)*\s*\(\s*(["'`])((?:[^\\]|\\.)*?)\1/g)) {
+          for (const id of call[2].matchAll(/REQ-[A-Z]+-\d+/g)) tagged.add(id[0]);
         }
       }
     };

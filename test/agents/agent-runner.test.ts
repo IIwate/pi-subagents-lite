@@ -8,10 +8,24 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { rmSync, writeFileSync } from "node:fs";
 import { fakeCtx, fakePi as makeFakePi, makeResolvablePromise } from "../fixtures.ts";
-import * as promptFiles from "../../src/platform/fs/prompt-files.js";
 
 const fakePi = makeFakePi();
+
+// Custom prompt mode reads a real file whose path derives from HOME at
+// bootstrap load time. vi.hoisted runs before the imports below, so the
+// custom-mode cases can write and remove that file to exercise the real
+// read path instead of doubling an in-repo module.
+const promptHome = await vi.hoisted(async () => {
+  const { mkdtempSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const home = mkdtempSync(path.join(tmpdir(), "agent-runner-home-"));
+  mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+  process.env.HOME = home;
+  return path.join(home, ".pi", "agent", "subagents-lite-prompt.md");
+});
 
 // --- Vendor session/loader doubles (the only mocked seam) ---
 
@@ -1509,45 +1523,35 @@ describe("runAgent — system prompt modes", () => {
 /* ------------------------------------------------------------------ */
 
 describe("runAgent — custom mode", () => {
-  let readCustomPromptSpy: ReturnType<typeof vi.spyOn>;
+  function readySession() {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+  }
 
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
     currentSystemPromptMode = "custom";
-    readCustomPromptSpy = vi.spyOn(promptFiles, "readCustomPromptFile");
   });
 
   afterEach(() => {
-    readCustomPromptSpy.mockRestore();
+    rmSync(promptHome, { force: true });
   });
 
   it("reads the custom prompt file and uses it as the header", async () => {
-    readCustomPromptSpy.mockReturnValue({ ok: true, content: "My custom system prompt" });
-    const session = createMockSession();
-    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
-    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    writeFileSync(promptHome, "My custom system prompt");
+    readySession();
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
-    expect(readCustomPromptSpy).toHaveBeenCalledWith(
-      expect.stringContaining("subagents-lite-prompt.md"),
-    );
     const prompt = generatedPrompt();
     expect(prompt).toContain("My custom system prompt");
     expect(prompt).not.toContain("You are a Pi, an expert coding sub-agent.");
   });
 
-  it("falls back when custom file is missing (ENOENT)", async () => {
-    readCustomPromptSpy.mockReturnValue({
-      ok: false,
-      reason: "missing",
-      message: "Custom prompt file not found: /tmp/subagents-lite-prompt.md",
-    });
-    const session = createMockSession();
-    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
-    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-
+  it("falls back when the custom file is missing", async () => {
+    readySession();
     const ctx = fakeCtx();
     ctx.ui = { notify: vi.fn() };
 
@@ -1561,16 +1565,9 @@ describe("runAgent — custom mode", () => {
     expect(generatedPrompt()).toContain("You are a Pi, an expert coding sub-agent.");
   });
 
-  it("falls back when custom file is empty", async () => {
-    readCustomPromptSpy.mockReturnValue({
-      ok: false,
-      reason: "empty",
-      message: "Custom prompt file is empty: /tmp/subagents-lite-prompt.md",
-    });
-    const session = createMockSession();
-    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
-    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-
+  it("falls back when the custom file holds only whitespace", async () => {
+    writeFileSync(promptHome, "   \n\t\n");
+    readySession();
     const ctx = fakeCtx();
     ctx.ui = { notify: vi.fn() };
 
@@ -1583,16 +1580,12 @@ describe("runAgent — custom mode", () => {
     expect(generatedPrompt()).toContain("You are a Pi, an expert coding sub-agent.");
   });
 
-  it("falls back when custom file is unreadable (other error)", async () => {
-    readCustomPromptSpy.mockReturnValue({
-      ok: false,
-      reason: "unreadable",
-      message: "Failed to read custom prompt file: permission denied",
-    });
-    const session = createMockSession();
-    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
-    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
-
+  // A directory at the prompt path is the portable unreadable case: chmod is
+  // advisory on Windows, so a permission-denied file would not fail there.
+  it("falls back when the custom path cannot be read as a file", async () => {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(promptHome, { recursive: true });
+    readySession();
     const ctx = fakeCtx();
     ctx.ui = { notify: vi.fn() };
 
@@ -1602,6 +1595,8 @@ describe("runAgent — custom mode", () => {
       expect.stringContaining("Failed to read custom prompt file"),
       "warning",
     );
+    expect(generatedPrompt()).toContain("You are a Pi, an expert coding sub-agent.");
+    rmSync(promptHome, { recursive: true, force: true });
   });
 });
 

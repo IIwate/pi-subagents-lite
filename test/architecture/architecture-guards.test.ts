@@ -21,18 +21,36 @@ function repoPath(path: string): string {
 }
 
 /**
- * vi.mock is allowed only against external packages (vendor seams with no
- * in-repo implementation to run instead). A relative specifier replaces one
- * of this repository's own modules and bypasses its public surface, so it is
- * a blocking violation — there is no baseline to ratchet anymore.
+ * Module replacement is allowed only against external packages (vendor seams
+ * with no in-repo implementation to run instead). Replacing one of this
+ * repository's own modules bypasses its public surface, so it is a blocking
+ * violation — there is no baseline to ratchet anymore.
+ *
+ * Three syntaxes reach the same outcome and are all rejected: vi.mock and
+ * vi.doMock against a relative specifier, and vi.spyOn against a namespace
+ * imported from a relative specifier. The spy form is the one that slipped
+ * past an earlier specifier-only scan.
  */
 function internalMockViolations(): string[] {
   const violations: string[] = [];
   for (const path of typescriptFiles(resolve(projectRoot, "test"))) {
     const source = readFileSync(path, "utf8");
-    for (const match of source.matchAll(/vi\.mock\s*\(\s*["']([^"']+)["']/g)) {
-      if (match[1].startsWith(".") || match[1].includes("/src/")) {
+    const internal = (specifier: string): boolean =>
+      specifier.startsWith(".") || specifier.includes("/src/");
+
+    for (const match of source.matchAll(/vi\.(?:mock|doMock)\s*\(\s*["']([^"']+)["']/g)) {
+      if (internal(match[1])) {
         violations.push(`${repoPath(path)} mocks internal module ${match[1]}`);
+      }
+    }
+
+    const internalNamespaces = new Set<string>();
+    for (const match of source.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["']/g)) {
+      if (internal(match[2])) internalNamespaces.add(match[1]);
+    }
+    for (const match of source.matchAll(/vi\.spyOn\s*\(\s*(\w+)\s*,/g)) {
+      if (internalNamespaces.has(match[1])) {
+        violations.push(`${repoPath(path)} spies on internal module namespace ${match[1]}`);
       }
     }
   }
@@ -64,7 +82,7 @@ describe("architecture guards", () => {
     expect(stronglyConnectedComponents(graph)).toEqual([]);
   });
 
-  it("forbids vi.mock of internal modules", () => {
+  it("forbids replacing internal modules with mocks or namespace spies", () => {
     expect(internalMockViolations()).toEqual([]);
   });
 
