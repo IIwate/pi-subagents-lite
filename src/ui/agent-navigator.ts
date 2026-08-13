@@ -28,6 +28,7 @@ import type {
   InteractionResult,
   SubagentRuntime,
 } from "../modules/subagent-runtime/public.js";
+import { createChildScreen, type ChildScreen } from "../modules/child-screen/public.js";
 import {
   buildStatsParts,
   getDisplayName,
@@ -436,6 +437,7 @@ export class AgentNavigator {
   /** Debug-only display override; never changes agent lifecycle or session state. */
   private debugStatusPreview: DebugStatusPreview | undefined;
   /** User-controlled list visibility for this extension runtime. */
+  private readonly screen: ChildScreen;
   private listExpanded: boolean;
   private listFocused = false;
   private footerStatus: string | undefined;
@@ -466,7 +468,31 @@ export class AgentNavigator {
     private getPendingResultCount?: () => number | undefined,
     initialListExpanded = true,
   ) {
+    this.screen = createChildScreen({ initialListExpanded });
     this.listExpanded = initialListExpanded;
+  }
+
+  private applyScreenSnapshot(): void {
+    const inspected = this.screen.execute({ kind: "inspect" });
+    if (!inspected.ok) return;
+    this.selectedAgentId = inspected.snapshot.selectedAgentId;
+    this.listExpanded = inspected.snapshot.listExpanded;
+  }
+
+  private syncScreenRecords(records: AgentSnapshot[]): void {
+    const pendingResultCount = this.pendingResultState();
+    this.screen.execute({
+      kind: "replace-records",
+      records: records.map((record) => ({
+        id: record.id,
+        status: record.status,
+        type: record.type,
+        description: record.description ?? "",
+        pinned: record.pinnedAt != null,
+      })),
+      ...(pendingResultCount != null ? { pendingResultCount } : {}),
+    });
+    this.applyScreenSnapshot();
   }
 
   private pendingResultState(): number | undefined {
@@ -505,13 +531,11 @@ export class AgentNavigator {
   }
 
   toggleList(): void {
-    if (this.manager.listSnapshots().length === 0 && !this.pendingResultState()) return;
-    this.listExpanded = !this.listExpanded;
-    if (!this.listExpanded) {
-      this.listFocused = false;
-      this.confirmingClearId = null;
-      this.highlightedAgentId = this.selectedAgentId;
-    }
+    this.syncScreenRecords(this.manager.listSnapshots());
+    const toggled = this.screen.execute({ kind: "toggle-fold" });
+    if (!toggled.ok) return;
+    this.applyScreenSnapshot();
+    if (!this.listExpanded) this.confirmingClearId = null;
     this.lastRenderSig = "";
     this.update();
   }
@@ -522,12 +546,11 @@ export class AgentNavigator {
   }
 
   selectedId(): string | null {
-    if (this.selectedAgentId && !this.manager.getSnapshot(this.selectedAgentId)) {
-      this.selectedAgentId = null;
-      this.highlightedAgentId = null;
+    const wasSelected = this.selectedAgentId;
+    this.syncScreenRecords(this.manager.listSnapshots());
+    if (wasSelected && !this.selectedAgentId) {
       this.interactionRequestId++;
       this.interactionNotice = undefined;
-      this.listFocused = false;
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();
       this.update();
     }
@@ -802,22 +825,24 @@ export class AgentNavigator {
 
   private activate(id: string | null): boolean {
     if (id === this.selectedAgentId) return true;
-    if (id && !this.manager.getSnapshot(id)) return false;
+    this.syncScreenRecords(this.manager.listSnapshots());
+    const selected = this.screen.execute({ kind: "select", agentId: id });
+    if (!selected.ok) return false;
 
     if (id) {
       if (!this.swapToSubagentScreen()) {
+        this.screen.execute({ kind: "select", agentId: this.selectedAgentId });
         this.warnUnsupportedLayout();
         return false;
       }
-      this.selectedAgentId = id;
     } else {
-      this.selectedAgentId = null;
       this.restoreMainScreen();
     }
+    this.applyScreenSnapshot();
+    this.highlightedAgentId = this.selectedAgentId;
 
     this.interactionRequestId++;
     this.interactionNotice = undefined;
-    this.highlightedAgentId = this.selectedAgentId;
     this.clearScrollbackAndRender();
     if (id && !this.refreshTimer) this.ensureTimer();
     return true;
@@ -1272,10 +1297,10 @@ export class AgentNavigator {
 
     const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
+    const wasSelected = this.selectedAgentId;
+    this.syncScreenRecords(records);
     if (records.length === 0 && !pending) {
       this.updateFooterStatus(records);
-      this.selectedAgentId = null;
-      this.highlightedAgentId = null;
       this.confirmingClearId = null;
       this.interactionRequestId++;
       this.interactionNotice = undefined;
@@ -1288,8 +1313,7 @@ export class AgentNavigator {
       return;
     }
 
-    if (this.selectedAgentId && !records.some(record => record.id === this.selectedAgentId)) {
-      this.selectedAgentId = null;
+    if (wasSelected && !this.selectedAgentId) {
       this.interactionRequestId++;
       this.interactionNotice = undefined;
       if (this.restoreMainScreen()) this.clearScrollbackAndRender();

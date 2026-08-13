@@ -4,11 +4,14 @@
 
 `public.ts` exposes serializable navigation commands, presentation snapshots, rendered lines, and interaction results. Pi components and layout references never cross inward.
 
+## Implemented schemas
+
+- `NavigatorCommandSchema` and `NavigatorCommandResultSchema` cover replace-records, select, toggle-fold, and inspect.
+- `NavigatorSnapshotSchema` is the serializable selection, fold, and record list.
+
 ## Planned schemas
 
-- `NavigatorCommand`, `NavigatorSnapshot`, and `NavigatorResult`.
-- `ChildSelectionSnapshot`, `FooterSnapshot`, and `RenderedLine`.
-- `LayoutOwnershipResult` for the platform renderer seam.
+- `FooterSnapshot`, `RenderedLine`, and `LayoutOwnershipResult` remain for later Child screen slices.
 
 Exact fields are defined once in TypeBox and are not duplicated here.
 
