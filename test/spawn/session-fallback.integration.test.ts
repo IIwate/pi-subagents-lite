@@ -11,12 +11,12 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
+import { takeFallbackResults } from "../../src/platform/process/process-state.js";
 import {
   setDelivery,
   setManager,
   setPiInstance,
   setSessionCtx,
-  takeFallbackResults,
 } from "../../src/shell.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {

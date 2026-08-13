@@ -8,16 +8,15 @@
  *
  * index.ts populates the shell at session_start; handler modules import
  * getManager() / getNavigator() / etc.
+ *
+ * Reload-surviving process state (fallback result inbox, child-spawn marker)
+ * lives in platform/process/process-state, not here.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentRuntime } from "./modules/subagent-runtime/public.js";
 import type { ChildScreenHost } from "./bootstrap/child-screen.js";
-import type {
-  BackgroundDelivery,
-  BackgroundResultRecord,
-} from "./modules/background-result-delivery/public.js";
+import type { BackgroundDelivery } from "./modules/background-result-delivery/public.js";
 
 // ============================================================================
 // Shell type
@@ -29,27 +28,6 @@ interface Shell {
   manager: SubagentRuntime | null;
   delivery: BackgroundDelivery | null;
   navigator: ChildScreenHost | null;
-}
-
-interface ProcessState {
-  /** Process-local handoff buckets when a stale runtime rejects parent-session append. */
-  fallbackResults: Map<string, BackgroundResultRecord[]>;
-  /** Async context survives Jiti module reloads without blocking unrelated parent work. */
-  subagentSpawn: AsyncLocalStorage<boolean>;
-}
-
-const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")] ??= {
-  fallbackResults: new Map<string, BackgroundResultRecord[]>(),
-  subagentSpawn: new AsyncLocalStorage<boolean>(),
-}) as ProcessState;
-
-// Preserve a pending single-slot handoff when this version first loads into an
-// already-running Pi process; subsequent reloads use the session-keyed Map.
-if (!(processState.fallbackResults instanceof Map)) {
-  const legacy = processState.fallbackResults as unknown as { sessionId?: string; results?: BackgroundResultRecord[] } | undefined;
-  processState.fallbackResults = new Map(
-    legacy?.sessionId && legacy.results?.length ? [[legacy.sessionId, legacy.results]] : [],
-  );
 }
 
 // ============================================================================
@@ -115,30 +93,4 @@ export function setDelivery(delivery: BackgroundDelivery | null): void {
 
 export function setNavigator(navigator: ChildScreenHost | null): void {
   shell.navigator = navigator;
-}
-
-/** Transfer unpersisted final results only within the same parent session. */
-export function takeFallbackResults(sessionId: string): BackgroundResultRecord[] {
-  const results = processState.fallbackResults.get(sessionId) ?? [];
-  processState.fallbackResults.delete(sessionId);
-  return results;
-}
-
-export function setFallbackResults(sessionId: string, results: readonly BackgroundResultRecord[]): void {
-  if (results.length > 0) processState.fallbackResults.set(sessionId, [...results]);
-  else processState.fallbackResults.delete(sessionId);
-}
-
-// ============================================================================
-// Subagent spawn context
-// ============================================================================
-
-/** Run child setup/execution in a context visible to freshly imported extension modules. */
-export function withSubagentSpawn<T>(operation: () => Promise<T>): Promise<T> {
-  return processState.subagentSpawn.run(true, operation);
-}
-
-/** True only in the async chain that is loading or running a subagent. */
-export function isInsideSubagentSpawn(): boolean {
-  return processState.subagentSpawn.getStore() === true;
 }

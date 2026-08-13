@@ -448,11 +448,11 @@ describe("Agent tool schema — worktree_path", () => {
 /* ------------------------------------------------------------------ */
 
 describe("subagent spawn guard", () => {
-  // The real shell module is used here (index.test.ts does not mock shell.js).
-  let shell: typeof import("../src/shell.js");
+  // The real process-state module is used here (it is never mocked).
+  let processState: typeof import("../src/platform/process/process-state.js");
 
   beforeEach(async () => {
-    shell = await import("../src/shell.js");
+    processState = await import("../src/platform/process/process-state.js");
   });
 
   it("registers tools and listeners for the parent session", async () => {
@@ -465,20 +465,20 @@ describe("subagent spawn guard", () => {
   });
 
   it("stays inert when loaded inside a subagent spawn", async () => {
-    await shell.withSubagentSpawn(async () => {
+    await processState.withSubagentSpawn(async () => {
       const api = createMockExtensionAPI();
       await loadExtension(api.api);
 
-      // No tools, no event handlers: the subagent must not clobber the parent shell.
+      // No tools, no event handlers: the subagent must not clobber the parent runtime.
       expect(api.tools).toHaveLength(0);
       expect(api.listeners).toHaveLength(0);
       expect(api.shortcuts).toHaveLength(0);
     });
-    expect(shell.isInsideSubagentSpawn()).toBe(false);
+    expect(processState.isInsideSubagentSpawn()).toBe(false);
   });
 
   it("is inert for nested spawns and restores the parent async context", async () => {
-    await shell.withSubagentSpawn(() => shell.withSubagentSpawn(async () => {
+    await processState.withSubagentSpawn(() => processState.withSubagentSpawn(async () => {
       const api = createMockExtensionAPI();
       await loadExtension(api.api);
       expect(api.tools).toHaveLength(0);
@@ -491,10 +491,10 @@ describe("subagent spawn guard", () => {
 
   it("does not make unrelated parent work inert while a child context is active", async () => {
     let release!: () => void;
-    const child = shell.withSubagentSpawn(() => new Promise<void>((resolve) => { release = resolve; }));
+    const child = processState.withSubagentSpawn(() => new Promise<void>((resolve) => { release = resolve; }));
     await Promise.resolve();
 
-    expect(shell.isInsideSubagentSpawn()).toBe(false);
+    expect(processState.isInsideSubagentSpawn()).toBe(false);
     const api = createMockExtensionAPI();
     await loadExtension(api.api);
     expect(api.tools.length).toBeGreaterThan(0);

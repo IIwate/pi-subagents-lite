@@ -30,7 +30,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setPiInstance, isInsideSubagentSpawn } from "./shell.js";
+import { isInsideSubagentSpawn } from "./platform/process/process-state.js";
+import { setPiInstance } from "./shell.js";
 import { registerTools } from "./registration.js";
 import { setupEventListeners } from "./events.js";
 

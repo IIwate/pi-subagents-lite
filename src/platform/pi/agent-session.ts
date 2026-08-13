@@ -30,7 +30,7 @@ import { buildAgentPrompt, type PromptExtras } from "../../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../../prompt/skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGTH } from "../../types.js";
 import type { SubagentType } from "../../agents/types.js";
-import { withSubagentSpawn } from "../../shell.js";
+import { withSubagentSpawn } from "../process/process-state.js";
 // The bootstrap-composed path applies the operational source precedence and
 // spawn defaults once for the whole process. Like the shell import above,
 // these outward references are transitional wiring that the Phase 8

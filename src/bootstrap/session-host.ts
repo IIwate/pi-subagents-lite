@@ -19,12 +19,14 @@ import { createPiParentMessenger } from "../platform/pi/parent-messenger.js";
 import { createPiResultRepository } from "../platform/pi/result-repository.js";
 import type { SpawnConfig } from "../types.js";
 import {
+  setFallbackResults,
+  takeFallbackResults,
+} from "../platform/process/process-state.js";
+import {
   getNavigator,
   getPiInstance,
   getSessionCtx,
   setDelivery,
-  setFallbackResults,
-  takeFallbackResults,
 } from "../shell.js";
 
 export interface SpawnIntent extends SpawnConfig {

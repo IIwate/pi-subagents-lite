@@ -39,12 +39,9 @@ const {
   mockGetEntries,
   sessionEntries,
   activeBranchEntries,
-  fallbackResults,
   fallbackMeta,
 } = vi.hoisted(() => ({
-  fallbackResults: [] as any[],
   fallbackMeta: {
-    sessionId: undefined as string | undefined,
     currentSessionId: "test-session",
     currentLeafId: "origin-a" as string | null,
     idle: true,
@@ -68,17 +65,6 @@ const {
 
 vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
-  takeFallbackResults: (session: string) => {
-    return session === fallbackMeta.sessionId ? fallbackResults.splice(0) : [];
-  },
-  setFallbackResults: (session: string, results: any[]) => {
-    if (results.length === 0) {
-      if (session === fallbackMeta.sessionId) fallbackResults.length = 0;
-      return;
-    }
-    fallbackMeta.sessionId = session;
-    fallbackResults.splice(0, fallbackResults.length, ...results);
-  },
   getSessionCtx: () => ({
     isIdle: () => fallbackMeta.idle,
     sessionManager: {
@@ -91,6 +77,14 @@ vi.mock("../../src/shell.js", () => ({
   }),
   getNavigator: () => null,
 }));
+
+// The session-keyed fallback inbox is real: it is the process-state platform
+// contract the coordinator hands to the delivery module, and its Map semantics
+// are what the reload-transfer scenarios assert.
+import {
+  setFallbackResults,
+  takeFallbackResults,
+} from "../../src/platform/process/process-state.js";
 
 function makeMockManager() {
   const records = new Map<string, any>();
@@ -212,8 +206,7 @@ describe("session host delivery", () => {
     ctx = makeMockCtx();
     sessionEntries.length = 0;
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
-    fallbackResults.length = 0;
-    fallbackMeta.sessionId = undefined;
+    takeFallbackResults("test-session");
     fallbackMeta.currentSessionId = "test-session";
     fallbackMeta.currentLeafId = "origin-a";
     fallbackMeta.idle = true;
@@ -953,7 +946,10 @@ describe("session host delivery", () => {
 
     coordinator.onAgentComplete(result.snapshot);
     coordinator.dispose();
-    expect(fallbackResults).toHaveLength(1);
+    // Peek without consuming: the replacement coordinator must still find it.
+    const parked = takeFallbackResults("test-session");
+    expect(parked).toHaveLength(1);
+    setFallbackResults("test-session", parked);
 
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       sessionEntries.push({ type: "custom", customType, data });
