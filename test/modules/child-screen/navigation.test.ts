@@ -69,6 +69,28 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
     });
   });
 
+  it("returns to Main when only the active record disappears", () => {
+    const screen = createChildScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ id: "agent-active" }), record({ id: "agent-remaining", status: "completed" })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-active" });
+
+    const shrunk = screen.execute({
+      kind: "replace-records",
+      records: [record({ id: "agent-remaining", status: "completed" })],
+    });
+    expect(shrunk).toMatchObject({
+      ok: true,
+      snapshot: {
+        selectedAgentId: null,
+        highlightedAgentId: null,
+        visible: true,
+      },
+    });
+  });
+
   it("requires Enter before changing the active Child", () => {
     const screen = createChildScreen();
     screen.execute({ kind: "replace-records", records: [record()] });

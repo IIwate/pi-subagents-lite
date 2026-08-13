@@ -280,7 +280,6 @@ export function createChildScreen(options: CreateChildScreenOptions = {}): Child
           return ok();
         case "set-interaction-notice":
           interactionNotice = next.notice;
-          if (next.notice) interactionRequestId += 0;
           return ok();
         case "begin-interaction":
           if (next.agentId !== selectedAgentId) return ok({ interactionRequestId: -1 });

@@ -56,7 +56,10 @@ describe("process-local shell state", () => {
     expect(reloaded.takeFallbackResults("session-a")).toEqual([pendingResult]);
   });
 
-  it("keeps fallback and child context across Pi-style Jiti reloads", async () => {
+  // Four uncached Jiti imports compile the full module graph each time and can
+  // exceed the default 5s budget on cold disks or loaded CI runners. The test
+  // asserts state semantics across reloads, not performance, so give it room.
+  it("keeps fallback and child context across Pi-style Jiti reloads", { timeout: 30_000 }, async () => {
     const jiti = createJiti(import.meta.url, { moduleCache: false });
     const shellPath = path.resolve("src/shell.ts");
     const first = await jiti.import<typeof import("../src/shell.js")>(shellPath);

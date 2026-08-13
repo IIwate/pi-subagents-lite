@@ -129,12 +129,12 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     expect(lines.filter((line) => line.includes("Task "))).toHaveLength(6);
   });
 
-  it("preserves record order without moving Main", () => {
+  it("preserves record order without moving Main, including pinned rows", () => {
     const screen = createChildScreen();
     screen.execute({
       kind: "replace-records",
       records: [
-        record({ id: "agent-done", status: "completed", description: "Done task" }),
+        record({ id: "agent-done", status: "completed", description: "Done task", pinned: true }),
         record({ id: "agent-running", status: "running", description: "Running task" }),
         record({ id: "agent-blocked", status: "error", description: "Blocked task" }),
       ],
@@ -145,6 +145,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     const doneIndex = lines.findIndex((line) => line.includes("Done task"));
     const runningIndex = lines.findIndex((line) => line.includes("Running task"));
     const blockedIndex = lines.findIndex((line) => line.includes("Blocked task"));
+    expect(lines[doneIndex]).toContain("◇");
     expect(doneIndex).toBeLessThan(runningIndex);
     expect(runningIndex).toBeLessThan(blockedIndex);
   });
