@@ -127,36 +127,39 @@ vi.mock("../../src/shell.js", () => ({
     listSnapshots: vi.fn(() => []),
     stop: vi.fn(() => false),
   }),
-  getCoordinator: () => ({
-    spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
-      mockSpawnIntents.push(intent);
-      const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
-        description: intent.description,
-        signal: intent.signal,
-        acceptedPolicy: intent.acceptedPolicy,
-        worktreePath: intent.worktreePath,
-        invocation: intent.invocation,
-      });
-      const record = mockGetRecord(id);
-      const snapshot = {
-        id,
-        status: record?.status ?? record?.lifecycle?.status ?? "completed",
-        result: record?.result ?? "ok",
-        error: record?.error,
-        type: record?.type ?? record?.display?.type ?? "general-purpose",
-      };
-      return { agentId: id, snapshot };
-    }),
-    onAgentComplete: vi.fn(),
-    dispose: vi.fn(),
-  }),
 }));
 
 // Import after mocks are in place
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
+import * as sessionHost from "../../src/bootstrap/session-host.js";
+
+const sessionHostStub = {
+  spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
+    mockSpawnIntents.push(intent);
+    const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
+      description: intent.description,
+      signal: intent.signal,
+      acceptedPolicy: intent.acceptedPolicy,
+      worktreePath: intent.worktreePath,
+      invocation: intent.invocation,
+    });
+    const record = mockGetRecord(id);
+    const snapshot = {
+      id,
+      status: record?.status ?? record?.lifecycle?.status ?? "completed",
+      result: record?.result ?? "ok",
+      error: record?.error,
+      type: record?.type ?? record?.display?.type ?? "general-purpose",
+    };
+    return { agentId: id, snapshot };
+  }),
+  onAgentComplete: vi.fn(),
+  dispose: vi.fn(),
+};
 
 beforeEach(() => {
+  vi.spyOn(sessionHost, "currentSessionHost").mockReturnValue(sessionHostStub as any);
   mockRouting.enabled = false;
   mockRouting.enabledProviders = [];
   mockRouting.agentAccess = {};

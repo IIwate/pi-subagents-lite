@@ -15,13 +15,13 @@ const state = vi.hoisted(() => ({
 vi.mock("../src/shell.js", () => ({
   getManager: () => state.manager,
   getNavigator: () => state.navigator,
-  getCoordinator: () => state.coordinator,
+
   getStore: () => state.store,
   getPiInstance: () => ({}),
   getSessionCtx: () => ({ cwd: "/tmp" }),
   setManager: (manager: any) => { state.manager = manager; },
   setNavigator: (navigator: any) => { state.navigator = navigator; },
-  setCoordinator: (coordinator: any) => { state.coordinator = coordinator; },
+
   setSessionCtx: vi.fn(),
 }));
 
@@ -37,6 +37,8 @@ vi.mock("../src/bootstrap/session-host.js", () => ({
     pendingResultCount: vi.fn(),
     interact: vi.fn(),
   }),
+  bindSessionHost: vi.fn(),
+  currentSessionHost: () => state.coordinator,
 }));
 
 vi.mock("../src/ui/agent-navigator.js", () => ({

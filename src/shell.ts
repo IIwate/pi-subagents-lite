@@ -14,7 +14,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentRuntime } from "./modules/subagent-runtime/public.js";
 import type { AgentNavigator } from "./ui/agent-navigator.js";
-import type { SpawnCoordinatorApi } from "./spawn/coordinator-api.js";
 import type { PendingResult } from "./spawn/result-inbox.js";
 import { ConfigStore } from "./config/config-store.js";
 
@@ -28,7 +27,6 @@ interface Shell {
   manager: SubagentRuntime | null;
   navigator: AgentNavigator | null;
   store: ConfigStore;
-  coordinator: SpawnCoordinatorApi | null;
 }
 
 interface ProcessState {
@@ -62,7 +60,6 @@ const shell: Shell = {
   manager: null,
   navigator: null,
   store: new ConfigStore(),
-  coordinator: null,
 };
 
 // ============================================================================
@@ -94,11 +91,6 @@ export function getStore(): ConfigStore {
   return shell.store;
 }
 
-/** The current SpawnCoordinator, or null if not yet created. */
-export function getCoordinator(): SpawnCoordinatorApi | null {
-  return shell.coordinator;
-}
-
 // ============================================================================
 // Setter functions (called by index.ts to populate the shell)
 // ============================================================================
@@ -117,10 +109,6 @@ export function setManager(m: SubagentRuntime | null): void {
 
 export function setNavigator(navigator: AgentNavigator | null): void {
   shell.navigator = navigator;
-}
-
-export function setCoordinator(c: SpawnCoordinatorApi | null): void {
-  shell.coordinator = c;
 }
 
 /** Transfer unpersisted final results only within the same parent session. */

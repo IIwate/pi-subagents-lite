@@ -7,7 +7,8 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
-import { getCoordinator, getManager } from "../shell.js";
+import { getManager } from "../shell.js";
+import { currentSessionHost } from "../bootstrap/session-host.js";
 import { findStoredResult } from "../spawn/result-inbox.js";
 import { formatResultContent } from "./tool-execution.js";
 
@@ -61,7 +62,7 @@ export async function executeAgentStatusTool(
 
   if (requestedId) {
     const record = manager.getSnapshot(requestedId);
-    const coordinator = getCoordinator();
+    const coordinator = currentSessionHost();
     const stored = coordinator?.getStoredResult(requestedId)
       ?? (record?.result ? undefined : findStoredResult(_ctx, requestedId));
     const text = resultLookupText(requestedId, record, stored);

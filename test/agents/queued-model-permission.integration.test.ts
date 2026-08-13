@@ -130,7 +130,7 @@ vi.mock("../../src/prompt/skill-loader.js", () => ({
 
 vi.mock("../../src/shell.js", () => ({
   getStore: () => mocks.store,
-  getCoordinator: () => mocks.coordinator,
+
   getManager: () => mocks.manager,
   getNavigator: () => undefined,
   getPiInstance: () => mocks.pi,
@@ -151,7 +151,7 @@ import {
 import type { AgentConfig } from "../../src/agents/types.js";
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { createSessionHost } from "../../src/bootstrap/session-host.js";
+import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
 
 function params(description: string, model?: string, background = true, agent = "general-purpose") {
   return {
@@ -232,6 +232,7 @@ describe("queued invocation snapshots", () => {
       defaultModelLimit: 1,
     });
     mocks.coordinator = createSessionHost(mocks.manager);
+    bindSessionHost(mocks.coordinator);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
   });
 
@@ -385,6 +386,7 @@ describe("queued invocation snapshots", () => {
       defaultModelLimit: 1,
     });
     mocks.coordinator = createSessionHost(mocks.manager);
+    bindSessionHost(mocks.coordinator);
     mocks.manager.setOnComplete((record: any) => mocks.coordinator.onAgentComplete(record));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
     mocks.blockFirst = false;

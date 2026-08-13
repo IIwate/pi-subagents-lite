@@ -52,6 +52,16 @@ function isParentRunSuccessful(
     && last.errorMessage === undefined;
 }
 
+let boundHost: SpawnCoordinatorApi | null = null;
+
+export function bindSessionHost(host: SpawnCoordinatorApi | null): void {
+  boundHost = host;
+}
+
+export function currentSessionHost(): SpawnCoordinatorApi | null {
+  return boundHost;
+}
+
 export function createSessionHost(runtime: SubagentRuntime): SpawnCoordinatorApi {
   const ctx = getSessionCtx();
   const pi = getPiInstance();

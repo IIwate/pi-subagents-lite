@@ -12,19 +12,17 @@ import {
 import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
-import { createSessionHost } from "./bootstrap/session-host.js";
 import {
   getManager,
   getNavigator,
-  getCoordinator,
   getStore,
   getPiInstance,
   getSessionCtx,
   setSessionCtx,
   setManager,
   setNavigator,
-  setCoordinator,
 } from "./shell.js";
+import { bindSessionHost, createSessionHost, currentSessionHost } from "./bootstrap/session-host.js";
 
 const agentCatalogue = createAgentCatalogueRuntime();
 const configuration = createConfigurationRuntime();
@@ -60,7 +58,7 @@ export function ensureManagerAndNavigator(): void {
     getStore().setDeps({ manager: newManager });
 
     const coordinator = createSessionHost(newManager);
-    setCoordinator(coordinator);
+    bindSessionHost(coordinator);
 
     newManager.setOnComplete(record => coordinator.onAgentComplete(record));
   }
@@ -68,9 +66,9 @@ export function ensureManagerAndNavigator(): void {
   if (!currentNavigator) {
     const newNavigator = new AgentNavigator(
       getManager()!,
-      async (agentId, text) => getCoordinator()?.interact(agentId, text)
+      async (agentId, text) => currentSessionHost()?.interact(agentId, text)
         ?? { accepted: false, reason: "unavailable" },
-      () => getCoordinator()?.pendingResultCount(),
+      () => currentSessionHost()?.pendingResultCount(),
       getStore().agent.expandListByDefault,
     );
     setNavigator(newNavigator);
@@ -127,7 +125,7 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event, ctx) => {
-    const resultMessage = getCoordinator()?.prepareBeforeAgentStart();
+    const resultMessage = currentSessionHost()?.prepareBeforeAgentStart();
     if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
       return resultMessage ? { message: resultMessage } : undefined;
     }
@@ -151,7 +149,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
     const navigator = getNavigator();
     const requestId = navigator?.beginInteraction(selectedAgentId) ?? -1;
-    const result = await getCoordinator()?.interact(
+    const result = await currentSessionHost()?.interact(
       selectedAgentId,
       event.text,
       event.images,
@@ -161,24 +159,24 @@ export function setupEventListeners(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_start", () => {
-    getCoordinator()?.onParentAgentStart();
+    currentSessionHost()?.onParentAgentStart();
   });
 
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
   // setTimeout(0) lets Pi remove the Working row before relayout on the next event-loop turn.
   pi.on("agent_end", (event, ctx) => {
-    getCoordinator()?.onParentAgentEnd(event.messages);
+    currentSessionHost()?.onParentAgentEnd(event.messages);
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
   });
 
   pi.on("agent_settled", () => {
-    getCoordinator()?.onParentSettled();
+    currentSessionHost()?.onParentSettled();
   });
 
   pi.on("session_tree", () => {
-    getCoordinator()?.onSessionTree();
+    currentSessionHost()?.onSessionTree();
   });
 
   // session_start — load config and refresh the Agent catalogue used by guidance.
@@ -188,7 +186,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }
-    getCoordinator()?.restorePending();
+    currentSessionHost()?.restorePending();
   });
 
   // session_shutdown — abort all, dispose manager
@@ -224,7 +222,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       try { await getManager()?.dispose(); } finally { setManager(null); }
     });
     await cleanup(() => {
-      try { getCoordinator()?.dispose(); } finally { setCoordinator(null); }
+      try { currentSessionHost()?.dispose(); } finally { bindSessionHost(null); }
     });
     await cleanup(() => getStore().dispose());
 

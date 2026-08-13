@@ -43,9 +43,9 @@ import {
   getPiInstance,
   getSessionCtx,
   getStore,
-  getCoordinator,
   getManager,
 } from "../shell.js";
+import { currentSessionHost } from "../bootstrap/session-host.js";
 
 // ============================================================================
 // Tool result helpers
@@ -246,7 +246,7 @@ export async function executeAgentTool(
   }
 
   // Use the session host for unified spawn and delivery.
-  const coordinator = getCoordinator()!;
+  const coordinator = currentSessionHost()!;
   const result = await coordinator.spawn(getPiInstance(), ctx, {
     type: resolvedType,
     prompt,

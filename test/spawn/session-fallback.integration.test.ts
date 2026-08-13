@@ -12,14 +12,14 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import {
-  setCoordinator,
+
   setManager,
   setPiInstance,
   setSessionCtx,
   takeFallbackResults,
 } from "../../src/shell.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { createSessionHost } from "../../src/bootstrap/session-host.js";
+import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
 import type { SpawnCoordinatorApi } from "../../src/spawn/coordinator-api.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
@@ -61,7 +61,7 @@ function createPi(entries: any[], appendFails = false) {
 async function disposeRuntime(manager?: SubagentRuntime, coordinator?: SpawnCoordinatorApi) {
   coordinator?.dispose();
   await manager?.dispose();
-  setCoordinator(null);
+  bindSessionHost(null);
   setManager(null);
 }
 
@@ -95,7 +95,7 @@ describe("session-keyed coordinator fallback", () => {
       managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
       setManager(managerA);
       coordinatorA = createSessionHost(managerA);
-      setCoordinator(coordinatorA);
+      bindSessionHost(coordinatorA);
       managerA.setOnComplete(record => coordinatorA!.onAgentComplete(record));
 
       const spawned = await coordinatorA.spawn(piA, ctxA, {
@@ -117,7 +117,7 @@ describe("session-keyed coordinator fallback", () => {
       managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
       setManager(managerB);
       coordinatorB = createSessionHost(managerB);
-      setCoordinator(coordinatorB);
+      bindSessionHost(coordinatorB);
       coordinatorB.restorePending();
 
       expect(entriesB).toEqual([]);
@@ -131,7 +131,7 @@ describe("session-keyed coordinator fallback", () => {
       setPiInstance(piA);
       setManager(managerA);
       restoredA = createSessionHost(managerA);
-      setCoordinator(restoredA);
+      bindSessionHost(restoredA);
       managerA.setOnComplete(record => restoredA!.onAgentComplete(record));
       restoredA.restorePending();
 

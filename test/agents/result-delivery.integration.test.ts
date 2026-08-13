@@ -19,7 +19,7 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 
 vi.mock("../../src/shell.js", () => ({
   getManager: () => state.manager,
-  getCoordinator: () => state.coordinator,
+
   getNavigator: () => undefined,
   getPiInstance: () => state.pi,
   getSessionCtx: () => state.ctx,
@@ -29,7 +29,7 @@ vi.mock("../../src/shell.js", () => ({
 
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { readResultEntries } from "../../src/spawn/result-inbox.js";
-import { createSessionHost } from "../../src/bootstrap/session-host.js";
+import { bindSessionHost, createSessionHost } from "../../src/bootstrap/session-host.js";
 import { acceptedRunPolicy } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 
@@ -74,6 +74,7 @@ describe("durable result delivery integration", () => {
       clock: { now: () => state.now },
     });
     state.coordinator = createSessionHost(state.manager);
+    bindSessionHost(state.coordinator);
     state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
   });
 

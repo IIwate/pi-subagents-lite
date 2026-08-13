@@ -13,10 +13,17 @@ import { shellMock } from "../fixtures.ts";
 /*  are available when hoisted mock factories run.                      */
 /* ------------------------------------------------------------------ */
 
-const mockListAgents = vi.fn();
-const mockGetRecord = vi.fn();
-const mockGetStoredResult = vi.fn();
-const mockMarkResultPresented = vi.fn();
+const {
+  mockListAgents,
+  mockGetRecord,
+  mockGetStoredResult,
+  mockMarkResultPresented,
+} = vi.hoisted(() => ({
+  mockListAgents: vi.fn(),
+  mockGetRecord: vi.fn(),
+  mockGetStoredResult: vi.fn(),
+  mockMarkResultPresented: vi.fn(),
+}));
 
 /* ------------------------------------------------------------------ */
 /*  Global mocks                                                      */
@@ -33,6 +40,8 @@ vi.mock("../../src/shell.js", () => shellMock({
   },
 }));
 
+import * as sessionHost from "../../src/bootstrap/session-host.js";
+
 /* ------------------------------------------------------------------ */
 /*  Execute behavior tests                                            */
 /* ------------------------------------------------------------------ */
@@ -42,6 +51,10 @@ describe("AgentStatus tool execute behavior", () => {
     vi.clearAllMocks();
     mockGetRecord.mockReturnValue(undefined);
     mockGetStoredResult.mockReturnValue(undefined);
+    vi.spyOn(sessionHost, "currentSessionHost").mockReturnValue({
+      getStoredResult: mockGetStoredResult,
+      markResultPresented: mockMarkResultPresented,
+    } as any);
   });
 
   it("looks up one exact result without polling", async () => {

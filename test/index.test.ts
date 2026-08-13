@@ -395,7 +395,8 @@ describe("event listener registration", () => {
     const manager = { listSnapshots: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
     const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
     shell.setNavigator(navigator as any);
-    shell.setCoordinator(coordinator as any);
+    const { bindSessionHost } = await import("../src/bootstrap/session-host.js");
+    bindSessionHost(coordinator as any);
     shell.setManager(manager as any);
 
     try {
@@ -406,12 +407,14 @@ describe("event listener registration", () => {
       expect(storeDispose).toHaveBeenCalledTimes(1);
       expect(manager.dispose).toHaveBeenCalledTimes(1);
       expect(shell.getNavigator()).toBeNull();
-      expect(shell.getCoordinator()).toBeNull();
+      const { currentSessionHost } = await import("../src/bootstrap/session-host.js");
+      expect(currentSessionHost()).toBeNull();
       expect(shell.getManager()).toBeNull();
     } finally {
       storeDispose.mockRestore();
       shell.setNavigator(null);
-      shell.setCoordinator(null);
+      const { bindSessionHost } = await import("../src/bootstrap/session-host.js");
+      bindSessionHost(null);
       shell.setManager(null);
     }
   });
