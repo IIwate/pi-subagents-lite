@@ -90,6 +90,28 @@ describe("REQ-DELIVERY-001 persist before wake", () => {
   });
 });
 
+describe("REQ-DELIVERY-001 repository failure", () => {
+  it("keeps the result in fallback and does not wake when append fails", () => {
+    const memory = createMemory({ appendFails: true });
+    const result = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record(),
+      stillPresent: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      snapshot: {
+        fallback: [{ deliveryId: "d1" }],
+        pending: [],
+        lastWakeFailed: true,
+      },
+    });
+    expect(memory.sent).toEqual([]);
+    expect(memory.pending).toHaveLength(0);
+  });
+});
+
 describe("REQ-DELIVERY-002 origin-branch eligibility", () => {
   it("hides a result whose origin is not on the active branch", () => {
     const memory = createMemory();
@@ -102,5 +124,73 @@ describe("REQ-DELIVERY-002 origin-branch eligibility", () => {
     expect(memory.delivery.pendingResultCount()).toBeUndefined();
     const inspect = memory.delivery.execute({ kind: "inspect" });
     expect(inspect.ok && inspect.snapshot.pending[0]?.originEntryId).toBe("other-branch");
+  });
+});
+
+describe("REQ-DELIVERY-003 coalesced wake and failed-turn recovery", () => {
+  it("does not send a second wake while one is already active", () => {
+    const memory = createMemory();
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "d1", agentId: "a1" }),
+      stillPresent: true,
+    });
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "d2", agentId: "a2", result: "second" }),
+      stillPresent: true,
+    });
+    expect(memory.sent).toHaveLength(1);
+  });
+
+  it("lets a later completion wake after a failed parent turn", () => {
+    const memory = createMemory();
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "d1" }),
+      stillPresent: true,
+    });
+    memory.delivery.execute({ kind: "parent-end", succeeded: false });
+    memory.delivery.execute({ kind: "parent-settled" });
+    expect(memory.sent).toHaveLength(1);
+
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "d2", agentId: "a2", result: "later" }),
+      stillPresent: true,
+    });
+    expect(memory.sent).toHaveLength(2);
+    expect(memory.sent[1]?.content).toContain("later");
+  });
+});
+
+describe("REQ-DELIVERY-004 acknowledgement after successful settlement", () => {
+  it("acknowledges presented results only after a successful parent settle", () => {
+    const memory = createMemory();
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record(),
+      stillPresent: true,
+    });
+    memory.delivery.execute({ kind: "mark-presented", deliveryId: "d1" });
+    memory.delivery.execute({ kind: "parent-end", succeeded: true });
+    const settled = memory.delivery.execute({ kind: "parent-settled" });
+    expect(settled).toMatchObject({
+      ok: true,
+      snapshot: { pending: [] },
+    });
+  });
+});
+
+describe("REQ-DELIVERY-005 restore and tree navigation", () => {
+  it("does not wake a restored result from another parent session", () => {
+    const memory = createMemory();
+    memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ parentSessionId: "session-b" }),
+      stillPresent: true,
+    });
+    memory.delivery.execute({ kind: "restore" });
+    expect(memory.sent).toEqual([]);
   });
 });

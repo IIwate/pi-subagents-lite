@@ -199,6 +199,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
           return recordTerminal(next.record, next.stillPresent);
         case "parent-preflight": {
           if (disposed) return ok();
+          refreshActiveBranch();
           parentRunPhase = "preflight";
           flushFallbackResults();
           const results = eligiblePendingResults();
@@ -225,6 +226,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
           return parentSettled();
         case "restore":
           if (!disposed) {
+            refreshActiveBranch();
             flushFallbackResults();
             if (eligiblePendingResults().length > 0) requestParentWake();
           }

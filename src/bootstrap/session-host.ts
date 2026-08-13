@@ -8,6 +8,7 @@ import {
   type BackgroundResultRecord,
 } from "../modules/background-result-delivery/public.js";
 import { getStatusNote } from "../status-note.js";
+import { createPiDeliveryContext } from "../platform/pi/delivery-context.js";
 import { createPiParentMessenger } from "../platform/pi/parent-messenger.js";
 import { createPiResultRepository } from "../platform/pi/result-repository.js";
 import type { SpawnCoordinatorApi, SpawnIntent, SpawnResult } from "../spawn/coordinator-api.js";
@@ -57,11 +58,7 @@ export function createSessionHost(runtime: SubagentRuntime): SpawnCoordinatorApi
   const delivery: BackgroundDelivery = createBackgroundDelivery({
     repository: createPiResultRepository(pi, ctx),
     messenger: createPiParentMessenger(pi),
-    context: {
-      parentSessionId: () => getSessionCtx().sessionManager.getSessionId(),
-      activeBranchIds: () => getSessionCtx().sessionManager.getBranch().map((entry) => entry.id),
-      isIdle: () => getSessionCtx().isIdle(),
-    },
+    context: createPiDeliveryContext(getSessionCtx),
     fallback: {
       take: takeFallbackResults,
       save: setFallbackResults,
