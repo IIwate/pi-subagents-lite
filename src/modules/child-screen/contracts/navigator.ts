@@ -169,6 +169,7 @@ export const NavigatorSnapshotSchema = Type.Object({
   selectedAgentId: Type.Union([Type.String(), Type.Null()]),
   highlightedAgentId: Type.Union([Type.String(), Type.Null()]),
   listExpanded: Type.Boolean(),
+  statsVisibility: StatsVisibilitySchema,
   listFocused: Type.Boolean(),
   confirmingClearId: Type.Union([Type.String(), Type.Null()]),
   interactionNotice: Type.Optional(Type.String()),

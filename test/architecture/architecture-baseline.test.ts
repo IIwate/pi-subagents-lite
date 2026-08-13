@@ -10,18 +10,14 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // a resolved entry and may never add a new one.
 const legacyCycleBaseline = new Set<string>();
 
-// Phase 9 removes these mock by mock: executor suites are already mock-free
-// (dependencies enter through the ExtensionRuntime record). The remaining
-// entries are platform or vendor seams (pi-coding-agent, agent-session, fs
-// scanners) still being converted to injected ports or contract tests.
+// Internal-module mocks are gone. Every remaining vi.mock replaces the
+// @earendil-works/pi-coding-agent vendor package — an external seam whose
+// session/loader surface has no in-repo implementation to run instead.
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
-  "test/events.test.ts": 3,
-  "test/index.test.ts": 8,
   "test/agents/agent-runner.test.ts": 1,
   "test/agents/queued-model-permission.integration.test.ts": 1,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
-  "test/spawn/spawn-coordinator.test.ts": 5,
 };
 
 function internalMockCounts(): Record<string, number> {

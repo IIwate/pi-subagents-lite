@@ -24,6 +24,7 @@ import {
   type ChildScreen,
   type ChildStatus,
   type NavigatorKey,
+  type NavigatorSnapshot,
   type StatsVisibility,
 } from "../../../modules/child-screen/public.js";
 import { ChildNavigationEditor } from "./editor.js";
@@ -180,6 +181,11 @@ export class ChildScreenHost {
   private snapshot() {
     const inspected = this.screen.execute({ kind: "inspect" });
     return inspected.ok ? inspected.snapshot : undefined;
+  }
+
+  /** Schema-defined read-only navigator state (the module's inspect query). */
+  inspectState(): NavigatorSnapshot | undefined {
+    return this.snapshot();
   }
 
   setUICtx(ctx: NavigatorUICtx): void {

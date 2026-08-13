@@ -3,34 +3,15 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { acceptedRunPolicy } from "../fixtures.js";
 
-vi.mock("../../src/agents/agent-types.js", () => ({
-  resolveType: vi.fn((name: string) => name),
-  getAgentConfig: vi.fn(() => undefined),
-  discoverNewAgents: vi.fn(async () => 0),
-}));
-
-vi.mock("../../src/spawn/worktree-validator.js", () => ({
-  validateWorktreePath: vi.fn(async () => ({ ok: true, resolvedPath: "/wt" })),
-}));
-
-vi.mock("../../src/utils.js", () => ({
-  parseModelKey: vi.fn(() => null),
-  parseThinkingLevel: vi.fn(() => undefined),
-}));
-
-vi.mock("../../src/platform/fs/configuration-document-repository.js", () => ({
-  createFileConfigurationDocumentRepository: () => ({
-    load: () => ({}),
-    persist: () => {},
-  }),
-}));
-
-vi.mock("../../src/agents/tool-execution.js", () => ({
-  formatResultContent: (record: { status?: string; error?: string; result?: string }) =>
-    record.status === "error"
-      ? `Agent failed: ${record.error || "unknown error"}`
-      : record.result ?? "",
-}));
+// The bootstrap import graph resolves the config root at module load, so pin
+// HOME to an empty temp directory before importing session-host. The suite
+// never reads configuration; this only keeps the developer's real config out.
+await vi.hoisted(async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "spawn-coordinator-home-"));
+});
 
 const {
   mockPi,

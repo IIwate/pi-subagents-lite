@@ -55,6 +55,7 @@ export function createChildScreen(options: CreateChildScreenOptions = {}): Child
       selectedAgentId,
       highlightedAgentId,
       listExpanded,
+      statsVisibility: { ...statsVisibility },
       listFocused,
       confirmingClearId,
       interactionRequestId,

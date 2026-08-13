@@ -312,6 +312,7 @@ export function fakeCtx(): any {
     cwd: "/home/test/project",
     sessionManager: {
       getBranch: () => [],
+      getEntries: () => [],
       getSessionId: () => "parent-session",
       getLeafId: () => "leaf-entry",
     },

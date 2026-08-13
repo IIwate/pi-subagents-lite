@@ -17,117 +17,18 @@ import {
   loadExtension,
   type MockExtensionAPI,
 } from "./fixtures";
+import { registerAgents } from "../src/agents/agent-types.js";
 
-// Mock external dependencies before any imports
-vi.mock("typebox", () => {
-  const createType = (type: string) => (opts?: any) => ({
-    type,
-    ...(opts || {}),
-  });
-  return {
-    Type: {
-      Object: (properties: Record<string, any>, opts?: any) => ({
-        type: "object",
-        properties,
-        ...(opts || {}),
-      }),
-      String: createType("string"),
-      Number: createType("number"),
-      Integer: createType("integer"),
-      Boolean: createType("boolean"),
-      Null: createType("null"),
-      Optional: (schema: any) => ({ ...schema, optional: true }),
-      Array: (items: any) => ({ type: "array", items }),
-      Record: (keyType: any, valueType: any) => ({
-        type: "record",
-        keyType,
-        valueType,
-      }),
-      Union: (variants: any[]) => ({ type: "union", variants }),
-      // Real Type.Unsafe only pins the static type; passthrough matches that.
-      Unsafe: (schema: any) => schema,
-      Literal: (value: string | number | boolean) => ({
-        type: "literal",
-        const: value,
-      }),
-      Ref: (ref: string) => ({ type: "ref", ref }),
-      Cyclic: (definitions: Record<string, any>, ref: string) => ({
-        type: "cyclic",
-        definitions,
-        ref,
-      }),
-    },
-  };
+// Everything below runs against the real modules: real typebox schemas, real
+// Pi vendor packages, and the real agent registry. The bootstrap import graph
+// resolves the config root at module load, so pin HOME to an empty temp
+// directory first to keep the developer's real config out of the suite.
+await vi.hoisted(async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "index-test-home-"));
 });
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-  DynamicBorder: class {},
-}));
-
-vi.mock("@earendil-works/pi-tui", () => ({
-  Box: class {},
-  Container: class {
-    children: any[] = [];
-    addChild(c: any) {
-      this.children.push(c);
-    }
-    clear() {
-      this.children = [];
-    }
-    invalidate() { /* noop */ }
-    render(_width: number): string[] { return []; }
-  },
-  Input: class {
-    onSubmit: (() => void) | null = null;
-    focused = false;
-    getValue() {
-      return "";
-    }
-    handleInput(_k: string) {}
-  },
-  Spacer: class {},
-  Text: class {},
-  Markdown: class {
-    text: string;
-    constructor(text: string, _w: number, _h: number, _theme: any) {
-      this.text = text;
-    }
-    render(_width: number) {
-      return [this.text];
-    }
-  },
-  truncateToWidth: (text: string) => text,
-  fuzzyFilter: (items: any[], _query: string, _fn: any) => items,
-  getKeybindings: () => ({
-    matches: () => false,
-  }),
-}));
-
-vi.mock("../src/platform/pi/tui/searchable-select.js", () => ({
-  SearchableSelectDialog: class {},
-}));
-
-vi.mock("../src/agents/agent-types.js", () => ({
-  resolveType: vi.fn((name: string) => name),
-  getConfig: vi.fn(() => ({ displayName: "unknown" })),
-  getAgentConfig: vi.fn(() => ({})),
-  registerAgents: vi.fn(),
-  getAvailableTypes: vi.fn(() => ["general-purpose", "Explore"]),
-  getAllTypes: vi.fn(() => ["general-purpose", "Explore"]),
-}));
-
-vi.mock("../src/platform/fs/agent-frontmatter.js", () => ({
-  scanAgentFilesInDir: vi.fn().mockResolvedValue([]),
-  parseAgentFile: vi.fn(),
-  parseExtensions: vi.fn(),
-}));
-
-vi.mock("../src/platform/pi/agent-session.js", () => ({
-  runAgent: vi.fn(),
-}));
-
-vi.mock("../src/agents/default-agents.js", () => ({
-  DEFAULT_AGENTS: new Map(),
-}));
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -213,8 +114,7 @@ describe("Agent tool schema — stealth", () => {
   it("restricts thinking to Pi canonical levels", () => {
     expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
     const thinking = agentTool()!.parameters.properties.thinking;
-    expect(thinking.type).toBe("union");
-    expect(thinking.variants.map((variant: any) => variant.const)).toEqual([
+    expect(thinking.anyOf.map((variant: any) => variant.const)).toEqual([
       "off",
       "minimal",
       "low",
@@ -368,6 +268,9 @@ describe("event listener registration", () => {
   });
 
   it("injects current guidance only while the Agent tool is active", async () => {
+    // Guidance reads the real registry; session_start never fires in this
+    // suite, so seed it with the built-in default agents directly.
+    registerAgents(new Map());
     const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
     const ctx = {
       model: { provider: "anthropic", id: "sonnet", reasoning: true },
