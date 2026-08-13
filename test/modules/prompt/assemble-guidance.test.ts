@@ -74,6 +74,7 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
       kind: "assemble-guidance",
       agents: [
         { name: "zeta", description: "Last" },
+        { name: "reviewer", description: "Review" },
         { name: "alpha", description: "First", maxTurns: 4 },
       ],
       parentModelKey: "anthropic/sonnet",
@@ -86,6 +87,7 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
         enabledProviders: [],
         agentAccess: {
           alpha: { providers: {} },
+          reviewer: { providers: {} },
           zeta: { parentModelAccess: false, providers: {} },
         },
       },
@@ -94,7 +96,8 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.guidance.indexOf("alpha: First")).toBeLessThan(result.guidance.indexOf("Unavailable agent types:"));
+      expect(result.guidance.indexOf("alpha: First")).toBeLessThan(result.guidance.indexOf("reviewer: Review"));
+      expect(result.guidance.indexOf("reviewer: Review")).toBeLessThan(result.guidance.indexOf("Unavailable agent types:"));
       expect(result.guidance).toContain("- zeta: no authorized model");
       expect(result.guidance).toContain("max turns: 4");
     }
