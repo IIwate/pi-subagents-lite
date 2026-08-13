@@ -39,14 +39,21 @@ function toSourceDefinition(definition: AgentConfigFromMd): AgentSourceDefinitio
 export function createFileAgentCatalogueRepository(): AgentCatalogueRepository {
   return {
     async load(request) {
-      const [globalDefinitions, projectDefinitions] = await Promise.all([
+      const [globalDefinitions, projectDefinitions, worktreeDefinitions] = await Promise.all([
         scanAgentFilesInDir(request.globalDirectory, "user"),
         scanAgentFilesInDir(request.projectDirectory, "project"),
+        request.worktreeDirectory
+          ? scanAgentFilesInDir(request.worktreeDirectory, "project")
+          : Promise.resolve([]),
       ]);
+      const mappedWorktree = worktreeDefinitions
+        .map(toSourceDefinition)
+        .filter((definition): definition is AgentSourceDefinition => definition !== undefined);
       return {
         definitions: [...globalDefinitions, ...projectDefinitions]
           .map(toSourceDefinition)
           .filter((definition): definition is AgentSourceDefinition => definition !== undefined),
+        ...(mappedWorktree.length > 0 ? { worktreeDefinitions: mappedWorktree } : {}),
       };
     },
   };

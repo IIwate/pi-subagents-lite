@@ -52,12 +52,14 @@ export const AgentCatalogueConfigurationSchema = Type.Object({
 export const AgentCatalogueRootsSchema = Type.Object({
   globalDirectory: Type.String(),
   projectDirectory: Type.String(),
+  worktreeDirectory: Type.Optional(Type.String()),
 }, { additionalProperties: false });
 
 export const AgentSourceLoadRequestSchema = AgentCatalogueRootsSchema;
 
 export const AgentSourceLoadResultSchema = Type.Object({
   definitions: Type.Array(AgentSourceDefinitionSchema),
+  worktreeDefinitions: Type.Optional(Type.Array(AgentSourceDefinitionSchema)),
 }, { additionalProperties: false });
 
 export const DiscoverAgentCatalogueCommandSchema = Type.Object({

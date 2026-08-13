@@ -27,6 +27,7 @@ export function mergeAgentDefinitions(
   builtInDefinitions: readonly AgentDefinitionSnapshot[],
   sourceDefinitions: readonly AgentSourceDefinition[],
   configuration: AgentCatalogueConfiguration,
+  worktreeDefinitions: readonly AgentSourceDefinition[] = [],
 ): AgentDefinitionSnapshot[] {
   const definitions = new Map<string, AgentDefinitionSnapshot>();
   if (!configuration.disableDefaultAgents) {
@@ -43,5 +44,18 @@ export function mergeAgentDefinitions(
     definitions,
     sourceDefinitions.filter((definition) => definition.source === "project"),
   );
+  // Worktree files keep project attribution, but they only fill a vacant
+  // name. Folding them into the project pass would let a later checkout
+  // rewrite a definition the parent already settled, and the registry
+  // would never see that it had happened. Revisit only if worktree types
+  // are allowed to shadow parent names.
+  for (const source of worktreeDefinitions) {
+    if (definitions.has(source.name)) continue;
+    definitions.set(source.name, {
+      description: "",
+      ...structuredClone(source),
+      source: source.source,
+    });
+  }
   return [...definitions.values()];
 }

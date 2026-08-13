@@ -10,6 +10,7 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 
 - Built-in and custom source precedence.
 - Same-name custom definition preserved when a built-in definition is disabled.
+- Worktree-only names are added; a worktree file does not replace a global or project definition of the same name.
 - Malformed frontmatter rejected without hiding valid definitions.
 - Tool, skill, extension, system-prompt, model, and runtime settings are resolved into an immutable snapshot.
 - A repository failure produces a serializable failure result.
@@ -18,4 +19,4 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 
 Use an in-memory `AgentCatalogueRepository` for policy tests. Filesystem and source-loader doubles are allowed only at the repository contract seam. Expected snapshots are independent literals.
 
-The existing filesystem parser tests remain adapter tests while on-demand Worktree discovery is migrated in Phase 2. They are not a public catalogue policy seam.
+The existing filesystem parser tests remain adapter tests while frontmatter parsing still lives in `agent-discovery.ts`. They are not a public catalogue policy seam.

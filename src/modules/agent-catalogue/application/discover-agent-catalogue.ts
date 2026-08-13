@@ -48,6 +48,7 @@ export function createAgentCatalogue(options: CreateAgentCatalogueOptions): Agen
               builtInDefinitions,
               loaded.definitions,
               command.configuration,
+              loaded.worktreeDefinitions ?? [],
             ),
           },
         };

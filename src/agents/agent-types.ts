@@ -5,9 +5,10 @@
  * User agents override defaults with the same name. Disabled agents are kept but excluded from spawning.
  */
 
-import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
+import { createAgentCatalogueRuntime } from "../bootstrap/agent-catalogue.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AgentConfig, SystemPromptMode } from "./types.js";
+import type { AgentDefinitionSnapshot } from "../modules/agent-catalogue/public.js";
 
 /**
  * All tool names that Pi can provide to a session.
@@ -101,34 +102,33 @@ export function setDefaultAgentsDisabled(disabled: boolean): void {
  *   Worktree-local types use "project" source attribution and follow the same
  *   parsing and name-uniqueness rules as the parent's project scan.
  */
+function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
+  const { source, ...config } = structuredClone(definition);
+  return source === "built-in" ? config : { ...config, source };
+}
+
 export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
-  const [userAgents, projectAgents] = await Promise.all([
-    scanAgentFilesInDir(userAgentDir, "user"),
-    scanAgentFilesInDir(projectAgentDir, "project"),
-  ]);
-  const defaults = defaultAgentsDisabled ? new Map<string, AgentConfig>() : DEFAULT_AGENTS;
-  const merged = mergeAgents(defaults, userAgents, projectAgents);
+  const result = await createAgentCatalogueRuntime().execute({
+    kind: "discover",
+    roots: {
+      globalDirectory: userAgentDir,
+      projectDirectory: projectAgentDir,
+      ...(worktreeDir ? { worktreeDirectory: worktreeDir } : {}),
+    },
+    configuration: { disableDefaultAgents: defaultAgentsDisabled },
+  });
+  // On-demand discovery used to swallow missing directories and unreadable
+  // files. A hard failure here would turn that into an Agent-tool error
+  // the parent never asked for. Revisit when the registry no longer sits
+  // in front of the catalogue result.
+  if (!result.ok) return 0;
 
   let count = 0;
-  for (const [name, config] of merged) {
-    if (!agents.has(name)) {
-      agents.set(name, config);
-      count++;
-    }
+  for (const definition of result.catalogue.definitions) {
+    if (agents.has(definition.name)) continue;
+    agents.set(definition.name, toAgentConfig(definition));
+    count++;
   }
-
-  // Scan worktree-local agents (only when worktreeDir is provided)
-  if (worktreeDir) {
-    const worktreeAgents = await scanAgentFilesInDir(worktreeDir, "project");
-    const wtMerged = mergeAgents(new Map(), [], worktreeAgents);
-    for (const [name, config] of wtMerged) {
-      if (!agents.has(name)) {
-        agents.set(name, config);
-        count++;
-      }
-    }
-  }
-
   return count;
 }
 

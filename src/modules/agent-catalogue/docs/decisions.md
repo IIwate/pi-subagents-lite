@@ -4,15 +4,16 @@
 
 - Discovery and merge policy belong to one catalogue capability; frontmatter parsing remains an internal component.
 - The effective definition is copied into the Accepted run policy at authorization time.
-- Session-start discovery enters through `agent-catalogue/public.ts`; its filesystem source is wired by `bootstrap/agent-catalogue.ts`.
+- Session-start and on-demand discovery enter through `agent-catalogue/public.ts`; the filesystem source is wired by `bootstrap/agent-catalogue.ts`.
 - The `disableDefaultAgents` value is read through `configuration/public.ts`, then validated as a catalogue-owned fragment without creating a new persisted section.
 - A malformed source file is rejected at the filesystem adapter boundary without hiding valid definitions from the same discovery request.
+- Worktree-local definitions use project source attribution and only fill names absent from the built-in, global, and project merge.
 
 ## Superseded
 
-- Discovery spread across session-start and registry helpers is superseded by one catalogue facade. Phase 2 removes the remaining on-demand registry path when its caller moves.
+- Session-start `scanAndMerge` and on-demand `scanAgentFilesInDir`/`mergeAgents` execution are superseded by one catalogue facade. The in-process registry remains the runtime sink until its callers move.
 
 ## Implementation-only
 
 - Existing source filenames and parser helper names are evidence, not a public contract.
-- The legacy registry Map and on-demand Worktree discovery functions remain migration boundaries, not public catalogue contracts; Phase 2 removes them as their callers move.
+- The legacy registry Map, `registerAgents`, and `resolveType` remain migration boundaries, not public catalogue contracts.
