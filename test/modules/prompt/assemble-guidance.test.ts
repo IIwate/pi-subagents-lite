@@ -42,7 +42,7 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
     const result = assembleAgentGuidance(command);
     expect(Check(AgentGuidanceRequestSchema, command)).toBe(true);
     expect(Check(AgentGuidanceResultSchema, result)).toBe(true);
-    expect(result).toEqual({
+    const expected = {
       ok: true,
       guidance: [
         "[Subagent access]",
@@ -63,6 +63,49 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
         "Explore alternate models:",
         "- openai/gpt-5 (allowed: off, low, medium, high; default: high)",
       ].join("\n"),
+    };
+    expect(result).toEqual(expected);
+    expect(JSON.parse(JSON.stringify(result))).toEqual(expected);
+    expect(assembleAgentGuidance(command)).toEqual(result);
+  });
+
+  it("sorts callable names and lists types with no authorized model as unavailable", () => {
+    const result = assembleAgentGuidance({
+      kind: "assemble-guidance",
+      agents: [
+        { name: "zeta", description: "Last" },
+        { name: "alpha", description: "First", maxTurns: 4 },
+      ],
+      parentModelKey: "anthropic/sonnet",
+      parentThinkingLevel: "medium",
+      parentSupportedLevels: ["off", "medium", "high"],
+      parentFallbackLevel: "high",
+      parentScopedThinkingLevel: null,
+      routing: {
+        enabled: false,
+        enabledProviders: [],
+        agentAccess: {
+          alpha: { providers: {} },
+          zeta: { parentModelAccess: false, providers: {} },
+        },
+      },
+      availableModels: [],
+      scopedKeys: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.guidance.indexOf("alpha: First")).toBeLessThan(result.guidance.indexOf("Unavailable agent types:"));
+      expect(result.guidance).toContain("- zeta: no authorized model");
+      expect(result.guidance).toContain("max turns: 4");
+    }
+  });
+
+  it("rejects a malformed guidance command", () => {
+    const result = assembleAgentGuidance({ kind: "assemble-guidance" });
+    expect(Check(AgentGuidanceResultSchema, result)).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Agent guidance command is invalid." },
     });
   });
 });

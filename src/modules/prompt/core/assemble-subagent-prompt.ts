@@ -58,7 +58,9 @@ export function assembleSubagentPromptText(request: SubagentPromptRequest): stri
     contextSuffix = `\n\n${lines.join("\n")}`;
   }
 
-  const customHeader = request.header ? stripScaffolding(request.header) : undefined;
+  const customHeader = request.mode !== "replace" && request.header
+    ? stripScaffolding(request.header)
+    : undefined;
   const basePrompt = customHeader
     ? `${customHeader}\n\n${envBlock}`
     : `You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously.\n\n${envBlock}`;

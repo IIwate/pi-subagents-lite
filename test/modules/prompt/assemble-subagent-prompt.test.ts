@@ -25,6 +25,8 @@ describe("REQ-AGENT-001 Subagent system prompt public seam", () => {
     expect(Check(SubagentPromptResultSchema, result)).toBe(true);
     expect(result.ok).toBe(true);
     if (result.ok) {
+      expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+      expect(assembleSubagentPrompt(command)).toEqual(result);
       expect(result.prompt).toContain("You are a Pi, an expert coding sub-agent.");
       expect(result.prompt).toContain("Working directory: C:/project");
       expect(result.prompt).toContain("Branch: re");
@@ -32,6 +34,8 @@ describe("REQ-AGENT-001 Subagent system prompt public seam", () => {
       expect(result.prompt).toContain("Review the diff.");
       expect(result.prompt).toContain("Follow the house style.");
       expect(result.prompt).toContain("<name>tdd</name>");
+      expect(result.prompt).toContain("<available_skills>");
+      expect(result.prompt).toContain("The following skills provide specialized instructions");
     }
   });
 
@@ -54,5 +58,58 @@ describe("REQ-AGENT-001 Subagent system prompt public seam", () => {
       expect(result.prompt).toContain("Review the diff.");
       expect(result.prompt).not.toContain("You are a Pi, an expert coding sub-agent.");
     }
+  });
+
+  it("uses the custom header and strips leftover project and skill scaffolding", () => {
+    const result = assembleSubagentPrompt({
+      kind: "assemble-subagent-prompt",
+      mode: "custom",
+      agentName: "reviewer",
+      agentInstructions: "Review the diff.",
+      cwd: "C:/project",
+      env: { isGitRepo: false, branch: null, platform: "linux" },
+      header: [
+        "Custom header",
+        "<project_context>old context</project_context>",
+        "<available_skills><skill><name>old</name></skill></available_skills>",
+      ].join("\n"),
+      contextFiles: [],
+      skillElements: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prompt).toContain("Custom header");
+      expect(result.prompt).toContain("Not a git repository");
+      expect(result.prompt).not.toContain("old context");
+      expect(result.prompt).not.toContain("<name>old</name>");
+    }
+  });
+
+  it("ignores a header in replace mode", () => {
+    const result = assembleSubagentPrompt({
+      kind: "assemble-subagent-prompt",
+      mode: "replace",
+      agentName: "reviewer",
+      agentInstructions: "Review the diff.",
+      cwd: "C:/project",
+      env: { isGitRepo: false, branch: null, platform: "linux" },
+      header: "Should not appear",
+      contextFiles: [],
+      skillElements: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prompt).toContain("You are a Pi, an expert coding sub-agent.");
+      expect(result.prompt).not.toContain("Should not appear");
+    }
+  });
+
+  it("rejects a malformed Subagent prompt command", () => {
+    const result = assembleSubagentPrompt({ kind: "assemble-subagent-prompt" });
+    expect(Check(SubagentPromptResultSchema, result)).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Subagent prompt command is invalid." },
+    });
   });
 });

@@ -40,6 +40,21 @@ Each output has a documented ordered fragment list. Assembly is a pure function 
 
 The host owns Pi skill XML formatting and filesystem reads. Prompt assembly only concatenates those serialized strings.
 
+## Owning tests
+
+| Fragment or rule | Owner | Public-seam test |
+|:--|:--|:--|
+| Guidance header, tool rules, required `model`, exact alternates | `assemble-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` required-model golden |
+| Guidance name sort, unavailable types, `maxTurns` | `assemble-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` sort/unavailable |
+| Guidance malformed command | `assemble-agent-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` invalid-command |
+| Catalogue reader for Parent guidance | `create-parent-guidance.ts` | `test/modules/prompt/parent-guidance.test.ts` |
+| Replace-mode env, context, skill wrapper | `assemble-subagent-prompt.ts` | `test/modules/prompt/assemble-subagent-prompt.test.ts` replace golden |
+| Inherit scaffolding strip | `assemble-subagent-prompt.ts` | inherit date/cwd strip |
+| Custom header and leftover context/skill strip | `assemble-subagent-prompt.ts` | custom scaffolding strip |
+| Replace mode ignores host header | `assemble-subagent-prompt.ts` | replace ignores header |
+| Subagent malformed command | `assemble-subagent-prompt.ts` | invalid-command |
+| Custom file and context I/O | `platform/fs/prompt-files.ts` | `test/platform/fs/prompt-files.test.ts` |
+
 ## Safety boundary
 
 Prompt text is not persisted as a runtime record, emitted as a new session message, logged for inspection, or exposed through a new menu or command. Users inspect and modify extension-controlled material through the source files and these documents.
