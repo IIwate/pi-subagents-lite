@@ -343,6 +343,39 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
     expect(buckets.get("session-a")).toHaveLength(1);
   });
 
+  it("prefers a persisted completion over a same-timestamp fallback for the same agent", () => {
+    const delivery = createBackgroundDelivery({
+      repository: {
+        read: () => ({ pending: [], latest: [] }),
+        append(next) {
+          return next.result !== "older fallback";
+        },
+        acknowledge: () => true,
+      },
+      messenger: { send: () => true },
+      context: {
+        parentSessionId: () => "session-a",
+        activeBranchIds: () => ["origin-a"],
+        isIdle: () => true,
+      },
+      fallback: { take: () => [], save() {} },
+    });
+    delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "old", result: "older fallback", createdAt: 1 }),
+      stillPresent: true,
+    });
+    delivery.execute({
+      kind: "record-terminal",
+      record: record({ deliveryId: "new", result: "current result", createdAt: 1 }),
+      stillPresent: true,
+    });
+    expect(delivery.getStoredResult("agent-1")).toMatchObject({
+      deliveryId: "new",
+      result: "current result",
+    });
+  });
+
   it("rejects a malformed command at the public seam", () => {
     const memory = createMemory();
     expect(memory.delivery.execute({ kind: "not-a-command" })).toEqual({

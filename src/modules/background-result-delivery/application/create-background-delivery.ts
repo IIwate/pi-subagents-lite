@@ -309,7 +309,10 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
         undefined,
       );
     if (!fallback) return latest;
-    if (!latest || fallback.createdAt >= latest.createdAt) return fallback;
+    // Same-millisecond continuations share createdAt. Treating equality as
+    // "fallback is newer" would resurrect the failed persist over the
+    // completion that just landed. Prefer the persisted latest on a tie.
+    if (!latest || fallback.createdAt > latest.createdAt) return fallback;
     return latest;
   }
 }
