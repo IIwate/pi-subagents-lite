@@ -10,24 +10,22 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // a resolved entry and may never add a new one.
 const legacyCycleBaseline = new Set<string>();
 
-// Phase 7 retired the ConfigStore mock hub (menu-mock-setup) and the menu
-// suites; the agent suites gained bootstrap-seam mocks in exchange for the
-// getStore one. Phase 8's composition root turns those seams into injected
-// dependencies, which is when these counts are expected to shrink again.
+// Phase 8's ExtensionRuntime removed every shell.js mock: executor suites now
+// construct the runtime record directly. The remaining entries are platform or
+// vendor seams (pi-coding-agent, agent-session, fs scanners) plus the routing
+// pin in bootstrap/model-access; Phase 9 decides which of those stay.
 const legacyInternalMockBaseline: Readonly<Record<string, number>> = {
-  "test/events.test.ts": 4,
-  "test/fixtures.ts": 3,
+  "test/events.test.ts": 3,
   "test/index.test.ts": 8,
-  "test/agents/agent-runner.test.ts": 6,
-  "test/agents/agent-status.test.ts": 1,
-  "test/agents/queued-model-permission.integration.test.ts": 5,
-  "test/agents/result-delivery.integration.test.ts": 2,
-  "test/agents/stop-agent.test.ts": 5,
-  "test/agents/tool-execution.test.ts": 6,
+  "test/agents/agent-runner.test.ts": 5,
+  "test/agents/queued-model-permission.integration.test.ts": 3,
+  "test/agents/result-delivery.integration.test.ts": 1,
+  "test/agents/stop-agent.test.ts": 4,
+  "test/agents/tool-execution.test.ts": 4,
   "test/prompt/prompts.test.ts": 1,
   "test/prompt/skill-loader.test.ts": 1,
   "test/spawn/session-fallback.integration.test.ts": 1,
-  "test/spawn/spawn-coordinator.test.ts": 6,
+  "test/spawn/spawn-coordinator.test.ts": 5,
 };
 
 function internalMockCounts(): Record<string, number> {

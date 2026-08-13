@@ -16,9 +16,9 @@ import {
   type ConcurrencyLimits,
   type ConcurrencyLimitsFragment,
   type ConcurrencyLimitsUpdate,
+  type SubagentRuntime,
 } from "../modules/subagent-runtime/public.js";
 import { configurationSectionIO } from "./configuration.js";
-import { getManager } from "../shell.js";
 
 /** Current persisted fragment, read fresh so no stale copy is ever edited. */
 export function readConcurrencyFragment(): ConcurrencyLimitsFragment {
@@ -30,9 +30,10 @@ export function concurrencyRuntimeLimits(): ConcurrencyLimits {
   return runtimeLimitsFromFragment(readConcurrencyFragment());
 }
 
-/** Commit-first fragment update; republishes into the live runtime only on success. */
+/** Commit-first fragment update; republishes into the live scheduler only on success. */
 export function updateConcurrencyLimits(
   update: ConcurrencyLimitsUpdate,
+  manager: SubagentRuntime | null,
 ): { ok: true } | { ok: false; message: string } {
   const next = applyConcurrencyLimitsUpdate(readConcurrencyFragment(), update);
   const result = configurationSectionIO.commit(
@@ -40,6 +41,6 @@ export function updateConcurrencyLimits(
     JSON.parse(JSON.stringify(next)) as Record<string, JsonValue>,
   );
   if (!result.ok) return result;
-  getManager()?.replaceLimits(runtimeLimitsFromFragment(next));
+  manager?.replaceLimits(runtimeLimitsFromFragment(next));
   return { ok: true };
 }

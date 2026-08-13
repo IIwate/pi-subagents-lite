@@ -4,13 +4,13 @@
  * section. Resolution applies capability defaults on read; updates are
  * commit-first (REQ-CONFIG-001), so a failed save keeps the previous
  * effective value and never synchronizes the navigator with an unpersisted
- * value. Phase 8 moves ownership into the explicit composition root.
+ * value. One store is created per ExtensionRuntime by the composition root,
+ * bound to that runtime's navigator.
  */
 
 import type { SystemPromptMode } from "../agents/types.js";
 import type { JsonValue } from "../modules/configuration/public.js";
-import { configurationSectionIO, type ConfigSectionIO } from "./configuration.js";
-import { getNavigator } from "../shell.js";
+import type { ConfigSectionIO } from "./configuration.js";
 
 /** Default number of grace turns before an agent is force-stopped. */
 export const DEFAULT_GRACE_TURNS = 6;
@@ -182,22 +182,3 @@ export function createAgentSettingsStore(
   return store;
 }
 
-const runtimeStore = createAgentSettingsStore(configurationSectionIO, () => getNavigator());
-
-/** Resolved `agent` fragment read fresh from the shared configuration document. */
-export function readAgentSettings(): ResolvedAgentSettings {
-  return runtimeStore.read();
-}
-
-/** Commit-first update of one agent setting (REQ-CONFIG-001). */
-export function updateAgentSetting<K extends keyof AgentSettings>(
-  key: K,
-  value: NonNullable<AgentSettings[K]>,
-): { ok: true } | { ok: false; message: string } {
-  return runtimeStore.update(key, value);
-}
-
-/** Re-sync list stats visibility after reloads or navigator creation. */
-export function syncNavigatorStats(): void {
-  runtimeStore.syncNavigatorStats();
-}

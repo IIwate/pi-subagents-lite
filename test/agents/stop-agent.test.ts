@@ -3,20 +3,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { shellMock } from "../fixtures.ts";
+import { fakeExtensionRuntime } from "../fixtures.ts";
 
 const { mockAbort, mockGetRecord, mockListAgents } = vi.hoisted(() => ({
   mockAbort: vi.fn(() => false),
   mockGetRecord: vi.fn(),
   mockListAgents: vi.fn(),
-}));
-
-vi.mock("../../src/shell.js", () => shellMock({
-  manager: {
-    stop: mockAbort,
-    getSnapshot: mockGetRecord,
-    listSnapshots: mockListAgents,
-  },
 }));
 
 // StopAgent does not use the spawn/model path. Stub those imports so this focused
@@ -41,7 +33,15 @@ vi.mock("../../src/models/model-scope.js", () => ({
   modelKey: ({ provider, id }: { provider: string; id: string }) => `${provider}/${id}`,
 }));
 
-import { executeStopAgentTool, formatResultContent } from "../../src/agents/tool-execution.js";
+import { createStopAgentToolExecutor, formatResultContent } from "../../src/agents/tool-execution.js";
+
+const executeStopAgentTool = createStopAgentToolExecutor(fakeExtensionRuntime({
+  manager: {
+    stop: mockAbort,
+    getSnapshot: mockGetRecord,
+    listSnapshots: mockListAgents,
+  } as any,
+}));
 
 describe("formatResultContent", () => {
   // Only the composition contract lives here: result text, then the note as a

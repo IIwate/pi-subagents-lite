@@ -10,14 +10,9 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
 }));
 
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
-import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
+import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { takeFallbackResults } from "../../src/platform/process/process-state.js";
-import {
-  setDelivery,
-  setManager,
-  setPiInstance,
-  setSessionCtx,
-} from "../../src/shell.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {
   applyDeliveryCommand,
@@ -26,16 +21,17 @@ import {
   recordTerminalResult,
   spawnAgent,
 } from "../../src/bootstrap/session-host.js";
-import { acceptedRunPolicy } from "../fixtures.js";
+import { acceptedRunPolicy, fakeExtensionRuntime } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 
-function createHost(runtime: SubagentRuntime) {
-  const delivery = createHostDelivery();
+function createHost(ext: ExtensionRuntime) {
+  const delivery = createHostDelivery(ext);
+  const manager = ext.manager!;
   const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
-    applyDeliveryCommand(runtime, delivery, command);
+    applyDeliveryCommand(manager, delivery, command);
   return {
     delivery,
-    spawn: (ctx: any, intent: any) => spawnAgent(runtime, ctx, intent),
+    spawn: (ctx: any, intent: any) => spawnAgent(ext, ctx, intent),
     restorePending: () => { run({ kind: "restore" }); },
     onParentAgentEnd: (messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]) => {
       run({ kind: "parent-end", succeeded: isParentRunSuccessful(messages) });
@@ -44,8 +40,8 @@ function createHost(runtime: SubagentRuntime) {
     pendingResultCount: () => delivery.pendingResultCount(),
     dispose: () => { run({ kind: "dispose" }); },
     bind: () => {
-      setDelivery(delivery);
-      runtime.setOnComplete((record) => recordTerminalResult(runtime, delivery, record));
+      ext.delivery = delivery;
+      manager.setOnComplete((record) => recordTerminalResult(manager, delivery, record));
     },
   };
 }
@@ -87,8 +83,6 @@ function createPi(entries: any[], appendFails = false) {
 async function disposeRuntime(manager?: SubagentRuntime, host?: { dispose(): void }) {
   host?.dispose();
   await manager?.dispose();
-  setDelivery(null);
-  setManager(null);
 }
 
 describe("session-keyed delivery fallback", () => {
@@ -97,6 +91,8 @@ describe("session-keyed delivery fallback", () => {
     takeFallbackResults("session-b");
   });
 
+  // Two ExtensionRuntime records share only the process-wide fallback inbox;
+  // everything else (pi, ctx, manager, delivery) must stay isolated per record.
   it("preserves A across B and restores one durable delivery when A returns", async () => {
     const entriesA: any[] = [];
     const entriesB: any[] = [];
@@ -116,11 +112,9 @@ describe("session-keyed delivery fallback", () => {
     let hostB: ReturnType<typeof createHost> | undefined;
     let restoredA: ReturnType<typeof createHost> | undefined;
     try {
-      setSessionCtx(ctxA);
-      setPiInstance(piA);
       managerA = createTestSubagentRuntime({ pi: piA, ctx: ctxA });
-      setManager(managerA);
-      hostA = createHost(managerA);
+      const runtimeA = fakeExtensionRuntime({ pi: piA, sessionCtx: ctxA, manager: managerA });
+      hostA = createHost(runtimeA);
       hostA.bind();
 
       const spawned = await hostA.spawn(ctxA, {
@@ -137,11 +131,9 @@ describe("session-keyed delivery fallback", () => {
       hostA.dispose();
       hostA = undefined;
 
-      setSessionCtx(ctxB);
-      setPiInstance(piB);
       managerB = createTestSubagentRuntime({ pi: piB, ctx: ctxB });
-      setManager(managerB);
-      hostB = createHost(managerB);
+      const runtimeB = fakeExtensionRuntime({ pi: piB, sessionCtx: ctxB, manager: managerB });
+      hostB = createHost(runtimeB);
       hostB.bind();
       hostB.restorePending();
 
@@ -152,10 +144,8 @@ describe("session-keyed delivery fallback", () => {
       hostB = undefined;
 
       piA.appendFails = false;
-      setSessionCtx(ctxA);
-      setPiInstance(piA);
-      setManager(managerA);
-      restoredA = createHost(managerA);
+      const runtimeARestored = fakeExtensionRuntime({ pi: piA, sessionCtx: ctxA, manager: managerA });
+      restoredA = createHost(runtimeARestored);
       restoredA.bind();
       restoredA.restorePending();
 
@@ -163,7 +153,7 @@ describe("session-keyed delivery fallback", () => {
       expect(piA.sendMessage).toHaveBeenCalledOnce();
       expect(managerA.getSnapshot(spawned.agentId)?.resultPersisted).toBe(true);
 
-      const status = await executeAgentStatusTool(
+      const status = await createAgentStatusToolExecutor(runtimeARestored)(
         "status",
         { agent_id: spawned.agentId },
         undefined,

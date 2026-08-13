@@ -103,39 +103,37 @@ vi.mock("../../src/models/model-scope.js", () => ({
     `Model "${modelRef}" is not in the active model scope. Allowed: ${[...scopedKeys].join(", ")}.`,
 }));
 
-vi.mock("../../src/shell.js", () => ({
-  getPiInstance: () => ({ sendMessage: vi.fn(), exec: vi.fn() }),
-  getSessionCtx: () => ({ cwd: "/home/test/project" }),
-  getManager: () => ({
-    execute: mockSpawn,
-    getSnapshot: mockGetRecord,
-    listSnapshots: vi.fn(() => []),
-    stop: vi.fn(() => false),
-  }),
-}));
-
-// The bootstrap seams read the shared configuration document; these tests pin
-// spawn policy and routing per case instead of going through persisted state.
-vi.mock("../../src/bootstrap/agent-settings.js", () => ({
-  DEFAULT_GRACE_TURNS: 6,
-  readAgentSettings: () => ({
-    graceTurns: 5,
-    forceBackground: mockForceBackground.value,
-    loadSkillsImplicitly: true,
-    loadExtensionsImplicitly: true,
-    systemPromptMode: "replace",
-    includeContextFiles: true,
-  }),
-}));
-
 vi.mock("../../src/bootstrap/model-access.js", () => ({
   currentModelAccess: () => structuredClone(mockRouting),
 }));
 
 // Import after mocks are in place
-import { executeAgentTool } from "../../src/agents/tool-execution.js";
+import { createAgentToolExecutor } from "../../src/agents/tool-execution.js";
 import * as agentTypes from "../../src/agents/agent-types.js";
 import * as sessionHost from "../../src/bootstrap/session-host.js";
+import { fakeExtensionRuntime, inertAgentSettings } from "../fixtures.ts";
+
+// The executor closes over an explicitly constructed runtime record; spawn
+// policy is pinned per case through a live-reading settings fake instead of
+// the persisted document.
+const runtime = fakeExtensionRuntime({
+  sessionCtx: { cwd: "/home/test/project" } as any,
+  manager: {
+    execute: mockSpawn,
+    getSnapshot: mockGetRecord,
+    listSnapshots: vi.fn(() => []),
+    stop: vi.fn(() => false),
+  } as any,
+  agentSettings: {
+    ...inertAgentSettings(),
+    read: () => ({
+      ...inertAgentSettings().read(),
+      graceTurns: 5,
+      forceBackground: mockForceBackground.value,
+    }),
+  },
+});
+const executeAgentTool = createAgentToolExecutor(runtime);
 
 beforeEach(() => {
   vi.spyOn(sessionHost, "spawnAgent").mockImplementation(async (_runtime: any, _ctx: any, intent: any) => {

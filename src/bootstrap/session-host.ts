@@ -22,12 +22,7 @@ import {
   setFallbackResults,
   takeFallbackResults,
 } from "../platform/process/process-state.js";
-import {
-  getNavigator,
-  getPiInstance,
-  getSessionCtx,
-  setDelivery,
-} from "../shell.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
 
 export interface SpawnIntent extends SpawnConfig {
   type: string;
@@ -73,11 +68,17 @@ export function isParentRunSuccessful(
     && last.errorMessage === undefined;
 }
 
-export function createHostDelivery(): BackgroundDelivery {
+/** Delivery is wired at session_start; a missing session context is a wiring bug. */
+function requireSessionCtx(runtime: ExtensionRuntime): ExtensionContext {
+  if (!runtime.sessionCtx) throw new Error("Session context is not initialised.");
+  return runtime.sessionCtx;
+}
+
+export function createHostDelivery(runtime: ExtensionRuntime): BackgroundDelivery {
   return createBackgroundDelivery({
-    repository: createPiResultRepository(getPiInstance(), getSessionCtx()),
-    messenger: createPiParentMessenger(getPiInstance()),
-    context: createPiDeliveryContext(getSessionCtx),
+    repository: createPiResultRepository(runtime.pi, requireSessionCtx(runtime)),
+    messenger: createPiParentMessenger(runtime.pi),
+    context: createPiDeliveryContext(() => requireSessionCtx(runtime)),
     fallback: {
       take: takeFallbackResults,
       save: setFallbackResults,
@@ -91,39 +92,41 @@ function pendingIds(delivery: BackgroundDelivery): Set<string> {
 }
 
 function syncRuntimeFlags(
-  runtime: SubagentRuntime,
+  manager: SubagentRuntime,
   delivery: BackgroundDelivery,
   previousPending: Set<string>,
 ): void {
   const current = pendingIds(delivery);
-  for (const snapshot of runtime.listSnapshots()) {
+  for (const snapshot of manager.listSnapshots()) {
     const deliveryId = snapshot.resultDeliveryId;
     if (!deliveryId) continue;
-    if (current.has(deliveryId)) runtime.markResult(snapshot.id, { persisted: true });
+    if (current.has(deliveryId)) manager.markResult(snapshot.id, { persisted: true });
     if (previousPending.has(deliveryId) && !current.has(deliveryId)) {
-      runtime.markResult(snapshot.id, { consumed: true });
+      manager.markResult(snapshot.id, { consumed: true });
     }
   }
 }
 
 export function applyDeliveryCommand(
-  runtime: SubagentRuntime,
+  manager: SubagentRuntime,
   delivery: BackgroundDelivery,
   command: DeliveryCommand,
 ): DeliveryCommandResult {
   const previous = pendingIds(delivery);
   const result = delivery.execute(command);
-  syncRuntimeFlags(runtime, delivery, previous);
+  syncRuntimeFlags(manager, delivery, previous);
   return result;
 }
 
 export async function spawnAgent(
-  runtime: SubagentRuntime,
+  runtime: ExtensionRuntime,
   spawnCtx: ExtensionContext,
   intent: SpawnIntent,
 ): Promise<SpawnResult> {
+  const manager = runtime.manager;
+  if (!manager) throw new Error("Subagent runtime is not initialised.");
   const { type, prompt, runInBackground, ...spawnOptions } = intent;
-  const spawned = await runtime.execute({
+  const spawned = await manager.execute({
     kind: "spawn",
     type,
     prompt,
@@ -142,25 +145,26 @@ export async function spawnAgent(
   const agentId = spawned.snapshot.id;
   if (spawnOptions.signal && !spawnOptions.signal.aborted) {
     spawnOptions.signal.addEventListener("abort", () => {
-      runtime.stop(agentId, "user");
+      manager.stop(agentId, "user");
     }, { once: true });
   }
-  getNavigator()?.ensureTimer();
+  runtime.navigator?.ensureTimer();
   if (!runInBackground) {
-    await runtime.waitUntilSettled(agentId);
-    runtime.markResult(agentId, { consumed: true });
+    await manager.waitUntilSettled(agentId);
+    manager.markResult(agentId, { consumed: true });
   }
-  return { agentId, snapshot: runtime.getSnapshot(agentId) ?? spawned.snapshot };
+  return { agentId, snapshot: manager.getSnapshot(agentId) ?? spawned.snapshot };
 }
 
 export async function interactAgent(
-  runtime: SubagentRuntime,
+  runtime: ExtensionRuntime,
   agentId: string,
   message: string,
   images?: ImageContent[],
 ): Promise<InteractionResult> {
-  if (!runtime.getSnapshot(agentId)) return { accepted: false, reason: "unavailable" };
-  const interacted = await runtime.execute({
+  const manager = runtime.manager;
+  if (!manager?.getSnapshot(agentId)) return { accepted: false, reason: "unavailable" };
+  const interacted = await manager.execute({
     kind: "interact",
     id: agentId,
     message,
@@ -169,37 +173,39 @@ export async function interactAgent(
   const result = interacted.ok && interacted.interaction
     ? interacted.interaction
     : { accepted: false as const, reason: "unavailable" as const };
-  if (result.accepted) getNavigator()?.ensureTimer();
+  if (result.accepted) runtime.navigator?.ensureTimer();
   return result;
 }
 
 export function recordTerminalResult(
-  runtime: SubagentRuntime,
+  manager: SubagentRuntime,
   delivery: BackgroundDelivery,
   snapshot: AgentSnapshot,
 ): void {
   const result = toResult(snapshot);
-  if (!result || !runtime.getSnapshot(snapshot.id)) return;
-  runtime.markResult(snapshot.id, { deliveryId: result.deliveryId });
-  applyDeliveryCommand(runtime, delivery, {
+  if (!result || !manager.getSnapshot(snapshot.id)) return;
+  manager.markResult(snapshot.id, { deliveryId: result.deliveryId });
+  applyDeliveryCommand(manager, delivery, {
     kind: "record-terminal",
     record: result,
-    stillPresent: runtime.getSnapshot(snapshot.id) != null,
+    stillPresent: manager.getSnapshot(snapshot.id) != null,
   });
 }
 
 /**
- * Composition-root wiring only. Delivery lives on the shell the same way
- * the runtime does: one getter, retired when Phase 8 deletes the remaining
- * locators. A combined coordinator facade was the rejected alternative —
- * callers already know whether they want spawn or delivery.
+ * Composition-root wiring only. Delivery lives on the runtime record next to
+ * the manager it serves. A combined coordinator facade was the rejected
+ * alternative — callers already know whether they want spawn or delivery.
  */
-export function wireHostDelivery(runtime: SubagentRuntime): BackgroundDelivery {
-  const delivery = createHostDelivery();
-  setDelivery(delivery);
-  runtime.setOnComplete((snapshot) => {
-    recordTerminalResult(runtime, delivery, snapshot);
-    getNavigator()?.update();
+export function wireHostDelivery(
+  runtime: ExtensionRuntime,
+  manager: SubagentRuntime,
+): BackgroundDelivery {
+  const delivery = createHostDelivery(runtime);
+  runtime.delivery = delivery;
+  manager.setOnComplete((snapshot) => {
+    recordTerminalResult(manager, delivery, snapshot);
+    runtime.navigator?.update();
   });
   return delivery;
 }

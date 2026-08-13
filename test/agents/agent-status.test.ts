@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { shellMock } from "../fixtures.ts";
+import { fakeExtensionRuntime } from "../fixtures.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Module-level mock variables — defined before vi.mock calls so they  */
@@ -29,11 +29,15 @@ const {
 /*  Global mocks                                                      */
 /* ------------------------------------------------------------------ */
 
-vi.mock("../../src/shell.js", () => shellMock({
+// Load the module graph during collection; the per-test dynamic imports then
+// hit the cache instead of charging the first test's timeout with it.
+import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+
+const executeAgentStatusTool = createAgentStatusToolExecutor(fakeExtensionRuntime({
   manager: {
     listSnapshots: mockListAgents,
     getSnapshot: mockGetRecord,
-  },
+  } as any,
   delivery: {
     getStoredResult: mockGetStoredResult,
     execute: (command: { kind?: string; deliveryId?: string }) => {
@@ -42,12 +46,8 @@ vi.mock("../../src/shell.js", () => shellMock({
       }
       return { ok: true };
     },
-  },
+  } as any,
 }));
-
-// Load the module graph during collection; the per-test dynamic imports then
-// hit the cache instead of charging the first test's timeout with it.
-import "../../src/agents/agent-status.js";
 
 /* ------------------------------------------------------------------ */
 /*  Execute behavior tests                                            */
@@ -69,7 +69,6 @@ describe("AgentStatus tool execute behavior", () => {
       result: "Review-Result: PASS",
     });
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
     const result = await executeAgentStatusTool(
       "call_exact",
       { agent_id: "agent-12345678" },
@@ -93,7 +92,6 @@ describe("AgentStatus tool execute behavior", () => {
       result: "done",
     } : undefined);
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
     const result = await executeAgentStatusTool(
       "call_prefix",
       { agent_id: "agent-1234" },
@@ -135,7 +133,6 @@ describe("AgentStatus tool execute behavior", () => {
       delivery: "auto",
     });
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
     const result = await executeAgentStatusTool(
       "call_durable",
       { agent_id: "agent-12345678" },
@@ -151,8 +148,6 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("returns empty state message when no agents exist", async () => {
     mockListAgents.mockReturnValue([]);
-
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
 
     const result = await executeAgentStatusTool(
       "call_1",
@@ -173,8 +168,6 @@ describe("AgentStatus tool execute behavior", () => {
       { id: "abc123def456ghi", type: "builder", status: "running" },
     ]);
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
-
     const result = await executeAgentStatusTool(
       "call_2",
       {},
@@ -194,8 +187,6 @@ describe("AgentStatus tool execute behavior", () => {
       { id: "aaa111bbb222ccc", type: "builder", status: "running" },
       { id: "ddd333eee444fff", type: "reviewer", status: "completed" },
     ]);
-
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
 
     const result = await executeAgentStatusTool(
       "call_3",
@@ -221,7 +212,6 @@ describe("AgentStatus tool execute behavior", () => {
       debugFaultKind: "output_blocked",
     }]);
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
     const result = await executeAgentStatusTool(
       "call_debug",
       {},
@@ -246,8 +236,6 @@ describe("AgentStatus tool execute behavior", () => {
       { id: "id5", type: "e", status: "error" },
     ]);
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
-
     const result = await executeAgentStatusTool(
       "call_4",
       {},
@@ -270,8 +258,6 @@ describe("AgentStatus tool execute behavior", () => {
   it("always includes nudge message", async () => {
     mockListAgents.mockReturnValue([]);
 
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
-
     const result = await executeAgentStatusTool(
       "call_5",
       {},
@@ -287,8 +273,6 @@ describe("AgentStatus tool execute behavior", () => {
     mockListAgents.mockReturnValue([
       { id: "a-very-long-agent-id-that-exceeds-short-length", type: "reviewer", status: "completed" },
     ]);
-
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
 
     const result = await executeAgentStatusTool(
       "call_6",
@@ -306,8 +290,6 @@ describe("AgentStatus tool execute behavior", () => {
 
   it("returns no error flag on success", async () => {
     mockListAgents.mockReturnValue([]);
-
-    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
 
     const result = await executeAgentStatusTool(
       "call_7",

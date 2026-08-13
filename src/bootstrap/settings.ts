@@ -16,20 +16,20 @@ import {
   createCustomPromptFile,
   customPromptFileExists,
 } from "../platform/fs/prompt-files.js";
-import { DEFAULT_GRACE_TURNS, readAgentSettings, updateAgentSetting } from "./agent-settings.js";
+import { DEFAULT_GRACE_TURNS } from "./agent-settings.js";
 import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
 import { createModelAccessSettingsOwner, readModelAccessFragment } from "./model-access.js";
-import { getManager, getNavigator } from "../shell.js";
 import { getAgentConfig, getAllTypes, setDefaultAgentsDisabled } from "../agents/agent-types.js";
 
 // Owner adapters compose each settings page with the capability that owns
 // its policy: the agent fragment seam, the concurrency seam, the
 // model-access seam, and the live runtime/navigator.
-function createDisplayOwner(): DisplaySettingsOwner {
+function createDisplayOwner(runtime: ExtensionRuntime): DisplaySettingsOwner {
   return {
     read() {
-      const agent = readAgentSettings();
+      const agent = runtime.agentSettings.read();
       return {
         expandListByDefault: agent.expandListByDefault,
         showTools: agent.showTools,
@@ -42,15 +42,15 @@ function createDisplayOwner(): DisplaySettingsOwner {
       };
     },
     update(id, value) {
-      return updateAgentSetting(id, value);
+      return runtime.agentSettings.update(id, value);
     },
   };
 }
 
-function createSpawnOwner(): SpawnSettingsOwner {
+function createSpawnOwner(runtime: ExtensionRuntime): SpawnSettingsOwner {
   return {
     read() {
-      const agent = readAgentSettings();
+      const agent = runtime.agentSettings.read();
       return {
         forceBackground: agent.forceBackground,
         graceTurns: agent.graceTurns,
@@ -59,7 +59,7 @@ function createSpawnOwner(): SpawnSettingsOwner {
       };
     },
     update(update) {
-      const result = updateAgentSetting(update.id, update.value);
+      const result = runtime.agentSettings.update(update.id, update.value);
       // Registry availability is an owner-side effect and must not run when
       // the commit failed, otherwise runtime and persisted policy diverge.
       if (result.ok && update.id === "disableDefaultAgents") {
@@ -70,10 +70,10 @@ function createSpawnOwner(): SpawnSettingsOwner {
   };
 }
 
-function createPromptOwner(): PromptSettingsOwner {
+function createPromptOwner(runtime: ExtensionRuntime): PromptSettingsOwner {
   return {
     read() {
-      const agent = readAgentSettings();
+      const agent = runtime.agentSettings.read();
       return {
         systemPromptMode: agent.systemPromptMode,
         includeContextFiles: agent.includeContextFiles,
@@ -84,7 +84,7 @@ function createPromptOwner(): PromptSettingsOwner {
       };
     },
     update(update) {
-      return updateAgentSetting(update.id, update.value);
+      return runtime.agentSettings.update(update.id, update.value);
     },
     createCustomPromptFile() {
       return createCustomPromptFile(customPromptPath);
@@ -97,7 +97,7 @@ function createPromptOwner(): PromptSettingsOwner {
  * every routable alternate for every agent type, and the keys of accepted
  * sessions (still actionable after routing or scope changes).
  */
-function activeModelKeys(ctx: ExtensionCommandContext): string[] {
+function activeModelKeys(runtime: ExtensionRuntime, ctx: ExtensionCommandContext): string[] {
   const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
   const scopedKeys = scopedModelKeys(ctx.scopedModels);
   const parentKey = ctx.model ? modelKey(ctx.model) : "";
@@ -115,17 +115,17 @@ function activeModelKeys(ctx: ExtensionCommandContext): string[] {
     )) keys.add(key);
   }
 
-  for (const record of getManager()?.listSnapshots() ?? []) {
+  for (const record of runtime.manager?.listSnapshots() ?? []) {
     keys.add(record.concurrencyKey);
   }
   return [...keys].sort();
 }
 
-function createConcurrencyOwner(ctx: ExtensionCommandContext): ConcurrencySettingsOwner {
+function createConcurrencyOwner(runtime: ExtensionRuntime, ctx: ExtensionCommandContext): ConcurrencySettingsOwner {
   return {
     read() {
       const fragment = readConcurrencyFragment();
-      const models = activeModelKeys(ctx);
+      const models = activeModelKeys(runtime, ctx);
       const providers = [...new Set(models.map((key) => key.split("/")[0]).filter((p): p is string => Boolean(p)))].sort();
       return {
         defaultLimit: fragment.default,
@@ -137,7 +137,7 @@ function createConcurrencyOwner(ctx: ExtensionCommandContext): ConcurrencySettin
       };
     },
     update(update) {
-      return updateConcurrencyLimits(update);
+      return updateConcurrencyLimits(update, runtime.manager);
     },
   };
 }
@@ -145,10 +145,10 @@ function createConcurrencyOwner(ctx: ExtensionCommandContext): ConcurrencySettin
 const RUNTIME_UNAVAILABLE = "Agent manager is not available in this session";
 const CHILD_SCREEN_UNAVAILABLE = "Agent list is not available in this session";
 
-function createDebugOwner(): DebugSettingsOwner {
+function createDebugOwner(runtime: ExtensionRuntime): DebugSettingsOwner {
   return {
     read() {
-      const armedFault = getManager()?.debugDiagnostics().armedFault?.kind;
+      const armedFault = runtime.manager?.debugDiagnostics().armedFault?.kind;
       return armedFault ? { armedFault } : {};
     },
     agentTypes() {
@@ -165,7 +165,7 @@ function createDebugOwner(): DebugSettingsOwner {
       });
     },
     diagnostics() {
-      const manager = getManager();
+      const manager = runtime.manager;
       if (!manager) return { ok: false, message: RUNTIME_UNAVAILABLE };
       const diagnostics = manager.debugDiagnostics();
       return {
@@ -187,13 +187,13 @@ function createDebugOwner(): DebugSettingsOwner {
       };
     },
     setStatusPreview(preview) {
-      const navigator = getNavigator();
+      const navigator = runtime.navigator;
       if (!navigator) return { ok: false, message: CHILD_SCREEN_UNAVAILABLE };
       navigator.setDebugStatusPreview(preview ?? undefined);
       return { ok: true };
     },
     armFault(fault) {
-      const manager = getManager();
+      const manager = runtime.manager;
       if (!manager) return { ok: false, message: RUNTIME_UNAVAILABLE };
       void manager.execute(fault ? { kind: "arm-debug-fault", fault } : { kind: "clear-debug-fault" });
       return { ok: true };
@@ -213,14 +213,14 @@ function createSummaryReader(): SettingsSummaryReader {
 }
 
 /** `/agents` entry point: the settings workflow rendered through the Pi host. */
-export async function showAgentsMenu(ctx: ExtensionCommandContext): Promise<void> {
+export async function showAgentsMenu(runtime: ExtensionRuntime, ctx: ExtensionCommandContext): Promise<void> {
   const settings = createSettings({
     summaries: createSummaryReader(),
-    display: createDisplayOwner(),
-    spawn: createSpawnOwner(),
-    prompt: createPromptOwner(),
-    concurrency: createConcurrencyOwner(ctx),
-    debug: createDebugOwner(),
+    display: createDisplayOwner(runtime),
+    spawn: createSpawnOwner(runtime),
+    prompt: createPromptOwner(runtime),
+    concurrency: createConcurrencyOwner(runtime, ctx),
+    debug: createDebugOwner(runtime),
     modelAccess: createModelAccessSettingsOwner(ctx),
   });
   await runSettingsScreen(ctx, settings);

@@ -63,9 +63,21 @@ const {
   activeBranchEntries: [{ id: "origin-a" }] as any[],
 }));
 
-vi.mock("../../src/shell.js", () => ({
-  getPiInstance: () => mockGetPiInstance(),
-  getSessionCtx: () => ({
+// The session-keyed fallback inbox is real: it is the process-state platform
+// contract the coordinator hands to the delivery module, and its Map semantics
+// are what the reload-transfer scenarios assert.
+import {
+  setFallbackResults,
+  takeFallbackResults,
+} from "../../src/platform/process/process-state.js";
+import { fakeExtensionRuntime } from "../fixtures.js";
+
+/**
+ * Host-session context equivalent of the retired shell getters: closures read
+ * fallbackMeta live so tests can move the branch/idle state mid-scenario.
+ */
+function hostSessionCtx() {
+  return {
     isIdle: () => fallbackMeta.idle,
     sessionManager: {
       getBranch: mockGetBranch,
@@ -74,17 +86,8 @@ vi.mock("../../src/shell.js", () => ({
       getSessionId: () => fallbackMeta.currentSessionId,
     },
     ui: { notify: vi.fn() },
-  }),
-  getNavigator: () => null,
-}));
-
-// The session-keyed fallback inbox is real: it is the process-state platform
-// contract the coordinator hands to the delivery module, and its Map semantics
-// are what the reload-transfer scenarios assert.
-import {
-  setFallbackResults,
-  takeFallbackResults,
-} from "../../src/platform/process/process-state.js";
+  } as unknown as ExtensionContext;
+}
 
 function makeMockManager() {
   const records = new Map<string, any>();
@@ -170,19 +173,25 @@ describe("session host delivery", () => {
   let ctx: ExtensionContext;
 
   function buildHost(
-    runtime: ReturnType<typeof makeMockManager>,
+    mockManager: ReturnType<typeof makeMockManager>,
     mod: typeof import("../../src/bootstrap/session-host.js"),
   ) {
-    const delivery = mod.createHostDelivery();
+    const ext = fakeExtensionRuntime({
+      pi: mockGetPiInstance(),
+      sessionCtx: hostSessionCtx(),
+      manager: mockManager as any,
+    });
+    const delivery = mod.createHostDelivery(ext);
+    ext.delivery = delivery;
     const run = (command: Parameters<typeof mod.applyDeliveryCommand>[2]) =>
-      mod.applyDeliveryCommand(runtime as any, delivery, command);
+      mod.applyDeliveryCommand(mockManager as any, delivery, command);
     return {
       spawn: (_pi: ExtensionAPI, spawnCtx: ExtensionContext, intent: any) =>
-        mod.spawnAgent(runtime as any, spawnCtx, intent),
+        mod.spawnAgent(ext, spawnCtx, intent),
       interact: (agentId: string, message: string, images?: any) =>
-        mod.interactAgent(runtime as any, agentId, message, images),
+        mod.interactAgent(ext, agentId, message, images),
       onAgentComplete: (snapshot: any) =>
-        mod.recordTerminalResult(runtime as any, delivery, snapshot),
+        mod.recordTerminalResult(mockManager as any, delivery, snapshot),
       prepareBeforeAgentStart: () => {
         const result = run({ kind: "parent-preflight" });
         return result.ok ? result.injection : undefined;

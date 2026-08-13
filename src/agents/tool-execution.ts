@@ -39,12 +39,8 @@ import {
   type ThinkingLevel,
 } from "../modules/model-access/public.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
-import {
-  getPiInstance,
-  getSessionCtx,
-  getManager,
-} from "../shell.js";
-import { readAgentSettings } from "../bootstrap/agent-settings.js";
+import type { ExtensionRuntime } from "../bootstrap/extension-runtime.js";
+import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
 import { currentModelAccess } from "../bootstrap/model-access.js";
 import { spawnAgent } from "../bootstrap/session-host.js";
 
@@ -77,7 +73,19 @@ export function formatResultContent(record: AgentSnapshot): string {
 // Tool execute handlers
 // ============================================================================
 
-export async function executeAgentTool(
+/** Bind the Agent tool execute callback to the composition-root runtime. */
+export function createAgentToolExecutor(runtime: ExtensionRuntime) {
+  return (
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate: ((update: any) => void) | undefined,
+    ctx: ExtensionContext,
+  ): Promise<any> => executeAgentTool(runtime, toolCallId, params, signal, onUpdate, ctx);
+}
+
+async function executeAgentTool(
+  runtime: ExtensionRuntime,
   _toolCallId: string,
   params: Record<string, unknown>,
   signal: AbortSignal | undefined,
@@ -89,10 +97,10 @@ export async function executeAgentTool(
   let validatedWorktreePath: string | undefined;
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
     try {
-      const parentCwd = getSessionCtx()?.cwd ?? ctx.cwd;
+      const parentCwd = runtime.sessionCtx?.cwd ?? ctx.cwd;
       const warnings: string[] = [];
       const onWarning = (msg: string) => { warnings.push(msg); };
-      const validation = await validateWorktreePath(getPiInstance(), rawWorktreePath, parentCwd, onWarning);
+      const validation = await validateWorktreePath(runtime.pi, rawWorktreePath, parentCwd, onWarning);
       if (!validation.ok) {
         for (const msg of warnings) {
           if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
@@ -122,7 +130,7 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);
   const requestedBackground = params.run_in_background as boolean | undefined;
-  const agentSettings = readAgentSettings();
+  const agentSettings = runtime.agentSettings.read();
   const scopedModels = structuredClone(ctx.scopedModels);
   const runInBackground = requestedBackground === true || agentSettings.forceBackground;
   const routing = currentModelAccess();
@@ -246,7 +254,7 @@ export async function executeAgentTool(
     return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);
   }
 
-  const result = await spawnAgent(getManager()!, ctx, {
+  const result = await spawnAgent(runtime, ctx, {
     type: resolvedType,
     prompt,
     description,
@@ -277,8 +285,8 @@ export async function executeAgentTool(
  * Build a compact list of running (or queued) agents.
  * Format: "short_id (type), short_id (type)" — one line, easy for LLM to parse.
  */
-function formatRunningAgents(): string {
-  const agents = getManager()!.listSnapshots().filter(
+function formatRunningAgents(manager: SubagentRuntime): string {
+  const agents = manager.listSnapshots().filter(
     (a) => a.status === "running" || a.status === "queued",
   );
 
@@ -293,39 +301,44 @@ function formatRunningAgents(): string {
 // StopAgent execute handler
 // ============================================================================
 
-export async function executeStopAgentTool(
-  _toolCallId: string,
-  params: Record<string, unknown>,
-  _signal: AbortSignal | undefined,
-  _onUpdate: ((update: any) => void) | undefined,
-  _ctx: ExtensionContext,
-): Promise<any> {
-  const agentId = params.agent_id as string | undefined;
+/** Bind the StopAgent tool execute callback to the composition-root runtime. */
+export function createStopAgentToolExecutor(runtime: ExtensionRuntime) {
+  return async (
+    _toolCallId: string,
+    params: Record<string, unknown>,
+    _signal: AbortSignal | undefined,
+    _onUpdate: ((update: any) => void) | undefined,
+    _ctx: ExtensionContext,
+  ): Promise<any> => {
+    const agentId = params.agent_id as string | undefined;
 
-  if (!agentId) {
-    return errorResult("agent_id is required");
-  }
+    if (!agentId) {
+      return errorResult("agent_id is required");
+    }
 
-  const record = getManager()!.getSnapshot(agentId);
+    // Tools only execute inside a session, after session_start created the manager.
+    const manager = runtime.manager!;
+    const record = manager.getSnapshot(agentId);
 
-  if (!record) {
-    // Agent not found → return error + list of running agents
-    return errorResult(
-      `Agent ${agentId} not found. Running agents: ${formatRunningAgents()}`,
-    );
-  }
+    if (!record) {
+      // Agent not found → return error + list of running agents
+      return errorResult(
+        `Agent ${agentId} not found. Running agents: ${formatRunningAgents(manager)}`,
+      );
+    }
 
-  // Check if already in a terminal state (not running or queued)
-  if (record.status !== "running" && record.status !== "queued") {
-    return successResult(
-      `Agent ${agentId} is already ${record.status}. Running agents: ${formatRunningAgents()}`,
-    );
-  }
+    // Check if already in a terminal state (not running or queued)
+    if (record.status !== "running" && record.status !== "queued") {
+      return successResult(
+        `Agent ${agentId} is already ${record.status}. Running agents: ${formatRunningAgents(manager)}`,
+      );
+    }
 
-  // Attempt to stop the running/queued agent
-  if (getManager()!.stop(agentId, "agent")) {
-    return successResult(`Stopped agent ${agentId.slice(0, SHORT_ID_LENGTH)}`);
-  }
+    // Attempt to stop the running/queued agent
+    if (manager.stop(agentId, "agent")) {
+      return successResult(`Stopped agent ${agentId.slice(0, SHORT_ID_LENGTH)}`);
+    }
 
-  return errorResult(`Failed to stop agent ${agentId}`);
+    return errorResult(`Failed to stop agent ${agentId}`);
+  };
 }

@@ -127,27 +127,8 @@ vi.mock("../../src/prompt/skill-loader.js", () => ({
   }),
 }));
 
-vi.mock("../../src/shell.js", () => ({
-  getManager: () => mocks.manager,
-  getDelivery: () => mocks.host?.delivery,
-  setDelivery: vi.fn(),
-  getNavigator: () => undefined,
-  getPiInstance: () => mocks.pi,
-  takeFallbackResults: (_sessionId?: string) => mocks.fallbackResults.splice(0),
-  setFallbackResults: (_sessionId: string | undefined, results: any[]) => {
-    mocks.fallbackResults.splice(0, mocks.fallbackResults.length, ...results);
-  },
-  getSessionCtx: () => mocks.ctx,
-  withSubagentSpawn: (operation: () => Promise<unknown>) => operation(),
-}));
-
-// Pin spawn policy and routing at the bootstrap seams so queued-permission
-// behavior is driven by this suite, not by the persisted document.
-vi.mock("../../src/bootstrap/agent-settings.js", () => ({
-  DEFAULT_GRACE_TURNS: 6,
-  readAgentSettings: () => mocks.store.agent,
-}));
-
+// Pin routing at the bootstrap seam so queued-permission behavior is driven
+// by this suite, not by the persisted document.
 vi.mock("../../src/bootstrap/model-access.js", () => ({
   currentModelAccess: () => structuredClone(mocks.routing),
 }));
@@ -159,7 +140,8 @@ import {
   setDefaultAgentsDisabled,
 } from "../../src/agents/agent-types.js";
 import type { AgentConfig } from "../../src/agents/types.js";
-import { executeAgentTool } from "../../src/agents/tool-execution.js";
+import { createAgentToolExecutor } from "../../src/agents/tool-execution.js";
+import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {
   applyDeliveryCommand,
@@ -168,6 +150,26 @@ import {
   isParentRunSuccessful,
   recordTerminalResult,
 } from "../../src/bootstrap/session-host.js";
+import { fakeExtensionRuntime, inertAgentSettings } from "../fixtures.js";
+
+// Spawn policy comes from the runtime record; the fake settings store reads
+// mocks.store.agent live so per-test mutation keeps working.
+function buildRuntime(): ExtensionRuntime {
+  const runtime = fakeExtensionRuntime({
+    pi: mocks.pi,
+    sessionCtx: mocks.ctx,
+    manager: mocks.manager,
+    agentSettings: {
+      ...inertAgentSettings(),
+      read: () => ({ ...inertAgentSettings().read(), ...mocks.store.agent }),
+    },
+  });
+  return runtime;
+}
+
+// Rebind on every call: the runtime record is rebuilt per beforeEach.
+const executeAgentTool = (...args: Parameters<ReturnType<typeof createAgentToolExecutor>>) =>
+  createAgentToolExecutor(mocks.runtime)(...args);
 
 function params(description: string, model?: string, background = true, agent = "general-purpose") {
   return {
@@ -183,10 +185,12 @@ function storedPending() {
   return createPiResultRepository(mocks.pi, mocks.ctx).read();
 }
 
-function createHost(runtime: any) {
-  const delivery = createHostDelivery();
+function createHost(runtime: ExtensionRuntime) {
+  const delivery = createHostDelivery(runtime);
+  runtime.delivery = delivery;
+  const manager = runtime.manager!;
   const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
-    applyDeliveryCommand(runtime, delivery, command);
+    applyDeliveryCommand(manager, delivery, command);
   return {
     delivery,
     interact: (agentId: string, message: string) => interactAgent(runtime, agentId, message),
@@ -195,7 +199,7 @@ function createHost(runtime: any) {
     },
     onParentSettled: () => { run({ kind: "parent-settled" }); },
     dispose: () => { run({ kind: "dispose" }); },
-    onComplete: (snapshot: any) => recordTerminalResult(runtime, delivery, snapshot),
+    onComplete: (snapshot: any) => recordTerminalResult(manager, delivery, snapshot),
   };
 }
 
@@ -267,7 +271,8 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.host = createHost(mocks.manager);
+    mocks.runtime = buildRuntime();
+    mocks.host = createHost(mocks.runtime);
     mocks.manager.setOnComplete((record: any) => mocks.host.onComplete(record));
   });
 
@@ -420,7 +425,8 @@ describe("queued invocation snapshots", () => {
       ctx: mocks.ctx,
       defaultModelLimit: 1,
     });
-    mocks.host = createHost(mocks.manager);
+    mocks.runtime = buildRuntime();
+    mocks.host = createHost(mocks.runtime);
     mocks.manager.setOnComplete((record: any) => mocks.host.onComplete(record));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
     mocks.blockFirst = false;

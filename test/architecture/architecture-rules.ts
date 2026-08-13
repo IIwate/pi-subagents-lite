@@ -43,8 +43,7 @@ export function dependencyDirectionViolations(graph: SourceGraph): string[] {
       const outwardPackage = entry.specifier.startsWith("node:") || entry.specifier.startsWith("@earendil-works/pi");
       const outwardPath = entry.target?.startsWith("src/platform/")
         || entry.target?.startsWith("src/adapters/")
-        || entry.target?.startsWith("src/ui/")
-        || entry.target?.startsWith("src/shell.ts");
+        || entry.target?.startsWith("src/bootstrap/");
       if (outwardPackage || outwardPath) {
         violations.push(`${source} imports outward dependency ${entry.specifier}`);
       }

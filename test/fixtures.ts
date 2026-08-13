@@ -7,9 +7,7 @@
  *   - loadExtension: import and invoke the extension factory
  *   - makeAgentMd: build agent .md content from frontmatter fields
  *   - tempDirWithFiles: create a temp dir with files for scanAgentFilesInDir tests
- *
- * Shared mock factories (for vi.mock call sites):
- *   - shellMock: ../src/shell.js stubs (parameterized by hoisted fns)
+ *   - fakeExtensionRuntime / inertAgentSettings: plain composition-root records
  */
 
 import { vi } from "vitest";
@@ -17,6 +15,13 @@ import {
   parseAcceptedRunPolicy,
   type AcceptedRunPolicy,
 } from "../src/modules/subagent-runtime/public.js";
+// Type-only: constructing the record must not load the real bootstrap graph
+// (and its configuration file reads) into unit tests.
+import type { ExtensionRuntime } from "../src/bootstrap/extension-runtime.js";
+import type {
+  AgentSettingsStore,
+  ResolvedAgentSettings,
+} from "../src/bootstrap/agent-settings.js";
 
 /** Build a complete accepted policy for tests that enter the runtime spawn seam. */
 export function acceptedRunPolicy(modelKey = "test/model"): AcceptedRunPolicy {
@@ -66,56 +71,53 @@ export function acceptedRunPolicy(modelKey = "test/model"): AcceptedRunPolicy {
 
 
 
-/* ================================================================== */
-/*  Shared mock factories                                             */
-/*  These return factory bodies for vi.mock() calls.                  */
-/*  Each test file keeps its own vi.mock("path", factory) line;       */
-/*  only the factory BODY is deduplicated here.                       */
-/* ================================================================== */
-
 /* ------------------------------------------------------------------ */
-/*  Per-test-overridable mock builders                                */
-/*  These accept hoisted fns from the test file so behavior can be    */
-/*  controlled per-test. The test file keeps its own vi.hoisted().    */
+/*  Composition-root fixtures                                         */
 /* ------------------------------------------------------------------ */
 
-export interface ShellMockFns {
-  manager?: any;
-  pi?: any;
-  sessionCtx?: any;
-  delivery?: any;
-  coordinator?: any;
+/** A no-persistence agent-settings store returning capability defaults. */
+export function inertAgentSettings(
+  overrides: Partial<ResolvedAgentSettings> = {},
+): AgentSettingsStore {
+  return {
+    read: () => ({
+      forceBackground: false,
+      showCost: false,
+      graceTurns: 6,
+      systemPromptMode: "replace",
+      includeContextFiles: true,
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: true,
+      disableDefaultAgents: false,
+      expandListByDefault: true,
+      showTools: true,
+      showTurns: true,
+      showInput: true,
+      showOutput: true,
+      showContext: true,
+      showTime: true,
+      ...overrides,
+    }),
+    update: () => ({ ok: true }),
+    syncNavigatorStats: () => {},
+  };
 }
 
 /**
- * ../src/shell.js mock builder.
- * Accepts partial overrides; defaults to no-op stubs.
- * Pass hoisted fns for per-test behavioral control.
- *
- * Usage:
- *   const { mockAbort } = vi.hoisted(() => ({ mockAbort: vi.fn() }));
- *   vi.mock("../src/shell.js", () => shellMock({
- *     manager: { abort: mockAbort, getRecord: vi.fn(), listAgents: vi.fn() },
- *   }));
+ * Plain ExtensionRuntime record for executor and host tests. No mock
+ * machinery: the composition root is data, so tests just construct it.
  */
-export function shellMock(fns: ShellMockFns = {}) {
-  const manager = fns.manager ?? {
-    // stop() returns boolean ("was it stopped"), not void.
-    stop: vi.fn(() => false),
-    getSnapshot: vi.fn(),
-    listSnapshots: vi.fn(() => []),
-    execute: vi.fn(),
-  };
-  const pi = fns.pi ?? { sendMessage: vi.fn(), exec: vi.fn() };
-  const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };
-  const delivery = fns.delivery ?? fns.coordinator ?? { spawn: vi.fn() };
-
+export function fakeExtensionRuntime(
+  overrides: Partial<ExtensionRuntime> = {},
+): ExtensionRuntime {
   return {
-    getManager: () => manager,
-    getDelivery: () => delivery,
-    setDelivery: vi.fn(),
-    getPiInstance: () => pi,
-    getSessionCtx: () => sessionCtx,
+    pi: { sendMessage: vi.fn(), exec: vi.fn() } as any,
+    sessionCtx: { cwd: "/home/test" } as any,
+    manager: null,
+    delivery: null,
+    navigator: null,
+    agentSettings: inertAgentSettings(),
+    ...overrides,
   };
 }
 

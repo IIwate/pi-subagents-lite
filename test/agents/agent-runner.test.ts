@@ -45,7 +45,6 @@ const mockModules = vi.hoisted(() => ({
   clearLoaderOpts: () => { _loaderOpts.length = 0; },
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
   clearLoaderExtensions: () => { _loaderGetExtensionsResult.extensions = []; },
-  mockWithSubagentSpawn: vi.fn((operation: () => Promise<unknown>) => operation()),
 }));
 
 vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
@@ -69,10 +68,6 @@ vi.mock("../../src/prompt/context.js", () => ({
 vi.mock("../../src/prompt/skill-loader.js", () => ({
   preloadSkills: mockModules.mockPreloadSkills,
   loadSkillMeta: mockModules.mockLoadSkillMeta,
-}));
-
-vi.mock("../../src/shell.js", () => ({
-  withSubagentSpawn: mockModules.mockWithSubagentSpawn,
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({

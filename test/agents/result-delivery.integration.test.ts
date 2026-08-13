@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   session: undefined as any,
   ctx: undefined as any,
   pi: undefined as any,
+  runtime: undefined as any,
   runAgent: vi.fn(),
   continueAgentSession: vi.fn(),
   now: 0,
@@ -17,18 +18,8 @@ vi.mock("../../src/platform/pi/agent-session.js", () => ({
   continueAgentSession: state.continueAgentSession,
 }));
 
-vi.mock("../../src/shell.js", () => ({
-  getManager: () => state.manager,
-  getDelivery: () => state.host?.delivery,
-  setDelivery: vi.fn(),
-  getNavigator: () => undefined,
-  getPiInstance: () => state.pi,
-  getSessionCtx: () => state.ctx,
-  takeFallbackResults: () => [],
-  setFallbackResults: vi.fn(),
-}));
-
-import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
+import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {
   applyDeliveryCommand,
@@ -38,17 +29,19 @@ import {
   recordTerminalResult,
   spawnAgent,
 } from "../../src/bootstrap/session-host.js";
-import { acceptedRunPolicy } from "../fixtures.js";
+import { acceptedRunPolicy, fakeExtensionRuntime } from "../fixtures.js";
 import { createTestSubagentRuntime } from "../runtime-harness.js";
 
 function storedPending() {
   return createPiResultRepository(state.pi, state.ctx).read();
 }
 
-function createHost(runtime: any) {
-  const delivery = createHostDelivery();
+function createHost(runtime: ExtensionRuntime) {
+  const delivery = createHostDelivery(runtime);
+  runtime.delivery = delivery;
+  const manager = runtime.manager!;
   const run = (command: Parameters<typeof applyDeliveryCommand>[2]) =>
-    applyDeliveryCommand(runtime, delivery, command);
+    applyDeliveryCommand(manager, delivery, command);
   return {
     delivery,
     spawn: (_pi: any, ctx: any, intent: any) => spawnAgent(runtime, ctx, intent),
@@ -59,7 +52,7 @@ function createHost(runtime: any) {
     },
     onParentSettled: () => { run({ kind: "parent-settled" }); },
     dispose: () => { run({ kind: "dispose" }); },
-    onComplete: (snapshot: any) => recordTerminalResult(runtime, delivery, snapshot),
+    onComplete: (snapshot: any) => recordTerminalResult(manager, delivery, snapshot),
   };
 }
 
@@ -103,7 +96,12 @@ describe("durable result delivery integration", () => {
       ctx: state.ctx,
       clock: { now: () => state.now },
     });
-    state.host = createHost(state.manager);
+    state.runtime = fakeExtensionRuntime({
+      pi: state.pi,
+      sessionCtx: state.ctx,
+      manager: state.manager,
+    });
+    state.host = createHost(state.runtime);
     state.manager.setOnComplete((record: any) => state.host.onComplete(record));
   });
 
@@ -129,7 +127,7 @@ describe("durable result delivery integration", () => {
     await state.manager.execute({ kind: "expire" });
     expect(state.manager.getSnapshot(id)).toBeUndefined();
 
-    const status = await executeAgentStatusTool(
+    const status = await createAgentStatusToolExecutor(state.runtime)(
       "status-call",
       { agent_id: id },
       undefined,

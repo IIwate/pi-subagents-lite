@@ -329,18 +329,19 @@ describe("shortcut registration", () => {
     ]);
   });
 
-  it("routes shortcuts to the current navigator", async () => {
-    const shell = await import("../src/shell.js");
+  it("routes shortcuts to the runtime's navigator", async () => {
+    const { createExtensionRuntime } = await import("../src/bootstrap/extension-runtime.js");
+    const { registerTools } = await import("../src/registration.js");
+    const localApi = createMockExtensionAPI();
+    const runtime = createExtensionRuntime(localApi.api as any);
+    registerTools(runtime);
+
     const navigator = { toggleList: vi.fn(), activateMain: vi.fn() };
-    shell.setNavigator(navigator as any);
-    try {
-      await api.shortcuts[0]!.handler({});
-      await api.shortcuts[1]!.handler({});
-      expect(navigator.toggleList).toHaveBeenCalledOnce();
-      expect(navigator.activateMain).toHaveBeenCalledOnce();
-    } finally {
-      shell.setNavigator(null);
-    }
+    runtime.navigator = navigator as any;
+    await localApi.shortcuts[0]!.handler({});
+    await localApi.shortcuts[1]!.handler({});
+    expect(navigator.toggleList).toHaveBeenCalledOnce();
+    expect(navigator.activateMain).toHaveBeenCalledOnce();
   });
 });
 
@@ -391,28 +392,27 @@ describe("event listener registration", () => {
   });
 
   it("continues shutdown cleanup after a display disposer fails", async () => {
-    const shell = await import("../src/shell.js");
+    const { createExtensionRuntime } = await import("../src/bootstrap/extension-runtime.js");
+    const { setupEventListeners } = await import("../src/events.js");
+    const localApi = createMockExtensionAPI();
+    const runtime = createExtensionRuntime(localApi.api as any);
+    setupEventListeners(runtime);
+
     const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
     const delivery = { execute: vi.fn() };
     const manager = { listSnapshots: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
-    shell.setNavigator(navigator as any);
-    shell.setDelivery(delivery as any);
-    shell.setManager(manager as any);
+    runtime.navigator = navigator as any;
+    runtime.delivery = delivery as any;
+    runtime.manager = manager as any;
 
-    try {
-      const shutdown = api.listeners.find(listener => listener.event === "session_shutdown")?.handler;
-      await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
+    const shutdown = localApi.listeners.find(listener => listener.event === "session_shutdown")?.handler;
+    await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
 
-      expect(delivery.execute).toHaveBeenCalledWith({ kind: "dispose" });
-      expect(manager.dispose).toHaveBeenCalledTimes(1);
-      expect(shell.getNavigator()).toBeNull();
-      expect(shell.getDelivery()).toBeNull();
-      expect(shell.getManager()).toBeNull();
-    } finally {
-      shell.setNavigator(null);
-      shell.setDelivery(null);
-      shell.setManager(null);
-    }
+    expect(delivery.execute).toHaveBeenCalledWith({ kind: "dispose" });
+    expect(manager.dispose).toHaveBeenCalledTimes(1);
+    expect(runtime.navigator).toBeNull();
+    expect(runtime.delivery).toBeNull();
+    expect(runtime.manager).toBeNull();
   });
 });
 

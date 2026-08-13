@@ -15,31 +15,16 @@ const state = await vi.hoisted(async () => {
   );
   process.env.HOME = home;
   return {
-    manager: null as any,
-    navigator: null as any,
-    delivery: null as any,
     navigatorArgs: [] as any[][],
     statsCalls: [] as any[],
   };
 });
 
-vi.mock("../src/shell.js", () => ({
-  getManager: () => state.manager,
-  getDelivery: () => state.delivery,
-  getNavigator: () => state.navigator,
-  getPiInstance: () => ({}),
-  getSessionCtx: () => ({ cwd: "/tmp" }),
-  setManager: (manager: any) => { state.manager = manager; },
-  setDelivery: (delivery: any) => { state.delivery = delivery; },
-  setNavigator: (navigator: any) => { state.navigator = navigator; },
-
-  setSessionCtx: vi.fn(),
-}));
-
 vi.mock("../src/bootstrap/subagent-runtime.js", () => ({
   createHostSubagentRuntime: () => ({
     setOnComplete: vi.fn(),
     setOnRemove: vi.fn(),
+    replaceLimits: vi.fn(),
   }),
 }));
 
@@ -60,29 +45,32 @@ vi.mock("../src/bootstrap/child-screen.js", () => ({
     setStatsVisibility(visibility: unknown) {
       state.statsCalls.push(visibility);
     }
+    update() {}
   },
 }));
 
 import { ensureManagerAndNavigator } from "../src/events.js";
+import { createExtensionRuntime, type ExtensionRuntime } from "../src/bootstrap/extension-runtime.js";
 
 describe("ensureManagerAndNavigator", () => {
+  const ctx = { cwd: "/tmp" } as any;
+  let runtime: ExtensionRuntime;
+
   beforeEach(() => {
-    state.manager = null;
-    state.navigator = null;
-    state.delivery = null;
+    runtime = createExtensionRuntime({} as any);
     state.navigatorArgs = [];
     state.statsCalls = [];
   });
 
   it("passes the persisted list expansion default to a new navigator", () => {
-    ensureManagerAndNavigator();
+    ensureManagerAndNavigator(runtime, ctx);
 
     expect(state.navigatorArgs).toHaveLength(1);
     expect(state.navigatorArgs[0][3]).toBe(false);
   });
 
   it("seeds the new navigator's stats visibility from the persisted display settings", () => {
-    ensureManagerAndNavigator();
+    ensureManagerAndNavigator(runtime, ctx);
 
     expect(state.statsCalls).toHaveLength(1);
     expect(state.statsCalls[0]).toMatchObject({ showTurns: false, showTools: true });
