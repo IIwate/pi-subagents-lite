@@ -13,7 +13,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentRuntime } from "./modules/subagent-runtime/public.js";
-import type { AgentNavigator } from "./ui/agent-navigator.js";
+import type { ChildScreenHost } from "./bootstrap/child-screen.js";
 import type {
   BackgroundDelivery,
   BackgroundResultRecord,
@@ -29,7 +29,7 @@ interface Shell {
   sessionCtx: ExtensionContext;
   manager: SubagentRuntime | null;
   delivery: BackgroundDelivery | null;
-  navigator: AgentNavigator | null;
+  navigator: ChildScreenHost | null;
   store: ConfigStore;
 }
 
@@ -92,7 +92,7 @@ export function getDelivery(): BackgroundDelivery | null {
 }
 
 /** The current keyboard-driven agent navigator, or null if not yet created. */
-export function getNavigator(): AgentNavigator | null {
+export function getNavigator(): ChildScreenHost | null {
   return shell.navigator;
 }
 
@@ -121,7 +121,7 @@ export function setDelivery(delivery: BackgroundDelivery | null): void {
   shell.delivery = delivery;
 }
 
-export function setNavigator(navigator: AgentNavigator | null): void {
+export function setNavigator(navigator: ChildScreenHost | null): void {
   shell.navigator = navigator;
 }
 

@@ -10,7 +10,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 import { ScrollView, VStack } from "@earendil-works/pi-tui";
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
 import { registerAgents } from "../../src/agents/agent-types.js";
-import { AgentNavigator } from "../../src/ui/agent-navigator.js";
+import { ChildScreenHost as AgentNavigator } from "../../src/bootstrap/child-screen.js";
 
 function makeRecord(id = "agent-12345678", status = "running"): any {
   return {

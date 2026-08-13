@@ -3,6 +3,7 @@ import { Check } from "typebox/value";
 import {
   NavigatorCommandResultSchema,
   createChildScreen,
+  lineText,
   type ChildRecordSummary,
 } from "../../../src/modules/child-screen/public.js";
 
@@ -82,6 +83,18 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
     });
   });
 
+  it("projects the expanded Main row without Pi TUI", () => {
+    const screen = createChildScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ startedAt: 1 })],
+    });
+    const projected = screen.execute({ kind: "project", columns: 120, rows: 40, now: 1 });
+    expect(projected.ok && projected.snapshot.listLines?.map(lineText).some((text) =>
+      text.includes("● Main") && text.includes("1 running") && text.includes("Alt+A collapse"),
+    )).toBe(true);
+  });
+
   it("toggles fold only while records or pending results exist", () => {
     const screen = createChildScreen();
     expect(screen.execute({ kind: "toggle-fold" })).toMatchObject({
@@ -94,6 +107,38 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
     expect(folded).toMatchObject({
       ok: true,
       snapshot: { listExpanded: false, listFocused: false },
+    });
+  });
+
+  it("moves highlight with keys and confirms Child selection", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    expect(screen.execute({ kind: "key", key: "down", editorEmpty: true })).toMatchObject({
+      ok: true,
+      consume: true,
+      snapshot: { listFocused: true, highlightedAgentId: null },
+    });
+    expect(screen.execute({ kind: "key", key: "down", editorEmpty: true })).toMatchObject({
+      ok: true,
+      snapshot: { highlightedAgentId: "agent-1" },
+    });
+    expect(screen.execute({ kind: "key", key: "enter", editorEmpty: true })).toMatchObject({
+      ok: true,
+      snapshot: { selectedAgentId: "agent-1", listFocused: true },
+    });
+  });
+
+  it("refuses to pin or clear Main", () => {
+    const screen = createChildScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    expect(screen.execute({ kind: "key", key: "space", editorEmpty: true })).toMatchObject({
+      ok: true,
+      notify: { message: "Cannot pin Main agent" },
+    });
+    expect(screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true })).toMatchObject({
+      ok: true,
+      notify: { message: "Cannot clear Main agent" },
     });
   });
 

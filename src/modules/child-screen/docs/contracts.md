@@ -6,12 +6,10 @@
 
 ## Implemented schemas
 
-- `NavigatorCommandSchema` and `NavigatorCommandResultSchema` cover replace-records, select, toggle-fold, and inspect.
-- `NavigatorSnapshotSchema` is the serializable selection, fold, and record list.
+- `NavigatorCommandSchema` and `NavigatorCommandResultSchema` cover records, select, fold, keys, notices, and project.
+- `NavigatorSnapshotSchema` and `RenderedLineSchema` are the serializable selection, fold, and presentation view.
 
-## Planned schemas
-
-- `FooterSnapshot`, `RenderedLine`, and `LayoutOwnershipResult` remain for later Child screen slices.
+Exact fields are owned by those TypeBox schemas.
 
 Exact fields are defined once in TypeBox and are not duplicated here.
 

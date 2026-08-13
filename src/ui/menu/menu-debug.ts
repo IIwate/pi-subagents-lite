@@ -17,7 +17,7 @@ import { buildListTheme } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { getManager, getNavigator } from "../../shell.js";
 import { type DebugFaultKind } from "../../agents/debug-fault.js";
-import type { DebugStatusPreview } from "../agent-navigator.js";
+import type { DebugStatusPreview } from "../../bootstrap/child-screen.js";
 
 const STATUS_PREVIEW_ITEMS: Array<{
   value: string;

@@ -12,4 +12,4 @@
 
 ## Implementation-only
 
-- `AgentNavigator` method names and Pi component references are not public concepts.
+- `AgentNavigator` method names and Pi component references are not public concepts. The host lives in `platform/pi/tui`.

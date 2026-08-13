@@ -10,7 +10,7 @@ import {
   type AgentDefinitionSnapshot,
 } from "./modules/agent-catalogue/public.js";
 import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
-import { AgentNavigator } from "./ui/agent-navigator.js";
+import { ChildScreenHost } from "./bootstrap/child-screen.js";
 import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
 import {
   getDelivery,
@@ -64,7 +64,7 @@ export function ensureManagerAndNavigator(): void {
   }
 
   if (!currentNavigator) {
-    const newNavigator = new AgentNavigator(
+    const newNavigator = new ChildScreenHost(
       getManager()!,
       async (agentId, text) => {
         const runtime = getManager();

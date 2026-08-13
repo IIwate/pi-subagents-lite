@@ -13,7 +13,7 @@
  * `dispose()` drops deps at session_shutdown.
  */
 
-import type { AgentNavigator } from "../ui/agent-navigator.js";
+import type { ChildScreenHost } from "../bootstrap/child-screen.js";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig, ThinkingAccessOverride } from "./types.js";
 import {
@@ -89,13 +89,13 @@ export interface ResolvedRoutingConfig {
 
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
-  navigator?: AgentNavigator;
+  navigator?: ChildScreenHost;
   manager?: SubagentRuntime;
 }
 
 export class ConfigStore {
   private config: SubagentsConfig;
-  private navigator?: AgentNavigator;
+  private navigator?: ChildScreenHost;
   private manager?: SubagentRuntime;
 
   constructor(private readonly io: ConfigIO = fileConfigIO) {
