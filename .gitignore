@@ -21,6 +21,7 @@ Thumbs.db
 *.pem
 
 # Editors
+.cursor/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
