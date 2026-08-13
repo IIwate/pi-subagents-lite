@@ -16,4 +16,4 @@ Exact fields are defined by TypeBox in the prompt slices.
 
 ## Ports
 
-The Parent guidance use case reads serialized catalogue and effective Model access projections through narrow reader ports connected by `bootstrap`. Filesystem context and custom prompt contents arrive as serialized strings.
+`PromptCatalogueReader` supplies the current Agent type list. Bootstrap connects it to the session catalogue snapshot. Custom prompt and context-file contents arrive as serialized strings from `platform/fs`.

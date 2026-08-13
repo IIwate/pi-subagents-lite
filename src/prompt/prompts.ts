@@ -26,21 +26,6 @@ export interface PromptExtras {
 }
 
 /**
- * Strip pi scaffolding sections from a parent system prompt.
- *
- * In inherit mode, the parent's prompt already contains:
- *   - <project_context>...</project_context>  (AGENTS.md)
- *   - Skills block (text intro + <available_skills>...</available_skills>)
- *   - Current date: YYYY-MM-DD
- *   - Current working directory: /path
- *
- * These are re-added by subagents-lite from the subagent's own config,
- * so we strip them to avoid duplication.
- *
- * @param prompt  The parent system prompt to clean.
- * @returns       The prompt with scaffolding sections removed.
- */
-/**
  * Build the system prompt for an agent from its config.
  *
  * Three modes:

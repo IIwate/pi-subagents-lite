@@ -34,4 +34,25 @@ describe("REQ-AGENT-001 Subagent system prompt public seam", () => {
       expect(result.prompt).toContain("<name>tdd</name>");
     }
   });
+
+  it("strips parent scaffolding in inherit mode and keeps agent instructions", () => {
+    const result = assembleSubagentPrompt({
+      kind: "assemble-subagent-prompt",
+      mode: "inherit",
+      agentName: "reviewer",
+      agentInstructions: "Review the diff.",
+      cwd: "C:/project",
+      env: { isGitRepo: false, branch: null, platform: "linux" },
+      header: "Parent identity\nCurrent date: 2026-01-01\nCurrent working directory: /tmp\n",
+      contextFiles: [],
+      skillElements: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prompt).toContain("Parent identity");
+      expect(result.prompt).not.toContain("Current date:");
+      expect(result.prompt).toContain("Review the diff.");
+      expect(result.prompt).not.toContain("You are a Pi, an expert coding sub-agent.");
+    }
+  });
 });

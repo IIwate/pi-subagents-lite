@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
-import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
+import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
 import type { AgentConfig } from "./agents/types.js";
 import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
 import { createConfigurationRuntime } from "./bootstrap/configuration.js";
@@ -12,7 +12,7 @@ import {
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
-import { buildCurrentAgentGuidance } from "./prompt/agent-guidance.js";
+import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
 import {
   getManager,
   getNavigator,
@@ -26,6 +26,7 @@ import {
 
 const agentCatalogue = createAgentCatalogueRuntime();
 const configuration = createConfigurationRuntime();
+const parentGuidance = createParentGuidanceRuntime();
 
 function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
   const { source, ...config } = structuredClone(definition);
@@ -129,25 +130,11 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
       return resultMessage ? { message: resultMessage } : undefined;
     }
-    const guidance = buildCurrentAgentGuidance({
-      agents: getAvailableTypes().flatMap((name) => {
-        const config = getAgentConfig(name);
-        return config ? [{
-          name,
-          description: config.description,
-          registeredTools: config.registeredTools,
-          maxTurns: config.maxTurns,
-        }] : [];
-      }),
-      parentModel: ctx.model,
-      parentThinkingLevel: ctx.thinkingLevel,
-      routing: getStore().routing,
-      availableModels: ctx.modelRegistry.getAvailable(),
-      scopedModels: structuredClone(ctx.scopedModels),
-    });
+    const assembled = parentGuidance.assembleFromSession(ctx);
+    if (!assembled.ok) throw new TypeError(assembled.error.message);
     return {
       message: resultMessage,
-      systemPrompt: `${event.systemPrompt}\n\n${guidance}`,
+      systemPrompt: `${event.systemPrompt}\n\n${assembled.guidance}`,
     };
   });
 

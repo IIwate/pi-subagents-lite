@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fs from "node:fs";
 import { fakeCtx, fakePi as makeFakePi, makeResolvablePromise } from "../fixtures.ts";
+import * as promptFiles from "../../src/platform/fs/prompt-files.js";
 
 const fakePi = makeFakePi();
 
@@ -1568,30 +1568,29 @@ describe("runAgent — system prompt modes", () => {
 /* ------------------------------------------------------------------ */
 
 describe("runAgent — custom mode", () => {
-  let fsReadFileSyncSpy: ReturnType<typeof vi.spyOn>;
+  let readCustomPromptSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
     mockModules.mockSystemPromptMode = "custom";
-    fsReadFileSyncSpy = vi.spyOn(fs, "readFileSync");
+    readCustomPromptSpy = vi.spyOn(promptFiles, "readCustomPromptFile");
   });
 
   afterEach(() => {
-    fsReadFileSyncSpy.mockRestore();
+    readCustomPromptSpy.mockRestore();
   });
 
   it("reads custom prompt file and passes content to buildAgentPrompt", async () => {
-    fsReadFileSyncSpy.mockReturnValue("My custom system prompt");
+    readCustomPromptSpy.mockReturnValue({ ok: true, content: "My custom system prompt" });
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
 
     await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
 
-    expect(fsReadFileSyncSpy).toHaveBeenCalledWith(
+    expect(readCustomPromptSpy).toHaveBeenCalledWith(
       expect.stringContaining("subagents-lite-prompt.md"),
-      "utf-8",
     );
     expect(mockModules.mockBuildAgentPrompt).toHaveBeenCalledWith(
       expect.anything(),
@@ -1603,9 +1602,11 @@ describe("runAgent — custom mode", () => {
   });
 
   it("falls back when custom file is missing (ENOENT)", async () => {
-    const err = new Error("ENOENT") as any;
-    err.code = "ENOENT";
-    fsReadFileSyncSpy.mockImplementation(() => { throw err; });
+    readCustomPromptSpy.mockReturnValue({
+      ok: false,
+      reason: "missing",
+      message: "Custom prompt file not found: /tmp/subagents-lite-prompt.md",
+    });
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
@@ -1630,7 +1631,11 @@ describe("runAgent — custom mode", () => {
   });
 
   it("falls back when custom file is empty", async () => {
-    fsReadFileSyncSpy.mockReturnValue("   "); // whitespace only
+    readCustomPromptSpy.mockReturnValue({
+      ok: false,
+      reason: "empty",
+      message: "Custom prompt file is empty: /tmp/subagents-lite-prompt.md",
+    });
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
@@ -1654,7 +1659,11 @@ describe("runAgent — custom mode", () => {
   });
 
   it("falls back when custom file is unreadable (other error)", async () => {
-    fsReadFileSyncSpy.mockImplementation(() => { throw new Error("permission denied"); });
+    readCustomPromptSpy.mockReturnValue({
+      ok: false,
+      reason: "unreadable",
+      message: "Failed to read custom prompt file: permission denied",
+    });
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });

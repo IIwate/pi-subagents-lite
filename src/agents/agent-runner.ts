@@ -4,7 +4,6 @@
  * Tool visibility policy is owned by agent-types.ts (resolveVisibleTools).
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import type { AssistantMessage, ImageContent, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -33,6 +32,7 @@ import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGT
 import type { SubagentType } from "./types.js";
 import { withSubagentSpawn } from "../shell.js";
 import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
+import { readCustomPromptFile, readProjectContextFiles } from "../platform/fs/prompt-files.js";
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "../spawn/result-inbox.js";
 import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
 
@@ -301,28 +301,17 @@ function resolveSystemPromptSources(
   }
 
   if (policy.systemPromptMode === "custom") {
-    try {
-      const content = fs.readFileSync(CUSTOM_PROMPT_PATH, "utf-8").trim();
-      if (content) {
-        extras.customSystemPrompt = content;
-      } else {
-        notify(`Custom prompt file is empty: ${CUSTOM_PROMPT_PATH}. Falling back to replace mode.`);
-      }
-    } catch (err: any) {
-      if (err.code === "ENOENT") {
-        notify(`Custom prompt file not found: ${CUSTOM_PROMPT_PATH}. Falling back to replace mode.`);
-      } else {
-        notify(`Failed to read custom prompt file: ${err.message}. Falling back to replace mode.`);
-      }
-    }
+    const custom = readCustomPromptFile(CUSTOM_PROMPT_PATH);
+    if (custom.ok) extras.customSystemPrompt = custom.content;
+    else notify(`${custom.message}. Falling back to replace mode.`);
   }
 
   if (policy.includeContextFiles) {
-    try {
-      extras.contextFiles = loadProjectContextFiles({ cwd, agentDir: getAgentDir() });
-    } catch {
-      // Non-fatal: context files are supplementary
-    }
+    extras.contextFiles = readProjectContextFiles({
+      cwd,
+      agentDir: getAgentDir(),
+      load: loadProjectContextFiles,
+    });
   }
 
   return extras;
