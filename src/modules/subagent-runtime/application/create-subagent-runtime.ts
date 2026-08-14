@@ -42,6 +42,51 @@ import {
   parseAcceptedRunPolicy,
 } from "./validate-accepted-run-policy.js";
 import { copyJson } from "./copy-json.js";
+import type { AcceptedRunPolicy } from "../contracts/accepted-run-policy.js";
+
+/**
+ * Envelope Check still needs a policy object. The real scopedModels catalog
+ * was already snapshotted at spawn; walking it again on every list tick is
+ * what made five live agents hitch the parent TUI. This stub is only the
+ * shape TypeBox walks. Revisit if acceptedPolicy becomes mutable after spawn.
+ */
+const parsedOutboundPolicyStub = parseAcceptedRunPolicy({
+  definition: {
+    name: "outbound-stub",
+    description: "outbound-stub",
+    systemPrompt: "outbound-stub",
+    source: "built-in",
+  },
+  registeredTools: [],
+  restrictToRegisteredTools: false,
+  extensions: false,
+  skills: false,
+  systemPromptMode: "replace",
+  includeContextFiles: false,
+  parentModelKey: "",
+  model: {
+    id: "outbound-stub",
+    name: "outbound-stub",
+    api: "openai-completions",
+    provider: "outbound-stub",
+    baseUrl: "",
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 1,
+    maxTokens: 1,
+  },
+  parentModel: null,
+  scopedModels: [],
+  thinkingLevel: null,
+  outputTokenLimit: 1,
+  turnLimit: null,
+  graceTurns: 0,
+});
+if (!parsedOutboundPolicyStub) {
+  throw new TypeError("Outbound policy stub does not match AcceptedRunPolicy.");
+}
+const OUTBOUND_POLICY_STUB: AcceptedRunPolicy = parsedOutboundPolicyStub;
 
 function asImages(images: unknown[] | undefined): SessionSteerRequest["images"] {
   return images as SessionSteerRequest["images"];
@@ -166,11 +211,22 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
    * consumer already models. Reachable corruption belongs at the inbound
    * seams above, which is where the session-event check lives; this stays as
    * the last line for a writer that slips past them.
+   *
+   * acceptedPolicy is the spawn-time JSON snapshot, already Check'd. Sharing
+   * that object keeps the list timer from cloning the user's whole model
+   * catalog on every tick. Callers that mutate it would write through to the
+   * live record; nothing in this host does. Revisit if a consumer starts
+   * editing the returned policy.
    */
   function outbound(snapshot: AgentSnapshot | undefined): AgentSnapshot | undefined {
     if (!snapshot) return undefined;
-    const copy = copyJson(snapshot);
-    return Check(AgentSnapshotSchema, copy) ? copy : undefined;
+    const copy = copyJson({
+      ...snapshot,
+      acceptedPolicy: OUTBOUND_POLICY_STUB,
+    }) as AgentSnapshot;
+    if (!Check(AgentSnapshotSchema, copy)) return undefined;
+    copy.acceptedPolicy = snapshot.acceptedPolicy;
+    return copy;
   }
 
   /**

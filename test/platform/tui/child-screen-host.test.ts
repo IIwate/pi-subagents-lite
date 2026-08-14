@@ -33,6 +33,30 @@ describe("ChildScreenHost", () => {
       expect(ui.statuses.size).toBe(0);
     });
 
+    it("inspects only the selected session on list refresh, not every live agent", () => {
+      const first = makeRecord("agent-11111111");
+      const second = makeRecord("agent-22222222");
+      const manager = makeManager([first, second]);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      inspect.mockClear();
+
+      host.update();
+      expect(inspect).not.toHaveBeenCalled();
+
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\r");
+      inspect.mockClear();
+      host.update();
+      expect(inspect.mock.calls.map((call) => call[0])).toEqual([first.id]);
+    });
+
     it("registers a below-editor selector containing Main and subagents", () => {
       const record = makeRecord();
       const ui = makeUI({ value: "" });
@@ -747,7 +771,7 @@ describe("ChildScreenHost", () => {
       mountSelector(ui, tui);
       tui.requestRender.mockClear();
 
-      record._session.modelId = "gpt-updated";
+      record.invocation.modelName = "gpt-updated";
       host.update();
 
       expect(tui.requestRender).toHaveBeenCalledWith(false);
@@ -823,7 +847,14 @@ describe("ChildScreenHost", () => {
       host.ensureTimer();
       const { selector } = mountSelector(ui);
       expect(vi.getTimerCount()).toBeGreaterThan(0);
-      manager.listSnapshots = vi.fn(() => { throw new Error("selector state unavailable"); });
+      const screen = (host as unknown as { screen: { execute: (command: unknown) => unknown } }).screen;
+      const execute = screen.execute.bind(screen);
+      screen.execute = (command: unknown) => {
+        if ((command as { kind?: string }).kind === "project") {
+          throw new Error("selector state unavailable");
+        }
+        return execute(command);
+      };
 
       expect(selector.render(120)).toEqual([]);
       expect(vi.getTimerCount()).toBe(0);

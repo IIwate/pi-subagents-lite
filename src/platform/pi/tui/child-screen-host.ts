@@ -125,9 +125,21 @@ export class ChildScreenHost {
     return count && count > 0 ? count : undefined;
   }
 
-  private presentationRecords(): ChildRecordSummary[] {
-    return this.manager.listSnapshots().map((record) => {
-      const session = this.manager.inspectSession(record.id);
+  /**
+   * List rows only need identity and stats. Inspecting every live transcript
+   * on the 1s refresh — then TypeBox-checking those messages — is how a
+   * handful of background agents pinned the parent event loop. The selected
+   * child still gets a real inspect for its screen. Revisit if the list
+   * starts rendering message previews.
+   */
+  private presentationRecords(
+    snapshots: AgentSnapshot[],
+    selectedId: string | null,
+  ): ChildRecordSummary[] {
+    return snapshots.map((record) => {
+      const session = record.id === selectedId
+        ? this.manager.inspectSession(record.id)
+        : undefined;
       return {
         id: record.id,
         status: record.status,
@@ -156,26 +168,38 @@ export class ChildScreenHost {
           contextPercent: record.stats.contextPercent,
           compactionCount: record.stats.compactionCount,
         },
-        session: {
-          found: session.found,
-          live: session.live,
-          streaming: session.streaming,
-          modelId: session.modelId,
-          provider: session.provider,
-          thinkingLevel: session.thinkingLevel,
-          contextPercent: session.contextPercent,
-          messages: session.messages,
-          streamingMessage: session.streamingMessage,
-        },
+        session: session
+          ? {
+            found: session.found,
+            live: session.live,
+            streaming: session.streaming,
+            modelId: session.modelId,
+            provider: session.provider,
+            thinkingLevel: session.thinkingLevel,
+            contextPercent: session.contextPercent,
+            messages: session.messages,
+            streamingMessage: session.streamingMessage,
+          }
+          : {
+            found: record.liveSession,
+            live: record.liveSession,
+            streaming: false,
+            modelId: record.invocation?.modelName,
+            provider: record.invocation?.providerName,
+            thinkingLevel: record.invocation?.thinkingLevel,
+            contextPercent: record.stats.contextPercent,
+            messages: [],
+          },
       };
     });
   }
 
-  private syncRecords(highlightIndex?: number) {
+  private syncRecords(highlightIndex?: number, snapshots?: AgentSnapshot[]) {
+    const records = snapshots ?? this.manager.listSnapshots();
     const pending = this.pendingResultState();
     return this.screen.execute({
       kind: "replace-records",
-      records: this.presentationRecords(),
+      records: this.presentationRecords(records, this.snapshot()?.selectedAgentId ?? null),
       ...(pending != null ? { pendingResultCount: pending } : {}),
       ...(highlightIndex != null ? { highlightIndex } : {}),
     });
@@ -474,7 +498,6 @@ export class ChildScreenHost {
   }
 
   private renderSelector(tui: TUI): string[] {
-    this.syncRecords();
     const projected = this.screen.execute({
       kind: "project",
       columns: tui.terminal.columns,
@@ -488,7 +511,6 @@ export class ChildScreenHost {
   }
 
   private renderActiveTranscript(width: number): string[] {
-    this.syncRecords();
     const projected = this.screen.execute({
       kind: "project",
       columns: width,
@@ -513,7 +535,7 @@ export class ChildScreenHost {
     const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
     const wasSelected = this.snapshot()?.selectedAgentId ?? null;
-    this.syncRecords();
+    this.syncRecords(undefined, records);
     const selected = this.snapshot()?.selectedAgentId ?? null;
     if (records.length === 0 && !pending) {
       this.updateFooterStatus();
@@ -608,12 +630,9 @@ export class ChildScreenHost {
   private listRenderSignature(records: AgentSnapshot[]): string {
     const state = this.snapshot();
     const parts = records.map((record) => {
-      const session = this.manager.inspectSession(record.id);
       const invocation = record.invocation;
       const usage = record.stats.lifetimeUsage;
-      const contextPercent = session.found
-        ? session.contextPercent ?? null
-        : record.stats.contextPercent ?? null;
+      const contextPercent = record.stats.contextPercent ?? null;
       const elapsedSec = Math.floor(
         ((record.completedAt ?? Date.now()) - record.startedAt) / 1000,
       );
@@ -628,9 +647,9 @@ export class ChildScreenHost {
         record.settled ? "1" : "0",
         record.debugFaultKind ?? "",
         record.error ?? "",
-        session.modelId ?? invocation?.modelName ?? "",
-        session.provider ?? invocation?.providerName ?? "",
-        session.thinkingLevel ?? invocation?.thinkingLevel ?? "",
+        invocation?.modelName ?? "",
+        invocation?.providerName ?? "",
+        invocation?.thinkingLevel ?? "",
         record.stats.toolUses,
         record.stats.turnCount,
         record.stats.maxTurns ?? "",

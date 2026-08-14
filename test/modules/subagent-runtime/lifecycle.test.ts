@@ -1142,6 +1142,24 @@ describe("session-driver contract", () => {
     await runtime.execute({ kind: "interact", id: "agent-00000001", message: "nudge" });
     expect(memory.steers).toEqual([]);
   });
+
+  it("listSnapshots shares the spawn-validated acceptedPolicy instead of recloning it", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    const listed = runtime.listSnapshots()[0];
+    const fetched = runtime.getSnapshot("agent-00000001");
+    expect(listed?.acceptedPolicy).toBe(fetched?.acceptedPolicy);
+    expect(listed?.status).toBe("running");
+    if (listed) listed.status = "error";
+    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("running");
+  });
 });
 
 describe("mark-result command schema", () => {
