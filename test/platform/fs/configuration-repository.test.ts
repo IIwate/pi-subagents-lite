@@ -60,6 +60,19 @@ describe("file configuration document repository contract", () => {
     expect(repository.load()).toEqual(document);
   });
 
+  it("overwrites an existing file on a second persist", () => {
+    const filePath = tempConfigFile();
+    const repository = createFileConfigurationDocumentRepository({ filePath });
+    const first = { concurrency: { default: 4 } };
+    const second = { concurrency: { default: 8 }, agent: { forceBackground: true } };
+
+    repository.persist(first);
+    repository.persist(second);
+
+    expect(readFileSync(filePath, "utf-8")).toBe(JSON.stringify(second, null, 2));
+    expect(repository.load()).toEqual(second);
+  });
+
   it("throws on persistence failure instead of swallowing it", () => {
     // A directory at the target path makes the atomic rename fail, standing in
     // for permission and disk errors that REQ-CONFIG-001 must surface.

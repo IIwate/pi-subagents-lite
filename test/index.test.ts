@@ -204,7 +204,7 @@ describe("command registration", () => {
     const agentsCmd = api.commands.find((c) => c.name === "agents");
     expect(agentsCmd).toBeDefined();
     expect(agentsCmd!.description).toBe(
-      "Manage subagents: model access, concurrency, diagnostics, and agent types",
+      "Manage subagents: model access, concurrency, spawn, prompt, display, and debug",
     );
   });
 

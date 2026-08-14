@@ -133,7 +133,7 @@ describe("architecture guards", () => {
   it("detects every spelling that replaces an internal module", () => {
     const findings = scanTestDoubles(
       [
-        "import * as registry from '../../src/agents/agent-registry.js';",
+        "import * as registry from '../../src/__architecture-probe__/internal-module.js';",
         "const alias = registry;",
         "vi.mock('../../src/utils.js');",
         "vi.mock(import('../../src/types.js'));",

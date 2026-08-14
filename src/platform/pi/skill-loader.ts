@@ -25,6 +25,7 @@ import {
   loadSkillsFromDir,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
+import { resolveConfigRoot } from "../fs/config-paths.js";
 import { isUnsafeName } from "../../utils.js";
 
 export interface PreloadedSkill {
@@ -67,10 +68,12 @@ export function loadAllSkills(cwd: string, home: string): Skill[] {
   });
   const homeAgentsSkills = filterRootMdFiles(homeAgentsResult.skills, homeAgentsDir);
 
-  // Pi defaults: ~/.pi/agent/skills and <cwd>/.pi/skills
+  // Skill defaults share the persisted-config root. A second join() of
+  // ".pi/agent" would survive a path-policy change and load from the old
+  // tree while the document moved.
   const defaultsResult = loadSkills({
     cwd: resolvedCwd,
-    agentDir: join(home, ".pi", "agent"),
+    agentDir: resolveConfigRoot(home),
     skillPaths: [],
     includeDefaults: true,
   });

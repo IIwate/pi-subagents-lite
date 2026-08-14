@@ -76,7 +76,7 @@ export function registerTools(runtime: ExtensionRuntime): void {
 
   // Command registration
   pi.registerCommand("agents", {
-    description: "Manage subagents: model access, concurrency, diagnostics, and agent types",
+    description: "Manage subagents: model access, concurrency, spawn, prompt, display, and debug",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       await showAgentsMenu(runtime, ctx);
     },

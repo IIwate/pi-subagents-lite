@@ -39,20 +39,15 @@ export interface PromptExtras {
 }
 
 /**
- * Build the system prompt for an agent from its config.
- *
- * Three modes:
- * - replace (default): generic header + env + agent's systemPrompt
- * - inherit: parent's system prompt (stripped of scaffolding) + env + agent's systemPrompt
- * - custom: content of ~/.pi/agent/subagents-lite-prompt.md + env + agent's systemPrompt
- *
- * Agent's own systemPrompt is always included in <agent_instructions> tags.
+ * Bind Pi-loaded skill bytes and host extras, then hand assembly to
+ * assembleSubagentPrompt. Mode meaning, inherit visibility, and header
+ * fallback live in the prompt module; this adapter does not restate them.
  *
  * @param config   Agent configuration.
  * @param cwd      Current working directory.
  * @param env      Environment info.
  * @param extras   Optional extra sections to inject (skills, parent/custom prompts).
- * @param mode     System prompt mode (replace, inherit, custom).
+ * @param mode     System prompt mode from the prompt module.
  */
 export function buildAgentPrompt(
   config: AgentPromptConfig,
