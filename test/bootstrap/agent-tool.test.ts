@@ -682,6 +682,48 @@ describe("executeAgentTool — model access", () => {
     expect(mgr.spawnCommands[0].invocation.thinkingLevel).toBe("high");
   });
 
+  it("accepts Pi 0.84.1 composed models that still carry undefined keys and host extras", async () => {
+    ctx.model = makeModel("cpa-responses", "grok-4.5", {
+      thinkingLevelMap: { xhigh: "xhigh", max: "max", ultra: "ultra" },
+      samplingParams: undefined,
+      headers: undefined,
+      compat: undefined,
+      source: "models_json",
+    });
+    ctx.scopedModels = [
+      { model: ctx.model, thinkingLevel: undefined },
+      { model: makeModel("test", "parent-model"), thinkingLevel: "high" },
+    ];
+    ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model, makeModel("test", "parent-model")]);
+
+    const result = await execute("pi-runtime-model", makeParams({ model: undefined }), undefined, undefined, ctx);
+
+    expect(result.isError).toBeUndefined();
+    expect(mgr.spawnCommands).toHaveLength(1);
+    expect(mgr.spawnCommands[0].acceptedPolicy.model).toMatchObject({
+      provider: "cpa-responses",
+      id: "grok-4.5",
+    });
+    expect(mgr.spawnCommands[0].acceptedPolicy.model).not.toHaveProperty("source");
+    expect(mgr.spawnCommands[0].acceptedPolicy.model).not.toHaveProperty("headers");
+    expect(mgr.spawnCommands[0].acceptedPolicy.scopedModels[0]).toEqual({
+      model: expect.not.objectContaining({ source: "models_json" }),
+    });
+    expect(mgr.spawnCommands[0].acceptedPolicy.scopedModels[0]).not.toHaveProperty("thinkingLevel");
+  });
+
+  it("names the failing accepted-policy field instead of a bare invalid-policy sentence", async () => {
+    ctx.model = makeModel("cpa-responses", "grok-4.5", { maxTokens: 0 });
+    ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
+
+    const result = await execute("invalid-policy-detail", makeParams({ model: undefined }), undefined, undefined, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("produced an invalid accepted run policy");
+    expect(result.content[0].text).toMatch(/outputTokenLimit|maxTokens|exclusiveMinimum/);
+    expect(mgr.spawnCommands).toHaveLength(0);
+  });
+
   it("makes a Model scope thinking pin authoritative", async () => {
     ctx.scopedModels = [{ model: makeModel("cpa-responses", "grok-4.5"), thinkingLevel: "medium" }];
     const rejected = await execute(

@@ -11,7 +11,10 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getStatusNote } from "../status-note.js";
 import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
 import { SHORT_ID_LENGTH } from "../types.js";
-import { parseAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
+import {
+  describeAcceptedRunPolicyFailure,
+  parseAcceptedRunPolicy,
+} from "../modules/subagent-runtime/public.js";
 
 import {
   parseModelKey,
@@ -245,7 +248,7 @@ async function executeAgentTool(
   const turnLimit = configuredTurnLimit == null || configuredTurnLimit === 0
     ? null
     : Math.max(1, configuredTurnLimit);
-  const acceptedPolicy = parseAcceptedRunPolicy({
+  const acceptedPolicyInput = {
     ...policyInputs,
     model: acceptedModel,
     parentModel: ctx.model ? structuredClone(ctx.model) : null,
@@ -254,9 +257,13 @@ async function executeAgentTool(
     outputTokenLimit: acceptedModel.maxTokens,
     turnLimit,
     graceTurns: agentSettings.graceTurns,
-  });
+  };
+  const acceptedPolicy = parseAcceptedRunPolicy(acceptedPolicyInput);
   if (!acceptedPolicy) {
-    return errorResult(`Agent "${resolvedType}" produced an invalid accepted run policy.`);
+    return errorResult(
+      `Agent "${resolvedType}" produced an invalid accepted run policy. `
+      + describeAcceptedRunPolicyFailure(acceptedPolicyInput),
+    );
   }
 
   const result = await spawnAgent(runtime, ctx, {

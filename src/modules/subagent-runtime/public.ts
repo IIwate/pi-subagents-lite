@@ -10,7 +10,10 @@ export type {
   AcceptedScopedModel,
   AgentInvocation,
 } from "./contracts/accepted-run-policy.js";
-export { parseAcceptedRunPolicy } from "./application/validate-accepted-run-policy.js";
+export {
+  describeAcceptedRunPolicyFailure,
+  parseAcceptedRunPolicy,
+} from "./application/validate-accepted-run-policy.js";
 export {
   ConcurrencyDecisionSchema,
   ConcurrencyLimitsFragmentSchema,

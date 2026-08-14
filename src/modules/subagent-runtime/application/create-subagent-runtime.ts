@@ -37,7 +37,10 @@ import {
 } from "../core/lifecycle-status.js";
 import { shouldExpire, unpinCleanupPausedMs } from "../core/retention.js";
 import { createConcurrencyScheduler, type ConcurrencyScheduler } from "./create-concurrency-scheduler.js";
-import { parseAcceptedRunPolicy } from "./validate-accepted-run-policy.js";
+import {
+  describeAcceptedRunPolicyFailure,
+  parseAcceptedRunPolicy,
+} from "./validate-accepted-run-policy.js";
 import { copyJson } from "./copy-json.js";
 
 function asImages(images: unknown[] | undefined): SessionSteerRequest["images"] {
@@ -396,7 +399,12 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   async function spawn(command: SpawnCommand): Promise<AgentCommandResult> {
     if (disposing) return failure("disposed", "Subagent runtime is disposed.");
     const acceptedPolicy = parseAcceptedRunPolicy(command.acceptedPolicy);
-    if (!acceptedPolicy) return failure("invalid-command", "Accepted run policy is invalid.");
+    if (!acceptedPolicy) {
+      return failure(
+        "invalid-command",
+        `Accepted run policy is invalid. ${describeAcceptedRunPolicyFailure(command.acceptedPolicy)}`,
+      );
+    }
 
     let worktreePath = command.worktreePath;
     if (worktreePath) {
