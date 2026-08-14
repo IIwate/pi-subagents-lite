@@ -1,10 +1,12 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { Check } from "typebox/value";
 import {
   createConfiguration,
   resolveOperationalValue,
+  ConfigurationCommitFailureCodeSchema,
   type Configuration,
-  type ConfigurationResult,
+  type ConfigurationCommitFailureCode,
   type JsonValue,
 } from "../modules/configuration/public.js";
 import { createProcessEnvironmentSource } from "../platform/process/environment-source.js";
@@ -54,12 +56,10 @@ export const configuration: Configuration = createConfiguration({
 /** Top-level document sections with a live owner. */
 type ConfigSection = "modelRouting" | "agent" | "concurrency";
 
-type ConfigSectionFailureCode = Extract<ConfigurationResult, { ok: false }>["error"]["code"];
-
-/** Outcome of a section commit. Failure includes the module error code. */
+/** Outcome of a section commit. Failure carries only the save-refusal codes. */
 export type ConfigSectionCommitResult =
   | { ok: true }
-  | { ok: false; code: ConfigSectionFailureCode; message: string };
+  | { ok: false; code: ConfigurationCommitFailureCode; message: string };
 
 /** Section-level document access, backed by the configuration module. */
 export interface ConfigSectionIO {
@@ -96,7 +96,17 @@ export function createConfigurationSectionIO(source: Configuration): ConfigSecti
       });
       // Callers distinguish persistence-failure from revision-conflict; a
       // message alone collapses those into a toast they cannot branch on.
-      if (!result.ok) return { ok: false, code: result.error.code, message: result.error.message };
+      // Commit-fragment names only those two save refusals. A different
+      // code is a facade that broke its own door, not a third reason to
+      // leave the page — mapping it onto persistence-failure would invent
+      // a disk failure that never happened.
+      if (!result.ok) {
+        const { code, message } = result.error;
+        if (!Check(ConfigurationCommitFailureCodeSchema, code)) {
+          throw new TypeError(`Configuration commit returned unusable failure code ${code}.`);
+        }
+        return { ok: false, code, message };
+      }
       revision = result.revision;
       return { ok: true };
     },

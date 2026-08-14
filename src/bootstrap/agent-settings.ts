@@ -10,7 +10,7 @@
 
 import type { SystemPromptMode } from "../modules/prompt/public.js";
 import type { JsonValue } from "../modules/configuration/public.js";
-import { SYSTEM_PROMPT_MODES } from "../modules/settings/public.js";
+import { SYSTEM_PROMPT_MODES, type SettingsUpdateResult } from "../modules/settings/public.js";
 import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
 import type { ConfigSectionIO } from "./configuration.js";
 
@@ -108,7 +108,7 @@ export interface AgentSettingsStore {
   update<K extends keyof AgentSettings>(
     key: K,
     value: NonNullable<AgentSettings[K]>,
-  ): { ok: true } | { ok: false; message: string };
+  ): SettingsUpdateResult;
   /** Push current stats visibility into the navigator; no-op without one. */
   syncNavigatorStats(): void;
 }

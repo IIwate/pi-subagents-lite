@@ -45,10 +45,11 @@ import type {
   ModelAccessThinkingTarget,
   ModelAccessThinkingView,
   ModelAccessUnavailableRule,
+  SettingsUpdateResult,
 } from "../modules/settings/public.js";
 import { configurationSectionIO, type ConfigSectionIO } from "./configuration.js";
 
-type UpdateResult = { ok: true } | { ok: false; message: string };
+type UpdateResult = SettingsUpdateResult;
 type ModelRef = { provider: string; id: string };
 
 /** Current persisted fragment, read fresh so no stale copy is ever edited. */

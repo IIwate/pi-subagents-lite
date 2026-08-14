@@ -1,17 +1,10 @@
 import { Type, type Static } from "typebox";
 import { ThinkingLevelSchema } from "../../model-access/public.js";
-import { AgentStatusSchema, DebugFaultKindSchema } from "../../subagent-runtime/public.js";
-
-const JsonValueSchema = Type.Cyclic({
-  JsonValue: Type.Union([
-    Type.Null(),
-    Type.Boolean(),
-    Type.Number(),
-    Type.String(),
-    Type.Array(Type.Ref("JsonValue")),
-    Type.Record(Type.String(), Type.Ref("JsonValue")),
-  ]),
-}, "JsonValue");
+import {
+  AgentStatusSchema,
+  DebugFaultKindSchema,
+  SessionInspectResultSchema,
+} from "../../subagent-runtime/public.js";
 
 export interface TextLayout {
   visibleWidth(text: string): number;
@@ -27,17 +20,10 @@ export interface TextLayout {
  */
 export const ChildStatusSchema = AgentStatusSchema;
 
-export const ChildSessionViewSchema = Type.Object({
-  found: Type.Boolean(),
-  live: Type.Boolean(),
-  streaming: Type.Boolean(),
-  modelId: Type.Optional(Type.String()),
-  provider: Type.Optional(Type.String()),
-  thinkingLevel: Type.Optional(ThinkingLevelSchema),
-  contextPercent: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
-  messages: Type.Array(JsonValueSchema),
-  streamingMessage: Type.Optional(JsonValueSchema),
-}, { additionalProperties: false });
+// The child view is the inspect result. A second object shape would let
+// the screen paint a field the driver never sends, or drop one it does.
+// Revisit if the screen needs a narrower projection than inspect.
+export const ChildSessionViewSchema = SessionInspectResultSchema;
 
 export const ChildRecordSummarySchema = Type.Object({
   id: Type.String({ minLength: 1 }),

@@ -43,13 +43,22 @@ export const ConfigurationCommandSchema = Type.Union([
   ReloadConfigurationCommandSchema,
 ]);
 
+// The two ways a fragment commit can refuse a save. Settings embeds this
+// schema so a new commit code is either added here — and accepted on the
+// page — or stays a facade error, never an invalid-snapshot that closes
+// /agents. Revisit if commit grows a third refusal that is not a save
+// failure.
+export const ConfigurationCommitFailureCodeSchema = Type.Union([
+  Type.Literal("persistence-failure"),
+  Type.Literal("revision-conflict"),
+]);
+
 const ConfigurationErrorSchema = Type.Object({
   code: Type.Union([
     Type.Literal("invalid-command"),
     Type.Literal("repository-failure"),
     Type.Literal("invalid-repository-result"),
-    Type.Literal("revision-conflict"),
-    Type.Literal("persistence-failure"),
+    ConfigurationCommitFailureCodeSchema,
   ]),
   message: Type.String(),
 }, { additionalProperties: false });
@@ -117,4 +126,5 @@ export type ReadConfigurationValueResult = Static<typeof ReadConfigurationValueR
 export type CommitConfigurationFragmentResult = Static<typeof CommitConfigurationFragmentResultSchema>;
 export type ReloadConfigurationResult = Static<typeof ReloadConfigurationResultSchema>;
 export type ConfigurationResult = Static<typeof ConfigurationResultSchema>;
+export type ConfigurationCommitFailureCode = Static<typeof ConfigurationCommitFailureCodeSchema>;
 export type OperationalValueCandidates = Static<typeof OperationalValueCandidatesSchema>;

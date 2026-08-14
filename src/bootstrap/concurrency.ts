@@ -18,6 +18,7 @@ import {
   type ConcurrencyLimitsUpdate,
   type SubagentRuntime,
 } from "../modules/subagent-runtime/public.js";
+import type { SettingsUpdateResult } from "../modules/settings/public.js";
 import { configurationSectionIO } from "./configuration.js";
 
 /** Current persisted fragment, read fresh so no stale copy is ever edited. */
@@ -34,7 +35,7 @@ export function concurrencyRuntimeLimits(): ConcurrencyLimits {
 export function updateConcurrencyLimits(
   update: ConcurrencyLimitsUpdate,
   manager: SubagentRuntime | null,
-): { ok: true } | { ok: false; message: string } {
+): SettingsUpdateResult {
   const next = applyConcurrencyLimitsUpdate(readConcurrencyFragment(), update);
   const result = configurationSectionIO.commit(
     "concurrency",
