@@ -15,7 +15,7 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 63 files, 871 passed, 2 skipped | Vitest |
+| Full suite | 63 files, 883 passed, 2 skipped | Vitest |
 | Skipped tests | 2 on this host: directory-symlink resolution and cross-repo rejection skip when the host returns `EPERM`/`EACCES`. Skipping is not a pass | Worktree fixture capability |
 | Architecture guard | 19 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
