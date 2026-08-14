@@ -38,6 +38,7 @@ export {
 export {
   AgentCommandSchema,
   AgentCommandResultSchema,
+  AgentListSnapshotSchema,
   AgentSnapshotSchema,
   AgentStatusSchema,
   DebugDiagnosticsSchema,
@@ -53,6 +54,7 @@ export {
 export type {
   AgentCommand,
   AgentCommandResult,
+  AgentListSnapshot,
   AgentSnapshot,
   AgentStatus,
   DebugDiagnostics,

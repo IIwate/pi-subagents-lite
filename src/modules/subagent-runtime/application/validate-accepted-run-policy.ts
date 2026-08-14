@@ -4,23 +4,6 @@ import {
   type AcceptedRunPolicy,
 } from "../contracts/accepted-run-policy.js";
 
-const ACCEPTED_MODEL_KEYS = [
-  "id",
-  "name",
-  "api",
-  "provider",
-  "baseUrl",
-  "reasoning",
-  "thinkingLevelMap",
-  "input",
-  "cost",
-  "contextWindow",
-  "maxTokens",
-  "samplingParams",
-  "headers",
-  "compat",
-] as const;
-
 function isPlainJsonValue(value: unknown, ancestors = new Set<object>()): boolean {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
@@ -56,53 +39,6 @@ function hasConsistentDerivedValues(candidate: AcceptedRunPolicy): boolean {
     : Math.max(1, configuredTurnLimit);
   return candidate.outputTokenLimit === candidate.model.maxTokens
     && candidate.turnLimit === expectedTurnLimit;
-}
-
-/**
- * Pi never hands us a contract object. After models.json composition it writes
- * `headers: undefined` so the key still exists; after `/scoped-models` it
- * pushes `{ model, thinkingLevel }` even when nobody chose a level. Host
- * extensions then hang private tags on the same object. Check would forgive
- * the undefined and then `additionalProperties: false` would hang the whole
- * spawn on a field the child session will never read. We keep the serializable
- * Model fields and drop the rest. This still dies when a required field is
- * missing or the wrong type. Revisit if Pi stops writing undefined own keys
- * and stops attaching host-only properties to Model.
- */
-function projectAcceptedModel(value: unknown): unknown {
-  if (value === null) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const source = value as Record<string, unknown>;
-  const projected: Record<string, unknown> = {};
-  for (const key of ACCEPTED_MODEL_KEYS) {
-    const field = source[key];
-    if (field !== undefined) projected[key] = field;
-  }
-  return projected;
-}
-
-function projectScopedModels(value: unknown): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.map((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
-    const source = entry as Record<string, unknown>;
-    const projected: Record<string, unknown> = {
-      model: projectAcceptedModel(source.model),
-    };
-    if (source.thinkingLevel !== undefined) projected.thinkingLevel = source.thinkingLevel;
-    return projected;
-  });
-}
-
-function projectAcceptedRunPolicyInput(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const source = value as Record<string, unknown>;
-  return {
-    ...source,
-    model: projectAcceptedModel(source.model),
-    parentModel: projectAcceptedModel(source.parentModel),
-    scopedModels: projectScopedModels(source.scopedModels),
-  };
 }
 
 function jsonPath(parent: string, key: string, isArray: boolean): string {
@@ -176,23 +112,34 @@ function describeDerivedFailure(candidate: AcceptedRunPolicy): string {
   return "turnLimit does not match definition.maxTurns.";
 }
 
+/**
+ * Same gate as parse: the value must already be a contract object. Vendor
+ * leftovers are not dropped here; the caller that assembled a Pi snapshot
+ * projects first. Revisit if a second inbound language appears.
+ */
+function acceptedRunPolicySnapshot(value: unknown): AcceptedRunPolicy | undefined {
+  if (!isPlainJsonValue(value) || !Check(AcceptedRunPolicySchema, value)) return undefined;
+  const candidate = value as AcceptedRunPolicy;
+  if (!hasConsistentDerivedValues(candidate)) return undefined;
+  const snapshot: unknown = JSON.parse(JSON.stringify(value));
+  return Check(AcceptedRunPolicySchema, snapshot)
+    && hasConsistentDerivedValues(snapshot as AcceptedRunPolicy)
+    ? snapshot as AcceptedRunPolicy
+    : undefined;
+}
+
 export function describeAcceptedRunPolicyFailure(value: unknown): string {
   try {
-    const projected = projectAcceptedRunPolicyInput(value);
-    if (!isPlainJsonValue(projected)) {
-      const path = firstNonPlainPath(projected);
+    if (!isPlainJsonValue(value)) {
+      const path = firstNonPlainPath(value);
       return path
         ? `${path} is not a plain JSON value.`
         : "accepted run policy is not a plain JSON value.";
     }
-    if (!Check(AcceptedRunPolicySchema, projected)) return describeCheckFailure(projected);
-    const candidate = projected as AcceptedRunPolicy;
+    if (!Check(AcceptedRunPolicySchema, value)) return describeCheckFailure(value);
+    const candidate = value as AcceptedRunPolicy;
     if (!hasConsistentDerivedValues(candidate)) return describeDerivedFailure(candidate);
-    const snapshot: unknown = JSON.parse(JSON.stringify(projected));
-    if (
-      !Check(AcceptedRunPolicySchema, snapshot)
-      || !hasConsistentDerivedValues(snapshot as AcceptedRunPolicy)
-    ) {
+    if (!acceptedRunPolicySnapshot(value)) {
       return "accepted run policy failed JSON snapshot validation.";
     }
     return "accepted run policy is invalid.";
@@ -203,15 +150,7 @@ export function describeAcceptedRunPolicyFailure(value: unknown): string {
 
 export function parseAcceptedRunPolicy(value: unknown): AcceptedRunPolicy | undefined {
   try {
-    const projected = projectAcceptedRunPolicyInput(value);
-    if (!isPlainJsonValue(projected) || !Check(AcceptedRunPolicySchema, projected)) return undefined;
-    const candidate = projected as AcceptedRunPolicy;
-    if (!hasConsistentDerivedValues(candidate)) return undefined;
-    const snapshot: unknown = JSON.parse(JSON.stringify(projected));
-    return Check(AcceptedRunPolicySchema, snapshot)
-      && hasConsistentDerivedValues(snapshot as AcceptedRunPolicy)
-      ? snapshot as AcceptedRunPolicy
-      : undefined;
+    return acceptedRunPolicySnapshot(value);
   } catch {
     return undefined;
   }

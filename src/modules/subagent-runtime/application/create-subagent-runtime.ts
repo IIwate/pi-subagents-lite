@@ -2,6 +2,7 @@ import { Check } from "typebox/value";
 import {
   AgentCommandResultSchema,
   AgentCommandSchema,
+  AgentListSnapshotSchema,
   AgentSnapshotSchema,
   DebugDiagnosticsSchema,
   MarkResultCommandSchema,
@@ -11,6 +12,7 @@ import {
   DEFAULT_TEARDOWN_TIMEOUT_MS,
   type AgentCommand,
   type AgentCommandResult,
+  type AgentListSnapshot,
   type AgentSnapshot,
   type DebugDiagnostics,
   type DebugFaultKind,
@@ -42,51 +44,6 @@ import {
   parseAcceptedRunPolicy,
 } from "./validate-accepted-run-policy.js";
 import { copyJson } from "./copy-json.js";
-import type { AcceptedRunPolicy } from "../contracts/accepted-run-policy.js";
-
-/**
- * Envelope Check still needs a policy object. The real scopedModels catalog
- * was already snapshotted at spawn; walking it again on every list tick is
- * what made five live agents hitch the parent TUI. This stub is only the
- * shape TypeBox walks. Revisit if acceptedPolicy becomes mutable after spawn.
- */
-const parsedOutboundPolicyStub = parseAcceptedRunPolicy({
-  definition: {
-    name: "outbound-stub",
-    description: "outbound-stub",
-    systemPrompt: "outbound-stub",
-    source: "built-in",
-  },
-  registeredTools: [],
-  restrictToRegisteredTools: false,
-  extensions: false,
-  skills: false,
-  systemPromptMode: "replace",
-  includeContextFiles: false,
-  parentModelKey: "",
-  model: {
-    id: "outbound-stub",
-    name: "outbound-stub",
-    api: "openai-completions",
-    provider: "outbound-stub",
-    baseUrl: "",
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 1,
-    maxTokens: 1,
-  },
-  parentModel: null,
-  scopedModels: [],
-  thinkingLevel: null,
-  outputTokenLimit: 1,
-  turnLimit: null,
-  graceTurns: 0,
-});
-if (!parsedOutboundPolicyStub) {
-  throw new TypeError("Outbound policy stub does not match AcceptedRunPolicy.");
-}
-const OUTBOUND_POLICY_STUB: AcceptedRunPolicy = parsedOutboundPolicyStub;
 
 function asImages(images: unknown[] | undefined): SessionSteerRequest["images"] {
   return images as SessionSteerRequest["images"];
@@ -134,7 +91,7 @@ export interface CreateSubagentRuntimeOptions {
 export interface SubagentRuntime {
   execute(command: unknown): Promise<AgentCommandResult>;
   getSnapshot(id: string): AgentSnapshot | undefined;
-  listSnapshots(): AgentSnapshot[];
+  listSnapshots(): AgentListSnapshot[];
   waitUntilSettled(id: string): Promise<AgentSnapshot | undefined>;
   inspectSession(id: string): ReturnType<SessionDriver["inspect"]>;
   stop(id: string, initiator?: AgentSnapshot["stoppedBy"]): boolean;
@@ -203,30 +160,32 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   );
 
   /**
-   * The one gate every snapshot leaves through. A copy that fails the contract
-   * is withheld rather than handed out: consumers project it into rendering,
-   * persistence, and prompt text, so passing a malformed record on turns one
-   * internal defect into a fault surfacing far from its cause. Withholding
-   * degrades to an absent row or an unavailable interaction — states every
-   * consumer already models. Reachable corruption belongs at the inbound
-   * seams above, which is where the session-event check lives; this stays as
-   * the last line for a writer that slips past them.
-   *
-   * acceptedPolicy is the spawn-time JSON snapshot, already Check'd. Sharing
-   * that object keeps the list timer from cloning the user's whole model
-   * catalog on every tick. Callers that mutate it would write through to the
-   * live record; nothing in this host does. Revisit if a consumer starts
-   * editing the returned policy.
+   * The one gate a full snapshot leaves through. A copy that fails the
+   * contract is withheld rather than handed out: consumers project it into
+   * rendering, persistence, and prompt text, so passing a malformed record
+   * on turns one internal defect into a fault surfacing far from its cause.
+   * Withholding degrades to an absent row or an unavailable interaction —
+   * states every consumer already models. The accepted call is the real
+   * object, not a stub swapped in after the Check. Revisit if a writer
+   * starts slipping past the inbound session-event check.
    */
   function outbound(snapshot: AgentSnapshot | undefined): AgentSnapshot | undefined {
     if (!snapshot) return undefined;
-    const copy = copyJson({
-      ...snapshot,
-      acceptedPolicy: OUTBOUND_POLICY_STUB,
-    }) as AgentSnapshot;
-    if (!Check(AgentSnapshotSchema, copy)) return undefined;
-    copy.acceptedPolicy = snapshot.acceptedPolicy;
-    return copy;
+    const copy = copyJson(snapshot);
+    return Check(AgentSnapshotSchema, copy) ? copy : undefined;
+  }
+
+  /**
+   * The list never read the accepted call. Cloning that catalog on every
+   * tick was the hitch; stubbing the Check and hanging the live policy
+   * back was how a caller could write through to the record. A thinner
+   * row is the gate the refresh can pay for. Revisit if a list consumer
+   * starts needing the accepted call.
+   */
+  function outboundList(snapshot: AgentSnapshot): AgentListSnapshot | undefined {
+    const { acceptedPolicy: _acceptedPolicy, ...row } = snapshot;
+    const copy = copyJson(row);
+    return Check(AgentListSnapshotSchema, copy) ? copy : undefined;
   }
 
   /**
@@ -255,11 +214,18 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     return outbound(snapshots.get(id));
   }
 
-  function listCopies(): AgentSnapshot[] {
+  function listRows(): AgentListSnapshot[] {
     // Acceptance order is the list. Recency-by-startedAt looked harmless
     // until a later queued row, stamped at enqueue, climbed over running
     // work that had already begun. Pins must not move rows either.
     // Revisit only if product names an explicit status rank.
+    return [...snapshots.values()].flatMap((snapshot) => {
+      const emitted = outboundList(snapshot);
+      return emitted ? [emitted] : [];
+    });
+  }
+
+  function snapshotCopies(): AgentSnapshot[] {
     return [...snapshots.values()].flatMap((snapshot) => {
       const emitted = outbound(snapshot);
       return emitted ? [emitted] : [];
@@ -782,7 +748,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
           ? snapshots.has(next.id)
             ? ok({ snapshot: snapshotCopy(next.id) })
             : failure("not-found", `Unknown Subagent: ${next.id}`)
-          : ok({ snapshots: listCopies() });
+          : ok({ snapshots: snapshotCopies() });
       case "pin":
         return pin(next.id);
       case "expire":
@@ -821,8 +787,8 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     getSnapshot(id: string): AgentSnapshot | undefined {
       return snapshotCopy(id);
     },
-    listSnapshots(): AgentSnapshot[] {
-      return listCopies();
+    listSnapshots(): AgentListSnapshot[] {
+      return listRows();
     },
     waitUntilSettled(id: string): Promise<AgentSnapshot | undefined> {
       const snapshot = snapshots.get(id);
@@ -877,7 +843,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     debugDiagnostics(): DebugDiagnostics {
       const diagnostics = {
         ...(armedFault ? { armedFault: { kind: armedFault } } : {}),
-        agents: listCopies().map((snapshot) => ({
+        agents: listRows().map((snapshot) => ({
           id: snapshot.id,
           type: snapshot.type,
           status: snapshot.status,
