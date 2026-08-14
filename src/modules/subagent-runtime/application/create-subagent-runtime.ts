@@ -3,6 +3,7 @@ import {
   AgentCommandResultSchema,
   AgentCommandSchema,
   AgentSnapshotSchema,
+  DebugDiagnosticsSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
   DEFAULT_CONCURRENCY_LIMIT,
   DEFAULT_RETENTION_MS,
@@ -763,8 +764,8 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       onRemove = handler;
     },
     debugDiagnostics(): DebugDiagnostics {
-      return {
-        armedFault: armedFault ? { kind: armedFault } : undefined,
+      const diagnostics = {
+        ...(armedFault ? { armedFault: { kind: armedFault } } : {}),
         agents: listCopies().map((snapshot) => ({
           id: snapshot.id,
           type: snapshot.type,
@@ -773,10 +774,14 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
           settled: snapshot.settled,
           resultConsumed: snapshot.resultConsumed === true,
           resultPersisted: snapshot.resultPersisted === true,
-          debugFaultKind: snapshot.debugFaultKind,
-          error: snapshot.error,
+          ...(snapshot.debugFaultKind ? { debugFaultKind: snapshot.debugFaultKind } : {}),
+          ...(snapshot.error ? { error: snapshot.error } : {}),
         })),
       };
+      if (!Check(DebugDiagnosticsSchema, diagnostics)) {
+        throw new TypeError("Debug diagnostics do not match their contract.");
+      }
+      return diagnostics;
     },
     dispose: disposeRuntime,
   };

@@ -1,3 +1,7 @@
+/**
+ * Session-driver / policy-lock integration. createAgentSession is mocked;
+ * this suite does not run a live Pi turn loop.
+ */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -213,7 +217,7 @@ function model(provider: string, id: string) {
   };
 }
 
-describe("REQ-AGENT-002 queued invocation snapshots", () => {
+describe("REQ-AGENT-002 queued invocation snapshots (session-driver / policy lock)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reset();

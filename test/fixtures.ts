@@ -26,6 +26,27 @@ import type {
   ResolvedAgentSettings,
 } from "../src/bootstrap/agent-settings.js";
 import type { ModelAccessFragment } from "../src/modules/model-access/public.js";
+import type { BackgroundDelivery } from "../src/modules/background-result-delivery/public.js";
+
+/** Accepts track-origin so background spawn tests can omit a real inbox. */
+export function inertDelivery(): BackgroundDelivery {
+  return {
+    execute: () => ({
+      ok: true,
+      snapshot: {
+        parentSessionId: "",
+        parentRunPhase: "idle",
+        parentWakeActive: false,
+        lastWakeFailed: false,
+        pending: [],
+        fallback: [],
+      },
+      events: [],
+    }),
+    pendingResultCount: () => undefined,
+    getStoredResult: () => undefined,
+  };
+}
 
 /** The parse-time default routing policy: alternates OFF, no saved rules. */
 export function disabledModelAccess(): ModelAccessFragment {
@@ -123,7 +144,7 @@ export function fakeExtensionRuntime(
     pi: { sendMessage: vi.fn(), exec: vi.fn() } as any,
     sessionCtx: { cwd: "/home/test" } as any,
     manager: null,
-    delivery: null,
+    delivery: inertDelivery(),
     navigator: null,
     agentSettings: inertAgentSettings(),
     modelAccess: disabledModelAccess,

@@ -1,19 +1,9 @@
-import { Check } from "typebox/value";
-import {
-  ModelAccessFragmentSchema,
-  type ModelAccessFragment,
-} from "../contracts/model-access-contracts.js";
+import { type ModelAccessFragment } from "../contracts/model-access-contracts.js";
+import { outboundFragment, requireFragment } from "./checked-fragment.js";
 import {
   applyAgentProviderAccess as applyAgentProviderAccessDecision,
   applyQuickAgentProviderAccess as applyQuickAgentProviderAccessDecision,
 } from "../core/update-provider-access.js";
-
-function requireFragment(routing: unknown): ModelAccessFragment {
-  if (!Check(ModelAccessFragmentSchema, routing)) {
-    throw new TypeError("Model access fragment is invalid.");
-  }
-  return routing;
-}
 
 export function applyAgentProviderAccess(
   routing: unknown,
@@ -21,7 +11,9 @@ export function applyAgentProviderAccess(
   provider: string,
   models?: readonly string[],
 ): ModelAccessFragment {
-  return applyAgentProviderAccessDecision(requireFragment(routing), agentType, provider, models);
+  return outboundFragment(
+    applyAgentProviderAccessDecision(requireFragment(routing), agentType, provider, models),
+  );
 }
 
 export function applyQuickAgentProviderAccess(
@@ -30,5 +22,7 @@ export function applyQuickAgentProviderAccess(
   provider: string,
   models?: readonly string[],
 ): ModelAccessFragment {
-  return applyQuickAgentProviderAccessDecision(requireFragment(routing), agentType, provider, models);
+  return outboundFragment(
+    applyQuickAgentProviderAccessDecision(requireFragment(routing), agentType, provider, models),
+  );
 }

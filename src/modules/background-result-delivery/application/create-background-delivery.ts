@@ -119,6 +119,15 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       .filter((result) => belongsToActiveBranch(result, options.context.parentSessionId(), activeBranchIds));
   }
 
+  /**
+   * Only session-tree replaces this set from the host. A full replace is
+   * honest there: the host is naming the tree the user navigated to, and a
+   * seed the listing omits no longer belongs on screen. Preflight and restore
+   * used to share this and would erase a track-origin id the host had not
+   * yet grown — the result then hid on the turn that should have delivered
+   * it. Revisit if Pi reports the in-turn leaf from getBranch() before the
+   * next tree event.
+   */
   function refreshActiveBranch(): void {
     activeBranchIds = new Set(options.context.activeBranchIds());
   }
@@ -258,14 +267,14 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       case "record-terminal":
         return recordTerminal(next.record, next.stillPresent);
       case "track-origin":
-        // Dropped by the next refresh on purpose: by then the host reports
-        // the entry itself, or the user navigated away and the result no
-        // longer belongs to the visible branch.
+        // The Agent call's leaf is born inside this turn. The host branch
+        // still names the path from before the call, so the seed has to
+        // live here until the host learns the entry. session-tree may drop
+        // it; preflight and restore do not replace the set.
         if (!disposed) activeBranchIds.add(next.originEntryId);
         return ok();
       case "parent-preflight": {
         if (disposed) return ok();
-        refreshActiveBranch();
         parentRunPhase = "preflight";
         flushFallbackResults();
         const results = eligiblePendingResults();
@@ -293,7 +302,6 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
         return parentSettled();
       case "restore":
         if (!disposed) {
-          refreshActiveBranch();
           flushFallbackResults();
           const restored = eligiblePendingResults();
           if (restored.length > 0) {
@@ -335,6 +343,14 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   }
 
   function getStored(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined {
+    // Maps can hold a record that passed inbound Check and was later
+    // mutated in place. Handing that out would let wake and inspect treat
+    // a broken view as a parent message. Drop it; the caller sees absence.
+    const stored = lookupStored(agentId, deliveryId);
+    return stored && Check(BackgroundResultRecordSchema, stored) ? stored : undefined;
+  }
+
+  function lookupStored(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined {
     if (deliveryId) {
       const latest = latestResults.get(agentId);
       return fallbackResults.get(deliveryId)

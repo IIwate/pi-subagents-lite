@@ -64,14 +64,20 @@ function internalMockViolations(): string[] {
  * anything that must survive a reload lives behind that module's API. Any
  * other globalThis access reintroduces hidden shared state.
  */
+function accessesProcessGlobal(source: string): boolean {
+  return /\bglobalThis\b/.test(source)
+    || /\bglobal\s*[.\[]/.test(source)
+    || /\(\s*global\s+as\b/.test(source);
+}
+
 function globalThisViolations(): string[] {
   const allowed = new Set(["src/platform/process/process-state.ts"]);
   const violations: string[] = [];
   for (const path of typescriptFiles(resolve(projectRoot, "src"))) {
     if (allowed.has(repoPath(path))) continue;
     const source = readFileSync(path, "utf8");
-    if (/\bglobalThis\b/.test(source)) {
-      violations.push(`${repoPath(path)} accesses globalThis`);
+    if (accessesProcessGlobal(source)) {
+      violations.push(`${repoPath(path)} accesses process-global state`);
     }
   }
   return violations.sort();
@@ -106,6 +112,20 @@ describe("architecture guards", () => {
     expect(analysis.opaque.map((entry) => entry.kind)).toEqual(["computed-import", "computed-require"]);
   });
 
+  it("names import-equals require and createRequire IIFE loads", () => {
+    const analysis = analyzeModuleReferences(
+      [
+        "import fs = require('./static.js');",
+        "import dyn = require(name);",
+        "createRequire(import.meta.url)('./literal.js');",
+        "createRequire(import.meta.url)(name);",
+      ].join("\n"),
+      "fixture.ts",
+    );
+    expect(analysis.specifiers).toEqual(["./static.js", "./literal.js"]);
+    expect(analysis.opaque.map((entry) => entry.kind)).toEqual(["computed-require", "computed-require"]);
+  });
+
   it("forbids replacing internal modules with mocks or namespace spies", () => {
     expect(internalMockViolations()).toEqual([]);
   });
@@ -123,6 +143,14 @@ describe("architecture guards", () => {
         "const loaded = await import('../../src/utils.js');",
         "vi.spyOn(loaded, 'errorMessage');",
         "vi.mock(specifierFromVariable);",
+        "vi[\"mock\"]('../../src/utils.js');",
+        "const method = 'mock';",
+        "vi[method]('../../src/types.js');",
+        "const { mock } = vi;",
+        "mock('../../src/status-note.js');",
+        "vi.spyOn(await import('../../src/utils.js'), 'errorMessage');",
+        "vi.spyOn(loaded as any, 'errorMessage');",
+        "vi.spyOn(loaded!, 'errorMessage');",
       ].join("\n"),
       "fixture.test.ts",
     );
@@ -133,11 +161,25 @@ describe("architecture guards", () => {
       { kind: "internal-namespace-spy", binding: "alias" },
       { kind: "internal-namespace-spy", binding: "loaded" },
       { kind: "undecidable-mock", text: "vi.mock(specifierFromVariable)" },
+      { kind: "internal-mock", specifier: "../../src/utils.js" },
+      { kind: "undecidable-mock", text: "vi[method]('../../src/types.js')" },
+      { kind: "internal-mock", specifier: "../../src/status-note.js" },
+      { kind: "internal-namespace-spy", binding: "../../src/utils.js" },
+      { kind: "internal-namespace-spy", binding: "loaded" },
+      { kind: "internal-namespace-spy", binding: "loaded" },
     ]);
   });
 
   it("confines globalThis to the process-state platform module", () => {
     expect(globalThisViolations()).toEqual([]);
+  });
+
+  it("treats global. and (global as any) as process-global siblings of globalThis", () => {
+    expect(accessesProcessGlobal("void globalThis.flag")).toBe(true);
+    expect(accessesProcessGlobal("void global.process")).toBe(true);
+    expect(accessesProcessGlobal("void global[key]")).toBe(true);
+    expect(accessesProcessGlobal("void (global as any).flag")).toBe(true);
+    expect(accessesProcessGlobal("const globallySafe = 1")).toBe(false);
   });
 
   it("keeps target module imports behind public surfaces and inward layers", () => {

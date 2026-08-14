@@ -1,9 +1,8 @@
-import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import type { AgentConfig } from "../agents/types.js";
 import { configRoot, configuration, configurationSectionIO } from "./configuration.js";
-import { userAgentsDirPath } from "../platform/fs/config-paths.js";
+import { projectAgentsDirPath, userAgentsDirPath } from "../platform/fs/config-paths.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
@@ -69,7 +68,7 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
  */
 async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
   const userAgentDir = userAgentsDirPath(configRoot);
-  const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
+  const projectAgentDir = projectAgentsDirPath(ctx.cwd);
 
   const configurationResult = configuration.execute({
     kind: "read-value",

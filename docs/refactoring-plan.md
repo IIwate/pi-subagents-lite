@@ -4,7 +4,7 @@
 
 `pi-subagents-lite` has a well-defined product model, but the implementation is accumulating change amplification. Adding a feature often crosses the mutable shell, runtime orchestration, Pi session APIs, configuration, and TUI code. Large modules then need broad internal mocks, so tests protect the current structure as much as the observable behavior.
 
-The refactor must make later maintenance and feature development local. Except for the explicitly approved configuration-persistence failure correction below, it must not change user-visible behavior, add a second execution path, or pause normal releases for a repository-wide rewrite.
+The refactor must make later maintenance and feature development local. Except for the two explicitly approved behavior corrections below — persist-failure made explicit, and inherit of an invisible prompt source hard-fails — it must not change user-visible behavior, add a second execution path, or pause normal releases for a repository-wide rewrite.
 
 This plan is based on local `re` branch commit `37162c8`. During migration it implemented ADR 0009, whose content now lives in [architecture decisions](architecture/decisions.md) under the retirement rule below.
 
@@ -117,7 +117,7 @@ The history audit is handled as input to the baseline, not as part of the final 
 10. As a contributor, I want session execution separate from scheduling, so that I can change concurrency without touching Pi session setup.
 11. As a contributor, I want result-delivery rules represented as a state machine, so that branch eligibility and wake behavior remain explicit.
 12. As a contributor, I want Agent type discovery separate from frontmatter parsing and merge policy, so that each can change independently.
-13. As a user, I want Agent, StopAgent, and AgentStatus to behave exactly as before, so that the refactor does not alter my workflow.
+13. As a user, I want Agent, StopAgent, and AgentStatus to keep their accepted behavior, including that inheriting an invisible prompt source fails the run instead of continuing under an empty replace-mode header, so that a host malfunction is not hidden. Persist-failure reporting is the separate accepted correction in US16 — inherit is not the only exception.
 14. As a user, I want running and queued Subagents to retain their accepted run policy, so that configuration changes affect only future calls.
 15. As a user, I want Child screen, background delivery, Model access, and worktree validation behavior preserved, so that no capability regresses.
 16. As a user, I want a failed configuration save to report failure and retain the previous effective value, so that the UI never claims an update that was not persisted.

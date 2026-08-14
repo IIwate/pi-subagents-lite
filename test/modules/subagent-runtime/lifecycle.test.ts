@@ -244,6 +244,7 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     });
 
     expect(Check(AgentCommandResultSchema, first)).toBe(true);
+    expect(Check(AgentCommandResultSchema, JSON.parse(JSON.stringify(first)))).toBe(true);
     expect(Check(AgentCommandResultSchema, second)).toBe(true);
     expect(first).toMatchObject({ ok: true, snapshot: { status: "running", id: "agent-00000001" } });
     expect(second).toMatchObject({ ok: true, snapshot: { status: "queued", id: "agent-00000002" } });
@@ -422,6 +423,53 @@ describe("REQ-RUNTIME-001 queue release", () => {
       "release:test/model",
       "reserve:test/model",
     ]);
+  });
+
+  it("REQ-RUNTIME-001 rejects a settled continuation when concurrency slots are full without enqueueing", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      limits: { defaultModelLimit: 1, modelLimits: {}, providerLimits: {} },
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "settled",
+      description: "settled",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await completeRun(memory, "agent-00000001");
+    expect(runtime.getSnapshot("agent-00000001")).toMatchObject({
+      status: "completed",
+      settled: true,
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "occupant",
+      description: "occupant",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+
+    const queuedBefore = runtime.listSnapshots().filter((snapshot) => snapshot.status === "queued");
+    const continued = await runtime.execute({
+      kind: "interact",
+      id: "agent-00000001",
+      message: "follow up",
+    });
+
+    expect(continued).toMatchObject({
+      ok: true,
+      interaction: { accepted: false, reason: "concurrency", concurrencyKey: "test/model" },
+    });
+    expect(runtime.getSnapshot("agent-00000001")).toMatchObject({
+      status: "completed",
+      settled: true,
+    });
+    expect(runtime.listSnapshots().filter((snapshot) => snapshot.status === "queued")).toEqual(queuedBefore);
+    expect(memory.continues.size).toBe(0);
   });
 });
 

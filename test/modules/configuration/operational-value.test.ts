@@ -34,6 +34,13 @@ describe("operational source precedence", () => {
     expect(resolveOperationalValue({ fallback: "/fallback" })).toBe("/fallback");
   });
 
+  it("rejects candidates that do not match the inbound contract", () => {
+    expect(() => resolveOperationalValue({} as never)).toThrow(TypeError);
+    expect(() => resolveOperationalValue({ fallback: 1 } as never)).toThrow(
+      /Operational value candidates do not match their contract/,
+    );
+  });
+
   it("treats a set-but-empty source as absent instead of an override", () => {
     // Preserves the historical `process.env.HOME || ""` contract: an empty
     // exported variable must not blank out a usable lower-precedence source.

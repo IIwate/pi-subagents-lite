@@ -1,14 +1,11 @@
-import type { AgentModelAccess, ModelAccessFragment, ThinkingLevel } from "../contracts/model-access-contracts.js";
+import {
+  CANONICAL_THINKING_LEVELS,
+  type AgentModelAccess,
+  type ModelAccessFragment,
+  type ThinkingLevel,
+} from "../contracts/model-access-contracts.js";
 
-const CANONICAL_LEVELS = new Set<ThinkingLevel>([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
+const CANONICAL_LEVELS = new Set<ThinkingLevel>(CANONICAL_THINKING_LEVELS);
 
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;

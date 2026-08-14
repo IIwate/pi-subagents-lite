@@ -141,13 +141,17 @@ describe("documentation guards", () => {
         "xit(\"REQ-GHOST-006\", () => {});",
         "it(`REQ-${id}`, () => {});",
         "describe.skip(\"parked\", () => { it(\"REQ-GHOST-007 nested in skipped describe\", () => {}); });",
-        "it(\"REQ-REAL-001 runs\", () => {});",
-        "describe(\"REQ-REAL-002 suite\", () => {});",
+        "it(\"REQ-REAL-001 runs\", () => { expect(1).toBe(1); });",
+        "describe(\"REQ-REAL-002 suite\", () => { it(\"nested\", () => { expect(1).toBe(1); }); });",
+        "it(\"REQ-TITLE-ONLY-001 title only\", () => {});",
       ].join("\n"),
       "fixture.test.ts",
     )).toEqual(["REQ-REAL-001", "REQ-REAL-002"]);
   });
 
+  // A tagged title still needs an expect() in the body. The expect is not
+  // required to mention the same REQ — that would be parsing assertion
+  // meaning — but a title-only it() is not coverage.
   it("keeps every active requirement exercised by at least one executed tagged test title", () => {
     const { defined } = requirementIds();
     const tagged = new Set<string>();

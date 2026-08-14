@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  createAsciiTextLayout,
   createChildScreen,
   lineText,
   type ChildRecordSummary,
   type ChildScreen,
+  type CreateChildScreenOptions,
   type NavigatorSnapshot,
 } from "../../../src/modules/child-screen/public.js";
+
+function openScreen(options: Omit<CreateChildScreenOptions, "textLayout"> = {}) {
+  return createChildScreen({ textLayout: createAsciiTextLayout(), ...options });
+}
 
 function record(overrides: Partial<ChildRecordSummary> = {}): ChildRecordSummary {
   return {
@@ -58,7 +64,7 @@ function footerText(snapshot: NavigatorSnapshot): string | undefined {
 
 describe("REQ-CHILD-002 expanded list projection", () => {
   it("projects the Main summary with counts and never leaks record ids", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
 
     const snapshot = project(screen);
@@ -69,7 +75,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("hides zero running and queued counts when only terminal records remain", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [
@@ -83,7 +89,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("shows nonzero pending results inline and hides zero", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()], pendingResultCount: 3 });
     expect(listTexts(project(screen))[0]).toBe(
       "  ● Main (1 running · 1 total · 3 results pending · Alt+A collapse)",
@@ -96,7 +102,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("shows an error row and an undelivered result independently", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ id: "agent-needs-input", status: "error", error: "temporary provider failure" })],
@@ -115,7 +121,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
       status: index < 2 ? "running" : index === 2 ? "queued" : "completed",
       description: `Task ${index}`,
     }));
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records });
 
     let lines = listTexts(project(screen));
@@ -130,7 +136,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("preserves record order without moving Main, including pinned rows", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [
@@ -151,7 +157,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("keeps each status label adjacent to its description column", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [
@@ -180,7 +186,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("keeps the Error label visible when a narrow terminal truncates other columns", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({
@@ -197,7 +203,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("preserves status and provider-first identity space for a long display name", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({
@@ -214,7 +220,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("marks debug-fault records with an accented DEBUG badge", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({
@@ -236,7 +242,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("renders pinned indicators with the accent color role", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record({ status: "completed", pinned: true })] });
     const inactive = project(screen).listLines!
       .flatMap((line) => line.parts)
@@ -251,7 +257,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("shows focus hints that follow the highlighted row's pin state", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     expect(listTexts(project(screen))[0]).toBe(
@@ -270,7 +276,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("renders the clear confirmation prompt for the highlighted record", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
@@ -282,7 +288,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("respects the statsVisibility showCost toggle", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ stats: stats({ cost: 0.05 }) })],
@@ -294,7 +300,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
   });
 
   it("right-aligns elapsed time within the full row width", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ startedAt: 85_000, invocation: identity(), stats: stats() })],
@@ -315,14 +321,14 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     ["stopped", "Stopped"],
     ["error", "Error"],
   ] as const)("renders %s records with the %s label", (status, label) => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record({ status })] });
 
     expect(listTexts(project(screen)).join("\n")).toContain(`(${label})`);
   });
 
   it("previews a debug status without mutating record state", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
 
     screen.execute({ kind: "set-debug-preview", status: "error" });
@@ -337,7 +343,7 @@ describe("REQ-CHILD-002 expanded list projection", () => {
 
 describe("REQ-CHILD-002 folded footer status", () => {
   it("summarizes a single running record when folded", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "toggle-fold" });
 
@@ -347,7 +353,7 @@ describe("REQ-CHILD-002 folded footer status", () => {
   });
 
   it("pluralizes the title and counts queued records when folded", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ id: "agent-1" }), record({ id: "agent-2", status: "queued" })],
@@ -360,7 +366,7 @@ describe("REQ-CHILD-002 folded footer status", () => {
   });
 
   it("omits count segments for terminal-only records when folded", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ status: "error", error: "503 service unavailable" })],
@@ -371,7 +377,7 @@ describe("REQ-CHILD-002 folded footer status", () => {
   });
 
   it("appends the Main shortcut while a Child stays selected", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-12345678" });
     screen.execute({ kind: "toggle-fold" });
@@ -382,7 +388,7 @@ describe("REQ-CHILD-002 folded footer status", () => {
   });
 
   it("replaces counts with the interaction notice in both presentations", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-12345678" });
     screen.execute({
@@ -409,7 +415,7 @@ describe("REQ-CHILD-002 folded footer status", () => {
   });
 
   it("omits the footer status while expanded or without visible work", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     expect(project(screen).footerStatus).toBeUndefined();
 
@@ -423,7 +429,7 @@ describe("REQ-CHILD-004 transcript projection", () => {
   const sessionBase = { found: true, live: true, streaming: false } as const;
 
   it("shows queue waiting text before the child session exists", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record({ status: "queued" })] });
     screen.execute({ kind: "select", agentId: "agent-12345678" });
 
@@ -435,7 +441,7 @@ describe("REQ-CHILD-004 transcript projection", () => {
   });
 
   it("shows a start failure without a session as an error line", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({
@@ -452,7 +458,7 @@ describe("REQ-CHILD-004 transcript projection", () => {
   });
 
   it("renders the session conversation under the Error status label", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({
@@ -494,7 +500,7 @@ describe("REQ-CHILD-004 transcript projection", () => {
   });
 
   it("labels debug-fault transcripts with the DEBUG badge and no id", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({

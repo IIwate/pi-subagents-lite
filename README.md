@@ -161,7 +161,7 @@ The Agent model picker shows only actionable alternates: Provider models from `g
 
 Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key with its allowed and default thinking levels, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Agent types with no callable model are listed as unavailable, and guidance states when a `model` argument is required because Parent access is denied. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
 
-The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts.
+The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts. An unavailable inherit source fails the run and does not switch mode. A missing custom prompt file may still replace the header and notify, because settings can show and create that file.
 
 ## Concurrency
 
@@ -169,14 +169,14 @@ The fallback ceiling is 4 concurrent runs per model. An explicit Model limit rep
 
 New Agent calls beyond either ceiling enter `Queued`. Continuing a settled child does not queue: the input remains in the editor and Main shows `Blocked: provider/model concurrency limit reached` until a later successful send or Agent switch.
 
-The Concurrency menu shows only the parent model, currently authorized alternates, and models retained by existing child sessions. Limits outside that actionable inventory remain saved under **Saved inactive limits**, reappear automatically when their prerequisite returns, and are removed only through an explicit user action.
+The Concurrency menu shows the parent model, currently authorized alternates, and models retained by existing child sessions. Limits outside that actionable inventory stay saved and appear as **Inactive Provider ·** / **Inactive Model ·** rows, reappear as ordinary Provider/Model rows when their prerequisite returns, and are removed only through an explicit user action.
 
 ## Settings
 
 Run `/agents` to configure:
 
 - Parent model access and inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
-- the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
+- the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and Inactive Provider / Inactive Model rows;
 - force-background mode, grace turns, and exact Agent/model Thinking access overrides;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
 - implicit skill and extension loading, built-in agents, initial list expansion, and visible list statistics;

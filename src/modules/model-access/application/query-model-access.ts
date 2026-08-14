@@ -3,6 +3,7 @@ import {
   ModelAccessFragmentSchema,
   ResolveThinkingAccessQuerySchema,
   ThinkingAccessPolicySchema,
+  ThinkingSelectionSchema,
   type ModelAccessFragment,
   type ResolveThinkingAccessQuery,
 } from "../contracts/model-access-contracts.js";
@@ -111,5 +112,8 @@ export function selectThinkingLevel(
   policy: Readonly<ThinkingAccessPolicy>,
   requested: string | undefined,
 ): ThinkingSelection {
-  return decideThinkingSelection(policy, requested);
+  const denied: ThinkingSelection = { ok: false, reason: "thinking-denied", allowed: [] };
+  if (!Check(ThinkingAccessPolicySchema, policy)) return denied;
+  const selection = decideThinkingSelection(policy, requested);
+  return Check(ThinkingSelectionSchema, selection) ? selection : denied;
 }

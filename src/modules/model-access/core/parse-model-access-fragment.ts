@@ -1,20 +1,13 @@
-import type {
-  AgentModelAccess,
-  ModelAccessFragment,
-  ProviderModelAccess,
-  ThinkingAccessOverride,
-  ThinkingLevel,
+import {
+  CANONICAL_THINKING_LEVELS,
+  type AgentModelAccess,
+  type ModelAccessFragment,
+  type ProviderModelAccess,
+  type ThinkingAccessOverride,
+  type ThinkingLevel,
 } from "../contracts/model-access-contracts.js";
 
-const CANONICAL_LEVELS = new Set<ThinkingLevel>([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
+const CANONICAL_LEVELS = new Set<ThinkingLevel>(CANONICAL_THINKING_LEVELS);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -189,7 +182,7 @@ export function replacementThinkingDefault(
   allowed: readonly ThinkingLevel[],
   fallbackLevel: ThinkingLevel,
 ): ThinkingLevel {
-  const order: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const order = CANONICAL_THINKING_LEVELS;
   const preferredIndex = order.indexOf(fallbackLevel);
   const start = preferredIndex === -1 ? 0 : preferredIndex;
   for (let index = start; index < order.length; index++) {

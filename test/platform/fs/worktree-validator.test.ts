@@ -80,6 +80,8 @@ function canCreateDirectorySymlink(): boolean {
 
 const supportsDirectorySymlink = canCreateDirectorySymlink();
 const symlinkIt = supportsDirectorySymlink ? it : it.skip;
+// These two symlink contracts stay unexecuted on hosts that refuse
+// directory symlinks (EPERM/EACCES). Skipping is not a pass.
 
 // ── tests ────────────────────────────────────────────────────────
 

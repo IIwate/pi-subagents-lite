@@ -26,3 +26,8 @@ export function customPromptFilePath(configRoot: string): string {
 export function userAgentsDirPath(configRoot: string): string {
   return path.join(configRoot, "agents");
 }
+
+/** Project-level Agent definition directory under the session cwd. */
+export function projectAgentsDirPath(cwd: string): string {
+  return path.join(cwd, ".pi", "agents");
+}

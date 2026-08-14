@@ -1,7 +1,7 @@
 # Dev
 **Package manager:** bun (`bun install`, `bun add`, `bun add -d`)
 **Typecheck:** `bun run typecheck`
-**Tests:** `bun run test` (the full suite; runs in CI via `test.yml`)
+**Tests:** `bun run test` (the full suite; `--maxWorkers=1` is a CI-stability choice and stays the official script). `bun run test:parallel` runs without that cap.
 **Before committing:** run typecheck and the full test suite.
 
 # Repository language and style

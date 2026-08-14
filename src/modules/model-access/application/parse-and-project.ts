@@ -4,6 +4,7 @@ import {
   type ModelAccessFragment,
   type ThinkingLevel,
 } from "../contracts/model-access-contracts.js";
+import { outboundFragment, requireFragment } from "./checked-fragment.js";
 import {
   applyProviderEnabled as applyProviderEnabledDecision,
   applyRoutingEnabled as applyRoutingEnabledDecision,
@@ -14,19 +15,12 @@ import {
   snapshotVisibleSelectedModels as snapshotVisibleSelectedModelsDecision,
 } from "../core/parse-model-access-fragment.js";
 
-function requireFragment(routing: unknown): ModelAccessFragment {
-  if (!Check(ModelAccessFragmentSchema, routing)) {
-    throw new TypeError("Model access fragment is invalid.");
-  }
-  return routing;
-}
-
 export function parseModelAccessFragment(raw: unknown): ModelAccessFragment {
-  return parseModelAccessFragmentDecision(raw);
+  return outboundFragment(parseModelAccessFragmentDecision(raw));
 }
 
 export function applyRoutingEnabled(routing: unknown, enabled: boolean): ModelAccessFragment {
-  return applyRoutingEnabledDecision(requireFragment(routing), enabled);
+  return outboundFragment(applyRoutingEnabledDecision(requireFragment(routing), enabled));
 }
 
 export function applyProviderEnabled(
@@ -34,11 +28,11 @@ export function applyProviderEnabled(
   provider: string,
   enabled: boolean,
 ): ModelAccessFragment {
-  return applyProviderEnabledDecision(requireFragment(routing), provider, enabled);
+  return outboundFragment(applyProviderEnabledDecision(requireFragment(routing), provider, enabled));
 }
 
 export function isParentModelAllowed(routing: unknown, agentType: string): boolean {
-  const fragment = Check(ModelAccessFragmentSchema, routing) ? routing : parseModelAccessFragmentDecision(routing);
+  const fragment = Check(ModelAccessFragmentSchema, routing) ? routing : parseModelAccessFragment(routing);
   return isParentModelAllowedDecision(fragment, agentType);
 }
 
@@ -59,5 +53,7 @@ export function applySelectedModelSnapshot(
   provider: string,
   visibleModelIds: readonly string[],
 ): ModelAccessFragment {
-  return applySelectedModelSnapshotDecision(requireFragment(routing), agentType, provider, visibleModelIds);
+  return outboundFragment(
+    applySelectedModelSnapshotDecision(requireFragment(routing), agentType, provider, visibleModelIds),
+  );
 }

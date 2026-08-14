@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { Check } from "typebox/value";
 import {
+  ThinkingAccessPolicySchema,
   resolveThinkingAccess,
   selectThinkingLevel,
   type ModelAccessFragment,
   type ThinkingAccessOverride,
+  type ThinkingAccessPolicy,
   type ThinkingLevel,
 } from "../../src/modules/model-access/public.js";
 
@@ -40,7 +43,9 @@ function resolve(overrides: Record<string, unknown> = {}) {
 
 describe("REQ-MODEL-005 resolveThinkingAccess", () => {
   it("allows every model-supported level and defaults alternates from high", () => {
-    expect(resolve()).toEqual({
+    const policy = resolve();
+    expect(Check(ThinkingAccessPolicySchema, JSON.parse(JSON.stringify(policy)))).toBe(true);
+    expect(policy).toEqual({
       allowed: ["off", "minimal", "low", "medium", "high", "xhigh"],
       default: "high",
       source: "baseline",
@@ -143,5 +148,14 @@ describe("selectThinkingLevel", () => {
       reason: "thinking-denied",
       allowed: ["low", "medium", "high"],
     });
+  });
+
+  it("rejects an off-contract policy instead of copying a vendor thinking level", () => {
+    const selection = selectThinkingLevel({
+      allowed: ["vendor-ultra"],
+      default: "vendor-ultra",
+      source: "baseline",
+    } as unknown as ThinkingAccessPolicy, undefined);
+    expect(selection).toEqual({ ok: false, reason: "thinking-denied", allowed: [] });
   });
 });

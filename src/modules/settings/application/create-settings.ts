@@ -1,12 +1,41 @@
+import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
 import {
+  ConcurrencySettingsViewSchema,
+  DebugAgentTypeSchema,
+  DebugDiagnosticsViewSchema,
+  DebugSettingsViewSchema,
+  DisplaySettingsViewSchema,
   ModelAccessAgentDetailViewSchema,
+  ModelAccessAgentRowSchema,
+  ModelAccessModelsViewSchema,
+  ModelAccessProvidersViewSchema,
+  ModelAccessRootViewSchema,
+  ModelAccessThinkingTargetSchema,
   ModelAccessThinkingViewSchema,
+  PromptSettingsViewSchema,
+  RootSummariesSchema,
   SettingsCommandSchema,
   SettingsResultSchema,
+  SpawnSettingsViewSchema,
+  type ConcurrencySettingsView,
+  type DebugAgentType,
+  type DebugDiagnosticsView,
+  type DebugSettingsView,
+  type DisplaySettingsView,
+  type ModelAccessAgentDetailView,
+  type ModelAccessAgentRow,
+  type ModelAccessModelsView,
+  type ModelAccessProvidersView,
+  type ModelAccessRootView,
+  type ModelAccessThinkingTarget,
+  type ModelAccessThinkingView,
+  type PromptSettingsView,
+  type RootSummaries,
   type SettingsNotice,
   type SettingsResult,
   type SettingsSnapshot,
+  type SpawnSettingsView,
 } from "../contracts/settings-contracts.js";
 import type { SystemPromptMode } from "../../prompt/public.js";
 import {
@@ -99,6 +128,18 @@ type Page =
 
 type SettingsFailureCode = "invalid-command" | "unknown-row" | "invalid-value" | "invalid-snapshot";
 
+const ModelAccessAgentRowsSchema = Type.Array(ModelAccessAgentRowSchema);
+const ModelAccessThinkingTargetsSchema = Type.Array(ModelAccessThinkingTargetSchema);
+const DebugAgentTypesSchema = Type.Array(DebugAgentTypeSchema);
+
+// Owner views are replaceable ports. A page that renders an unchecked view
+// would treat a missing field as a product state — Alternate models off,
+// an empty inventory — and the user would act on a lie. Fail closed here;
+// revisit only if a view is documented as partially available.
+function ownerView<T>(schema: TSchema, value: unknown): T | undefined {
+  return Check(schema, value) ? value as T : undefined;
+}
+
 export function createSettings(options: CreateSettingsOptions): Settings {
   let stack: Page[] = [{ id: "root" }];
   const current = (): Page => stack[stack.length - 1]!;
@@ -108,79 +149,112 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     const withNotice = (snapshot: Omit<SettingsSnapshot, "notice">): SettingsSnapshot =>
       ({ ...snapshot, ...(notice ? { notice } : {}) });
     switch (page.id) {
-      case "root":
+      case "root": {
+        const view = ownerView<RootSummaries>(RootSummariesSchema, options.summaries.read());
+        if (!view) return undefined;
         return withNotice({
           page: "root",
           title: "Agents",
           presentation: "menu",
-          rows: buildRootRows(options.summaries.read()),
+          rows: buildRootRows(view),
         });
-      case "display":
+      }
+      case "display": {
+        const view = ownerView<DisplaySettingsView>(DisplaySettingsViewSchema, options.display.read());
+        if (!view) return undefined;
         return withNotice({
           page: "display",
           title: "Display Settings",
           presentation: "form",
-          rows: buildDisplayRows(options.display.read()),
+          rows: buildDisplayRows(view),
         });
-      case "spawn-options":
+      }
+      case "spawn-options": {
+        const view = ownerView<SpawnSettingsView>(SpawnSettingsViewSchema, options.spawn.read());
+        if (!view) return undefined;
         return withNotice({
           page: "spawn-options",
           title: "Spawn Options",
           presentation: "form",
-          rows: buildSpawnOptionsRows(options.spawn.read()),
+          rows: buildSpawnOptionsRows(view),
         });
-      case "system-prompt":
+      }
+      case "system-prompt": {
+        const view = ownerView<PromptSettingsView>(PromptSettingsViewSchema, options.prompt.read());
+        if (!view) return undefined;
         return withNotice({
           page: "system-prompt",
           title: "System Prompt",
           presentation: "form",
-          rows: buildSystemPromptRows(options.prompt.read()),
+          rows: buildSystemPromptRows(view),
         });
-      case "concurrency":
+      }
+      case "concurrency": {
+        const view = ownerView<ConcurrencySettingsView>(ConcurrencySettingsViewSchema, options.concurrency.read());
+        if (!view) return undefined;
         return withNotice({
           page: "concurrency",
           title: "Concurrency",
           presentation: "form",
-          rows: buildConcurrencyRows(options.concurrency.read()),
+          rows: buildConcurrencyRows(view),
         });
-      case "debug":
+      }
+      case "debug": {
+        const view = ownerView<DebugSettingsView>(DebugSettingsViewSchema, options.debug.read());
+        if (!view) return undefined;
         return withNotice({
           page: "debug",
           title: "Debug",
           presentation: "form",
-          rows: buildDebugRows(options.debug.read()),
+          rows: buildDebugRows(view),
         });
-      case "model-access":
+      }
+      case "model-access": {
+        const view = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+        if (!view) return undefined;
         return withNotice({
           page: "model-access",
           title: "Model Access",
           presentation: "menu",
-          rows: buildModelAccessRootRows(options.modelAccess.root()),
+          rows: buildModelAccessRootRows(view),
         });
-      case "ma-quick-agents":
+      }
+      case "ma-quick-agents": {
+        const rows = ownerView<ModelAccessAgentRow[]>(ModelAccessAgentRowsSchema, options.modelAccess.quickAgents());
+        if (!rows) return undefined;
         return withNotice({
           page: "model-access/quick-agents",
           title: "Quick Model Setup",
           presentation: "menu",
-          rows: buildAgentListRows(options.modelAccess.quickAgents()),
+          rows: buildAgentListRows(rows),
         });
-      case "ma-providers":
+      }
+      case "ma-providers": {
+        const view = ownerView<ModelAccessProvidersView>(ModelAccessProvidersViewSchema, options.modelAccess.providers());
+        if (!view) return undefined;
         return withNotice({
           page: "model-access/providers",
           title: "Provider Access",
           presentation: "menu",
-          rows: buildProvidersRows(options.modelAccess.providers()),
+          rows: buildProvidersRows(view),
         });
-      case "ma-agents":
+      }
+      case "ma-agents": {
+        const rows = ownerView<ModelAccessAgentRow[]>(ModelAccessAgentRowsSchema, options.modelAccess.agents());
+        if (!rows) return undefined;
         return withNotice({
           page: "model-access/agents",
           title: "Agent Access",
           presentation: "menu",
-          rows: buildAgentListRows(options.modelAccess.agents()),
+          rows: buildAgentListRows(rows),
         });
+      }
       case "ma-agent": {
-        const view = options.modelAccess.agentDetail(page.type);
-        if (!Check(ModelAccessAgentDetailViewSchema, view)) return undefined;
+        const view = ownerView<ModelAccessAgentDetailView>(
+          ModelAccessAgentDetailViewSchema,
+          options.modelAccess.agentDetail(page.type),
+        );
+        if (!view) return undefined;
         return withNotice({
           page: "model-access/agent",
           title: `Agent Access · ${page.type}`,
@@ -188,25 +262,40 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           rows: buildAgentDetailRows(view),
         });
       }
-      case "ma-models":
+      case "ma-models": {
+        const view = ownerView<ModelAccessModelsView>(
+          ModelAccessModelsViewSchema,
+          options.modelAccess.models(page.type, page.provider),
+        );
+        if (!view) return undefined;
         return withNotice({
           page: "model-access/models",
           title: page.quick
             ? `Quick Setup · ${page.type} · ${page.provider}`
             : `Models · ${page.type} · ${page.provider}`,
           presentation: "menu",
-          rows: buildModelsRows(options.modelAccess.models(page.type, page.provider)),
+          rows: buildModelsRows(view),
         });
-      case "ma-thinking-targets":
+      }
+      case "ma-thinking-targets": {
+        const targets = ownerView<ModelAccessThinkingTarget[]>(
+          ModelAccessThinkingTargetsSchema,
+          options.modelAccess.thinkingTargets(page.type),
+        );
+        if (!targets) return undefined;
         return withNotice({
           page: "model-access/thinking-targets",
           title: `Thinking · ${page.type}`,
           presentation: "menu",
-          rows: buildThinkingTargetRows(options.modelAccess.thinkingTargets(page.type)),
+          rows: buildThinkingTargetRows(targets),
         });
+      }
       case "ma-thinking": {
-        const view = options.modelAccess.thinking(page.type, page.modelKey);
-        if (!Check(ModelAccessThinkingViewSchema, view)) return undefined;
+        const view = ownerView<ModelAccessThinkingView>(
+          ModelAccessThinkingViewSchema,
+          options.modelAccess.thinking(page.type, page.modelKey),
+        );
+        if (!view) return undefined;
         return withNotice({
           page: "model-access/thinking",
           title: `Thinking · ${page.type} · ${page.modelKey}`,
@@ -214,15 +303,20 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           rows: buildThinkingRows(view),
         });
       }
-      case "ma-unavailable":
+      case "ma-unavailable": {
+        const view = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+        if (!view) return undefined;
         return withNotice({
           page: "model-access/unavailable",
           title: "Unavailable Providers",
           presentation: "menu",
-          rows: buildUnavailableProvidersRows(options.modelAccess.root()),
+          rows: buildUnavailableProvidersRows(view),
         });
+      }
       case "ma-unavailable-provider": {
-        const entry = options.modelAccess.root().unavailableProviders
+        const root = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+        if (!root) return undefined;
+        const entry = root.unavailableProviders
           .find((candidate) => candidate.provider === page.provider);
         if (!entry) {
           // The provider became available (or its rules disappeared) while
@@ -320,7 +414,9 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       return updated(options.prompt.update({ id, value: enabled }), promptChangeNotice(id, enabled));
     }
     if (id === "createPromptFile") {
-      const path = options.prompt.read().customPromptPath;
+      const prompt = ownerView<PromptSettingsView>(PromptSettingsViewSchema, options.prompt.read());
+      if (!prompt) return failure("invalid-snapshot", "Settings page does not match its contract.");
+      const path = prompt.customPromptPath;
       const result = options.prompt.createCustomPromptFile();
       return snapshotResult(buildSnapshot(current(), result.ok
         ? { severity: "info", message: `Created prompt file: ${path}` }
@@ -353,12 +449,16 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     // session; the frozen menu behavior reports that as an informational
     // notice, not a save error.
     if (id === "agentTypes") {
-      return infoSnapshot(formatAgentTypesReport(options.debug.agentTypes()));
+      const types = ownerView<DebugAgentType[]>(DebugAgentTypesSchema, options.debug.agentTypes());
+      if (!types) return failure("invalid-snapshot", "Settings page does not match its contract.");
+      return infoSnapshot(formatAgentTypesReport(types));
     }
     if (id === "runtimeDiagnostics") {
       const result = options.debug.diagnostics();
       if (!result.ok) return infoSnapshot(result.message);
-      return infoSnapshot(formatDiagnosticsReport(result.diagnostics));
+      const diagnostics = ownerView<DebugDiagnosticsView>(DebugDiagnosticsViewSchema, result.diagnostics);
+      if (!diagnostics) return failure("invalid-snapshot", "Settings page does not match its contract.");
+      return infoSnapshot(formatDiagnosticsReport(diagnostics));
     }
     const preview = previewForRow(id);
     if (preview !== undefined) {
@@ -384,7 +484,8 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     if (current().id !== "concurrency") {
       return failure("unknown-row", `Page ${current().id} has no limit row ${command.id}.`);
     }
-    const view = options.concurrency.read();
+    const view = ownerView<ConcurrencySettingsView>(ConcurrencySettingsViewSchema, options.concurrency.read());
+    if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
     if (command.kind === "add-limit") {
       const scope = command.id === "addProviderLimit"
         ? "provider" as const
@@ -429,7 +530,8 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   };
 
   const selectOnModelAccessRoot = (id: string): SettingsResult => {
-    const view = options.modelAccess.root();
+    const view = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+    if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
     switch (id) {
       case "alternateModels":
         return updated(
@@ -455,7 +557,8 @@ export function createSettings(options: CreateSettingsOptions): Settings {
         const before = view.unavailableRules.length;
         const result = options.modelAccess.cleanUnavailableRules();
         if (!result.ok) return updated(result, "");
-        const after = options.modelAccess.root().unavailableRules.length;
+        const after = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root())
+          ?.unavailableRules.length ?? before;
         const removed = Math.max(0, before - after);
         return infoSnapshot(`Removed ${removed} unavailable model access rule${removed === 1 ? "" : "s"}`);
       }
@@ -469,7 +572,12 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   const selectOnProviders = (id: string): SettingsResult => {
     const provider = keyForRow(id, "provider:");
     if (!provider) return failure("unknown-row", `Page provider access has no selectable row ${id}.`);
-    const entry = options.modelAccess.providers().providers
+    const providers = ownerView<ModelAccessProvidersView>(
+      ModelAccessProvidersViewSchema,
+      options.modelAccess.providers(),
+    );
+    if (!providers) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    const entry = providers.providers
       .find((candidate) => candidate.provider === provider);
     // A provider can drop out of the inventory while the page is open;
     // refresh silently instead of acting on the stale row.
@@ -484,7 +592,9 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     const type = keyForRow(id, "type:");
     if (!type) return failure("unknown-row", `Agent list has no selectable row ${id}.`);
     if (quick) {
-      const parentKey = options.modelAccess.root().parentModelKey;
+      const root = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+      if (!root) return failure("invalid-snapshot", "Settings page does not match its contract.");
+      const parentKey = root.parentModelKey;
       if (parentKey === "") return infoSnapshot("Select a parent model before using Quick model setup");
       const provider = parentKey.slice(0, parentKey.indexOf("/"));
       return navigate({ id: "ma-models", type, provider, quick: true });
@@ -493,7 +603,11 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   };
 
   const selectOnAgentDetail = (page: Page & { id: "ma-agent" }, id: string): SettingsResult => {
-    const view = options.modelAccess.agentDetail(page.type);
+    const view = ownerView<ModelAccessAgentDetailView>(
+      ModelAccessAgentDetailViewSchema,
+      options.modelAccess.agentDetail(page.type),
+    );
+    if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
     if (id === "parentAccess") {
       if (view.parentModelKey === "") {
         return infoSnapshot("Select a parent model before changing Parent model access");
@@ -518,7 +632,12 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     }
     const modelId = keyForRow(id, "model:");
     if (!modelId) return failure("unknown-row", `Page models has no selectable row ${id}.`);
-    const known = options.modelAccess.models(page.type, page.provider).models
+    const models = ownerView<ModelAccessModelsView>(
+      ModelAccessModelsViewSchema,
+      options.modelAccess.models(page.type, page.provider),
+    );
+    if (!models) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    const known = models.models
       .some((candidate) => candidate.id === modelId);
     if (!known) return snapshotResult(buildSnapshot(current()));
     return updated(options.modelAccess.toggleModel(page.type, page.provider, modelId, page.quick), notice);
@@ -531,7 +650,11 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   };
 
   const selectOnThinking = (page: Page & { id: "ma-thinking" }, id: string): SettingsResult => {
-    const view = options.modelAccess.thinking(page.type, page.modelKey);
+    const view = ownerView<ModelAccessThinkingView>(
+      ModelAccessThinkingViewSchema,
+      options.modelAccess.thinking(page.type, page.modelKey),
+    );
+    if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
     const level = keyForRow(id, "level:");
     if (level !== undefined) {
       const entry = view.levels.find((candidate) => candidate.level === level);
@@ -564,7 +687,9 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   const selectOnUnavailable = (id: string): SettingsResult => {
     const provider = keyForRow(id, "provider:");
     if (!provider) return failure("unknown-row", `Page unavailable providers has no selectable row ${id}.`);
-    const known = options.modelAccess.root().unavailableProviders
+    const root = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+    if (!root) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    const known = root.unavailableProviders
       .some((candidate) => candidate.provider === provider);
     if (!known) return snapshotResult(buildSnapshot(current()));
     return navigate({ id: "ma-unavailable-provider", provider });
@@ -574,7 +699,9 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     page: Page & { id: "ma-unavailable-provider" },
     id: string,
   ): SettingsResult => {
-    const entry = options.modelAccess.root().unavailableProviders
+    const root = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root());
+    if (!root) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    const entry = root.unavailableProviders
       .find((candidate) => candidate.provider === page.provider);
     // buildSnapshot pops the stale page itself when the subject disappeared.
     if (!entry) return snapshotResult(buildSnapshot(current()));

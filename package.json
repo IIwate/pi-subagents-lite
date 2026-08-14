@@ -46,6 +46,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --maxWorkers=1",
+    "test:parallel": "vitest run",
     "test:watch": "vitest"
   },
   "pi": {

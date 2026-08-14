@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
 import {
   NavigatorCommandResultSchema,
+  createAsciiTextLayout,
   createChildScreen,
   lineText,
   type ChildRecordSummary,
+  type CreateChildScreenOptions,
 } from "../../../src/modules/child-screen/public.js";
+
+function openScreen(options: Omit<CreateChildScreenOptions, "textLayout"> = {}) {
+  return createChildScreen({ textLayout: createAsciiTextLayout(), ...options });
+}
 
 function record(overrides: Partial<ChildRecordSummary> = {}): ChildRecordSummary {
   return {
@@ -20,7 +26,7 @@ function record(overrides: Partial<ChildRecordSummary> = {}): ChildRecordSummary
 
 describe("REQ-CHILD-001 Main and Child navigation", () => {
   it("selects a Child and returns to Main without changing fold state", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     const selected = screen.execute({ kind: "select", agentId: "agent-1" });
     expect(Check(NavigatorCommandResultSchema, JSON.parse(JSON.stringify(selected)))).toBe(true);
@@ -46,7 +52,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("rejects selecting a Subagent that is not in the current list", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     expect(screen.execute({ kind: "select", agentId: "missing" })).toEqual({
       ok: false,
@@ -55,7 +61,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("returns to Main when the selected record disappears", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-1" });
     const cleared = screen.execute({ kind: "replace-records", records: [] });
@@ -70,7 +76,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("returns to Main when only the active record disappears", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ id: "agent-active" }), record({ id: "agent-remaining", status: "completed" })],
@@ -92,7 +98,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("requires Enter before changing the active Child", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     const highlighted = screen.execute({ kind: "key", key: "down", editorEmpty: true });
@@ -108,7 +114,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("keeps list focus after confirmation so Up navigates without re-entering", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
@@ -127,7 +133,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("Escape cancels a highlighted candidate without switching", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
@@ -141,7 +147,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("does not enter the list while the editor contains text", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
 
     expect(screen.execute({ kind: "key", key: "down", editorEmpty: false })).toMatchObject({
@@ -152,7 +158,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("returns focus to the editor on printable input without consuming it", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
 
@@ -164,7 +170,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
   });
 
   it("switches views without mutating record lifecycle state", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ status: "error", error: "content was flagged" })],
@@ -177,7 +183,7 @@ describe("REQ-CHILD-001 Main and Child navigation", () => {
 
 describe("REQ-CHILD-001 clear confirmation", () => {
   function focusedScreen() {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [
@@ -257,7 +263,7 @@ describe("REQ-CHILD-001 clear confirmation", () => {
 
 describe("REQ-CHILD-004 interaction requests", () => {
   it("issues increasing request ids only for the selected Child", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-1" });
 
@@ -272,7 +278,7 @@ describe("REQ-CHILD-004 interaction requests", () => {
   });
 
   it("invalidates in-flight interactions when the selection changes", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-1" });
     const begun = screen.execute({ kind: "begin-interaction", agentId: "agent-1" });
@@ -283,11 +289,12 @@ describe("REQ-CHILD-004 interaction requests", () => {
   });
 
   it("stores and clears the interaction notice with the selection", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "select", agentId: "agent-1" });
     screen.execute({ kind: "set-interaction-notice", notice: "Blocked: selected subagent is queued" });
     const inspected = screen.execute({ kind: "inspect" });
+    expect(Check(NavigatorCommandResultSchema, JSON.parse(JSON.stringify(inspected)))).toBe(true);
     expect(inspected.ok && inspected.snapshot.interactionNotice).toBe(
       "Blocked: selected subagent is queued",
     );
@@ -299,7 +306,7 @@ describe("REQ-CHILD-004 interaction requests", () => {
 
 describe("REQ-CHILD-002 expanded and folded presentation", () => {
   it("starts folded when the default expansion setting is off", () => {
-    const screen = createChildScreen({ initialListExpanded: false });
+    const screen = openScreen({ initialListExpanded: false });
     const result = screen.execute({
       kind: "replace-records",
       records: [record()],
@@ -311,7 +318,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("projects the expanded Main row without Pi TUI", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({
       kind: "replace-records",
       records: [record({ startedAt: 1 })],
@@ -323,7 +330,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("preserves the collapsed choice while the record list is empty", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "toggle-fold" });
 
@@ -344,7 +351,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("toggles fold only while records or pending results exist", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     expect(screen.execute({ kind: "toggle-fold" })).toMatchObject({
       ok: true,
       snapshot: { listExpanded: true, visible: false },
@@ -359,7 +366,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("moves highlight with keys and confirms Child selection", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     expect(screen.execute({ kind: "key", key: "down", editorEmpty: true })).toMatchObject({
       ok: true,
@@ -377,7 +384,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("refuses to pin or clear Main", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     screen.execute({ kind: "replace-records", records: [record()] });
     screen.execute({ kind: "key", key: "down", editorEmpty: true });
     expect(screen.execute({ kind: "key", key: "space", editorEmpty: true })).toMatchObject({
@@ -391,7 +398,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("rejects a record whose thinking level is outside the shared vocabulary", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     const result = screen.execute({
       kind: "replace-records",
       records: [record({
@@ -405,7 +412,7 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
   });
 
   it("rejects a malformed command at the public seam", () => {
-    const screen = createChildScreen();
+    const screen = openScreen();
     expect(screen.execute({ kind: "not-a-command" })).toEqual({
       ok: false,
       error: { code: "invalid-command", message: "Navigator command is invalid." },

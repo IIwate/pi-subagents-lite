@@ -12,11 +12,14 @@ import {
 } from "../contracts/navigator.js";
 import { projectFooterStatus, projectList } from "../core/projection.js";
 import { projectTranscript } from "../core/transcript.js";
-import { createAsciiTextLayout, type TextLayout } from "../ports/text-layout.js";
+import type { TextLayout } from "../ports/text-layout.js";
 
 export interface CreateChildScreenOptions {
   initialListExpanded?: boolean;
-  textLayout?: TextLayout;
+  // Required so application never constructs the layout adapter. Bootstrap
+  // injects the Pi implementation; tests inject the ASCII one. A default
+  // here would hide a missing host wire until a row wrapped wrong.
+  textLayout: TextLayout;
 }
 
 export interface ChildScreen {
@@ -44,8 +47,8 @@ function outbound(result: NavigatorCommandResult): NavigatorCommandResult {
     : failure("invalid-command", "Navigator result does not match its contract.");
 }
 
-export function createChildScreen(options: CreateChildScreenOptions = {}): ChildScreen {
-  const layout = options.textLayout ?? createAsciiTextLayout();
+export function createChildScreen(options: CreateChildScreenOptions): ChildScreen {
+  const layout = options.textLayout;
   let selectedAgentId: string | null = null;
   let highlightedAgentId: string | null = null;
   let listExpanded = options.initialListExpanded !== false;

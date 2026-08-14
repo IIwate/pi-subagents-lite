@@ -7,6 +7,12 @@ import ts from "typescript";
  * An `it("REQ-…")` nested under `describe.skip` is the same non-coverage:
  * the title never runs. Titles that are not string literals are left
  * uncounted rather than guessed.
+ *
+ * A tagged title is still not acceptance. An empty `it("REQ-…")` with no
+ * `expect(` would otherwise count as coverage for a contract nobody
+ * checked. The body is walked as AST, not regex, so a comment containing
+ * `expect(` cannot launder a title-only test. The expect is not required
+ * to mention the same REQ — that would be parsing assertion meaning.
  */
 
 const TEST_CALLEES = new Set(["describe", "it", "test"]);
@@ -55,6 +61,29 @@ function skippedAncestor(node: ts.Node): boolean {
   return false;
 }
 
+function isExpectCallee(expression: ts.Expression): boolean {
+  if (ts.isIdentifier(expression)) return expression.text === "expect";
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+    return expression.expression.text === "expect";
+  }
+  return false;
+}
+
+function containsExpect(node: ts.Node | undefined): boolean {
+  if (!node) return false;
+  let found = false;
+  const visit = (current: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(current) && isExpectCallee(current.expression)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
+}
+
 export function scanRequirementTags(sourceText: string, fileName: string): string[] {
   const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true);
   const tagged = new Set<string>();
@@ -66,6 +95,7 @@ export function scanRequirementTags(sourceText: string, fileName: string): strin
         callee
         && !callee.modifiers.some((modifier) => SKIPPED_MODIFIERS.has(modifier))
         && !skippedAncestor(node)
+        && containsExpect(node.arguments[1] ?? node)
       ) {
         const title = titleLiteral(node.arguments[0]);
         if (title !== undefined) {

@@ -57,9 +57,32 @@ function isRequireCall(node: ts.CallExpression): boolean {
   return ts.isIdentifier(node.expression) && node.expression.text === "require";
 }
 
+function isCreateRequireFactory(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return node.text === "createRequire";
+  return ts.isPropertyAccessExpression(node) && node.name.text === "createRequire";
+}
+
+/** `createRequire(...)("./x")` — the IIFE form, not an aliased `req("./x")`. */
+function isCreateRequireLoad(node: ts.CallExpression): boolean {
+  return ts.isCallExpression(node.expression) && isCreateRequireFactory(node.expression.expression);
+}
+
+function recordLoad(
+  specifiers: string[],
+  opaque: Array<Omit<OpaqueModuleReference, "source">>,
+  argument: ts.Expression | undefined,
+  kind: OpaqueModuleReference["kind"],
+  text: string,
+): void {
+  const literal = literalText(argument);
+  if (literal !== undefined) specifiers.push(literal);
+  else opaque.push({ kind, text: text.replace(/\s+/g, " ").slice(0, 120) });
+}
+
 /**
  * Every way this codebase can name another module: static import and export,
- * dynamic `import()`, and `require()`. The last two accept expressions, so each
+ * dynamic `import()`, `require()`, `import x = require()`, and
+ * `createRequire(...)("./x")`. The last three accept expressions, so each
  * one is either a literal specifier or an opaque reference — never dropped.
  */
 export function analyzeModuleReferences(sourceText: string, fileName: string): ModuleReferences {
@@ -70,18 +93,26 @@ export function analyzeModuleReferences(sourceText: string, fileName: string): M
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) specifiers.push(node.moduleSpecifier.text);
     }
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      recordLoad(
+        specifiers,
+        opaque,
+        node.moduleReference.expression,
+        "computed-require",
+        node.getText(),
+      );
+    }
     if (ts.isCallExpression(node)) {
       const dynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-      const required = isRequireCall(node);
+      const required = isRequireCall(node) || isCreateRequireLoad(node);
       if (dynamic || required) {
-        const literal = literalText(node.arguments[0]);
-        if (literal !== undefined) specifiers.push(literal);
-        else {
-          opaque.push({
-            kind: dynamic ? "computed-import" : "computed-require",
-            text: node.getText().replace(/\s+/g, " ").slice(0, 120),
-          });
-        }
+        recordLoad(
+          specifiers,
+          opaque,
+          node.arguments[0],
+          dynamic ? "computed-import" : "computed-require",
+          node.getText(),
+        );
       }
     }
     ts.forEachChild(node, add);

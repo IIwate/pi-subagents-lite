@@ -708,6 +708,7 @@ describe("ChildScreenHost", () => {
     });
 
     it("keeps footer reconciliation active while a completed child is selected", () => {
+      vi.useFakeTimers();
       const record = makeRecord("agent-12345678", "completed");
       const ui = makeUI({ value: "" });
       host = new ChildScreenHost(makeManager([record]));
@@ -721,6 +722,12 @@ describe("ChildScreenHost", () => {
       host.handleTerminalInput("\r");
 
       expect((host as any).refreshTimer).toBeDefined();
+      const update = vi.spyOn(host, "update");
+      update.mockClear();
+      vi.advanceTimersByTime(999);
+      expect(update).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(update).toHaveBeenCalled();
     });
 
     it("requests a redraw when the displayed model changes", () => {

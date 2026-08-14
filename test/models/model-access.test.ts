@@ -59,7 +59,7 @@ describe("REQ-MODEL-002 alternate model authorization", () => {
     })).toEqual({ ok: true });
   });
 
-  it("rejects the exact parent when Parent model access is denied", () => {
+  it("REQ-MODEL-001 rejects the exact parent when Parent model access is denied", () => {
     expect(authorize({
       modelKey: "anthropic/sonnet",
       routing: routing({

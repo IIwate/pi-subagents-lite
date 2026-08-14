@@ -15,9 +15,9 @@ This is the measured Phase 0 starting point for the `re` branch. It is an implem
 | Check | Result | Boundary |
 |:--|:--|:--|
 | Typecheck | Pass | TypeScript compiler |
-| Full suite | 62 files, 841 passed | Vitest |
-| Skipped tests | None on this host. Two directory-symlink scenarios still skip when the host returns `EPERM`/`EACCES` | Worktree fixture capability |
-| Architecture guard | 9 tests passed | Source graph, documentation, and migration baselines |
+| Full suite | 62 files, 852 passed | Vitest |
+| Skipped tests | 2 on this host: directory-symlink resolution and cross-repo rejection skip when the host returns `EPERM`/`EACCES`. Skipping is not a pass | Worktree fixture capability |
+| Architecture guard | 19 tests passed | Source graph, documentation, and migration baselines |
 | Markdown links and module docs | Pass | Scoped repository documentation |
 
 The two skipped scenarios are not replaced by ordinary directories or junctions. Environments with directory-symlink capability execute the real symlink resolution and cross-repository tests.

@@ -1,8 +1,5 @@
-import { Check } from "typebox/value";
-import {
-  ModelAccessFragmentSchema,
-  type ModelAccessFragment,
-} from "../contracts/model-access-contracts.js";
+import { type ModelAccessFragment } from "../contracts/model-access-contracts.js";
+import { outboundFragment, requireFragment } from "./checked-fragment.js";
 import {
   applyCleanUnavailableModels as applyCleanUnavailableModelsDecision,
   applyClearModelAccess as applyClearModelAccessDecision,
@@ -11,13 +8,6 @@ import {
   applyThinkingAccess as applyThinkingAccessDecision,
 } from "../core/update-thinking-and-cleanup.js";
 
-function requireFragment(routing: unknown): ModelAccessFragment {
-  if (!Check(ModelAccessFragmentSchema, routing)) {
-    throw new TypeError("Model access fragment is invalid.");
-  }
-  return routing;
-}
-
 export function applyThinkingAccess(
   routing: unknown,
   agentType: string,
@@ -25,7 +15,9 @@ export function applyThinkingAccess(
   allowed: readonly string[],
   defaultLevel: string,
 ): ModelAccessFragment {
-  return applyThinkingAccessDecision(requireFragment(routing), agentType, modelKey, allowed, defaultLevel);
+  return outboundFragment(
+    applyThinkingAccessDecision(requireFragment(routing), agentType, modelKey, allowed, defaultLevel),
+  );
 }
 
 export function applyResetThinkingAccess(
@@ -33,11 +25,11 @@ export function applyResetThinkingAccess(
   agentType: string,
   modelKey: string,
 ): ModelAccessFragment {
-  return applyResetThinkingAccessDecision(requireFragment(routing), agentType, modelKey);
+  return outboundFragment(applyResetThinkingAccessDecision(requireFragment(routing), agentType, modelKey));
 }
 
 export function applyDeleteProviderRules(routing: unknown, provider: string): ModelAccessFragment {
-  return applyDeleteProviderRulesDecision(requireFragment(routing), provider);
+  return outboundFragment(applyDeleteProviderRulesDecision(requireFragment(routing), provider));
 }
 
 export function applyCleanUnavailableModels(
@@ -45,9 +37,9 @@ export function applyCleanUnavailableModels(
   provider: string,
   modelIds: readonly string[],
 ): ModelAccessFragment {
-  return applyCleanUnavailableModelsDecision(requireFragment(routing), provider, modelIds);
+  return outboundFragment(applyCleanUnavailableModelsDecision(requireFragment(routing), provider, modelIds));
 }
 
 export function applyClearModelAccess(): ModelAccessFragment {
-  return applyClearModelAccessDecision();
+  return outboundFragment(applyClearModelAccessDecision());
 }

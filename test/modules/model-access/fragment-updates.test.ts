@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
 import {
   ModelAccessFragmentSchema,
+  applyAgentProviderAccess,
   applyCleanUnavailableModels,
   applyClearModelAccess,
   applyDeleteProviderRules,
+  applyParentModelAccess,
+  applyProviderEnabled,
   applyQuickAgentProviderAccess,
   applyResetThinkingAccess,
+  applyRoutingEnabled,
   applySelectedModelSnapshot,
   applyThinkingAccess,
+  parseModelAccessFragment,
   snapshotVisibleSelectedModels,
 } from "../../../src/modules/model-access/public.js";
 
@@ -63,5 +68,21 @@ describe("REQ-MODEL-003 and REQ-MODEL-007 fragment updates", () => {
     const result = applyClearModelAccess();
     expect(Check(ModelAccessFragmentSchema, result)).toBe(true);
     expect(result).toEqual(fresh);
+  });
+
+  it("rejects an off-contract fragment instead of copying it through", () => {
+    const garbage = { enabled: true };
+    expect(() => applyRoutingEnabled(garbage, true)).toThrow(TypeError);
+    expect(() => applyProviderEnabled(garbage, "openai", true)).toThrow(TypeError);
+    expect(() => applySelectedModelSnapshot(garbage, "Explore", "openai", ["gpt-5"])).toThrow(TypeError);
+    expect(() => applyThinkingAccess(garbage, "Explore", "openai/gpt-5", ["low"], "low")).toThrow(TypeError);
+    expect(() => applyResetThinkingAccess(garbage, "Explore", "openai/gpt-5")).toThrow(TypeError);
+    expect(() => applyDeleteProviderRules(garbage, "openai")).toThrow(TypeError);
+    expect(() => applyCleanUnavailableModels(garbage, "openai", ["retired"])).toThrow(TypeError);
+    expect(() => applyParentModelAccess(garbage, "Explore", false)).toThrow(TypeError);
+    expect(() => applyAgentProviderAccess(garbage, "Explore", "openai")).toThrow(TypeError);
+    expect(() => applyQuickAgentProviderAccess(garbage, "Explore", "openai")).toThrow(TypeError);
+    expect(Check(ModelAccessFragmentSchema, parseModelAccessFragment(garbage))).toBe(true);
+    expect(Check(ModelAccessFragmentSchema, applyClearModelAccess())).toBe(true);
   });
 });

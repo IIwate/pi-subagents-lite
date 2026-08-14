@@ -129,7 +129,14 @@ export async function spawnAgent(
   const resultSessionId = runInBackground ? spawnCtx.sessionManager.getSessionId() : undefined;
   const resultOriginEntryId = runInBackground ? spawnCtx.sessionManager.getLeafId() : undefined;
   if (resultOriginEntryId) {
-    runtime.delivery?.execute({ kind: "track-origin", originEntryId: resultOriginEntryId });
+    // A background spawn without a delivery would name an origin the inbox
+    // can never track. Swallowing that left the result eligible on no
+    // branch. Foreground work never sets an origin, so tests that omit
+    // delivery for that path stay honest.
+    if (!runtime.delivery) {
+      throw new Error("Background result delivery is not wired.");
+    }
+    runtime.delivery.execute({ kind: "track-origin", originEntryId: resultOriginEntryId });
   }
   const spawned = await manager.execute({
     kind: "spawn",

@@ -203,7 +203,9 @@ describe("command registration", () => {
   it("registers /agents command", () => {
     const agentsCmd = api.commands.find((c) => c.name === "agents");
     expect(agentsCmd).toBeDefined();
-    expect(agentsCmd!.description).toBeDefined();
+    expect(agentsCmd!.description).toBe(
+      "Manage subagents: model access, concurrency, diagnostics, and agent types",
+    );
   });
 
   it("registers only /agents command", () => {

@@ -26,21 +26,15 @@ interface ProcessState {
   subagentSpawn: AsyncLocalStorage<boolean>;
 }
 
-// The symbol key is shared with previously released versions; renaming it
-// would strand a live process's pending handoffs across an upgrade reload.
-const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")] ??= {
+// v3 is the Map-shaped inbox. An older build parked under a previous
+// symbol is left behind: converting that leftover would keep a shape this
+// module no longer names, and a live process cannot present the old
+// single-slot once the key has moved. Revisit only if a documented reload
+// contract must read that older key again.
+const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v3")] ??= {
   fallbackResults: new Map<string, BackgroundResultRecord[]>(),
   subagentSpawn: new AsyncLocalStorage<boolean>(),
 }) as ProcessState;
-
-// Preserve a pending single-slot handoff when this version first loads into an
-// already-running Pi process; subsequent reloads use the session-keyed Map.
-if (!(processState.fallbackResults instanceof Map)) {
-  const legacy = processState.fallbackResults as unknown as { sessionId?: string; results?: BackgroundResultRecord[] } | undefined;
-  processState.fallbackResults = new Map(
-    legacy?.sessionId && legacy.results?.length ? [[legacy.sessionId, legacy.results]] : [],
-  );
-}
 
 /** Transfer unpersisted final results only within the same parent session. */
 export function takeFallbackResults(sessionId: string): BackgroundResultRecord[] {

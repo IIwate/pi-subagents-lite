@@ -8,11 +8,13 @@
  * session start. Updates and the derived scheduler shape are strict.
  */
 
+import { Check } from "typebox/value";
 import { DEFAULT_CONCURRENCY_LIMIT } from "../contracts/lifecycle.js";
-import type {
-  ConcurrencyLimits,
-  ConcurrencyLimitsFragment,
-  ConcurrencyLimitsUpdate,
+import {
+  ConcurrencyLimitsFragmentSchema,
+  type ConcurrencyLimits,
+  type ConcurrencyLimitsFragment,
+  type ConcurrencyLimitsUpdate,
 } from "../contracts/scheduling.js";
 
 function isValidLimit(value: unknown): value is number {
@@ -34,13 +36,18 @@ function factoryLimitsFragment(): ConcurrencyLimitsFragment {
 }
 
 export function parseConcurrencyLimitsFragment(raw: unknown): ConcurrencyLimitsFragment {
+  if (Check(ConcurrencyLimitsFragmentSchema, raw)) return raw;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return factoryLimitsFragment();
   const source = raw as Record<string, unknown>;
-  return {
+  const parsed = {
     default: isValidLimit(source.default) ? source.default : DEFAULT_CONCURRENCY_LIMIT,
     providers: sanitizeEntries(source.providers),
     models: sanitizeEntries(source.models),
   };
+  // Hand-sanitizing can still produce a shape the schema refuses (a
+  // prototype-only object, a non-integer that slipped the guard). Factory
+  // defaults are the only remaining honest fragment.
+  return Check(ConcurrencyLimitsFragmentSchema, parsed) ? parsed : factoryLimitsFragment();
 }
 
 export function applyConcurrencyLimitsUpdate(

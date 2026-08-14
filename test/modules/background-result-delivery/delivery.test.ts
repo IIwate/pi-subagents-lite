@@ -177,6 +177,57 @@ describe("REQ-DELIVERY-002 origin-branch eligibility", () => {
     ]);
   });
 
+  it("delivers after parent-preflight when the host still omits the tracked origin", () => {
+    const memory = createMemory({ branch: () => ["origin-a"] });
+    memory.delivery.execute({ kind: "track-origin", originEntryId: "leaf-new" });
+    memory.delivery.execute({ kind: "parent-preflight" });
+
+    const recorded = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ originEntryId: "leaf-new" }),
+      stillPresent: true,
+    });
+    expect(recorded).toMatchObject({
+      ok: true,
+      events: [{ type: "persisted", deliveryId: "d1" }],
+    });
+    expect(recorded.ok && recorded.events.some((event) => event.type === "hidden")).toBe(false);
+
+    // Preflight holds wake until the parent run starts; eligibility must
+    // still be intact so agent_start can present the result.
+    const started = memory.delivery.execute({ kind: "parent-start" });
+    expect(started).toMatchObject({
+      ok: true,
+      events: [{ type: "wake-requested", deliveryIds: ["d1"], mode: "follow-up" }],
+    });
+    expect(memory.sent).toEqual([
+      { mode: "follow-up", content: expect.stringContaining("done") },
+    ]);
+  });
+
+  it("delivers after restore when the host still omits the tracked origin", () => {
+    const memory = createMemory({ branch: () => ["origin-a"] });
+    memory.delivery.execute({ kind: "track-origin", originEntryId: "leaf-new" });
+    memory.delivery.execute({ kind: "restore" });
+
+    const result = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ originEntryId: "leaf-new" }),
+      stillPresent: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      events: [
+        { type: "persisted", deliveryId: "d1" },
+        { type: "wake-requested", deliveryIds: ["d1"], mode: "turn" },
+      ],
+    });
+    expect(memory.sent).toEqual([
+      { mode: "turn", content: expect.stringContaining("done") },
+    ]);
+  });
+
   it("drops a tracked origin once the host reports a branch without it", () => {
     const memory = createMemory({ branch: () => ["origin-a"] });
     memory.delivery.execute({ kind: "track-origin", originEntryId: "leaf-new" });

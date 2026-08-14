@@ -19,7 +19,7 @@ A compact deterministic system-prompt block added automatically with `before_age
 _Avoid_: Agent briefing, agent documentation, tool description
 
 **Subagent system prompt**:
-The exact system prompt provided to a Subagent when its isolated session is created, composed from its accepted Agent type definition, system prompt mode, skills, context files, and runtime environment. It is distinct from Agent guidance, which is added to the parent LLM.
+The exact system prompt provided to a Subagent when its isolated session is created, composed from its accepted Agent type definition, system prompt mode, skills, context files, and runtime environment. It is distinct from Agent guidance, which is added to the parent LLM. An unavailable inherit source fails the run and does not switch mode; a missing custom prompt file may still replace the header and notify.
 _Avoid_: Child prompt, injected prompt, Agent guidance
 
 **Stealth tool**:
@@ -100,7 +100,7 @@ The resolved absolute filesystem path passed through `worktree_path`. It must id
 ### Runtime
 
 **Accepted run policy**:
-The deep-copied Agent definition, resolved tool/skill/extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns locked after an Agent call passes authorization. Running and queued agents use this snapshot; later registry, configuration, parent-model, or scope changes affect only future calls. `inherit` captures its mode while Pi supplies the parent prompt text at actual start time.
+The deep-copied Agent definition, resolved tool/skill/extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, output-token limit, and grace turns locked after an Agent call passes authorization. Running and queued agents use this snapshot; later registry, configuration, parent-model, or scope changes affect only future calls. `inherit` captures its mode while Pi supplies the parent prompt text at actual start time; an unavailable inherit source fails the run and does not switch mode. A missing custom prompt file may still replace the header and notify.
 _Avoid_: Queue revalidation, live assignment
 
 **Child screen**:

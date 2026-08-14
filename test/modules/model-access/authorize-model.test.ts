@@ -37,6 +37,17 @@ describe("REQ-MODEL-001 Parent and alternate authorization public seam", () => {
   });
 });
 
+describe("REQ-MODEL-001 authorization fail-closed", () => {
+  it("rejects an invalid command instead of authorizing", () => {
+    const result = authorizeModelAccess({ kind: "authorize" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Model access command is invalid." },
+    });
+    expect(Check(AuthorizeModelResultSchema, result)).toBe(true);
+  });
+});
+
 describe("REQ-MODEL-002 alternate model authorization public seam", () => {
   it("rejects an alternate model when routing is off instead of substituting another model", () => {
     const command = JSON.parse(JSON.stringify({
