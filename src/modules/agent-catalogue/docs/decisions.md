@@ -9,7 +9,7 @@
 - A malformed source file is rejected at the filesystem adapter boundary without hiding valid definitions from the same discovery request.
 - Worktree-local definitions use project source attribution and only fill names absent from the built-in, global, and project merge.
 - Tool, skill, and extension loading is resolved through `resolveAgentDefinitionPolicy`. The host supplies the fallback registered-tool list so the catalogue does not own Pi's built-in roster.
-- A Subagent never inherits the Agent tool, so it cannot spawn a Subagent of its own. The exclusion is applied while resolving the effective tool policy rather than at spawn time, because a definition that names the tool explicitly must also be denied. Recursive spawning has no bounded depth, no aggregate concurrency accounting, and no delivery path back to the human, so the ceiling is absent rather than configurable.
+- A Subagent never inherits the Agent tool, so it cannot spawn a Subagent of its own. The exclusion is applied while resolving the effective tool policy rather than at spawn time, because a definition that names the tool explicitly must also be denied. Recursive spawning has no bounded depth, no aggregate concurrency accounting, and no delivery path back to the human, so the ceiling is absent rather than configurable. `excludeInheritedTools` is the catalogue-owned rule and is exported from `public.ts`; the Pi adapter consumes that function and must not keep a second list.
 
 ## Superseded
 

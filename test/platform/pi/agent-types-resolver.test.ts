@@ -1,9 +1,8 @@
 /**
  * agent-types-resolver.test.ts — Tests for resolveVisibleTools.
  *
- * Verifies that the single-owner tool visibility resolver in agent-types.ts
- * correctly handles allowlist, denylist, ext/* expansion, and the
- * no-sub-subagent exclude policy.
+ * Verifies that the host visibility resolver handles allowlist, denylist,
+ * ext/* expansion, and still applies catalogue inherited-tool exclusion.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -12,19 +11,12 @@ import { describe, it, expect, vi } from "vitest";
 import {
   resolveSessionAllowedTools,
   resolveVisibleTools,
-  EXCLUDED_TOOL_NAMES,
   BUILTIN_TOOL_NAMES,
 } from "../../../src/platform/pi/agent-types.js";
 
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */
 /* ------------------------------------------------------------------ */
-
-describe("EXCLUDED_TOOL_NAMES", () => {
-  it("contains 'Agent' to prevent sub-subagent spawning", () => {
-    expect(EXCLUDED_TOOL_NAMES).toContain("Agent");
-  });
-});
 
 describe("BUILTIN_TOOL_NAMES", () => {
   it("is exported and non-empty", () => {
@@ -52,7 +44,7 @@ describe("resolveVisibleTools — allowlist mode", () => {
     expect(result).toEqual(["read", "bash", "edit"]);
   });
 
-  it("always excludes EXCLUDED_TOOL_NAMES", () => {
+  it("never makes the Agent tool visible on an allowlist", () => {
     const result = resolveVisibleTools({
       activeTools: ["read", "bash", "edit", "Agent"],
       tools: ["read", "bash", "edit", "Agent"],
@@ -196,7 +188,7 @@ describe("resolveVisibleTools — denylist mode", () => {
     expect(result).not.toContain("write");
   });
 
-  it("always excludes EXCLUDED_TOOL_NAMES", () => {
+  it("never makes the Agent tool visible on a denylist", () => {
     const result = resolveVisibleTools({
       activeTools: ["read", "bash", "Agent"],
       tools: undefined,
@@ -275,7 +267,7 @@ describe("resolveVisibleTools — denylist mode", () => {
 /* ------------------------------------------------------------------ */
 
 describe("resolveVisibleTools — tools: true/false/undefined", () => {
-  it("tools: true — all tools visible except EXCLUDED_TOOL_NAMES", () => {
+  it("tools: true — all tools visible except the Agent tool", () => {
     const result = resolveVisibleTools({
       activeTools: ["read", "bash", "edit", "Agent"],
       tools: true,

@@ -2,9 +2,12 @@
  * agent-types.ts — Tool visibility policy for a subagent session.
  *
  * Pure rules over names: which tool schemas an agent may see, and which set the
- * host session may register. The live type registry lives in bootstrap;
- * nothing here holds state.
+ * host session may register. Inherited-tool exclusion is owned by
+ * agent-catalogue; this file applies that module function to the live roster.
+ * The live type registry lives in bootstrap; nothing here holds state.
  */
+
+import { excludeInheritedTools } from "../../modules/agent-catalogue/public.js";
 
 /**
  * All tool names that Pi can provide to a session.
@@ -18,9 +21,6 @@ export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "g
 
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
-
-/** Tools a Subagent must never inherit; see agent-catalogue/docs/decisions.md. */
-export const EXCLUDED_TOOL_NAMES = ["Agent"];
 
 /**
  * Resolve tool entries (with ext/* syntax) into concrete tool names.
@@ -65,12 +65,12 @@ function resolveToolEntries(
 /**
  * Resolve the visible tool set for an agent type from its config.
  *
- * Single owner of tool visibility policy. Handles:
- *   - `tools: true` → all active tools (minus excluded)
- *   - `tools: string[]` → allowlist (minus excluded, with ext/* expansion)
+ * Host visibility selection over the live roster. Handles:
+ *   - `tools: true` → all active tools (minus catalogue inherited-tool exclusion)
+ *   - `tools: string[]` → allowlist (minus inherited tools, with ext/* expansion)
  *   - `tools: false` → no tools
- *   - `tools: undefined` + `excludeTools` → denylist (minus excluded, with ext/* expansion)
- *   - `tools: undefined` → all active tools (minus EXCLUDED_TOOL_NAMES if any are present)
+ *   - `tools: undefined` + `excludeTools` → denylist (minus inherited tools, with ext/* expansion)
+ *   - `tools: undefined` → all active tools (minus inherited tools if any are present)
  *
  * `tools` and `excludeTools` are mutually exclusive. If both set, `tools` wins.
  *
@@ -88,9 +88,7 @@ export function resolveVisibleTools(opts: {
   // Blacklist mode: excludeTools set and tools not set as whitelist
   if (excludeTools && !Array.isArray(tools)) {
     const excludeSet = resolveToolEntries(excludeTools, extToolMap, notify);
-    const filtered = activeTools.filter(t =>
-      !EXCLUDED_TOOL_NAMES.includes(t) && !excludeSet.has(t)
-    );
+    const filtered = excludeInheritedTools(activeTools.filter(t => !excludeSet.has(t)));
     return filtered.length !== activeTools.length ? filtered : null;
   }
 
@@ -116,7 +114,6 @@ export function resolveVisibleTools(opts: {
 
     const visibleSet = new Set<string>();
     for (const t of activeTools) {
-      if (EXCLUDED_TOOL_NAMES.includes(t)) continue;
       if (allowedTools.has(t)) {
         visibleSet.add(t);
       }
@@ -132,17 +129,16 @@ export function resolveVisibleTools(opts: {
       }
     }
 
-    return [...visibleSet];
+    return excludeInheritedTools([...visibleSet]);
   }
 
   if (tools === false) {
     return [];
   }
 
-  // tools: true or undefined — all tools visible (except excluded)
-  const hasExcluded = activeTools.some(t => EXCLUDED_TOOL_NAMES.includes(t));
-  if (!hasExcluded) return null;
-  return activeTools.filter(t => !EXCLUDED_TOOL_NAMES.includes(t));
+  // tools: true or undefined — all tools visible except catalogue inherited tools
+  const filtered = excludeInheritedTools(activeTools);
+  return filtered.length === activeTools.length ? null : filtered;
 }
 
 /**
@@ -162,10 +158,9 @@ export function resolveSessionAllowedTools(opts: {
 
   if (Array.isArray(opts.tools)) {
     if (opts.tools.some(tool => tool.endsWith("/*"))) return undefined;
-    return [...resolveToolEntries(opts.tools, undefined)]
-      .filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
+    return excludeInheritedTools([...resolveToolEntries(opts.tools, undefined)]);
   }
 
   if (!opts.restrictToRegisteredTools) return undefined;
-  return opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
+  return excludeInheritedTools(opts.registeredTools);
 }

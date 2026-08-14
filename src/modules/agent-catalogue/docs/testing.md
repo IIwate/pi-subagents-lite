@@ -13,6 +13,7 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 - Worktree-only names are added; a worktree file does not replace a global or project definition of the same name.
 - Malformed frontmatter rejected without hiding valid definitions.
 - Tool, skill, and extension loading is resolved through the public policy command, including implicit defaults and a host-supplied fallback tool list.
+- A Subagent's resolved tool policy never includes the Agent tool, including when a definition or host fallback names it.
 - A repository failure produces a serializable failure result.
 - Outbound `execute()` results that fail `AgentCatalogueResultSchema` are refused as `invalid-command` rather than handed out.
 
