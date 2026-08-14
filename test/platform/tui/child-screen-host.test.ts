@@ -258,15 +258,17 @@ describe("ChildScreenHost", () => {
       host = new ChildScreenHost(manager);
       host.setUICtx(ui.ctx as any);
       host.ensureTimer();
-      const { selector } = mountSelector(ui);
+      const { tui, selector } = mountSelector(ui);
 
       host.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
       host.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
       host.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
       expect(selector.render(120)[0]).toBe('  Remove “Inspect the project”? · Enter Remove · Esc Cancel');
 
+      tui.requestRender.mockClear();
       host.handleTerminalInput("\r");     // Enter confirms.
       expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
+      expect(tui.requestRender).not.toHaveBeenCalledWith(true);
       const lines = selector.render(120);
       expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
       expect(lines[0]).toMatch(/^  ↑↓ Move/);
@@ -336,7 +338,59 @@ describe("ChildScreenHost", () => {
       expect(tui.children[tui.statusIndex].render(120)).toEqual([]);
       expect(tui.children[tui.footerIndex]).toBe(tui.footerContainer);
       expect(tui.children[tui.footerIndex].render(120)).toEqual([]);
-      expect(tui.terminal.write).toHaveBeenCalledWith("\x1b[3J");
+      expect(tui.requestRender).toHaveBeenCalledWith(true);
+    });
+
+    it("keeps the list host and only force-paints after list data is already on the selector", () => {
+      const records = Array.from({ length: 8 }, (_, index) =>
+        makeRecord(`agent-${String(index + 1).padStart(8, "0")}`, "completed"),
+      );
+      const ui = makeUI({ value: "" });
+      const manager = makeManager(records);
+      const inspect = manager.inspectSession.bind(manager);
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      const { tui, selector } = mountSelector(ui);
+      const factory = ui.widgets.get("agent-navigator-selector");
+      const widgetCalls = ui.ctx.setWidget.mock.calls.length;
+      const below = tui.children[tui.belowIndex];
+      const footer = tui.children[tui.footerIndex];
+      const frames: string[][] = [];
+      tui.requestRender.mockImplementation(() => {
+        frames.push(selector.render(120));
+      });
+      manager.inspectSession = vi.fn((id: string) => {
+        expect(
+          tui.terminal.write.mock.calls.flat(),
+          "CSI 3J before inspect is the empty-list frame main never shows",
+        ).not.toContain("\x1b[3J");
+        expect(selector.render(120).join("\n")).toContain("Main");
+        return inspect(id);
+      });
+      tui.requestRender.mockClear();
+      tui.terminal.write.mockClear();
+
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\r");
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\r");
+      host.activateMain();
+
+      expect(ui.ctx.setWidget).toHaveBeenCalledTimes(widgetCalls);
+      expect(ui.widgets.get("agent-navigator-selector")).toBe(factory);
+      expect(tui.children[tui.belowIndex]).toBe(below);
+      expect(below.children).toContain(selector);
+      expect(tui.children[tui.footerIndex]).toBe(footer);
+      expect(tui.requestRender).toHaveBeenCalledWith(true);
+      expect(tui.terminal.write).not.toHaveBeenCalledWith("\x1b[3J");
+      expect(frames.length).toBeGreaterThan(0);
+      for (const frame of frames) {
+        expect(frame.join("\n"), "activation must not paint an empty list frame").toContain("Main");
+      }
+      expect(selector.render(120).join("\n")).toContain("Main");
+      expect(host.selectedId()).toBeNull();
     });
 
     it("restores the parent chat, pending, and status regions after confirmation", () => {

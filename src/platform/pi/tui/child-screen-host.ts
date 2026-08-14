@@ -28,7 +28,6 @@ import {
 } from "../../../modules/child-screen/public.js";
 import { ChildNavigationEditor } from "./editor.js";
 import {
-  CLEAR_SCROLLBACK_SEQUENCE,
   restoreMain,
   swapToChild,
   validateChildLayout,
@@ -255,7 +254,9 @@ export class ChildScreenHost {
   activateMain(): void {
     const current = this.snapshot();
     if (!current || current.selectedAgentId === null) return;
-    if (this.activate(null)) this.update();
+    if (!this.activate(null)) return;
+    this.update();
+    this.clearScrollbackAndRender();
   }
 
   selectedId(): string | null {
@@ -335,17 +336,22 @@ export class ChildScreenHost {
       if (!cleared) this.uiCtx?.notify("Agent not found", "warning");
       else this.syncRecords(result.effect.index);
     }
-    if (key === "enter" && result.consume) {
-      const selected = result.snapshot.selectedAgentId;
+    let screenChanged = false;
+    const selected = result.snapshot.selectedAgentId;
+    // Confirm-clear and re-Enter on the active row keep selectedId. Main's
+    // activate() returns true then without a screen clear; matching that
+    // avoids a 2J of the list for a no-op confirmation.
+    if (key === "enter" && result.consume && selected !== previousSelected) {
       if (!this.applySelection(selected)) {
         this.screen.execute({ kind: "select", agentId: previousSelected });
         this.warnUnsupportedLayout();
       } else {
-        this.clearScrollbackAndRender();
         if (selected && !this.refreshTimer) this.ensureTimer();
+        screenChanged = true;
       }
     }
     if (result.consume || result.notify || result.effect) this.update();
+    if (screenChanged) this.clearScrollbackAndRender();
     return result.consume ? { consume: true } : undefined;
   }
 
@@ -398,7 +404,6 @@ export class ChildScreenHost {
       this.warnUnsupportedLayout();
       return false;
     }
-    this.clearScrollbackAndRender();
     if (id && !this.refreshTimer) this.ensureTimer();
     return true;
   }
@@ -462,7 +467,13 @@ export class ChildScreenHost {
   private clearScrollbackAndRender(): void {
     const tui = this.screenSwap?.tui ?? this.selectorTui ?? this.hostTui;
     if (!tui) return;
-    try { tui.terminal.write(CLEAR_SCROLLBACK_SEQUENCE); } catch { /* best effort */ }
+    // Main writes CSI 3J here, then force-paints from live list pointers
+    // on the next tick. That gap is empty air. Ours spends it on inspect
+    // plus a TypeBox project of the selected transcript; 3J has already
+    // taken the below-editor rows, and they stay gone until that work
+    // finishes. Pi 0.84's force path emits 2J+3J after it has collected
+    // every widget line, so the list dies and returns in the same buffer.
+    // Revisit if a Pi version stops putting 3J in fullRender.
     tui.requestRender(true);
   }
 

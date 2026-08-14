@@ -2,7 +2,6 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 
 const PI_ROOT_CHILDREN = 7;
 const PI_DOCUMENT_CHILDREN = 3;
-export const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 
 export interface ScreenSwapState {
   tui: TUI;
