@@ -26,7 +26,7 @@ The architecture is acceptable only while these changes keep the stated scope: r
 
 ### Migration rule (historical)
 
-The refactor ran in place on the `re` branch as behavior-preserving vertical slices: one contract, one failing public-seam test, the new path, and removal of the replaced path in the same slice — no parallel trees, compatibility layers, or fallback behavior. The sole approved behavior correction was configuration persistence failure: a failed save returns an explicit failure and leaves the effective in-memory fragment unchanged instead of presenting a non-persisted mutation as current. Each phase ended with a batched formal review and a `Review-Result: PASS` checkpoint.
+The refactor ran in place on the `re` branch as behavior-preserving vertical slices: one contract, one failing public-seam test, the new path, and removal of the replaced path in the same slice — no parallel trees, compatibility layers, or fallback behavior. Two behavior corrections were approved, both of the same kind — a silent substitution replaced by an explicit outcome. Configuration persistence failure: a failed save returns an explicit failure and leaves the effective in-memory fragment unchanged instead of presenting a non-persisted mutation as current. Unavailable inherited prompt text: the run fails instead of silently continuing under the replace-mode header, because the inherited persona is the reason the mode was chosen and the condition is a host malfunction rather than a state the user can correct. Each phase ended with a batched formal review and a `Review-Result: PASS` checkpoint.
 
 ## Composition root over shared state
 

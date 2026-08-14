@@ -45,6 +45,18 @@ export const AgentGuidanceResultSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+/**
+ * The prompt-mode vocabulary. Assembly is what gives each mode meaning, so the
+ * enum lives here and authorization, runtime, and settings import it; the
+ * alternative — one union per consumer — lets a mode exist in a menu that
+ * assembly cannot honor.
+ */
+export const SystemPromptModeSchema = Type.Union([
+  Type.Literal("replace"),
+  Type.Literal("inherit"),
+  Type.Literal("custom"),
+]);
+
 export const SubagentPromptEnvSchema = Type.Object({
   isGitRepo: Type.Boolean(),
   branch: Type.Union([Type.String(), Type.Null()]),
@@ -53,7 +65,7 @@ export const SubagentPromptEnvSchema = Type.Object({
 
 export const SubagentPromptRequestSchema = Type.Object({
   kind: Type.Literal("assemble-subagent-prompt"),
-  mode: Type.Union([Type.Literal("replace"), Type.Literal("inherit"), Type.Literal("custom")]),
+  mode: SystemPromptModeSchema,
   agentName: Type.String({ minLength: 1 }),
   agentInstructions: Type.String(),
   cwd: Type.String(),
@@ -80,6 +92,7 @@ export const SubagentPromptResultSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+export type SystemPromptMode = Static<typeof SystemPromptModeSchema>;
 export type AgentGuidanceRequest = Static<typeof AgentGuidanceRequestSchema>;
 export type AgentGuidanceResult = Static<typeof AgentGuidanceResultSchema>;
 export type SubagentPromptRequest = Static<typeof SubagentPromptRequestSchema>;

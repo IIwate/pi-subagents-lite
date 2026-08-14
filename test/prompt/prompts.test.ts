@@ -2,31 +2,23 @@
  * prompts.test.ts — Tests for system prompt building with skills.
  *
  * Covers:
- *   - buildAgentPrompt with skillMetas (via formatSkillsForPrompt)
+ *   - buildAgentPrompt with pre-rendered skill elements (whitelist block)
  *   - buildAgentPrompt with skillBlocks (preloaded in available_skills with content tag)
  *   - buildAgentPrompt with both (merged into single available_skills block)
- *   - XML escaping of special characters (Pi's full XML escaping)
  *   - System prompt modes (replace, inherit, custom)
+ *
+ * Rendering a `<skill>` element is the Pi adapter's job (skill-loader.test.ts
+ * covers it against the real formatter); this suite only assembles strings.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { buildAgentPrompt } from "../../src/prompt/prompts.ts";
-import type { AgentConfig, EnvInfo } from "../../src/types.ts";
+import type { AgentConfig } from "../../src/agents/types.ts";
+import type { EnvInfo } from "../../src/types.ts";
 
-// Stub only formatSkillsForPrompt — do not importActual the full pi package (multi-second tax).
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-  // Return only <skill> elements — buildAgentPrompt extracts these with regex
-  // and adds its own intro text and <available_skills> wrapper.
-  formatSkillsForPrompt: vi.fn((skills: any[]) => {
-    return skills
-      .filter((s: any) => !s.disableModelInvocation)
-      .map((s: any) => `<skill><name>${escapeXml(s.name)}</name><description>${escapeXml(s.description)}</description><location>${escapeXml(s.filePath)}</location></skill>`)
-      .join("\n");
-  }),
-}));
-
-function escapeXml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+/** The shape the Pi skill formatter produces for one whitelisted skill. */
+function skillElement(name: string, description: string, location: string): string {
+  return `<skill><name>${name}</name><description>${description}</description><location>${location}</location></skill>`;
 }
 
 const baseConfig: AgentConfig = {
@@ -44,11 +36,11 @@ const env: EnvInfo = {
 };
 
 describe("buildAgentPrompt", () => {
-  it("renders skill elements for whitelist via formatSkillsForPrompt", () => {
+  it("wraps pre-rendered skill elements in the whitelist block", () => {
     const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {
-      skillMetas: [
-        { name: "tdd", description: "TDD workflow", location: "/skills/tdd/SKILL.md", disableModelInvocation: false },
-        { name: "debug", description: "Debugging workflow", location: "/skills/debug/SKILL.md", disableModelInvocation: false },
+      skillElements: [
+        skillElement("tdd", "TDD workflow", "/skills/tdd/SKILL.md"),
+        skillElement("debug", "Debugging workflow", "/skills/debug/SKILL.md"),
       ],
     });
 
@@ -83,9 +75,7 @@ describe("buildAgentPrompt", () => {
 
   it("merges both into single available_skills block", () => {
     const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {
-      skillMetas: [
-        { name: "debug", description: "Debug workflow", location: "/skills/debug/SKILL.md", disableModelInvocation: false },
-      ],
+      skillElements: [skillElement("debug", "Debug workflow", "/skills/debug/SKILL.md")],
       skillBlocks: [
         { name: "tdd", description: "TDD workflow", content: "Full TDD content here" },
       ],
@@ -104,19 +94,6 @@ describe("buildAgentPrompt", () => {
     expect(result).not.toContain("# Preloaded Skill:");
   });
 
-  it("escapes XML special characters in skill metadata (Pi's full escaping)", () => {
-    const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {
-      skillMetas: [
-        { name: "test", description: 'Use <code> & "quotes"', location: "/path/to/skill", disableModelInvocation: false },
-      ],
-    });
-
-    // Pi's escapeXml escapes all 5 XML entities
-    expect(result).toContain("&lt;code&gt;");
-    expect(result).toContain("&amp;");
-    expect(result).toContain("&quot;quotes&quot;");
-  });
-
   it("returns no skill sections when no extras provided", () => {
     const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {});
 
@@ -124,18 +101,6 @@ describe("buildAgentPrompt", () => {
     expect(result).not.toContain("Preloaded Skill");
   });
 
-  it("excludes skills with disableModelInvocation=true via formatSkillsForPrompt", () => {
-    const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {
-      skillMetas: [
-        { name: "visible", description: "Visible skill", location: "/skills/visible/SKILL.md", disableModelInvocation: false },
-        { name: "hidden", description: "Hidden skill", location: "/skills/hidden/SKILL.md", disableModelInvocation: true },
-      ],
-    });
-
-    expect(result).toContain("<name>visible</name>");
-    expect(result).not.toContain("<name>hidden</name>");
-    expect(result).not.toContain("Hidden skill");
-  });
 });
 
 describe("buildAgentPrompt — system prompt modes", () => {
@@ -518,7 +483,7 @@ Current working directory: /tmp`;
 
     const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {
       parentSystemPrompt: parentPrompt,
-      skillMetas: [{ name: "new-skill", description: "New", location: "/skills/new", disableModelInvocation: false }],
+      skillElements: [skillElement("new-skill", "New", "/skills/new")],
     }, "inherit");
 
     // Old skills stripped

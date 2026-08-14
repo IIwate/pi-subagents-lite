@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createSubagentRuntime,
   type SessionDriver,
@@ -93,6 +96,17 @@ export function createScriptedSessionDriver(script: ScriptedSessionDriverOptions
   };
 }
 
+/**
+ * An empty home for user-level skill and prompt lookups. Created per process so
+ * a suite can never pick up the developer's own `~/.agents` skills, which would
+ * make prompt assertions depend on the machine running them.
+ */
+let emptyHome: string | undefined;
+function isolatedHome(): string {
+  emptyHome ??= mkdtempSync(join(tmpdir(), "runtime-harness-home-"));
+  return emptyHome;
+}
+
 /** Host-shaped runtime for integration tests. Defaults to the real Pi session driver. */
 export function createTestSubagentRuntime(options: {
   pi?: any;
@@ -100,10 +114,21 @@ export function createTestSubagentRuntime(options: {
   sessionDriver?: SessionDriver;
   clock?: { now(): number };
   defaultModelLimit?: number;
+  /** Resolved home for user-level skill discovery; defaults to an empty temp dir. */
+  homeDirectory?: string;
+  /** Custom system-prompt file; defaults to a path under the empty home. */
+  customPromptPath?: string;
 }): SubagentRuntime {
+  const homeDirectory = options.homeDirectory ?? isolatedHome();
   return createSubagentRuntime({
     sessionDriver: options.sessionDriver
-      ?? createPiSessionDriver({ pi: options.pi, ctx: options.ctx }),
+      ?? createPiSessionDriver({
+        pi: options.pi,
+        ctx: options.ctx,
+        homeDirectory,
+        customPromptPath: options.customPromptPath
+          ?? join(homeDirectory, ".pi", "agent", "subagents-lite-prompt.md"),
+      }),
     worktreeInspector: {
       async inspect(request) {
         return { ok: true, resolvedPath: request.worktreePath };

@@ -7,16 +7,21 @@
 
 import type { EnvInfo } from "../types.js";
 import type { AgentConfig, SystemPromptMode } from "../agents/types.js";
-import type { SkillMeta, PreloadedSkill } from "./skill-loader.js";
-import { formatSkillsForPrompt, type Skill } from "@earendil-works/pi-coding-agent";
 import { assembleSubagentPrompt } from "../modules/prompt/public.js";
+
+/** One preloaded skill: full content inlined into the prompt. */
+export interface PreloadedSkill {
+  name: string;
+  description: string;
+  content: string;
+}
 
 /** Extra sections to inject into the system prompt (skills). */
 export interface PromptExtras {
   /** Preloaded skill contents to inject (full content + description). */
   skillBlocks?: PreloadedSkill[];
-  /** Skill metadata for whitelist display (name, description, location only). */
-  skillMetas?: SkillMeta[];
+  /** Pre-rendered `<skill>` elements for the whitelist block. */
+  skillElements?: string[];
   /** Parent system prompt (for inherit mode). */
   parentSystemPrompt?: string;
   /** Custom system prompt content (for custom mode). */
@@ -48,20 +53,7 @@ export function buildAgentPrompt(
   extras?: PromptExtras,
   mode: SystemPromptMode = "replace",
 ): string {
-  const skillElements: string[] = [];
-  if (extras?.skillMetas?.length) {
-    const piSkills: Skill[] = extras.skillMetas.map((m) => ({
-      name: m.name,
-      description: m.description,
-      filePath: m.location,
-      baseDir: "",
-      sourceInfo: {} as any,
-      disableModelInvocation: m.disableModelInvocation,
-    }));
-    const formatted = formatSkillsForPrompt(piSkills);
-    const extracted = formatted.match(/<skill>[\s\S]*?<\/skill>/g);
-    if (extracted) skillElements.push(...extracted);
-  }
+  const skillElements: string[] = [...(extras?.skillElements ?? [])];
   for (const skill of extras?.skillBlocks ?? []) {
     skillElements.push(
       `<skill><name>${escapeXml(skill.name)}</name><description>${escapeXml(skill.description)}</description><content>${escapeXml(skill.content)}</content></skill>`,

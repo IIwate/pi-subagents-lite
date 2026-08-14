@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Check } from "typebox/value";
 import {
   createSettings,
+  SettingsResultSchema,
   type ConcurrencyLimitUpdate,
   type ConcurrencySettingsOwner,
   type ConcurrencySettingsView,
@@ -11,6 +13,7 @@ import {
   type DebugStatusPreview,
   type DisplaySettingsOwner,
   type DisplaySettingsView,
+  type ModelAccessAgentRow,
   type ModelAccessSettingsOwner,
   type ModelAccessUnavailableProvider,
   type ModelAccessUnavailableRule,
@@ -24,6 +27,8 @@ import {
 interface ModelAccessFakeOptions {
   enabled?: boolean;
   parentModelKey?: string;
+  /** Off-contract rows are injectable here: owners are replaceable ports. */
+  agentRows?: ModelAccessAgentRow[];
   providers?: Array<{ provider: string; enabled: boolean }>;
   unavailableProviders?: ModelAccessUnavailableProvider[];
   unavailableRules?: ModelAccessUnavailableRule[];
@@ -197,10 +202,10 @@ function harness(options: HarnessOptions = {}) {
       unavailableProviders: structuredClone(modelAccessState.unavailableProviders),
       unavailableRules: structuredClone(modelAccessState.unavailableRules),
     }),
-    agents: () => [
+    agents: () => structuredClone(options.modelAccess?.agentRows ?? [
       { type: "general-purpose", registered: true, summary: "Parent only" },
       { type: "retired-type", registered: false, summary: "1 provider" },
-    ],
+    ]),
     quickAgents: () => [{ type: "general-purpose", registered: true, summary: "Parent only" }],
     agentDetail: () => ({
       parentModelKey: modelAccessState.parentModelKey,
@@ -1090,5 +1095,62 @@ describe("REQ-MODEL-002/007 model access pages", () => {
       message: "Failed to save setting: disk full",
     });
     expect(result.snapshot.rows[0]).toMatchObject({ id: "alternateModels", value: "OFF" });
+  });
+});
+
+describe("REQ-SETTINGS-005 serializable result contract", () => {
+  const walk = [
+    { kind: "open" as const },
+    { kind: "select" as const, id: "model-access" },
+    { kind: "select" as const, id: "agentAccess" },
+    { kind: "select" as const, id: "type:general-purpose" },
+    { kind: "select" as const, id: "thinking" },
+    { kind: "select" as const, id: "target:openai/gpt-5" },
+    { kind: "back" as const },
+    { kind: "back" as const },
+    { kind: "back" as const },
+    { kind: "back" as const },
+    { kind: "select" as const, id: "concurrency" },
+    { kind: "update-limit" as const, id: "default", limit: 3 },
+    { kind: "back" as const },
+    { kind: "select" as const, id: "spawn-options" },
+    { kind: "set-value" as const, id: "graceTurns", value: "9" },
+    { kind: "back" as const },
+    { kind: "select" as const, id: "system-prompt" },
+    { kind: "set-value" as const, id: "systemPromptMode", value: "inherit" },
+    { kind: "back" as const },
+    { kind: "select" as const, id: "display" },
+    { kind: "set-value" as const, id: "showTools", value: "OFF" },
+    { kind: "back" as const },
+    { kind: "select" as const, id: "debug" },
+  ];
+
+  it("returns schema-valid results that survive a JSON round trip on every page", () => {
+    const { settings } = harness({ modelAccess: { enabled: true } });
+    for (const command of walk) {
+      const result = settings.execute(command);
+      expect(Check(SettingsResultSchema, result)).toBe(true);
+      expect(Check(SettingsResultSchema, JSON.parse(JSON.stringify(result)))).toBe(true);
+      expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+    }
+  });
+
+  it("refuses a page whose owner view violates the row contract", () => {
+    // A registry that lost an agent name: the row would render as a
+    // selectable entry with no label.
+    const { settings } = harness({
+      modelAccess: {
+        enabled: true,
+        agentRows: [{ type: "", registered: true, summary: "broken" }],
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "model-access" });
+    const result = settings.execute({ kind: "select", id: "agentAccess" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-snapshot", message: "Settings page does not match its contract." },
+    });
+    expect(Check(SettingsResultSchema, result)).toBe(true);
   });
 });

@@ -152,6 +152,51 @@ describe("REQ-DELIVERY-002 origin-branch eligibility", () => {
     const inspect = memory.delivery.execute({ kind: "inspect" });
     expect(inspect.ok && inspect.snapshot.pending[0]?.originEntryId).toBe("other-branch");
   });
+
+  it("delivers a result whose origin entry appeared after the last branch read", () => {
+    // The host still reports the branch as it was when the turn started; the
+    // Agent call created "leaf-new" inside that turn.
+    const memory = createMemory({ branch: () => ["origin-a"] });
+    memory.delivery.execute({ kind: "track-origin", originEntryId: "leaf-new" });
+
+    const result = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ originEntryId: "leaf-new" }),
+      stillPresent: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      events: [
+        { type: "persisted", deliveryId: "d1" },
+        { type: "wake-requested", deliveryIds: ["d1"], mode: "turn" },
+      ],
+    });
+    expect(memory.sent).toEqual([
+      { mode: "turn", content: expect.stringContaining("done") },
+    ]);
+  });
+
+  it("drops a tracked origin once the host reports a branch without it", () => {
+    const memory = createMemory({ branch: () => ["origin-a"] });
+    memory.delivery.execute({ kind: "track-origin", originEntryId: "leaf-new" });
+    memory.delivery.execute({ kind: "session-tree" });
+
+    const result = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ originEntryId: "leaf-new" }),
+      stillPresent: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      events: [
+        { type: "persisted", deliveryId: "d1" },
+        { type: "hidden", deliveryId: "d1" },
+      ],
+    });
+    expect(memory.sent).toEqual([]);
+  });
 });
 
 describe("REQ-DELIVERY-003 coalesced wake and failed-turn recovery", () => {
@@ -382,5 +427,29 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
       ok: false,
       error: { code: "invalid-command", message: "Delivery command is invalid." },
     });
+  });
+
+  it("drops off-contract records read from the repository and the fallback inbox", () => {
+    const stale = { deliveryId: "stale", parentSessionId: "session-a", status: "finished" };
+    const memory = createMemory({
+      pending: [record({ deliveryId: "kept" }), stale as unknown as BackgroundResultRecord],
+      fallback: {
+        take: () => [
+          record({ deliveryId: "fallback-kept", originEntryId: "origin-a" }),
+          { ...record({ deliveryId: "fallback-stale" }), createdAt: "yesterday" } as unknown as BackgroundResultRecord,
+        ],
+        save() {},
+      },
+    });
+
+    const result = memory.delivery.execute({ kind: "parent-preflight" });
+
+    expect(result.ok).toBe(true);
+    expect(Check(DeliveryCommandResultSchema, result)).toBe(true);
+    if (!result.ok) return;
+    // Preflight flushes the surviving fallback record into the repository, so
+    // the contract to pin is which records survived at all, not their bucket.
+    expect(result.snapshot.pending.map((item) => item.deliveryId)).toEqual(["kept", "fallback-kept"]);
+    expect(result.snapshot.fallback).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@
  * no-sub-subagent exclude policy.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Import the module under test
 import {
@@ -14,11 +14,7 @@ import {
   resolveVisibleTools,
   EXCLUDED_TOOL_NAMES,
   BUILTIN_TOOL_NAMES,
-  getConfig,
-  registerAgents,
-  resolveAgentPolicyInputs,
 } from "../../src/agents/agent-types.js";
-import type { AgentConfig } from "../../src/agents/types.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */
@@ -405,154 +401,5 @@ describe("resolveVisibleTools — edge cases", () => {
       tools: ["read"],
     });
     expect(result).toEqual(["read"]);
-  });
-});
-
-describe("resolveAgentPolicyInputs", () => {
-  it("deep-copies the accepted definition and resolves loading defaults", () => {
-    const config: AgentConfig = {
-      name: "snapshot-agent",
-      description: "Snapshot policy",
-      systemPrompt: "Original prompt",
-      registeredTools: ["read"],
-      tools: ["read"],
-      extensions: ["original-extension"],
-      skills: ["original-skill"],
-      excludeExtensions: ["unsafe"],
-      preloadSkills: ["review"],
-      source: "project",
-    };
-    registerAgents(new Map([[config.name, config]]), { disableDefaultAgents: true });
-
-    const policy = resolveAgentPolicyInputs(config.name, {
-      loadSkillsImplicitly: true,
-      loadExtensionsImplicitly: false,
-      systemPromptMode: "inherit",
-      includeContextFiles: true,
-      parentModelKey: "parent/main",
-    })!;
-
-    config.registeredTools!.push("write");
-    (config.tools as string[]).push("write");
-    (config.extensions as string[]).push("later");
-    (config.skills as string[]).push("later");
-    config.excludeExtensions!.push("later");
-    config.preloadSkills!.push("later");
-    config.systemPrompt = "Mutated prompt";
-    registerAgents(new Map(), { disableDefaultAgents: true });
-
-    expect(policy).toMatchObject({
-      registeredTools: ["read"],
-      restrictToRegisteredTools: true,
-      tools: ["read"],
-      extensions: ["original-extension"],
-      skills: ["original-skill"],
-      systemPromptMode: "inherit",
-      includeContextFiles: true,
-      parentModelKey: "parent/main",
-      definition: {
-        systemPrompt: "Original prompt",
-        excludeExtensions: ["unsafe"],
-        preloadSkills: ["review"],
-        source: "project",
-      },
-    });
-    expect(resolveAgentPolicyInputs(config.name, {
-      loadSkillsImplicitly: true,
-      loadExtensionsImplicitly: true,
-      systemPromptMode: "replace",
-      includeContextFiles: false,
-      parentModelKey: "parent/next",
-    })).toBeUndefined();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  getConfig with global implicit defaults                           */
-/* ------------------------------------------------------------------ */
-
-describe("getConfig — global implicit defaults", () => {
-  beforeEach(() => {
-    // Register a test agent with skills: true and extensions: true
-    const agents = new Map<string, AgentConfig>();
-    agents.set("test-agent", {
-      name: "test-agent",
-      description: "Test agent",
-      extensions: true,
-      skills: true,
-      systemPrompt: "test",
-    });
-    agents.set("implicit-agent", {
-      name: "implicit-agent",
-      description: "Agent with no skills/extensions set",
-      systemPrompt: "test",
-    });
-    agents.set("explicit-skills", {
-      name: "explicit-skills",
-      description: "Agent with explicit skills list",
-      // extensions intentionally omitted — uses global default
-      skills: ["tdd"],
-      systemPrompt: "test",
-    });
-    agents.set("no-skills", {
-      name: "no-skills",
-      description: "Agent with skills disabled",
-      extensions: false,
-      skills: false,
-      systemPrompt: "test",
-    });
-    registerAgents(agents);
-  });
-
-  it("agent with explicit skills: true ignores global loadSkillsImplicitly=false", () => {
-    const result = getConfig("test-agent", false, true);
-    expect(result.skills).toBe(true);
-  });
-
-  it("agent with explicit extensions: true ignores global loadExtensionsImplicitly=false", () => {
-    const result = getConfig("test-agent", true, false);
-    expect(result.extensions).toBe(true);
-  });
-
-  it("agent with no skills/extensions uses global default (false)", () => {
-    const result = getConfig("implicit-agent", false, false);
-    expect(result.skills).toBe(false);
-    expect(result.extensions).toBe(false);
-  });
-
-  it("agent with no skills/extensions uses global default (true)", () => {
-    const result = getConfig("implicit-agent", true, true);
-    expect(result.skills).toBe(true);
-    expect(result.extensions).toBe(true);
-  });
-
-  it("agent with skills: true gets global loadSkillsImplicitly=true", () => {
-    const result = getConfig("test-agent", true, true);
-    expect(result.skills).toBe(true);
-  });
-
-  it("agent with explicit skills list ignores global default", () => {
-    const result = getConfig("explicit-skills", false, false);
-    expect(result.skills).toEqual(["tdd"]);
-    // extensions not explicitly set, so global default false applies
-    expect(result.extensions).toBe(false);
-  });
-
-  it("agent with skills: false ignores global default", () => {
-    const result = getConfig("no-skills", true, true);
-    expect(result.skills).toBe(false);
-    expect(result.extensions).toBe(false);
-  });
-
-  it("unknown agent type uses global defaults", () => {
-    const result = getConfig("nonexistent", false, false);
-    expect(result.skills).toBe(false);
-    expect(result.extensions).toBe(false);
-  });
-
-  it("unknown agent type with load-all defaults to true", () => {
-    const result = getConfig("nonexistent", true, true);
-    expect(result.skills).toBe(true);
-    expect(result.extensions).toBe(true);
   });
 });

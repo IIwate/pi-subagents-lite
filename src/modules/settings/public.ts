@@ -30,7 +30,6 @@ export {
   SettingsUpdateResultSchema,
   SpawnSettingUpdateSchema,
   SpawnSettingsViewSchema,
-  SystemPromptModeSchema,
 } from "./contracts/settings-contracts.js";
 export type {
   ConcurrencyLimitUpdate,
@@ -64,7 +63,6 @@ export type {
   SettingsUpdateResult,
   SpawnSettingUpdate,
   SpawnSettingsView,
-  SystemPromptMode,
 } from "./contracts/settings-contracts.js";
 export type { ConcurrencySettingsOwner } from "./ports/concurrency-settings-owner.js";
 export type { DebugSettingsOwner } from "./ports/debug-settings-owner.js";

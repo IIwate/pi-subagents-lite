@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import * as path from "node:path";
 import {
   createConfiguration,
@@ -22,13 +23,19 @@ const environment = createProcessEnvironmentSource({
 // precedence chain cannot apply to it: the document's own location derives
 // from this value, so it cannot locate itself. Interactive product policies
 // never pass through this resolution.
-const home = resolveOperationalValue({
+//
+// The OS home directory is the capability default rather than an empty string.
+// Windows usually leaves HOME unset and exposes the profile through
+// USERPROFILE, so an empty fallback resolved the document to a cwd-relative
+// `.pi/agent` — a different config file per working directory, and a different
+// root than skill discovery used.
+export const configHome = resolveOperationalValue({
   environment: environment.variable("HOME"),
   dotEnv: environment.dotEnvValue("HOME"),
-  fallback: "",
+  fallback: homedir(),
 });
 
-export const configRoot = resolveConfigRoot(home);
+export const configRoot = resolveConfigRoot(configHome);
 export const customPromptPath = customPromptFilePath(configRoot);
 
 /**

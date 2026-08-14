@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
-import { AcceptedRunPolicySchema, ThinkingLevelSchema } from "./accepted-run-policy.js";
+import { ThinkingLevelSchema } from "../../model-access/public.js";
+import { AcceptedRunPolicySchema } from "./accepted-run-policy.js";
 import { DebugFaultKindSchema, LifetimeUsageSchema } from "./lifecycle.js";
 
 const JsonValueSchema = Type.Cyclic({

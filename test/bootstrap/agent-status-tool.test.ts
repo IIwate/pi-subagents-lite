@@ -31,7 +31,7 @@ const {
 
 // Load the module graph during collection; the per-test dynamic imports then
 // hit the cache instead of charging the first test's timeout with it.
-import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+import { createAgentStatusToolExecutor } from "../../src/bootstrap/agent-status-tool.js";
 
 const executeAgentStatusTool = createAgentStatusToolExecutor(fakeExtensionRuntime({
   manager: {

@@ -3,12 +3,14 @@ export {
   AgentGuidanceResultSchema,
   SubagentPromptRequestSchema,
   SubagentPromptResultSchema,
+  SystemPromptModeSchema,
 } from "./contracts/prompt-contracts.js";
 export type {
   AgentGuidanceRequest,
   AgentGuidanceResult,
   SubagentPromptRequest,
   SubagentPromptResult,
+  SystemPromptMode,
 } from "./contracts/prompt-contracts.js";
 export { assembleAgentGuidance } from "./application/assemble-agent-guidance.js";
 export { assembleSubagentPrompt } from "./application/assemble-subagent-prompt.js";

@@ -40,6 +40,13 @@ Each output has a documented ordered fragment list. Assembly is a pure function 
 
 The host owns Pi skill XML formatting and filesystem reads. Prompt assembly only concatenates those serialized strings.
 
+## Failure boundaries
+
+A prompt source that fails to resolve is not silently replaced by a different mode. The host distinguishes two cases:
+
+- Inherited parent text is supplied by the host callback. If that callback fails, the run fails. The condition is a host malfunction the user cannot see or correct, and an inherited persona is the reason the mode was chosen — work produced under a generic header would still be reported as a success.
+- The custom prompt file is a state the settings page shows and offers to create. An absent or unreadable file degrades to replace mode with a notice, keeping the delegation alive over a condition the user already owns.
+
 ## Owning tests
 
 | Fragment or rule | Owner | Public-seam test |

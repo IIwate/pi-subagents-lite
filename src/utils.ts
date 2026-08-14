@@ -1,7 +1,6 @@
 /**
  * utils.ts — Security helpers and general utilities.
  */
-import type { Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "./types.js";
 import { CANONICAL_THINKING_LEVELS } from "./modules/model-access/public.js";
 
@@ -41,9 +40,14 @@ export function parseModelKey(modelStr: string): { provider: string; modelId: st
   return { provider: modelStr.slice(0, slashIdx), modelId: modelStr.slice(slashIdx + 1) };
 }
 
-/** Minimal registry surface used for model lookup. */
-export interface ModelLookupRegistry {
-  find(provider: string, modelId: string): Model<any> | undefined;
+/**
+ * Minimal registry surface used for model lookup.
+ *
+ * Generic over the model record so the lookup rule stays host-agnostic: the
+ * caller decides what a model is, this file only owns key parsing.
+ */
+export interface ModelLookupRegistry<TModel> {
+  find(provider: string, modelId: string): TModel | undefined;
 }
 
 /**
@@ -51,10 +55,10 @@ export interface ModelLookupRegistry {
  *
  * Only canonical "provider/id" keys are accepted.
  */
-export function resolveExactModel(
+export function resolveExactModel<TModel>(
   modelRef: string,
-  registry: ModelLookupRegistry,
-): Model<any> | undefined {
+  registry: ModelLookupRegistry<TModel>,
+): TModel | undefined {
   const parsed = parseModelKey(modelRef.trim());
   return parsed ? registry.find(parsed.provider, parsed.modelId) : undefined;
 }

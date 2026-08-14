@@ -1,27 +1,13 @@
-import type { ThinkingAccessOverride, ThinkingLevel } from "../contracts/model-access-contracts.js";
-
-const CANONICAL_LEVELS = new Set<ThinkingLevel>([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-
-export interface ThinkingAccessPolicy {
-  allowed: ThinkingLevel[];
-  default: ThinkingLevel;
-  source: "scope" | "override" | "baseline";
-}
-
-export type ThinkingSelection =
-  | { ok: true; level: ThinkingLevel }
-  | { ok: false; reason: "thinking-denied"; allowed: ThinkingLevel[] };
+import { CANONICAL_THINKING_LEVELS } from "../contracts/model-access-contracts.js";
+import type {
+  ThinkingAccessOverride,
+  ThinkingAccessPolicy,
+  ThinkingLevel,
+  ThinkingSelection,
+} from "../contracts/model-access-contracts.js";
 
 function canonicalLevel(value: string | undefined): ThinkingLevel | undefined {
-  return value && CANONICAL_LEVELS.has(value as ThinkingLevel) ? value as ThinkingLevel : undefined;
+  return CANONICAL_THINKING_LEVELS.find((level) => level === value);
 }
 
 export function decideThinkingAccess(input: {
@@ -65,3 +51,5 @@ export function decideThinkingSelection(
   }
   return { ok: true, level };
 }
+
+export type { ThinkingAccessPolicy, ThinkingSelection };

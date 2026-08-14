@@ -1,5 +1,6 @@
 import { Check } from "typebox/value";
 import {
+  BackgroundResultRecordSchema,
   DeliveryCommandSchema,
   type BackgroundResultRecord,
   type DeliveryCommand,
@@ -36,6 +37,18 @@ function failure(
   return { ok: false, error: { code, message } };
 }
 
+/**
+ * Records restored from a parent session or the process inbox are the oldest
+ * data this module handles: written by an earlier version, hand-editable, and
+ * outside this process's control. A record that no longer matches the contract
+ * is skipped rather than repaired — a repaired record would carry an invented
+ * delivery target or status into a wake message. The remaining results still
+ * reach the parent, which matters more than an all-or-nothing restore.
+ */
+function inbound(records: readonly BackgroundResultRecord[]): BackgroundResultRecord[] {
+  return records.filter((record) => Check(BackgroundResultRecordSchema, record));
+}
+
 export function createBackgroundDelivery(options: CreateBackgroundDeliveryOptions): BackgroundDelivery {
   let parentRunPhase: ParentPhase = "idle";
   let parentWakeActive = false;
@@ -46,11 +59,12 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   let lastWakeFailed = false;
   const failedResultIds = new Set<string>();
   const entries = options.repository.read();
-  const pendingResults = new Map(entries.pending.map((result) => [result.deliveryId, result]));
-  const latestResults = new Map(entries.latest.map((result) => [result.agentId, result]));
+  const pendingResults = new Map(inbound(entries.pending).map((result) => [result.deliveryId, result]));
+  const latestResults = new Map(inbound(entries.latest).map((result) => [result.agentId, result]));
   let activeBranchIds = new Set(options.context.activeBranchIds());
   const fallbackResults = new Map(
-    options.fallback.take(options.context.parentSessionId()).map((result) => [result.deliveryId, result]),
+    inbound(options.fallback.take(options.context.parentSessionId()))
+      .map((result) => [result.deliveryId, result]),
   );
   let disposed = false;
   let events: DeliveryEvent[] = [];
@@ -216,6 +230,12 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       switch (next.kind) {
         case "record-terminal":
           return recordTerminal(next.record, next.stillPresent);
+        case "track-origin":
+          // Dropped by the next refresh on purpose: by then the host reports
+          // the entry itself, or the user navigated away and the result no
+          // longer belongs to the visible branch.
+          if (!disposed) activeBranchIds.add(next.originEntryId);
+          return ok();
         case "parent-preflight": {
           if (disposed) return ok();
           refreshActiveBranch();

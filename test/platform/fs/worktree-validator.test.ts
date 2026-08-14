@@ -20,8 +20,8 @@ import {
   WORKTREE_VALIDATION_ERRORS,
   type WorktreeValidationSuccess,
   type WorktreeValidationFailure,
-} from "../../src/spawn/worktree-validator.js";
-import { acceptedRunPolicy } from "../fixtures.js";
+} from "../../../src/platform/fs/worktree-validator.js";
+import { acceptedRunPolicy } from "../../fixtures.js";
 
 // ── helpers ──────────────────────────────────────────────────────
 
@@ -436,8 +436,8 @@ describe("validateWorktreePath", () => {
 
 describe("worktree deletion mid-run", () => {
   it("marks the snapshot as errored when the session driver fails after accept", async () => {
-    const { createSubagentRuntime } = await import("../../src/modules/subagent-runtime/public.js");
-    const { acceptedRunPolicy } = await import("../fixtures.js");
+    const { createSubagentRuntime } = await import("../../../src/modules/subagent-runtime/public.js");
+    const { acceptedRunPolicy } = await import("../../fixtures.js");
     const runtime = createSubagentRuntime({
       sessionDriver: {
         async start(_request, emit) {

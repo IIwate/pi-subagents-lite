@@ -1,4 +1,7 @@
 import { Type, type Static } from "typebox";
+// The prompt module owns what a mode means; the settings page only offers the
+// choices assembly can honor.
+import { SystemPromptModeSchema } from "../../prompt/public.js";
 
 // ── Workflow surface ──────────────────────────────────────────────
 
@@ -80,6 +83,10 @@ const SettingsErrorSchema = Type.Object({
     Type.Literal("invalid-command"),
     Type.Literal("unknown-row"),
     Type.Literal("invalid-value"),
+    // A page projection that does not satisfy `SettingsSnapshotSchema`. Owner
+    // ports are the likely source, and the renderer is the wrong place to find
+    // out: it would draw a half-built page and let the user act on it.
+    Type.Literal("invalid-snapshot"),
   ]),
   message: Type.String(),
 }, { additionalProperties: false });
@@ -151,12 +158,6 @@ export const SpawnSettingUpdateSchema = Type.Union([
     id: Type.Literal("graceTurns"),
     value: Type.Integer({ minimum: 0 }),
   }, { additionalProperties: false }),
-]);
-
-export const SystemPromptModeSchema = Type.Union([
-  Type.Literal("replace"),
-  Type.Literal("inherit"),
-  Type.Literal("custom"),
 ]);
 
 export const PromptSettingsViewSchema = Type.Object({
@@ -347,7 +348,6 @@ export type SettingsUpdateResult = Static<typeof SettingsUpdateResultSchema>;
 export type RootSummaries = Static<typeof RootSummariesSchema>;
 export type SpawnSettingsView = Static<typeof SpawnSettingsViewSchema>;
 export type SpawnSettingUpdate = Static<typeof SpawnSettingUpdateSchema>;
-export type SystemPromptMode = Static<typeof SystemPromptModeSchema>;
 export type PromptSettingsView = Static<typeof PromptSettingsViewSchema>;
 export type PromptSettingUpdate = Static<typeof PromptSettingUpdateSchema>;
 export type ConcurrencySettingsView = Static<typeof ConcurrencySettingsViewSchema>;

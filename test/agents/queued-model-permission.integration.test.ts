@@ -119,13 +119,8 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 }));
 
 import { createTestSubagentRuntime } from "../runtime-harness.js";
-import {
-  registerAgents,
-  setAgentScanDirs,
-  setDefaultAgentsDisabled,
-} from "../../src/agents/agent-types.js";
 import type { AgentConfig } from "../../src/agents/types.js";
-import { createAgentToolExecutor } from "../../src/agents/tool-execution.js";
+import { createAgentToolExecutor } from "../../src/bootstrap/agent-tool.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {
@@ -140,15 +135,19 @@ import {
   fakeExtensionRuntime,
   inertAgentSettings,
   tempDirWithFiles,
+  testAgentRegistry,
 } from "../fixtures.js";
 
 // Spawn policy and routing come from the runtime record; the fakes read
 // mocks.store.agent / mocks.routing live so per-test mutation keeps working.
 function buildRuntime(): ExtensionRuntime {
+  const agents = testAgentRegistry();
+  agents.setScanRoots("/tmp/no-user-agents", "/tmp/no-project-agents", false);
   const runtime = fakeExtensionRuntime({
     pi: mocks.pi,
     sessionCtx: mocks.ctx,
     manager: mocks.manager,
+    agents,
     agentSettings: {
       ...inertAgentSettings(),
       read: () => ({ ...inertAgentSettings().read(), ...mocks.store.agent }),
@@ -218,8 +217,6 @@ describe("REQ-AGENT-002 queued invocation snapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reset();
-    setAgentScanDirs("/tmp/no-user-agents", "/tmp/no-project-agents", false);
-    registerAgents(new Map());
     mocks.routing = {
       enabled: true,
       enabledProviders: ["other"],
@@ -308,7 +305,7 @@ describe("REQ-AGENT-002 queued invocation snapshots", () => {
     const queued = mocks.manager.listSnapshots().find((record: any) => record.description === "queued Explore")!;
     expect(queued.status).toBe("queued");
 
-    setDefaultAgentsDisabled(true);
+    mocks.runtime.agents.setDefaultAgentsDisabled(true);
     mocks.store.agent.loadSkillsImplicitly = false;
     mocks.store.agent.loadExtensionsImplicitly = false;
     mocks.releaseFirst();
@@ -359,7 +356,7 @@ describe("REQ-AGENT-002 queued invocation snapshots", () => {
       skills: ["original-skill"],
       preloadSkills: ["original-preload"],
     };
-    registerAgents(new Map([[config.name, config]]));
+    mocks.runtime.agents.register(new Map([[config.name, config]]));
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
 
     try {
@@ -384,7 +381,7 @@ describe("REQ-AGENT-002 queued invocation snapshots", () => {
         skills: ["replacement-skill"],
         preloadSkills: ["replacement-preload"],
       };
-      registerAgents(new Map([[replacement.name, replacement]]));
+      mocks.runtime.agents.register(new Map([[replacement.name, replacement]]));
       mocks.releaseFirst();
       await Promise.all(mocks.manager.listSnapshots().map((record: any) => mocks.manager.waitUntilSettled(record.id)));
 

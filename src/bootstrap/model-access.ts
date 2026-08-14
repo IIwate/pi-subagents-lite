@@ -45,7 +45,6 @@ import type {
 } from "../modules/settings/public.js";
 import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
 import { configurationSectionIO, type ConfigSectionIO } from "./configuration.js";
-import { getAllTypes } from "../agents/agent-types.js";
 
 type UpdateResult = { ok: true } | { ok: false; message: string };
 type ModelRef = { provider: string; id: string };
@@ -69,21 +68,21 @@ function commitModelAccess(io: ConfigSectionIO, next: ModelAccessFragment): Upda
 
 export interface ModelAccessOwnerOverrides {
   io?: ConfigSectionIO;
-  /** Registered agent types; defaults to the live catalogue registry. */
-  registeredTypes?: () => string[];
 }
 
 /**
  * Settings owner over the live session: fragment from the shared document,
  * inventory from the Pi registry, parent/scope facts from the command
- * context.
+ * context. The registered types come from the activation's registry rather
+ * than a process-wide lookup, so a second runtime cannot see the first one's
+ * catalogue.
  */
 export function createModelAccessSettingsOwner(
   ctx: ExtensionCommandContext,
+  registeredTypes: () => string[],
   overrides: ModelAccessOwnerOverrides = {},
 ): ModelAccessSettingsOwner {
   const io = overrides.io ?? configurationSectionIO;
-  const registeredTypes = overrides.registeredTypes ?? getAllTypes;
 
   const parentKey = (): string => (ctx.model ? modelKey(ctx.model) : "");
 
@@ -151,11 +150,9 @@ export function createModelAccessSettingsOwner(
       for (const provider of Object.keys(access.providers)) providers.add(provider);
     }
     return [...providers].sort().flatMap((provider) => {
-      const catalogueIds = new Set(
-        snapshot.catalogueModels
-          .filter((model) => model.provider === provider)
-          .map((model) => model.id),
-      );
+      const catalogueIds = snapshot.catalogueModels
+        .filter((model) => model.provider === provider)
+        .map((model) => model.id);
       const stale = unavailableModelRules(
         fragment,
         provider,

@@ -1,36 +1,22 @@
 /**
- * Host-side shared types: prompt environment, runner callbacks, and the
- * coordinator spawn config. Lifecycle and record shapes live in the
- * subagent-runtime module contracts.
+ * Host-agnostic shared types: prompt environment and the coordinator spawn
+ * config. Lifecycle and record shapes live in the subagent-runtime module
+ * contracts; runner callbacks that carry a vendor session object live with the
+ * Pi session adapter that owns them.
  */
 
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { LifetimeUsage } from "./agents/usage.js";
 import type {
   AcceptedRunPolicy as AcceptedRunPolicyContract,
   AgentInvocation as AgentInvocationContract,
 } from "./modules/subagent-runtime/public.js";
 
-export type {
-  AcceptedRunPolicy,
-  ThinkingLevel,
-} from "./modules/subagent-runtime/public.js";
+export type { AcceptedRunPolicy } from "./modules/subagent-runtime/public.js";
+export type { ThinkingLevel } from "./modules/model-access/public.js";
 
 export interface EnvInfo {
   isGitRepo: boolean;
   branch: string | null;
   platform: string;
-}
-
-/** Internal runner events consumed by AgentManager record tracking. */
-export interface RunCallbacks {
-  onToolUse?: () => void;
-  onSessionSetupStarted?: () => void;
-  onSessionSetupFinished?: () => void;
-  onSessionCreated?: (session: AgentSession) => void | Promise<void>;
-  onTurnEnd?: (turnCount: number) => void;
-  onAssistantUsage?: (usage: LifetimeUsage) => void;
-  onCompaction?: () => void;
 }
 
 /**

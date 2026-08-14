@@ -11,7 +11,6 @@ import {
   type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
-import { getConfig } from "../../../agents/agent-types.js";
 import { errorMessage } from "../../../utils.js";
 import type {
   AgentSnapshot,
@@ -110,6 +109,10 @@ export class ChildScreenHost {
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
     private getPendingResultCount?: () => number | undefined,
     initialListExpanded = true,
+    // Injected rather than looked up: the display name belongs to the
+    // activation's type registry, and a host that reached for a process-wide
+    // one would label rows from another runtime's catalogue.
+    private displayNameFor: (type: string) => string = (type) => type,
   ) {
     this.screen = createChildScreen({
       initialListExpanded,
@@ -131,7 +134,7 @@ export class ChildScreenHost {
         type: record.type,
         description: record.description ?? "",
         pinned: record.pinnedAt != null,
-        displayName: getConfig(record.type).displayName,
+        displayName: this.displayNameFor(record.type),
         startedAt: record.startedAt,
         completedAt: record.completedAt,
         debugFaultKind: record.debugFaultKind,
@@ -618,7 +621,7 @@ export class ChildScreenHost {
         record.id,
         record.type,
         record.description,
-        getConfig(record.type).displayName,
+        this.displayNameFor(record.type),
         record.status,
         record.completedAt ?? "",
         record.pinnedAt ?? "",

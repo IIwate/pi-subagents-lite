@@ -237,6 +237,23 @@ describe("session host delivery", () => {
     expect(spawnCommand).not.toHaveProperty("modelKey");
   });
 
+  it("delivers a background result whose origin leaf was created inside the current turn", async () => {
+    const coordinator = createHost(manager as any);
+    // The host branch cache still reflects the turn start; the Agent tool call
+    // produced a leaf that no branch read has reported yet.
+    fallbackMeta.currentLeafId = "leaf-created-this-turn";
+
+    const result = await spawnBackground(coordinator);
+    complete(result.snapshot, "completed", "new leaf result");
+    coordinator.onAgentComplete(result.snapshot);
+
+    expect(result.snapshot.resultOriginEntryId).toBe("leaf-created-this-turn");
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("new leaf result") }),
+      { triggerTurn: true },
+    );
+  });
+
   it("awaits foreground work and marks its direct result consumed", async () => {
     const coordinator = createHost(manager as any);
     const result = await coordinator.spawn(mockPi, ctx, {

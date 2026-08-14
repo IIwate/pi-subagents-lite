@@ -7,7 +7,9 @@ export {
   ModelAccessFragmentSchema,
   ProviderModelAccessSchema,
   ThinkingAccessOverrideSchema,
+  ThinkingAccessPolicySchema,
   ThinkingLevelSchema,
+  ThinkingSelectionSchema,
 } from "./contracts/model-access-contracts.js";
 export type {
   AgentModelAccess,
@@ -17,7 +19,9 @@ export type {
   ModelAccessFragment,
   ProviderModelAccess,
   ThinkingAccessOverride,
+  ThinkingAccessPolicy,
   ThinkingLevel,
+  ThinkingSelection,
 } from "./contracts/model-access-contracts.js";
 export { authorizeModelAccess } from "./application/authorize-model-access.js";
 export {
@@ -47,6 +51,4 @@ export {
   resolveThinkingAccess,
   selectThinkingLevel,
   unavailableModelRules,
-  type ThinkingAccessPolicy,
-  type ThinkingSelection,
 } from "./application/query-model-access.js";

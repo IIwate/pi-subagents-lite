@@ -27,17 +27,11 @@ import type { LifetimeUsage } from "../../agents/usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../../utils.js";
 import { missingSubagentModelError } from "../../models/model-scope.js";
 import { buildAgentPrompt, type PromptExtras } from "../../prompt/prompts.js";
-import { preloadSkills, loadSkillMeta } from "../../prompt/skill-loader.js";
-import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, SHORT_ID_LENGTH } from "../../types.js";
+import { formatSkillMetaElements, loadSkillMeta, preloadSkills } from "./skill-loader.js";
+import { type AcceptedRunPolicy, type EnvInfo, SHORT_ID_LENGTH } from "../../types.js";
+import { DEFAULT_GRACE_TURNS } from "../../modules/subagent-runtime/public.js";
 import type { SubagentType } from "../../agents/types.js";
 import { withSubagentSpawn } from "../process/process-state.js";
-// Known platform->bootstrap reverse dependency: the resolved config root and
-// the grace-turn default are process-wide constants composed once at import.
-// Threading them through every run call adds a parameter to the widest
-// signature in the codebase for no isolation gain; revisit only if either
-// value ever becomes per-runtime.
-import { DEFAULT_GRACE_TURNS } from "../../bootstrap/agent-settings.js";
-import { customPromptPath as CUSTOM_PROMPT_PATH } from "../../bootstrap/configuration.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";
 import { debugFaultMessage, type DebugFaultKind } from "../../agents/debug-fault.js";
@@ -48,11 +42,31 @@ function normalizeMaxTurns(n: number | undefined): number | undefined {
   return Math.max(1, n);
 }
 
+/**
+ * Runner events consumed by the session driver.
+ *
+ * Lives with the adapter because `onSessionCreated` hands out a vendor session
+ * object; nothing above the adapter may observe one.
+ */
+interface RunCallbacks {
+  onToolUse?: () => void;
+  onSessionSetupStarted?: () => void;
+  onSessionSetupFinished?: () => void;
+  onSessionCreated?: (session: AgentSession) => void | Promise<void>;
+  onTurnEnd?: (turnCount: number) => void;
+  onAssistantUsage?: (usage: LifetimeUsage) => void;
+  onCompaction?: () => void;
+}
+
 /** Info about a tool event in the subagent. */
 interface RunOptions extends RunCallbacks {
   acceptedPolicy: AcceptedRunPolicy;
   /** ExtensionAPI instance — used for pi.exec() for git detection. */
   pi: ExtensionAPI;
+  /** Absolute path of the optional custom system-prompt file for "custom" mode. */
+  customPromptPath: string;
+  /** Resolved home directory used for user-level skill discovery. */
+  homeDirectory: string;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
   agentId?: string;
   /** Override working directory (resolved worktree path). */
@@ -292,22 +306,27 @@ function resolveSystemPromptSources(
   ctx: ExtensionContext,
   cwd: string,
   policy: AcceptedRunPolicy,
+  customPromptPath: string,
   notify: (msg: string) => void,
 ): Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> {
   const extras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {};
 
   // Inherit snapshots the mode, not the parent's generated prompt text. The
   // latter remains a runtime value supplied by Pi when the queued run starts.
+  //
+  // A throwing host is a malfunction, not a configuration state the user can
+  // see or correct, so the run fails instead of quietly becoming a different
+  // prompt mode: an inherited persona is why the mode was chosen, and work
+  // produced under a generic header would still be reported as success.
   if (policy.systemPromptMode === "inherit") {
-    try {
-      extras.parentSystemPrompt = ctx.getSystemPrompt();
-    } catch (err) {
-      notify(`Failed to get parent system prompt: ${err}. Falling back to replace mode.`);
-    }
+    extras.parentSystemPrompt = ctx.getSystemPrompt();
   }
 
+  // The custom file is different: absent or unreadable is a state the settings
+  // page shows and offers to create, so degrading to replace mode with a
+  // notice keeps a delegation alive over a condition the user already owns.
   if (policy.systemPromptMode === "custom") {
-    const custom = readCustomPromptFile(CUSTOM_PROMPT_PATH);
+    const custom = readCustomPromptFile(customPromptPath);
     if (custom.ok) extras.customSystemPrompt = custom.content;
     else notify(`${custom.message}. Falling back to replace mode.`);
   }
@@ -331,16 +350,17 @@ function resolveSystemPromptSources(
 function buildPrompt(
   policy: AcceptedRunPolicy,
   cwd: string,
+  home: string,
   env: EnvInfo,
   resolverExtras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {},
 ): string {
   const agentConfig = policy.definition;
   const extras: PromptExtras = { ...resolverExtras };
   if (Array.isArray(agentConfig.preloadSkills)) {
-    extras.skillBlocks = preloadSkills(agentConfig.preloadSkills, cwd);
+    extras.skillBlocks = preloadSkills(agentConfig.preloadSkills, cwd, home);
   }
   if (Array.isArray(policy.skills)) {
-    extras.skillMetas = loadSkillMeta(policy.skills, cwd);
+    extras.skillElements = formatSkillMetaElements(loadSkillMeta(policy.skills, cwd, home));
   }
   return buildAgentPrompt(agentConfig, cwd, env, extras, policy.systemPromptMode);
 }
@@ -690,10 +710,17 @@ async function runAgentImpl(
       ctx,
       effectiveCwd,
       policy,
+      options.customPromptPath,
       bufferNotify,
     );
 
-    const systemPrompt = buildPrompt(policy, effectiveCwd, env, promptExtras);
+    const systemPrompt = buildPrompt(
+      policy,
+      effectiveCwd,
+      options.homeDirectory,
+      env,
+      promptExtras,
+    );
     const { loader, reload } = createResourceLoader(policy, effectiveCwd, systemPrompt);
     await reload();
     session = await createAndConfigureSession(

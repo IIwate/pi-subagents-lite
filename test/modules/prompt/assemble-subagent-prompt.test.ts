@@ -6,7 +6,10 @@ import {
   assembleSubagentPrompt,
 } from "../../../src/modules/prompt/public.js";
 
-describe("REQ-AGENT-001 Subagent system prompt public seam", () => {
+// Prompt assembly is one input to REQ-AGENT-001; the requirement's acceptance
+// examples live where a spawn is accepted or refused (`test/bootstrap/agent-tool.test.ts`)
+// and where a prompt source is unavailable (`test/agents/agent-runner.test.ts`).
+describe("Subagent system prompt public seam", () => {
   it("assembles a replace-mode prompt from serializable fragments", () => {
     const command = JSON.parse(JSON.stringify({
       kind: "assemble-subagent-prompt",

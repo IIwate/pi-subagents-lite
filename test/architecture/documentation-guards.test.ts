@@ -17,17 +17,60 @@ function markdownFiles(directory: string): string[] {
 
 function scopedMarkdownFiles(): string[] {
   return [
+    resolve(projectRoot, "AGENTS.md"),
     resolve(projectRoot, "CONTEXT.md"),
+    resolve(projectRoot, "README.md"),
     ...markdownFiles(resolve(projectRoot, "docs")),
     ...markdownFiles(resolve(projectRoot, "src/modules")),
   ];
 }
 
-function relativeTargets(source: string): string[] {
+interface MarkdownLink {
+  readonly path: string;
+  readonly fragment?: string;
+}
+
+/**
+ * Inline links and reference definitions, with the fragment kept. Dropping the
+ * fragment is what let a link survive after its heading was renamed: the file
+ * still resolves, so the check passes while the reader lands at the top of a
+ * long document with no way to know what was meant.
+ */
+function repositoryLinks(source: string): MarkdownLink[] {
   const text = readFileSync(source, "utf8");
-  return [...text.matchAll(/\]\(([^)#]+)(?:#[^)]+)?\)/g)]
-    .map((match) => match[1])
-    .filter((target) => !target.startsWith(("http:")) && !target.startsWith("https:") && !target.startsWith("mailto:"));
+  const raw = [
+    ...[...text.matchAll(/\]\(([^)\s]+)\)/g)].map((match) => match[1]),
+    ...[...text.matchAll(/^\[[^\]]+\]:\s*(\S+)/gm)].map((match) => match[1]),
+  ];
+  return raw
+    .filter((target) => !/^(?:https?:|mailto:)/.test(target))
+    .map((target) => {
+      const hash = target.indexOf("#");
+      if (hash < 0) return { path: target };
+      return { path: target.slice(0, hash), fragment: target.slice(hash + 1) };
+    })
+    .filter((link) => link.path !== "" || link.fragment !== undefined);
+}
+
+/** GitHub heading slugs: lowercase, punctuation dropped, spaces hyphenated. */
+function headingSlugs(file: string): Set<string> {
+  const slugs = new Set<string>();
+  const counts = new Map<string, number>();
+  for (const match of readFileSync(file, "utf8").matchAll(/^#{1,6} +(.+?)\s*$/gm)) {
+    const base = match[1]
+      .replace(/`/g, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N} _-]/gu, "")
+      .trim()
+      // One hyphen per space, matching github-slugger: dropped punctuation
+      // between words leaves the spaces behind, so `A — B` anchors as `a--b`.
+      .replace(/ /g, "-");
+    const seen = counts.get(base) ?? 0;
+    counts.set(base, seen + 1);
+    slugs.add(seen === 0 ? base : `${base}-${seen}`);
+  }
+  return slugs;
 }
 
 function requirementIds(): { defined: Set<string>; referenced: Set<string> } {
@@ -52,10 +95,16 @@ describe("documentation guards", () => {
   it("keeps scoped repository links and required module documents valid", () => {
     const errors: string[] = [];
     for (const source of scopedMarkdownFiles()) {
-      for (const target of relativeTargets(source)) {
-        if (!resolve(dirname(source), target).startsWith(projectRoot)) continue;
-        if (!statSync(resolve(dirname(source), target), { throwIfNoEntry: false })) {
-          errors.push(`${relative(projectRoot, source)} -> ${target}`);
+      for (const link of repositoryLinks(source)) {
+        const target = link.path === "" ? source : resolve(dirname(source), link.path);
+        if (!target.startsWith(projectRoot)) continue;
+        if (!statSync(target, { throwIfNoEntry: false })) {
+          errors.push(`${relative(projectRoot, source)} -> ${link.path}`);
+          continue;
+        }
+        if (link.fragment === undefined || !target.endsWith(".md")) continue;
+        if (!headingSlugs(target).has(link.fragment.toLowerCase())) {
+          errors.push(`${relative(projectRoot, source)} -> ${link.path}#${link.fragment}`);
         }
       }
     }
@@ -80,11 +129,14 @@ describe("documentation guards", () => {
     expect([...defined].filter((id) => !referenced.has(id))).toEqual([]);
   });
 
-  it("keeps every active requirement exercised by at least one tagged test title", () => {
+  it("keeps every active requirement exercised by at least one executed tagged test title", () => {
     // An acceptance example is a describe/it title carrying the requirement
     // ID. Matching the title argument rather than the whole file is what makes
     // this a real check: a passing mention in a comment would otherwise let a
-    // requirement claim coverage it does not have.
+    // requirement claim coverage it does not have. Skipped and pending titles
+    // are excluded for the same reason — a title that never runs proves nothing,
+    // and letting one count is how a requirement keeps its badge after its test
+    // was parked.
     const { defined } = requirementIds();
     const tagged = new Set<string>();
     const visit = (directory: string): void => {
@@ -96,8 +148,9 @@ describe("documentation guards", () => {
         }
         if (!path.endsWith(".ts")) continue;
         const source = readFileSync(path, "utf8");
-        for (const call of source.matchAll(/\b(?:describe|it|test)(?:\.\w+)*\s*\(\s*(["'`])((?:[^\\]|\\.)*?)\1/g)) {
-          for (const id of call[2].matchAll(/REQ-[A-Z]+-\d+/g)) tagged.add(id[0]);
+        for (const call of source.matchAll(/\b(?:describe|it|test)((?:\.\w+)*)\s*\(\s*(["'`])((?:[^\\]|\\.)*?)\2/g)) {
+          if (/\.(?:skip|todo|skipIf|runIf|fails)\b/.test(call[1])) continue;
+          for (const id of call[3].matchAll(/REQ-[A-Z]+-\d+/g)) tagged.add(id[0]);
         }
       }
     };

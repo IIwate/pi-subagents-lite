@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SubagentRuntime } from "../../src/modules/subagent-runtime/public.js";
-import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+import { createAgentStatusToolExecutor } from "../../src/bootstrap/agent-status-tool.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { takeFallbackResults } from "../../src/platform/process/process-state.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";

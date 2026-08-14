@@ -1,11 +1,12 @@
 import { Check } from "typebox/value";
 import {
   SettingsCommandSchema,
+  SettingsResultSchema,
   type SettingsNotice,
   type SettingsResult,
   type SettingsSnapshot,
-  type SystemPromptMode,
 } from "../contracts/settings-contracts.js";
+import type { SystemPromptMode } from "../../prompt/public.js";
 import {
   buildConcurrencyRows,
   CONCURRENCY_LIMIT_MINIMUM,
@@ -94,7 +95,7 @@ type Page =
   | { id: "ma-unavailable" }
   | { id: "ma-unavailable-provider"; provider: string };
 
-type SettingsFailureCode = "invalid-command" | "unknown-row" | "invalid-value";
+type SettingsFailureCode = "invalid-command" | "unknown-row" | "invalid-value" | "invalid-snapshot";
 
 export function createSettings(options: CreateSettingsOptions): Settings {
   let stack: Page[] = [{ id: "root" }];
@@ -601,39 +602,56 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     }
   };
 
+  /**
+   * The single exit. Owner ports are replaceable implementations, so a view
+   * they return is not trusted merely because it typechecked at compile time;
+   * a row that violates the contract reaches the renderer as a widget with no
+   * value or an action with no label. Refusing the whole page keeps the
+   * failure where it can be read — an error notice on a workflow the user can
+   * back out of — instead of a half-drawn page they can act on.
+   */
+  const outbound = (result: SettingsResult): SettingsResult =>
+    Check(SettingsResultSchema, result)
+      ? result
+      : { ok: false, error: { code: "invalid-snapshot", message: "Settings page does not match its contract." } };
+
   return {
     execute(command: unknown): SettingsResult {
-      if (!Check(SettingsCommandSchema, command)) {
-        return failure("invalid-command", "Command does not match the settings command schema.");
-      }
-      switch (command.kind) {
-        case "open": {
-          stack = [{ id: "root" }];
-          return { ok: true, snapshot: buildSnapshot(current()) };
-        }
-        case "back": {
-          if (stack.length > 1) {
-            stack.pop();
-            return { ok: true, snapshot: buildSnapshot(current()) };
-          }
-          return { ok: true, snapshot: buildSnapshot(current()), effect: { kind: "close" } };
-        }
-        case "select":
-          return select(command.id);
-        case "set-value": {
-          switch (current().id) {
-            case "display": return setDisplayValue(command.id, command.value);
-            case "spawn-options": return setSpawnValue(command.id, command.value);
-            case "system-prompt": return setSystemPromptValue(command.id, command.value);
-            case "concurrency": return setConcurrencyValue(command.id, command.value);
-            case "debug": return setDebugValue(command.id);
-            default: return failure("unknown-row", `Page ${current().id} has no editable row ${command.id}.`);
-          }
-        }
-        case "update-limit":
-        case "add-limit":
-          return applyLimitUpdate(command);
-      }
+      return outbound(run(command));
     },
   };
+
+  function run(command: unknown): SettingsResult {
+    if (!Check(SettingsCommandSchema, command)) {
+      return failure("invalid-command", "Command does not match the settings command schema.");
+    }
+    switch (command.kind) {
+      case "open": {
+        stack = [{ id: "root" }];
+        return { ok: true, snapshot: buildSnapshot(current()) };
+      }
+      case "back": {
+        if (stack.length > 1) {
+          stack.pop();
+          return { ok: true, snapshot: buildSnapshot(current()) };
+        }
+        return { ok: true, snapshot: buildSnapshot(current()), effect: { kind: "close" } };
+      }
+      case "select":
+        return select(command.id);
+      case "set-value": {
+        switch (current().id) {
+          case "display": return setDisplayValue(command.id, command.value);
+          case "spawn-options": return setSpawnValue(command.id, command.value);
+          case "system-prompt": return setSystemPromptValue(command.id, command.value);
+          case "concurrency": return setConcurrencyValue(command.id, command.value);
+          case "debug": return setDebugValue(command.id);
+          default: return failure("unknown-row", `Page ${current().id} has no editable row ${command.id}.`);
+        }
+      }
+      case "update-limit":
+      case "add-limit":
+        return applyLimitUpdate(command);
+    }
+  }
 }

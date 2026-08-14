@@ -8,7 +8,7 @@ The parent LLM can call `Agent`, `StopAgent`, and `AgentStatus` using the existi
 
 ### REQ-AGENT-001 — Spawn through Agent
 
-The `Agent` tool accepts the existing spawn inputs and returns the existing success or failure outcome. `/agents` remains a management workflow and does not become a second spawn entry point.
+The `Agent` tool accepts the existing spawn inputs and returns the existing success or failure outcome. A prompt source the user cannot see or correct — unavailable inherited parent prompt text — fails the call rather than running under a different prompt mode; an absent custom prompt file, which the settings workflow shows and offers to create, degrades to replace mode with a notice. `/agents` remains a management workflow and does not become a second spawn entry point.
 
 ### REQ-AGENT-002 — Lock accepted run policy
 

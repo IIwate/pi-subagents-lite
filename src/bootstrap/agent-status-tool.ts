@@ -8,8 +8,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
 import type { BackgroundResultRecord } from "../modules/background-result-delivery/public.js";
-import type { ExtensionRuntime } from "../bootstrap/extension-runtime.js";
-import { formatResultContent } from "./tool-execution.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
+import { formatResultContent } from "./agent-tool.js";
 
 function formatAgent(record: AgentSnapshot): string {
   return `${record.id} (${record.type}) ${record.status}`;

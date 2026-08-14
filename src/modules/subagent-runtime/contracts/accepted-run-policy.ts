@@ -1,5 +1,11 @@
 import { Type, type Static } from "typebox";
 import { AgentDefinitionSnapshotSchema } from "../../agent-catalogue/public.js";
+// Thinking levels and prompt modes are one vocabulary shared by authorization,
+// runtime, and settings. They are imported from their owning modules rather
+// than restated: two identical literal unions drift silently, and the drift
+// only shows up as a value one module accepts and another rejects.
+import { ThinkingLevelSchema } from "../../model-access/public.js";
+import { SystemPromptModeSchema } from "../../prompt/public.js";
 
 const JsonValueSchema = Type.Cyclic({
   JsonValue: Type.Union([
@@ -11,22 +17,6 @@ const JsonValueSchema = Type.Cyclic({
     Type.Record(Type.String(), Type.Ref("JsonValue")),
   ]),
 }, "JsonValue");
-
-export const ThinkingLevelSchema = Type.Union([
-  Type.Literal("off"),
-  Type.Literal("minimal"),
-  Type.Literal("low"),
-  Type.Literal("medium"),
-  Type.Literal("high"),
-  Type.Literal("xhigh"),
-  Type.Literal("max"),
-]);
-
-export const SystemPromptModeSchema = Type.Union([
-  Type.Literal("replace"),
-  Type.Literal("inherit"),
-  Type.Literal("custom"),
-]);
 
 export const AgentInvocationSchema = Type.Object({
   modelName: Type.Optional(Type.String()),
@@ -95,7 +85,5 @@ export const AcceptedRunPolicySchema = Type.Object({
 
 export type AcceptedModelSnapshot = Static<typeof AcceptedModelSnapshotSchema>;
 export type AcceptedScopedModel = Static<typeof AcceptedScopedModelSchema>;
-export type ThinkingLevel = Static<typeof ThinkingLevelSchema>;
-export type SystemPromptMode = Static<typeof SystemPromptModeSchema>;
 export type AgentInvocation = Static<typeof AgentInvocationSchema>;
 export type AcceptedRunPolicy = Static<typeof AcceptedRunPolicySchema>;

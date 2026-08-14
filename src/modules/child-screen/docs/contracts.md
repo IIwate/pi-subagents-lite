@@ -8,6 +8,7 @@
 
 - `NavigatorCommandSchema` and `NavigatorCommandResultSchema` cover records, select, fold, keys, notices, and project.
 - `NavigatorSnapshotSchema` and `RenderedLineSchema` are the serializable selection, fold, and presentation view.
+- `ChildStatusSchema` aliases the runtime's `AgentStatusSchema`; lifecycle vocabulary is owned there and only rendered here.
 
 Exact fields are defined once in TypeBox and are not duplicated here.
 

@@ -1,14 +1,13 @@
 import { Type, type Static } from "typebox";
+import { AgentStatusSchema } from "../../subagent-runtime/public.js";
 
-export const DeliveryStatusSchema = Type.Union([
-  Type.Literal("queued"),
-  Type.Literal("running"),
-  Type.Literal("completed"),
-  Type.Literal("turn_limited"),
-  Type.Literal("aborted"),
-  Type.Literal("stopped"),
-  Type.Literal("error"),
-]);
+/**
+ * The status a persisted record carries is the run's lifecycle status, owned by
+ * the runtime. Aliased rather than restated: a private copy would keep
+ * validating records after the runtime added or renamed a state, and the drift
+ * would only show up as a record this module refuses to read back.
+ */
+export const DeliveryStatusSchema = AgentStatusSchema;
 
 export const BackgroundResultRecordSchema = Type.Object({
   deliveryId: Type.String({ minLength: 1 }),
@@ -35,6 +34,18 @@ export const RecordTerminalCommandSchema = Type.Object({
   kind: Type.Literal("record-terminal"),
   record: BackgroundResultRecordSchema,
   stillPresent: Type.Boolean(),
+}, { additionalProperties: false });
+
+/**
+ * Registers the parent entry a background spawn was launched from. The host
+ * caches the active branch only at turn boundaries, and the entry that holds
+ * the Agent call is created inside the turn — so without this seed the run's
+ * own origin looks off-branch when it completes, and the result is hidden
+ * from the session that asked for it.
+ */
+export const TrackOriginCommandSchema = Type.Object({
+  kind: Type.Literal("track-origin"),
+  originEntryId: Type.String({ minLength: 1 }),
 }, { additionalProperties: false });
 
 export const ParentPreflightCommandSchema = Type.Object({
@@ -79,6 +90,7 @@ export const DisposeDeliveryCommandSchema = Type.Object({
 
 export const DeliveryCommandSchema = Type.Union([
   RecordTerminalCommandSchema,
+  TrackOriginCommandSchema,
   ParentPreflightCommandSchema,
   ParentStartCommandSchema,
   ParentEndCommandSchema,

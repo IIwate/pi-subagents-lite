@@ -6,6 +6,14 @@ export const DEFAULT_RETENTION_MS = 10 * 60_000;
 export const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
 export const DEFAULT_TEARDOWN_TIMEOUT_MS = 15_000;
 export const DEFAULT_CONCURRENCY_LIMIT = 4;
+/**
+ * Turns a subagent may still use after the soft turn limit to wrap up.
+ *
+ * Owned here with the other runtime defaults because both the settings
+ * fragment that persists an override and the session adapter that enforces the
+ * limit need the same number; a second copy in either place would drift.
+ */
+export const DEFAULT_GRACE_TURNS = 6;
 
 export const AgentStatusSchema = Type.Union([
   Type.Literal("queued"),

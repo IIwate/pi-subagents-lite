@@ -10,7 +10,7 @@
 
 import * as path from "node:path";
 import { existsSync, statSync, realpathSync } from "node:fs";
-import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
+import { GIT_EXEC_TIMEOUT_MS } from "../../utils.js";
 /** Specific error messages returned to the LLM for self-correction. */
 export const WORKTREE_VALIDATION_ERRORS = {
   PATH_DOES_NOT_EXIST: "worktree_path does not exist: the specified path was not found on disk",
@@ -39,9 +39,11 @@ export interface WorktreeValidationFailure {
 export type WorktreeValidationResult = WorktreeValidationSuccess | WorktreeValidationFailure;
 
 /**
- * Minimal interface for the pi exec function — only what the validator needs.
+ * The command capability the validator needs, owned here rather than imported
+ * from the host package: git probing is the requirement, and a host that runs
+ * commands some other way satisfies this without the validator changing.
  */
-interface PiExec {
+export interface CommandRunner {
   exec(cmd: string, args: string[], opts?: { cwd?: string; timeout?: number }): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 
@@ -50,7 +52,7 @@ interface PiExec {
  * Returns a failure result if the command fails or git is unavailable.
  */
 async function getGitCommonDir(
-  pi: PiExec,
+  pi: CommandRunner,
   cwd: string,
   notInRepoError: string,
   onWarning?: (msg: string) => void,
@@ -106,7 +108,7 @@ function normalizeGitPath(gitPath: string, cwd: string): string {
  * @returns Validation result with resolved path + label, or error
  */
 export async function validateWorktreePath(
-  pi: PiExec,
+  pi: CommandRunner,
   worktreePath: string,
   parentCwd: string,
   onWarning?: (msg: string) => void,

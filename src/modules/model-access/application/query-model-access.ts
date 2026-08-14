@@ -5,13 +5,12 @@ import {
 } from "../contracts/model-access-contracts.js";
 import { listEffectiveAlternateKeys } from "../core/effective-alternates.js";
 import { listAgentTypesForProvider, listUnavailableModelRules } from "../core/provider-rules.js";
-import {
-  decideThinkingAccess,
-  decideThinkingSelection,
-  type ThinkingAccessPolicy,
-  type ThinkingSelection,
-} from "../core/thinking-access.js";
-import type { ThinkingLevel } from "../contracts/model-access-contracts.js";
+import { decideThinkingAccess, decideThinkingSelection } from "../core/thinking-access.js";
+import type {
+  ThinkingAccessPolicy,
+  ThinkingLevel,
+  ThinkingSelection,
+} from "../contracts/model-access-contracts.js";
 
 function asFragment(routing: unknown): ModelAccessFragment | undefined {
   return Check(ModelAccessFragmentSchema, routing) ? routing : undefined;
@@ -43,7 +42,9 @@ export function agentTypesForProvider(routing: unknown, provider: string): strin
 export function unavailableModelRules(
   routing: unknown,
   provider: string,
-  catalogueModelIds: ReadonlySet<string>,
+  // Serializable list, not a Set: the public surface must survive a JSON hop,
+  // and the caller's uniqueness guarantee is not something this module needs.
+  catalogueModelIds: readonly string[],
   providerPresent: boolean,
   registryReliable: boolean,
 ): Record<string, string[]> {
@@ -52,7 +53,7 @@ export function unavailableModelRules(
   return listUnavailableModelRules({
     routing: fragment,
     provider,
-    catalogueModelIds: [...catalogueModelIds],
+    catalogueModelIds,
     providerPresent,
     registryReliable,
   });
@@ -89,5 +90,3 @@ export function selectThinkingLevel(
 ): ThinkingSelection {
   return decideThinkingSelection(policy, requested);
 }
-
-export type { ThinkingAccessPolicy, ThinkingSelection };

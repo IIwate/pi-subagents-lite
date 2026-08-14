@@ -12,7 +12,7 @@ Resolve external configuration sources and atomically transact serialized fragme
 
 ## Supported product requirements
 
-- [REQ-CONFIG-001](../../../../docs/product/prd/settings.md#req-config-001)
+- [REQ-CONFIG-001](../../../../docs/product/prd/settings.md#req-config-001--atomic-persistence-failure-correction)
 - [Settings PRD](../../../../docs/product/prd/settings.md)
 
 `REQ-CONFIG-001` is the only persistence behavior correction owned by this support module. All other settings requirements remain owned by `settings` or the policy module they delegate to.

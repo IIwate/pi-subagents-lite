@@ -7,6 +7,7 @@ import {
   createSubagentRuntime,
   DEFAULT_RETENTION_MS,
   type AgentSnapshot,
+  type ConcurrencyScheduler,
   type SessionDriver,
   type SessionEvent,
   type SessionInspectResult,
@@ -143,12 +144,37 @@ const acceptingWorktree: WorktreeInspector = {
   },
 };
 
+/** Timer port double whose registered callbacks the test fires by hand. */
+function createTimers() {
+  const intervals: Array<{ ms: number; run: () => void }> = [];
+  const timeouts: Array<{ ms: number; run: () => void }> = [];
+  return {
+    intervals,
+    timeouts,
+    port: {
+      interval(ms: number, run: () => void) {
+        const entry = { ms, run };
+        intervals.push(entry);
+        return { clear() { intervals.splice(intervals.indexOf(entry), 1); } };
+      },
+      timeout(ms: number, run: () => void) {
+        const entry = { ms, run };
+        timeouts.push(entry);
+        return { clear() { timeouts.splice(timeouts.indexOf(entry), 1); } };
+      },
+    },
+  };
+}
+
 function createRuntime(
   driver: SessionDriver,
   overrides?: {
     clock?: { now(): number };
     limits?: { defaultModelLimit: number; modelLimits: Record<string, number>; providerLimits: Record<string, number> };
     worktree?: WorktreeInspector;
+    concurrency?: ConcurrencyScheduler;
+    timers?: ReturnType<typeof createTimers>["port"];
+    cleanupIntervalMs?: number;
   },
 ) {
   return createSubagentRuntime({
@@ -156,10 +182,12 @@ function createRuntime(
     worktreeInspector: overrides?.worktree ?? acceptingWorktree,
     clock: overrides?.clock ?? { now: () => 1_000 },
     ids: createIds(),
-    scheduler: {
+    scheduler: overrides?.timers ?? {
       interval: () => ({ clear() {} }),
       timeout: () => ({ clear() {} }),
     },
+    ...(overrides?.concurrency ? { concurrency: overrides.concurrency } : {}),
+    ...(overrides?.cleanupIntervalMs != null ? { cleanupIntervalMs: overrides.cleanupIntervalMs } : {}),
     limits: overrides?.limits ?? {
       defaultModelLimit: 4,
       modelLimits: {},
@@ -342,6 +370,58 @@ describe("REQ-RUNTIME-001 queue release", () => {
     expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
     expect(memory.runs.has("agent-00000002")).toBe(true);
   });
+
+  it("admits and releases through the injected scheduler instead of the built-in ceilings", async () => {
+    const calls: string[] = [];
+    let admit = true;
+    const substitute: ConcurrencyScheduler = {
+      reserve(key) {
+        calls.push(`reserve:${key}`);
+        return admit
+          ? { accepted: true, concurrencyKey: key }
+          : { accepted: false, reason: "concurrency", concurrencyKey: key };
+      },
+      release(key) { calls.push(`release:${key}`); },
+      replaceLimits() { calls.push("replaceLimits"); },
+    };
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      concurrency: substitute,
+      limits: { defaultModelLimit: 99, modelLimits: {}, providerLimits: {} },
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "one",
+      description: "one",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    admit = false;
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "two",
+      description: "two",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    // The generous `limits` would have admitted both runs; the substitute's
+    // verdict is what the lifecycle acted on.
+    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("running");
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("queued");
+
+    admit = true;
+    await completeRun(memory, "agent-00000001");
+    await Promise.resolve();
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(calls).toEqual([
+      "reserve:test/model",
+      "reserve:test/model",
+      "release:test/model",
+      "reserve:test/model",
+    ]);
+  });
 });
 
 describe("REQ-RUNTIME-003 foreground interruption", () => {
@@ -450,6 +530,39 @@ describe("REQ-RUNTIME-004 retention and pinning", () => {
     expect(runtime.getSnapshot("agent-00000002")).toBeUndefined();
     expect(removed).toEqual(["agent-00000002"]);
     expect(memory.closes).toEqual(["agent-00000002"]);
+  });
+
+  it("expires through the injected interval without an explicit expire command", async () => {
+    const clock = createClock();
+    const timers = createTimers();
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      clock,
+      timers: timers.port,
+      cleanupIntervalMs: 30_000,
+    });
+    const removed: string[] = [];
+    runtime.setOnRemove((snapshot) => { removed.push(snapshot.id); });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "sweep",
+      description: "sweep",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await completeRun(memory, "agent-00000001");
+    await runtime.execute({ kind: "mark-result", id: "agent-00000001", consumed: true });
+
+    expect(timers.intervals.map((entry) => entry.ms)).toEqual([30_000]);
+    clock.advance(DEFAULT_RETENTION_MS + 1);
+    timers.intervals[0]?.run();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot("agent-00000001")).toBeUndefined();
+    expect(removed).toEqual(["agent-00000001"]);
+    expect(memory.closes).toEqual(["agent-00000001"]);
   });
 
   it("pauses cleanup while pinned and resumes the remaining window", async () => {
@@ -709,5 +822,42 @@ describe("session-driver contract", () => {
       "progress",
       "completed",
     ]);
+  });
+
+  it("drops an off-contract driver event instead of publishing an invalid snapshot", async () => {
+    const memory = createMemoryDriver();
+    memory.driver.start = (request, emit) => {
+      // A replacement driver that forwards a vendor thinking level verbatim.
+      // The value is outside the canonical set, so applying it would leave the
+      // published snapshot failing its own contract.
+      emit({
+        type: "session-ready",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        thinkingLevel: "ultra" as never,
+      });
+      return new Promise<void>(() => {});
+    };
+
+    const runtime = createRuntime(memory.driver);
+    const spawned = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(spawned).toMatchObject({ ok: true });
+
+    const published = runtime.getSnapshot("agent-00000001") as AgentSnapshot;
+    expect(Check(AgentSnapshotSchema, published)).toBe(true);
+    expect(published.invocation?.thinkingLevel).toBeUndefined();
+    expect(runtime.listSnapshots().every((snapshot) => Check(AgentSnapshotSchema, snapshot))).toBe(true);
+    // Dropping the event whole is the documented cost: readiness never lands,
+    // so interaction queues instead of steering a session the runtime cannot
+    // describe. Asserted here so the failure boundary stays visible.
+    expect(published.liveSession).toBe(false);
+    await runtime.execute({ kind: "interact", id: "agent-00000001", message: "nudge" });
+    expect(memory.steers).toEqual([]);
   });
 });

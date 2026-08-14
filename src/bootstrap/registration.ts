@@ -1,18 +1,11 @@
 import { Type } from "typebox";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Container } from "@earendil-works/pi-tui";
-import { createAgentToolExecutor, createStopAgentToolExecutor } from "./agents/tool-execution.js";
-import { createAgentStatusToolExecutor } from "./agents/agent-status.js";
-import type { ExtensionRuntime } from "./bootstrap/extension-runtime.js";
-import { showAgentsMenu } from "./bootstrap/settings.js";
-
-// Subagent state belongs to the below-editor list. Results still reach the LLM,
-// but all three tools render zero chat rows so Pi's default tool cards cannot leak back in.
-const SILENT_TOOL_RENDERING = {
-  renderShell: "self" as const,
-  renderCall: () => new Container(),
-  renderResult: () => new Container(),
-};
+import { ThinkingLevelSchema } from "../modules/model-access/public.js";
+import { createAgentToolExecutor, createStopAgentToolExecutor } from "./agent-tool.js";
+import { createAgentStatusToolExecutor } from "./agent-status-tool.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
+import { showAgentsMenu } from "./settings.js";
+import { SILENT_TOOL_RENDERING } from "../platform/pi/tui/silent-tool-rendering.js";
 
 // ============================================================================
 // Agent tool registration helper — stable schema for the runtime lifetime
@@ -31,15 +24,10 @@ function registerAgentTool(runtime: ExtensionRuntime): void {
       agent: agentParam,
       // Optional explicit alternate as an exact canonical provider/model key.
       model: Type.Optional(Type.String()),
-      thinking: Type.Optional(Type.Union([
-        Type.Literal("off"),
-        Type.Literal("minimal"),
-        Type.Literal("low"),
-        Type.Literal("medium"),
-        Type.Literal("high"),
-        Type.Literal("xhigh"),
-        Type.Literal("max"),
-      ])),
+      // The registered schema must offer exactly the levels authorization can
+      // grant; a hand-written copy here would advertise a level the policy
+      // rejects, and the model would spend a turn discovering it.
+      thinking: Type.Optional(ThinkingLevelSchema),
       run_in_background: Type.Optional(Type.Boolean()),
       worktree_path: Type.Optional(Type.String({
         description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",

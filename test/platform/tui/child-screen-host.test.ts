@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerAgents } from "../../../src/agents/agent-types.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChildScreenHost } from "../../../src/platform/pi/tui/child-screen-host.js";
 import {
   makeManager,
@@ -18,14 +17,9 @@ import {
 describe("ChildScreenHost", () => {
   let host: ChildScreenHost | undefined;
 
-  beforeEach(() => {
-    registerAgents(new Map());
-  });
-
   afterEach(() => {
     host?.dispose();
     host = undefined;
-    registerAgents(new Map());
     vi.useRealTimers();
   });
 
@@ -145,26 +139,23 @@ describe("ChildScreenHost", () => {
       expect(ui.statuses.has("subagents-lite")).toBe(false);
     });
 
-    it("resolves display names through the registered agent catalogue", () => {
-      registerAgents(new Map([[
-        "long-agent",
-        {
-          name: "long-agent",
-          displayName: "Extremely Long Custom Agent Display Name",
-          description: "Long name test",
-          systemPrompt: "Review the project.",
-        } as any,
-      ]]));
+    it("renders the display name supplied by the composition root", () => {
       const record = makeRecord("agent-long", "running");
       record.type = "long-agent";
       const ui = makeUI({ value: "" });
-      host = new ChildScreenHost(makeManager([record]));
+      host = new ChildScreenHost(
+        makeManager([record]),
+        undefined,
+        undefined,
+        true,
+        (type) => (type === "long-agent" ? "Extremely Long Custom Agent Display Name" : type),
+      );
       host.setUICtx(ui.ctx as any);
       host.ensureTimer();
       const { tui, selector } = mountSelector(ui);
       tui.terminal.columns = 42;
 
-      // The catalogue display name replaces the raw type and is truncated
+      // The injected display name replaces the raw type and is truncated
       // ahead of the reserved identity column on a narrow terminal.
       const text = stripAnsi(selector.render(42).join("\n"));
       expect(text).toContain("(Running)");

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureManagerAndNavigator } from "../src/events.js";
-import { createExtensionRuntime, type ExtensionRuntime } from "../src/bootstrap/extension-runtime.js";
-import { ChildScreenHost } from "../src/bootstrap/child-screen.js";
-import { fakeCtx, fakePi } from "./fixtures.ts";
+import { ensureManagerAndNavigator } from "../../src/bootstrap/events.js";
+import { createExtensionRuntime, type ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
+import { ChildScreenHost } from "../../src/bootstrap/child-screen.js";
+import { fakeCtx, fakePi } from "../fixtures.ts";
 
 // The navigator seed values flow from the persisted document through the real
 // bootstrap seams (configuration -> agent-settings -> navigator). vi.hoisted

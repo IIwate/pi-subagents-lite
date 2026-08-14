@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeExtensionRuntime } from "../fixtures.ts";
 
-import { createStopAgentToolExecutor, formatResultContent } from "../../src/agents/tool-execution.js";
+import { createStopAgentToolExecutor, formatResultContent } from "../../src/bootstrap/agent-tool.js";
 
 const mockAbort = vi.fn(() => false);
 const mockGetRecord = vi.fn();

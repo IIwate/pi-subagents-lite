@@ -3,16 +3,12 @@ export {
   AcceptedModelSnapshotSchema,
   AcceptedScopedModelSchema,
   AgentInvocationSchema,
-  SystemPromptModeSchema,
-  ThinkingLevelSchema,
 } from "./contracts/accepted-run-policy.js";
 export type {
   AcceptedRunPolicy,
   AcceptedModelSnapshot,
   AcceptedScopedModel,
   AgentInvocation,
-  SystemPromptMode,
-  ThinkingLevel,
 } from "./contracts/accepted-run-policy.js";
 export { parseAcceptedRunPolicy } from "./application/validate-accepted-run-policy.js";
 export {
@@ -45,6 +41,7 @@ export {
   InteractionResultSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
   DEFAULT_CONCURRENCY_LIMIT,
+  DEFAULT_GRACE_TURNS,
   DEFAULT_RETENTION_MS,
   DEFAULT_TEARDOWN_TIMEOUT_MS,
 } from "./contracts/lifecycle.js";

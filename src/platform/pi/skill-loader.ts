@@ -18,14 +18,14 @@
  */
 
 import { readFileSync, realpathSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  formatSkillsForPrompt,
   loadSkills,
   loadSkillsFromDir,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
-import { isUnsafeName } from "../utils.js";
+import { isUnsafeName } from "../../utils.js";
 
 export interface PreloadedSkill {
   name: string;
@@ -53,26 +53,24 @@ export interface SkillMeta {
  *
  * Deduplication: by canonical path (symlink dedup) and by name (first match wins).
  */
-export function loadAllSkills(cwd: string): Skill[] {
+export function loadAllSkills(cwd: string, home: string): Skill[] {
   const resolvedCwd = resolve(cwd);
 
   // Ancestor .agents/skills (highest precedence)
   const ancestorsSkills = loadAncestorAgentsSkills(resolvedCwd);
 
   // ~/.agents/skills
+  const homeAgentsDir = join(home, ".agents", "skills");
   const homeAgentsResult = loadSkillsFromDir({
-    dir: join(homedir(), ".agents", "skills"),
+    dir: homeAgentsDir,
     source: "agents",
   });
-  const homeAgentsSkills = filterRootMdFiles(
-    homeAgentsResult.skills,
-    join(homedir(), ".agents", "skills"),
-  );
+  const homeAgentsSkills = filterRootMdFiles(homeAgentsResult.skills, homeAgentsDir);
 
   // Pi defaults: ~/.pi/agent/skills and <cwd>/.pi/skills
   const defaultsResult = loadSkills({
     cwd: resolvedCwd,
-    agentDir: join(homedir(), ".pi", "agent"),
+    agentDir: join(home, ".pi", "agent"),
     skillPaths: [],
     includeDefaults: true,
   });
@@ -154,8 +152,8 @@ function canonicalizePath(filePath: string): string {
   try { return realpathSync(filePath); } catch { return filePath; }
 }
 
-export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill[] {
-  const skills = loadAllSkills(cwd);
+export function preloadSkills(skillNames: string[], cwd: string, home: string): PreloadedSkill[] {
+  const skills = loadAllSkills(cwd, home);
   return skillNames.map((name) => {
     if (isUnsafeName(name)) {
       return { name, description: "", content: `(Skill "${name}" skipped: name contains path traversal characters)` };
@@ -176,8 +174,8 @@ export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill
  * Load skill metadata only (name, description, location) without full content.
  * Used for the skills whitelist — agent can read full content on-demand.
  */
-export function loadSkillMeta(skillNames: string[], cwd: string): SkillMeta[] {
-  const skills = loadAllSkills(cwd);
+export function loadSkillMeta(skillNames: string[], cwd: string, home: string): SkillMeta[] {
+  const skills = loadAllSkills(cwd, home);
   return skillNames.map((name) => {
     const match = skills.find((s) => s.name === name);
     if (!match) {
@@ -192,4 +190,23 @@ export function loadSkillMeta(skillNames: string[], cwd: string): SkillMeta[] {
   });
 }
 
+/**
+ * Render whitelisted skill metadata as `<skill>` elements.
+ *
+ * Pi owns the wording of the advertised skill block, so the metadata is fed
+ * back through its formatter and the elements are extracted. Prompt assembly
+ * receives strings and never sees a vendor Skill object.
+ */
+export function formatSkillMetaElements(metas: readonly SkillMeta[]): string[] {
+  if (metas.length === 0) return [];
+  const piSkills: Skill[] = metas.map((meta) => ({
+    name: meta.name,
+    description: meta.description,
+    filePath: meta.location,
+    baseDir: "",
+    sourceInfo: {} as Skill["sourceInfo"],
+    disableModelInvocation: meta.disableModelInvocation,
+  }));
+  return formatSkillsForPrompt(piSkills).match(/<skill>[\s\S]*?<\/skill>/g) ?? [];
+}
 

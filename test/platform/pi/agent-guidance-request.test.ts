@@ -1,5 +1,16 @@
+/**
+ * agent-guidance-request.test.ts — Pi session objects projected onto the
+ * prompt module's guidance request.
+ *
+ * The adapter under test owns the translation only: thinking capability from
+ * Pi's compat helpers, scope from ExtensionContext. Assertions run on the
+ * assembled guidance because that is the observable result of a wrong
+ * projection — a dropped alternate or a thinking level that never existed.
+ */
+
 import { describe, expect, it } from "vitest";
-import { buildCurrentAgentGuidance } from "../../src/prompt/agent-guidance.ts";
+import { piGuidanceHost, piModelCapability } from "../../../src/platform/pi/agent-guidance-request.ts";
+import { createParentGuidance } from "../../../src/modules/prompt/public.js";
 
 const agents = [
   { name: "reviewer", description: "Focused review" },
@@ -20,9 +31,10 @@ const availableModels = [
   { provider: "google", id: "gemini-pro", reasoning: false },
 ] as any[];
 
+const guidance = createParentGuidance({ catalogue: { listAgents: () => agents } });
+
 function build(overrides: Record<string, unknown> = {}): string {
-  return buildCurrentAgentGuidance({
-    agents,
+  const result = guidance.assemble(piGuidanceHost({
     parentModel,
     parentThinkingLevel: "medium",
     routing: {
@@ -45,10 +57,30 @@ function build(overrides: Record<string, unknown> = {}): string {
       { model: availableModels[4] },
     ],
     ...overrides,
-  } as any);
+  } as any));
+  if (!result.ok) throw new Error(`Guidance request rejected: ${result.error.message}`);
+  return result.guidance;
 }
 
-describe("buildCurrentAgentGuidance", () => {
+describe("piModelCapability", () => {
+  it("projects a Pi model onto the canonical capability shape", () => {
+    expect(piModelCapability(availableModels[2], [])).toEqual({
+      key: "openai/gpt-5",
+      supportedLevels: expect.arrayContaining(["off", "high"]),
+      fallbackLevel: "high",
+      scopedThinkingLevel: null,
+    });
+  });
+
+  it("reports the scope-pinned thinking level for a scoped model", () => {
+    const capability = piModelCapability(availableModels[2], [
+      { model: availableModels[2], thinkingLevel: "medium" },
+    ] as any);
+    expect(capability.scopedThinkingLevel).toBe("medium");
+  });
+});
+
+describe("piGuidanceHost", () => {
   it("is deterministic and sorts callable Agent types", () => {
     const first = build();
     expect(build()).toBe(first);
@@ -56,33 +88,33 @@ describe("buildCurrentAgentGuidance", () => {
   });
 
   it("includes critical tool rules and distinguishes Parent access", () => {
-    const guidance = build();
-    expect(guidance).toContain("[Subagent access]");
-    expect(guidance).toContain("run_in_background: true");
-    expect(guidance).toContain("Do not poll");
-    expect(guidance).toContain("worktree_path");
-    expect(guidance).toContain("anthropic/sonnet");
-    expect(guidance).toContain("reviewer");
-    expect(guidance).toContain("parent default");
-    expect(guidance).toContain("medium");
-    expect(guidance).toContain("Explore");
-    expect(guidance).toContain("`model` is required");
+    const text = build();
+    expect(text).toContain("[Subagent access]");
+    expect(text).toContain("run_in_background: true");
+    expect(text).toContain("Do not poll");
+    expect(text).toContain("worktree_path");
+    expect(text).toContain("anthropic/sonnet");
+    expect(text).toContain("reviewer");
+    expect(text).toContain("parent default");
+    expect(text).toContain("medium");
+    expect(text).toContain("Explore");
+    expect(text).toContain("`model` is required");
   });
 
   it("advertises exact alternates with effective thinking summaries", () => {
-    const guidance = build();
-    expect(guidance).toContain("Explore alternate models:");
-    expect(guidance).toContain("openai/gpt-5");
-    expect(guidance).toContain("google/gemini-pro");
-    expect(guidance).toContain("default: high");
-    expect(guidance).toContain("default: off");
-    expect(guidance).not.toContain("openai/*");
-    expect(guidance).not.toContain("openai/o3");
-    expect(guidance).not.toContain("google/missing");
+    const text = build();
+    expect(text).toContain("Explore alternate models:");
+    expect(text).toContain("openai/gpt-5");
+    expect(text).toContain("google/gemini-pro");
+    expect(text).toContain("default: high");
+    expect(text).toContain("default: off");
+    expect(text).not.toContain("openai/*");
+    expect(text).not.toContain("openai/o3");
+    expect(text).not.toContain("google/missing");
   });
 
   it("shows unavailable Agent types when no authorized model exists", () => {
-    const guidance = build({
+    const text = build({
       routing: {
         enabled: false,
         enabledProviders: [],
@@ -92,21 +124,21 @@ describe("buildCurrentAgentGuidance", () => {
         },
       },
     });
-    expect(guidance).toContain("Unavailable agent types:");
-    expect(guidance).toContain("Explore: no authorized model");
-    expect(guidance).toContain("reviewer: no authorized model");
-    expect(guidance).not.toContain("Model routing is OFF. Other models are not authorized.");
+    expect(text).toContain("Unavailable agent types:");
+    expect(text).toContain("Explore: no authorized model");
+    expect(text).toContain("reviewer: no authorized model");
+    expect(text).not.toContain("Model routing is OFF. Other models are not authorized.");
   });
 
   it("retains callable alternates without an active Parent default", () => {
-    const guidance = build({ parentModel: undefined, parentThinkingLevel: undefined });
-    expect(guidance).toContain("Explore");
-    expect(guidance).toContain("openai/gpt-5");
-    expect(guidance).toContain("reviewer: no authorized model");
+    const text = build({ parentModel: undefined, parentThinkingLevel: undefined });
+    expect(text).toContain("Explore");
+    expect(text).toContain("openai/gpt-5");
+    expect(text).toContain("reviewer: no authorized model");
   });
 
   it("does not advertise current-parent-provider alternates without explicit Provider access", () => {
-    const guidance = build({
+    const text = build({
       routing: {
         enabled: true,
         enabledProviders: [],
@@ -119,25 +151,25 @@ describe("buildCurrentAgentGuidance", () => {
       },
       scopedModels: [],
     });
-    expect(guidance).not.toContain("anthropic/haiku");
-    expect(guidance).toContain("Explore: no authorized model");
+    expect(text).not.toContain("anthropic/haiku");
+    expect(text).toContain("Explore: no authorized model");
   });
 
   it("shows a scope-pinned thinking level as the only allowed/default level", () => {
-    const guidance = build({
+    const text = build({
       scopedModels: [
         { model: parentModel },
         { model: availableModels[2], thinkingLevel: "medium" },
       ],
     });
-    const modelLine = guidance.split("\n").find((line) => line.includes("openai/gpt-5"));
+    const modelLine = text.split("\n").find((line) => line.includes("openai/gpt-5"));
     expect(modelLine).toContain("allowed: medium");
     expect(modelLine).toContain("default: medium");
     expect(modelLine).not.toContain("high,");
   });
 
   it("omits a model whose saved thinking override is no longer valid", () => {
-    const guidance = build({
+    const text = build({
       routing: {
         enabled: true,
         enabledProviders: ["openai"],
@@ -153,7 +185,7 @@ describe("buildCurrentAgentGuidance", () => {
       },
       scopedModels: [],
     });
-    expect(guidance).not.toContain("- openai/gpt-5");
-    expect(guidance).toContain("Explore: no authorized model");
+    expect(text).not.toContain("- openai/gpt-5");
+    expect(text).toContain("Explore: no authorized model");
   });
 });

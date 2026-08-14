@@ -1,18 +1,17 @@
-import { getStatusNote } from "../status-note.js";
 /**
- * tool-execution.ts — Agent tool execution handlers.
+ * agent-tool.ts — Agent and StopAgent tool execute callbacks.
  *
- * Contains the execute callbacks registered for the Agent tool.
- * Spawn translation lives in the composition root; delivery is a separate facade.
+ * Translation between a Pi tool call and the capability modules: it validates
+ * parameters, resolves access policy, and hands an accepted run to the runtime.
+ * It owns no policy of its own, which is why it lives with the wiring.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { getStatusNote } from "../status-note.js";
 import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import { parseAcceptedRunPolicy } from "../modules/subagent-runtime/public.js";
-import { resolveType, resolveAgentPolicyInputs, discoverNewAgents } from "./agent-types.js";
-import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
   parseModelKey,
@@ -36,12 +35,11 @@ import {
   authorizeModelAccess,
   resolveThinkingAccess,
   selectThinkingLevel,
-  type ThinkingLevel,
 } from "../modules/model-access/public.js";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
-import type { ExtensionRuntime } from "../bootstrap/extension-runtime.js";
+import { piModelCapability } from "../platform/pi/agent-guidance-request.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
-import { spawnAgent } from "../bootstrap/session-host.js";
+import { spawnAgent } from "./session-host.js";
 
 // ============================================================================
 // Tool result helpers
@@ -97,11 +95,12 @@ async function executeAgentTool(
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
     try {
       const parentCwd = runtime.sessionCtx?.cwd ?? ctx.cwd;
-      const warnings: string[] = [];
-      const onWarning = (msg: string) => { warnings.push(msg); };
-      const validation = await validateWorktreePath(runtime.pi, rawWorktreePath, parentCwd, onWarning);
+      const validation = await runtime.worktree.inspect({
+        worktreePath: rawWorktreePath,
+        parentCwd,
+      });
       if (!validation.ok) {
-        for (const msg of warnings) {
+        for (const msg of validation.warnings ?? []) {
           if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
         }
         return errorResult(validation.error);
@@ -114,13 +113,18 @@ async function executeAgentTool(
   }
 
   const type = (params.agent as string) || "general-purpose";
-  let resolvedType = resolveType(type);
+  let resolvedType = runtime.agents.resolveType(type);
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
     // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
     const worktreeDir = validatedWorktreePath ? `${validatedWorktreePath}/.pi/agents` : undefined;
-    await discoverNewAgents(worktreeDir);
-    resolvedType = resolveType(type);
+    const discovered = await runtime.agents.discoverNew(worktreeDir);
+    // A broken scan is reported instead of being read as "no such type": the
+    // parent would otherwise correct a spelling that was never wrong.
+    if (!discovered.ok) {
+      return errorResult(`Agent type lookup failed: ${discovered.message}`);
+    }
+    resolvedType = runtime.agents.resolveType(type);
   }
   if (!resolvedType) {
     return errorResult(`Unknown agent type: ${type}`);
@@ -189,7 +193,7 @@ async function executeAgentTool(
     : resolveExactModel(resolvedModelKey, ctx.modelRegistry);
   if (!model) return errorResult(unknownModelError(resolvedModelKey));
 
-  const policyInputs = resolveAgentPolicyInputs(resolvedType, {
+  const policyInputs = runtime.agents.policyInputs(resolvedType, {
     loadSkillsImplicitly: agentSettings.loadSkillsImplicitly,
     loadExtensionsImplicitly: agentSettings.loadExtensionsImplicitly,
     systemPromptMode: agentSettings.systemPromptMode,
@@ -210,6 +214,7 @@ async function executeAgentTool(
   const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
+  const capability = piModelCapability(acceptedModel, scopedModels);
   const thinkingPolicy = resolveThinkingAccess({
     routing,
     agentType: resolvedType,
@@ -217,8 +222,8 @@ async function executeAgentTool(
     parentModelKey: parentModelRef,
     parentThinkingLevel: ctx.thinkingLevel,
     scopedThinkingLevel: scopedThinkingLevel(scopedModels, model),
-    supportedLevels: getSupportedThinkingLevels(acceptedModel) as ThinkingLevel[],
-    fallbackLevel: clampThinkingLevel(acceptedModel, "high") as ThinkingLevel,
+    supportedLevels: capability.supportedLevels,
+    fallbackLevel: capability.fallbackLevel,
   });
   if (!thinkingPolicy) {
     return errorResult(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createAgentStatusToolExecutor } from "../../src/agents/agent-status.js";
+import { createAgentStatusToolExecutor } from "../../src/bootstrap/agent-status-tool.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";
 import {

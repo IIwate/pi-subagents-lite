@@ -1,21 +1,25 @@
 import { Type, type Static } from "typebox";
 
-/** Canonical Pi thinking levels; the schema below is derived from this list. */
-export const CANONICAL_THINKING_LEVELS = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
+/**
+ * The Thinking vocabulary, and the only definition of it. Written as explicit
+ * literals rather than mapped from an array because `Type.Unsafe` around a
+ * mapped union erases the static shape, and every union that embeds this schema
+ * then loses discriminated-narrowing at its own boundary.
+ */
+export const ThinkingLevelSchema = Type.Union([
+  Type.Literal("off"),
+  Type.Literal("minimal"),
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
+  Type.Literal("xhigh"),
+  Type.Literal("max"),
+]);
 
-// Type.Union cannot infer a literal union from a mapped array, so the static
-// type is pinned to the canonical list the schema is built from.
-export const ThinkingLevelSchema = Type.Unsafe<(typeof CANONICAL_THINKING_LEVELS)[number]>(
-  Type.Union(CANONICAL_THINKING_LEVELS.map((level) => Type.Literal(level))),
-);
+/** Ascending order, derived from the schema so a new level cannot be missed. */
+export const CANONICAL_THINKING_LEVELS = ThinkingLevelSchema.anyOf.map(
+  (member) => member.const,
+) as readonly Static<typeof ThinkingLevelSchema>[];
 
 export const ProviderModelAccessSchema = Type.Object({
   models: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
@@ -37,6 +41,33 @@ export const ModelAccessFragmentSchema = Type.Object({
   enabledProviders: Type.Array(Type.String({ minLength: 1 })),
   agentAccess: Type.Record(Type.String(), AgentModelAccessSchema),
 }, { additionalProperties: false });
+
+/**
+ * The resolved Thinking envelope for one agent/model pair. Schema-defined
+ * because the prompt module renders it into guidance text: it leaves this
+ * module, so its shape is a contract rather than an internal convenience.
+ */
+export const ThinkingAccessPolicySchema = Type.Object({
+  allowed: Type.Array(ThinkingLevelSchema, { minItems: 1 }),
+  default: ThinkingLevelSchema,
+  source: Type.Union([
+    Type.Literal("scope"),
+    Type.Literal("override"),
+    Type.Literal("baseline"),
+  ]),
+}, { additionalProperties: false });
+
+export const ThinkingSelectionSchema = Type.Union([
+  Type.Object({
+    ok: Type.Literal(true),
+    level: ThinkingLevelSchema,
+  }, { additionalProperties: false }),
+  Type.Object({
+    ok: Type.Literal(false),
+    reason: Type.Literal("thinking-denied"),
+    allowed: Type.Array(ThinkingLevelSchema),
+  }, { additionalProperties: false }),
+]);
 
 export const AuthorizationDenialReasonSchema = Type.Union([
   Type.Literal("parent-model-denied"),
@@ -80,6 +111,8 @@ export type ProviderModelAccess = Static<typeof ProviderModelAccessSchema>;
 export type ThinkingAccessOverride = Static<typeof ThinkingAccessOverrideSchema>;
 export type AgentModelAccess = Static<typeof AgentModelAccessSchema>;
 export type ModelAccessFragment = Static<typeof ModelAccessFragmentSchema>;
+export type ThinkingAccessPolicy = Static<typeof ThinkingAccessPolicySchema>;
+export type ThinkingSelection = Static<typeof ThinkingSelectionSchema>;
 export type AuthorizationDenialReason = Static<typeof AuthorizationDenialReasonSchema>;
 export type AuthorizeModelCommand = Static<typeof AuthorizeModelCommandSchema>;
 export type AuthorizeModelResult = Static<typeof AuthorizeModelResultSchema>;

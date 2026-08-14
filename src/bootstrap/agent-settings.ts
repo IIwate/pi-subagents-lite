@@ -10,10 +10,8 @@
 
 import type { SystemPromptMode } from "../agents/types.js";
 import type { JsonValue } from "../modules/configuration/public.js";
+import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
 import type { ConfigSectionIO } from "./configuration.js";
-
-/** Default number of grace turns before an agent is force-stopped. */
-export const DEFAULT_GRACE_TURNS = 6;
 
 const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
 

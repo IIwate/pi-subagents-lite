@@ -1,14 +1,17 @@
 /**
- * Model-scope helpers backed by Pi's resolved session scope.
+ * Model-scope helpers backed by the host's resolved session scope.
  *
  * Pi 0.84 exposes the exact scope on ExtensionContext, including unsaved
- * session changes and per-pattern thinking levels. Keep that as the only
- * source of truth instead of re-parsing CLI arguments and settings here.
+ * session changes and per-pattern thinking levels; the host adapter passes
+ * that snapshot in. Keep it as the only source of truth instead of re-parsing
+ * CLI arguments and settings here. The shape below is the repo-owned subset
+ * these helpers read, so replacing the host does not reach into this file.
  */
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-type ScopedModel = ExtensionContext["scopedModels"][number];
+interface ScopedModel {
+  model: { provider: string; id: string };
+  thinkingLevel?: string;
+}
 
 /** Canonical model key used in scope sets and settings views. */
 export function modelKey(model: { provider: string; id: string }): string {

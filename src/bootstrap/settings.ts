@@ -16,12 +16,11 @@ import {
   createCustomPromptFile,
   customPromptFileExists,
 } from "../platform/fs/prompt-files.js";
-import { DEFAULT_GRACE_TURNS } from "./agent-settings.js";
+import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
 import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
 import type { ExtensionRuntime } from "./extension-runtime.js";
 import { createModelAccessSettingsOwner, readModelAccessFragment } from "./model-access.js";
-import { getAgentConfig, getAllTypes, setDefaultAgentsDisabled } from "../agents/agent-types.js";
 
 // Owner adapters compose each settings page with the capability that owns
 // its policy: the agent fragment seam, the concurrency seam, the
@@ -63,7 +62,7 @@ function createSpawnOwner(runtime: ExtensionRuntime): SpawnSettingsOwner {
       // Registry availability is an owner-side effect and must not run when
       // the commit failed, otherwise runtime and persisted policy diverge.
       if (result.ok && update.id === "disableDefaultAgents") {
-        setDefaultAgentsDisabled(update.value);
+        runtime.agents.setDefaultAgentsDisabled(update.value);
       }
       return result;
     },
@@ -105,7 +104,7 @@ function activeModelKeys(runtime: ExtensionRuntime, ctx: ExtensionCommandContext
   if (parentKey) keys.add(parentKey);
 
   const routing = readModelAccessFragment();
-  for (const type of getAllTypes()) {
+  for (const type of runtime.agents.allTypes()) {
     for (const key of effectiveAlternateModelKeys(
       type,
       routing,
@@ -152,8 +151,8 @@ function createDebugOwner(runtime: ExtensionRuntime): DebugSettingsOwner {
       return armedFault ? { armedFault } : {};
     },
     agentTypes() {
-      return getAllTypes().flatMap((name) => {
-        const config = getAgentConfig(name);
+      return runtime.agents.allTypes().flatMap((name) => {
+        const config = runtime.agents.agentConfig(name);
         if (!config) return [];
         return [{
           name,
@@ -221,7 +220,7 @@ export async function showAgentsMenu(runtime: ExtensionRuntime, ctx: ExtensionCo
     prompt: createPromptOwner(runtime),
     concurrency: createConcurrencyOwner(runtime, ctx),
     debug: createDebugOwner(runtime),
-    modelAccess: createModelAccessSettingsOwner(ctx),
+    modelAccess: createModelAccessSettingsOwner(ctx, () => runtime.agents.allTypes()),
   });
   await runSettingsScreen(ctx, settings);
 }

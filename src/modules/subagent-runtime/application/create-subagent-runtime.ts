@@ -14,7 +14,12 @@ import {
   type SpawnCommand,
 } from "../contracts/lifecycle.js";
 import { ConcurrencyLimitsSchema } from "../contracts/scheduling.js";
-import type { SessionEvent, SessionSteerRequest } from "../contracts/session.js";
+import {
+  SessionEventSchema,
+  SessionInspectResultSchema,
+  type SessionEvent,
+  type SessionSteerRequest,
+} from "../contracts/session.js";
 import type { SessionDriver } from "../ports/session-driver.js";
 import type { WorktreeInspector } from "../ports/worktree-inspector.js";
 import type { IdGenerator, RuntimeClock, RuntimeScheduler } from "../ports/runtime-services.js";
@@ -25,7 +30,7 @@ import {
   isTerminalStatus,
 } from "../core/lifecycle-status.js";
 import { shouldExpire, unpinCleanupPausedMs } from "../core/retention.js";
-import { createConcurrencyScheduler } from "./create-concurrency-scheduler.js";
+import { createConcurrencyScheduler, type ConcurrencyScheduler } from "./create-concurrency-scheduler.js";
 import { parseAcceptedRunPolicy } from "./validate-accepted-run-policy.js";
 import { copyJson } from "./copy-json.js";
 
@@ -43,6 +48,13 @@ export interface CreateSubagentRuntimeOptions {
   clock: RuntimeClock;
   ids: IdGenerator;
   scheduler: RuntimeScheduler;
+  /**
+   * Admission control. Injectable so an alternative policy — a global pool, a
+   * cost-aware ceiling — can be substituted without editing the lifecycle, and
+   * so a contract test can observe the decisions the runtime acted on. Defaults
+   * to the two-ceiling scheduler this module owns.
+   */
+  concurrency?: ConcurrencyScheduler;
   limits?: unknown;
   retentionMs?: number;
   cleanupIntervalMs?: number;
@@ -60,6 +72,13 @@ export interface SubagentRuntime {
   togglePinned(id: string): boolean | undefined;
   clear(id: string, initiator?: AgentSnapshot["stoppedBy"]): boolean;
   replaceLimits(limits: unknown): void;
+  /**
+   * Outbound subscription seams, not data on the boundary: the handler is a
+   * local callback and every snapshot handed to it passes the same schema gate
+   * as a returned one. Registered after construction because the composition
+   * root builds delivery and the child screen from this runtime, so they cannot
+   * be arguments to it without an indirection that only moves the cycle.
+   */
   setOnComplete(handler: (snapshot: AgentSnapshot) => void): void;
   setOnRemove(handler: (snapshot: AgentSnapshot) => void): void;
   debugDiagnostics(): DebugDiagnostics;
@@ -96,7 +115,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   const reservedKeys = new Map<string, string>();
   const pendingSetups = new Set<Promise<void>>();
   const closing = new Set<Promise<void>>();
-  const scheduler = createConcurrencyScheduler(options.limits ?? {
+  const scheduler = options.concurrency ?? createConcurrencyScheduler(options.limits ?? {
     defaultModelLimit: DEFAULT_CONCURRENCY_LIMIT,
     modelLimits: {},
     providerLimits: {},
@@ -113,33 +132,56 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     () => { void expireRecords(); },
   );
 
+  /**
+   * The one gate every snapshot leaves through. A copy that fails the contract
+   * is withheld rather than handed out: consumers project it into rendering,
+   * persistence, and prompt text, so passing a malformed record on turns one
+   * internal defect into a fault surfacing far from its cause. Withholding
+   * degrades to an absent row or an unavailable interaction — states every
+   * consumer already models. Reachable corruption belongs at the inbound
+   * seams above, which is where the session-event check lives; this stays as
+   * the last line for a writer that slips past them.
+   */
+  function outbound(snapshot: AgentSnapshot | undefined): AgentSnapshot | undefined {
+    if (!snapshot) return undefined;
+    const copy = copyJson(snapshot);
+    return Check(AgentSnapshotSchema, copy) ? copy : undefined;
+  }
+
   function snapshotCopy(id: string): AgentSnapshot | undefined {
-    const snapshot = snapshots.get(id);
-    return snapshot && Check(AgentSnapshotSchema, snapshot) ? copyJson(snapshot) : snapshot ? copyJson(snapshot) : undefined;
+    return outbound(snapshots.get(id));
   }
 
   function listCopies(): AgentSnapshot[] {
     return [...snapshots.values()]
       .sort((left, right) => right.startedAt - left.startedAt)
-      .map((snapshot) => copyJson(snapshot));
+      .flatMap((snapshot) => {
+        const emitted = outbound(snapshot);
+        return emitted ? [emitted] : [];
+      });
   }
 
   function notifyComplete(snapshot: AgentSnapshot): void {
     // Delivery host marks persisted/consumed on the live snapshot first.
     // Waiters then observe that committed copy, not the pre-delivery one.
-    try { onComplete?.(copyJson(snapshot)); } catch { /* host callbacks cannot poison settlement */ }
+    const emitted = outbound(snapshot);
+    if (emitted) {
+      try { onComplete?.(emitted); } catch { /* host callbacks cannot poison settlement */ }
+    }
     resolveWaiters(snapshot.id, snapshots.get(snapshot.id) ?? snapshot);
   }
 
   function notifyRemove(snapshot: AgentSnapshot): void {
-    try { onRemove?.(copyJson(snapshot)); } catch { /* removal is already committed */ }
+    const emitted = outbound(snapshot);
+    if (!emitted) return;
+    try { onRemove?.(emitted); } catch { /* removal is already committed */ }
   }
 
   function resolveWaiters(id: string, snapshot: AgentSnapshot | undefined): void {
     const pending = waiters.get(id);
     if (!pending) return;
     waiters.delete(id);
-    for (const resolve of pending) resolve(snapshot ? copyJson(snapshot) : undefined);
+    for (const resolve of pending) resolve(outbound(snapshot));
   }
 
   function releaseReservation(id: string): void {
@@ -156,6 +198,13 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   }
 
   function emitSessionEvent(event: SessionEvent): void {
+    // The session driver is a replaceable adapter, so what it emits is an
+    // inbound port boundary, not an internal call. An off-contract event is
+    // dropped whole rather than applied field by field, because a partial
+    // apply would leave the snapshot describing a session state that never
+    // happened. Normalizing vendor values is the adapter's job: the Pi driver
+    // maps its thinking level onto the canonical set before emitting.
+    if (!Check(SessionEventSchema, event)) return;
     const snapshot = snapshots.get(event.agentId);
     if (!snapshot) {
       if (event.type === "session-ready") rejectLateSession(event.sessionId);
@@ -362,16 +411,16 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         releaseReservation(id);
       }
       notifyComplete(snapshot);
-      return ok({ snapshot: copyJson(snapshot) });
+      return ok({ snapshot: outbound(snapshot) });
     }
 
     if (queued) {
       queue.push({ id, concurrencyKey, command });
-      return ok({ snapshot: copyJson(snapshot) });
+      return ok({ snapshot: outbound(snapshot) });
     }
 
     void startAgent(command, snapshot);
-    return ok({ snapshot: copyJson(snapshot) });
+    return ok({ snapshot: outbound(snapshot) });
   }
 
   function stop(id: string, initiator?: AgentSnapshot["stoppedBy"], notify = true): boolean {
@@ -406,7 +455,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         const pending = pendingSteers.get(id) ?? [];
         pending.push({ message, images });
         pendingSteers.set(id, pending);
-        return ok({ interaction: { accepted: true }, snapshot: copyJson(snapshot) });
+        return ok({ interaction: { accepted: true }, snapshot: outbound(snapshot) });
       }
       const steered = await options.sessionDriver.steer({
         sessionId: snapshot.sessionId,
@@ -415,7 +464,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       });
       return ok({
         interaction: steered.accepted ? { accepted: true } : { accepted: false, reason: "unavailable" },
-        snapshot: copyJson(snapshot),
+        snapshot: outbound(snapshot),
       });
     }
 
@@ -423,13 +472,13 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       ? options.sessionDriver.inspect({ sessionId: snapshot.sessionId })
       : { found: false, live: false, streaming: false, messages: [] };
     if (!snapshot.sessionId || !snapshot.settled || !view.live || view.streaming) {
-      return ok({ interaction: { accepted: false, reason: "unavailable" }, snapshot: copyJson(snapshot) });
+      return ok({ interaction: { accepted: false, reason: "unavailable" }, snapshot: outbound(snapshot) });
     }
 
     if (!scheduler.reserve(snapshot.concurrencyKey).accepted) {
       return ok({
         interaction: { accepted: false, reason: "concurrency", concurrencyKey: snapshot.concurrencyKey },
-        snapshot: copyJson(snapshot),
+        snapshot: outbound(snapshot),
       });
     }
     reservedKeys.set(id, snapshot.concurrencyKey);
@@ -480,7 +529,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       }
     })();
 
-    return ok({ interaction: { accepted: true }, snapshot: copyJson(snapshot) });
+    return ok({ interaction: { accepted: true }, snapshot: outbound(snapshot) });
   }
 
   function pin(id: string): AgentCommandResult {
@@ -488,11 +537,11 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     if (!snapshot) return failure("not-found", `Unknown Subagent: ${id}`);
     if (snapshot.pinnedAt == null) {
       snapshot.pinnedAt = options.clock.now();
-      return ok({ pinned: true, snapshot: copyJson(snapshot) });
+      return ok({ pinned: true, snapshot: outbound(snapshot) });
     }
     snapshot.cleanupExpiryPausedMs = unpinCleanupPausedMs(snapshot, options.clock.now());
     snapshot.pinnedAt = undefined;
-    return ok({ pinned: false, snapshot: copyJson(snapshot) });
+    return ok({ pinned: false, snapshot: outbound(snapshot) });
   }
 
   async function closeSession(sessionId: string): Promise<void> {
@@ -619,7 +668,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
           if (next.persisted != null) snapshot.resultPersisted = next.persisted;
           if (next.consumed != null) snapshot.resultConsumed = next.consumed;
           if (next.deliveryId != null) snapshot.resultDeliveryId = next.deliveryId;
-          return ok({ snapshot: copyJson(snapshot) });
+          return ok({ snapshot: outbound(snapshot) });
         }
         case "dispose":
           await disposeRuntime();
@@ -635,7 +684,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     waitUntilSettled(id: string): Promise<AgentSnapshot | undefined> {
       const snapshot = snapshots.get(id);
       if (!snapshot) return Promise.resolve(undefined);
-      if (snapshot.settled) return Promise.resolve(copyJson(snapshot));
+      if (snapshot.settled) return Promise.resolve(outbound(snapshot));
       return new Promise((resolve) => {
         const pending = waiters.get(id) ?? [];
         pending.push(resolve);
@@ -644,10 +693,13 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     },
     inspectSession(id: string) {
       const snapshot = snapshots.get(id);
-      if (!snapshot?.sessionId) {
-        return { found: false, live: false, streaming: false, messages: [] };
-      }
-      return options.sessionDriver.inspect({ sessionId: snapshot.sessionId });
+      const absent = { found: false, live: false, streaming: false, messages: [] };
+      if (!snapshot?.sessionId) return absent;
+      const view = options.sessionDriver.inspect({ sessionId: snapshot.sessionId });
+      // An off-contract driver view degrades to "no live session" — the state
+      // the caller already renders while a run is queued — rather than
+      // travelling into transcript rendering as a partially valid object.
+      return Check(SessionInspectResultSchema, view) ? view : absent;
     },
     stop(id, initiator) {
       return stop(id, initiator);
@@ -658,7 +710,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       if (fields.persisted != null) snapshot.resultPersisted = fields.persisted;
       if (fields.consumed != null) snapshot.resultConsumed = fields.consumed;
       if (fields.deliveryId != null) snapshot.resultDeliveryId = fields.deliveryId;
-      return copyJson(snapshot);
+      return outbound(snapshot);
     },
     togglePinned(id) {
       const result = pin(id);

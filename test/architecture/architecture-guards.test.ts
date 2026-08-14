@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { dependencyDirectionViolations } from "./architecture-rules.js";
-import { collectSourceGraph, stronglyConnectedComponents } from "./source-graph.js";
+import {
+  dependencyDirectionViolations,
+  externalPackageViolations,
+  type DeclaredDependencies,
+} from "./architecture-rules.js";
+import { analyzeModuleReferences, collectSourceGraph, stronglyConnectedComponents } from "./source-graph.js";
+import { scanTestDoubles } from "./test-double-scan.js";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 
@@ -20,41 +25,37 @@ function repoPath(path: string): string {
   return relative(projectRoot, path).replaceAll("\\", "/");
 }
 
+function declaredDependencies(): DeclaredDependencies {
+  const manifest = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+  return {
+    runtime: new Set(Object.keys(manifest.dependencies ?? {})),
+    host: new Set(Object.keys(manifest.peerDependencies ?? {})),
+  };
+}
+
 /**
  * Module replacement is allowed only against external packages (vendor seams
  * with no in-repo implementation to run instead). Replacing one of this
  * repository's own modules bypasses its public surface, so it is a blocking
  * violation — there is no baseline to ratchet anymore.
- *
- * Three syntaxes reach the same outcome and are all rejected: vi.mock and
- * vi.doMock against a relative specifier, and vi.spyOn against a namespace
- * imported from a relative specifier. The spy form is the one that slipped
- * past an earlier specifier-only scan.
  */
 function internalMockViolations(): string[] {
   const violations: string[] = [];
   for (const path of typescriptFiles(resolve(projectRoot, "test"))) {
-    const source = readFileSync(path, "utf8");
-    const internal = (specifier: string): boolean =>
-      specifier.startsWith(".") || specifier.includes("/src/");
-
-    for (const match of source.matchAll(/vi\.(?:mock|doMock)\s*\(\s*["']([^"']+)["']/g)) {
-      if (internal(match[1])) {
-        violations.push(`${repoPath(path)} mocks internal module ${match[1]}`);
-      }
-    }
-
-    const internalNamespaces = new Set<string>();
-    for (const match of source.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["']/g)) {
-      if (internal(match[2])) internalNamespaces.add(match[1]);
-    }
-    for (const match of source.matchAll(/vi\.spyOn\s*\(\s*(\w+)\s*,/g)) {
-      if (internalNamespaces.has(match[1])) {
-        violations.push(`${repoPath(path)} spies on internal module namespace ${match[1]}`);
+    for (const finding of scanTestDoubles(readFileSync(path, "utf8"), path)) {
+      if (finding.kind === "internal-mock") {
+        violations.push(`${repoPath(path)} mocks internal module ${finding.specifier}`);
+      } else if (finding.kind === "internal-namespace-spy") {
+        violations.push(`${repoPath(path)} spies on internal module namespace ${finding.binding}`);
+      } else {
+        violations.push(`${repoPath(path)} mocks an undecidable target ${finding.text}`);
       }
     }
   }
-  return violations;
+  return violations.sort();
 }
 
 /**
@@ -73,17 +74,66 @@ function globalThisViolations(): string[] {
       violations.push(`${repoPath(path)} accesses globalThis`);
     }
   }
-  return violations;
+  return violations.sort();
 }
 
 describe("architecture guards", () => {
+  // Tarjan over ~140 files is fast, but a cold TypeScript parse of every source
+  // file is not: the earlier default timeout failed on a cold cache rather than
+  // on a cycle, which is the kind of red that gets rerun instead of read.
   it("keeps the source dependency graph cycle-free", () => {
     const graph = collectSourceGraph(projectRoot);
     expect(stronglyConnectedComponents(graph)).toEqual([]);
+  }, 30_000);
+
+  it("names every module reference in a form the graph can resolve", () => {
+    const graph = collectSourceGraph(projectRoot);
+    expect(graph.opaqueReferences).toEqual([]);
+  }, 30_000);
+
+  it("reports computed imports and requires as opaque references", () => {
+    const analysis = analyzeModuleReferences(
+      [
+        "const name = './generated.js';",
+        "const a = await import(name);",
+        "const b = require(`../${name}`);",
+        "const c = require('./static.js');",
+        "const d = await import(`./literal.js`);",
+      ].join("\n"),
+      "fixture.ts",
+    );
+    expect(analysis.specifiers).toEqual(["./static.js", "./literal.js"]);
+    expect(analysis.opaque.map((entry) => entry.kind)).toEqual(["computed-import", "computed-require"]);
   });
 
   it("forbids replacing internal modules with mocks or namespace spies", () => {
     expect(internalMockViolations()).toEqual([]);
+  });
+
+  it("detects every spelling that replaces an internal module", () => {
+    const findings = scanTestDoubles(
+      [
+        "import * as registry from '../../src/agents/agent-registry.js';",
+        "const alias = registry;",
+        "vi.mock('../../src/utils.js');",
+        "vi.mock(import('../../src/types.js'));",
+        "vi.doMock(`../../src/status-note.js`);",
+        "vi.mock('@earendil-works/pi-coding-agent');",
+        "vi.spyOn(alias, 'createAgentRegistry');",
+        "const loaded = await import('../../src/utils.js');",
+        "vi.spyOn(loaded, 'errorMessage');",
+        "vi.mock(specifierFromVariable);",
+      ].join("\n"),
+      "fixture.test.ts",
+    );
+    expect(findings).toEqual([
+      { kind: "internal-mock", specifier: "../../src/utils.js" },
+      { kind: "internal-mock", specifier: "../../src/types.js" },
+      { kind: "internal-mock", specifier: "../../src/status-note.js" },
+      { kind: "internal-namespace-spy", binding: "alias" },
+      { kind: "internal-namespace-spy", binding: "loaded" },
+      { kind: "undecidable-mock", text: "vi.mock(specifierFromVariable)" },
+    ]);
   });
 
   it("confines globalThis to the process-state platform module", () => {
@@ -93,7 +143,12 @@ describe("architecture guards", () => {
   it("keeps target module imports behind public surfaces and inward layers", () => {
     const graph = collectSourceGraph(projectRoot);
     expect(dependencyDirectionViolations(graph)).toEqual([]);
-  });
+  }, 30_000);
+
+  it("keeps external packages inside their declared seams", () => {
+    const graph = collectSourceGraph(projectRoot);
+    expect(externalPackageViolations(graph, declaredDependencies())).toEqual([]);
+  }, 30_000);
 
   it("rejects reverse dependencies inside a capability module", () => {
     expect(dependencyDirectionViolations({
@@ -121,6 +176,7 @@ describe("architecture guards", () => {
         },
       ],
       edges: new Map(),
+      opaqueReferences: [],
     })).toEqual([
       "src/modules/example/contracts/request.ts imports reverse layer src/modules/example/core/decision.ts",
       "src/modules/example/core/decision.ts imports reverse layer src/modules/example/application/execute.ts",
@@ -128,33 +184,93 @@ describe("architecture guards", () => {
     ]);
   });
 
-  it("rejects ports that depend on platform packages", () => {
+  it("rejects inward layers that reach the host, the adapters, or the composition root", () => {
     expect(dependencyDirectionViolations({
-      files: ["src/modules/example/ports/repository.ts"],
-      imports: [{
-        source: "src/modules/example/ports/repository.ts",
-        specifier: "node:fs",
-      }],
+      files: [
+        "src/modules/example/application/execute.ts",
+        "src/utils.ts",
+        "src/platform/fs/adapter.ts",
+        "src/bootstrap/wiring.ts",
+      ],
+      imports: [
+        {
+          source: "src/modules/example/application/execute.ts",
+          specifier: "../../../platform/fs/adapter.js",
+          target: "src/platform/fs/adapter.ts",
+        },
+        {
+          source: "src/utils.ts",
+          specifier: "./bootstrap/wiring.js",
+          target: "src/bootstrap/wiring.ts",
+        },
+        {
+          source: "src/platform/fs/adapter.ts",
+          specifier: "../../bootstrap/wiring.js",
+          target: "src/bootstrap/wiring.ts",
+        },
+      ],
       edges: new Map(),
+      opaqueReferences: [],
     })).toEqual([
-      "src/modules/example/ports/repository.ts imports outward dependency node:fs",
+      "src/modules/example/application/execute.ts imports outward layer src/platform/fs/adapter.ts",
+      "src/platform/fs/adapter.ts imports outward layer src/bootstrap/wiring.ts",
+      "src/utils.ts imports outward layer src/bootstrap/wiring.ts",
     ]);
   });
 
-  it("rejects external consumers that bypass a module public surface", () => {
+  it("rejects external consumers that bypass a module public surface, including a nested facade", () => {
     expect(dependencyDirectionViolations({
       files: [
         "src/platform/fs/adapter.ts",
+        "src/bootstrap/wiring.ts",
         "src/modules/example/contracts/request.ts",
+        "src/modules/example/core/public.ts",
       ],
-      imports: [{
-        source: "src/platform/fs/adapter.ts",
-        specifier: "../../modules/example/contracts/request.js",
-        target: "src/modules/example/contracts/request.ts",
-      }],
+      imports: [
+        {
+          source: "src/platform/fs/adapter.ts",
+          specifier: "../../modules/example/contracts/request.js",
+          target: "src/modules/example/contracts/request.ts",
+        },
+        {
+          source: "src/bootstrap/wiring.ts",
+          specifier: "../modules/example/core/public.js",
+          target: "src/modules/example/core/public.ts",
+        },
+      ],
       edges: new Map(),
+      opaqueReferences: [],
     })).toEqual([
+      "src/bootstrap/wiring.ts imports src/modules/example/core/public.ts instead of example/public.ts",
       "src/platform/fs/adapter.ts imports src/modules/example/contracts/request.ts instead of example/public.ts",
+    ]);
+  });
+
+  it("rejects packages outside their declared seam", () => {
+    const declared: DeclaredDependencies = {
+      runtime: new Set(["typebox"]),
+      host: new Set(["@earendil-works/pi-tui", "@earendil-works/pi-coding-agent"]),
+    };
+    expect(externalPackageViolations({
+      files: [
+        "src/modules/example/ports/repository.ts",
+        "src/bootstrap/wiring.ts",
+        "src/platform/pi/tui/screen.ts",
+      ],
+      imports: [
+        { source: "src/modules/example/ports/repository.ts", specifier: "node:fs" },
+        { source: "src/modules/example/ports/repository.ts", specifier: "@earendil-works/pi-coding-agent" },
+        { source: "src/bootstrap/wiring.ts", specifier: "@earendil-works/pi-tui" },
+        { source: "src/bootstrap/wiring.ts", specifier: "lodash" },
+        { source: "src/platform/pi/tui/screen.ts", specifier: "@earendil-works/pi-tui" },
+      ],
+      edges: new Map(),
+      opaqueReferences: [],
+    }, declared)).toEqual([
+      "src/bootstrap/wiring.ts imports Pi TUI package @earendil-works/pi-tui",
+      "src/bootstrap/wiring.ts imports undeclared package lodash",
+      "src/modules/example/ports/repository.ts imports outward dependency @earendil-works/pi-coding-agent",
+      "src/modules/example/ports/repository.ts imports platform API node:fs",
     ]);
   });
 });

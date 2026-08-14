@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { AgentStatusSchema } from "../../subagent-runtime/public.js";
 
 const JsonValueSchema = Type.Cyclic({
   JsonValue: Type.Union([
@@ -17,15 +18,13 @@ export interface TextLayout {
   wrap(text: string, width: number): string[];
 }
 
-export const ChildStatusSchema = Type.Union([
-  Type.Literal("queued"),
-  Type.Literal("running"),
-  Type.Literal("completed"),
-  Type.Literal("turn_limited"),
-  Type.Literal("aborted"),
-  Type.Literal("stopped"),
-  Type.Literal("error"),
-]);
+/**
+ * Lifecycle status is the runtime's vocabulary; this screen only renders it.
+ * Re-exported under a local name rather than restated, because a second copy of
+ * the literal list would let the two drift into a label this module cannot
+ * paint or a state it silently ignores.
+ */
+export const ChildStatusSchema = AgentStatusSchema;
 
 export const ChildSessionViewSchema = Type.Object({
   found: Type.Boolean(),

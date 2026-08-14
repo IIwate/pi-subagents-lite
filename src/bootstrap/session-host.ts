@@ -126,6 +126,11 @@ export async function spawnAgent(
   const manager = runtime.manager;
   if (!manager) throw new Error("Subagent runtime is not initialised.");
   const { type, prompt, runInBackground, ...spawnOptions } = intent;
+  const resultSessionId = runInBackground ? spawnCtx.sessionManager.getSessionId() : undefined;
+  const resultOriginEntryId = runInBackground ? spawnCtx.sessionManager.getLeafId() : undefined;
+  if (resultOriginEntryId) {
+    runtime.delivery?.execute({ kind: "track-origin", originEntryId: resultOriginEntryId });
+  }
   const spawned = await manager.execute({
     kind: "spawn",
     type,
@@ -135,8 +140,8 @@ export async function spawnAgent(
     worktreePath: spawnOptions.worktreePath,
     parentCwd: spawnOptions.worktreePath ? spawnCtx.cwd : undefined,
     invocation: spawnOptions.invocation,
-    resultSessionId: runInBackground ? spawnCtx.sessionManager.getSessionId() : undefined,
-    resultOriginEntryId: runInBackground ? spawnCtx.sessionManager.getLeafId() : undefined,
+    resultSessionId,
+    resultOriginEntryId,
     parentAborted: spawnOptions.signal?.aborted === true,
   });
   if (!spawned.ok || !spawned.snapshot) {

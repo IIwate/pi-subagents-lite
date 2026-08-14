@@ -13,8 +13,8 @@ Discover, merge, normalize, and expose serializable Agent type definitions for f
 
 ## Product requirements
 
-- [REQ-CATALOGUE-001](../../../../docs/product/prd/agent-calls.md#req-catalogue-001)
-- [REQ-CATALOGUE-002](../../../../docs/product/prd/agent-calls.md#req-catalogue-002)
+- [REQ-CATALOGUE-001](../../../../docs/product/prd/agent-calls.md#req-catalogue-001--discover-agent-types)
+- [REQ-CATALOGUE-002](../../../../docs/product/prd/agent-calls.md#req-catalogue-002--disable-built-in-agent-types-safely)
 
 These are the only product requirements owned by this module. Agent call and runtime requirements belong to `subagent-runtime`.
 

@@ -1,11 +1,11 @@
 /**
- * tool-execution.test.ts — Acceptance tests for the Agent tool executor.
+ * agent-tool.test.ts — Acceptance tests for the Agent tool executor.
  *
  * Every collaborator enters through a real seam instead of a module mock:
  *   - routing policy through runtime.modelAccess (composition-root record)
  *   - scheduling through a SubagentRuntime port double on the record
  *   - git probes through the runtime's pi.exec external port + real temp dirs
- *   - agent types through the real registry, seeded per test
+ *   - agent types through the runtime's own registry, seeded per test
  *
  * Detailed worktree failure reasons are owned by worktree-validator.test.ts;
  * this suite only proves the executor surfaces validation results, enforces
@@ -17,9 +17,10 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { createAgentToolExecutor } from "../../src/agents/tool-execution.js";
-import { registerAgents, setAgentScanDirs } from "../../src/agents/agent-types.js";
-import { WORKTREE_VALIDATION_ERRORS } from "../../src/spawn/worktree-validator.js";
+import { createAgentToolExecutor } from "../../src/bootstrap/agent-tool.js";
+import { createFsWorktreeInspector } from "../../src/platform/fs/worktree-inspector.js";
+import { WORKTREE_VALIDATION_ERRORS } from "../../src/platform/fs/worktree-validator.js";
+import type { AgentRegistry } from "../../src/agents/agent-registry.js";
 import type { ModelAccessFragment } from "../../src/modules/model-access/public.js";
 import {
   disabledModelAccess,
@@ -27,6 +28,7 @@ import {
   fakeExtensionRuntime,
   inertAgentSettings,
   makeAgentMd,
+  testAgentRegistry,
 } from "../fixtures.ts";
 
 /* ------------------------------------------------------------------ */
@@ -107,14 +109,20 @@ function normalized(value: string): string {
 let routing: ModelAccessFragment;
 let mgr: ReturnType<typeof stubManager>;
 let forceBackground: boolean;
+let agents: AgentRegistry;
 
 /** Build the executor over an explicit composition-root record. */
 function buildExecutor(options: { parentCwd?: string; exec?: (...args: any[]) => any } = {}) {
   mgr = stubManager();
+  const pi = { sendMessage: vi.fn(), exec: options.exec ?? vi.fn() } as any;
   const runtime = fakeExtensionRuntime({
-    pi: { sendMessage: vi.fn(), exec: options.exec ?? vi.fn() } as any,
+    pi,
     sessionCtx: { cwd: options.parentCwd ?? "/home/test/project" } as any,
     manager: mgr.manager as any,
+    agents,
+    // The real probe over the scripted exec port: the executor's early check
+    // and the accepted spawn must resolve paths the same way.
+    worktree: createFsWorktreeInspector(pi),
     agentSettings: {
       ...inertAgentSettings(),
       read: () => ({
@@ -131,9 +139,9 @@ function buildExecutor(options: { parentCwd?: string; exec?: (...args: any[]) =>
 beforeEach(() => {
   // Fresh built-in registry per test: discovery cases below add worktree-local
   // types and must not leak them into later tests.
-  registerAgents(new Map());
+  agents = testAgentRegistry();
   const missingRoot = join(tmpdir(), "tool-execution-no-agents");
-  setAgentScanDirs(join(missingRoot, "user"), join(missingRoot, "project"));
+  agents.setScanRoots(join(missingRoot, "user"), join(missingRoot, "project"));
   routing = disabledModelAccess();
   forceBackground = false;
 });
@@ -293,8 +301,39 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     expect(mgr.stops).toEqual([]);
   });
 
+});
+
+describe("REQ-AGENT-001 executeAgentTool — spawn inputs and outcome", () => {
+  let ctx: any;
+  let execute: ReturnType<typeof buildExecutor>;
+
+  beforeEach(() => {
+    ctx = fakeCtx();
+    execute = buildExecutor();
+  });
+
+  it("accepts the documented spawn inputs and forwards them as one spawn command", async () => {
+    const result = await execute(
+      "tc-inputs",
+      makeParams({ prompt: "Review the diff", description: "Reviewer run", run_in_background: false }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(mgr.spawnCommands).toHaveLength(1);
+    expect(mgr.spawnCommands[0]).toMatchObject({
+      kind: "spawn",
+      type: "general-purpose",
+      description: "Reviewer run",
+      prompt: "Review the diff",
+      runInBackground: false,
+    });
+    expect(result.isError).toBeUndefined();
+  });
+
   it("returns the recorded snapshot result for completed foreground agents", async () => {
-    const result = await execute("tc-ok", makeParams({ worktree_path: worktree }), undefined, undefined, ctx);
+    const result = await execute("tc-ok", makeParams(), undefined, undefined, ctx);
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toBe("Agent completed successfully");
@@ -308,6 +347,13 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     const result = await execute("tc-error", makeParams(), undefined, undefined, ctx);
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe("Agent failed: 503 service_unavailable");
+  });
+
+  it("rejects an unknown agent type without reaching the scheduler", async () => {
+    const result = await execute("tc-unknown", makeParams({ agent: "no-such-type" }), undefined, undefined, ctx);
+
+    expect(result.isError).toBe(true);
+    expect(mgr.spawnCommands).toHaveLength(0);
   });
 });
 

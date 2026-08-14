@@ -17,7 +17,6 @@ import {
   loadExtension,
   type MockExtensionAPI,
 } from "./fixtures";
-import { registerAgents } from "../src/agents/agent-types.js";
 
 // Everything below runs against the real modules: real typebox schemas, real
 // Pi vendor packages, and the real agent registry. The bootstrap import graph
@@ -33,6 +32,15 @@ await vi.hoisted(async () => {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The first `loadExtension` in a worker transpiles the whole bootstrap graph and
+ * the Pi vendor packages behind it. On a warm Vite cache that is under a second;
+ * on a cold one it is tens of seconds, and the default 10s hook timeout turned
+ * that into a red run that says nothing about the extension. Timing out here
+ * should mean the entry point hangs, not that the cache was empty.
+ */
+const COLD_IMPORT_TIMEOUT_MS = 120_000;
 
 /**
  * Find a tool by name from the mock API.
@@ -51,7 +59,7 @@ describe("Agent tool schema — stealth", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   const agentTool = () => findTool(api, "Agent");
 
@@ -148,7 +156,7 @@ describe("tool registration", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   it("registers exactly 3 tools", () => {
     expect(api.tools).toHaveLength(3);
@@ -190,7 +198,7 @@ describe("command registration", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   it("registers /agents command", () => {
     const agentsCmd = api.commands.find((c) => c.name === "agents");
@@ -214,7 +222,7 @@ describe("shortcut registration", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   it("registers list and Main navigation shortcuts", () => {
     expect(api.shortcuts).toEqual([
@@ -231,7 +239,7 @@ describe("shortcut registration", () => {
 
   it("routes shortcuts to the runtime's navigator", async () => {
     const { createExtensionRuntime } = await import("../src/bootstrap/extension-runtime.js");
-    const { registerTools } = await import("../src/registration.js");
+    const { registerTools } = await import("../src/bootstrap/registration.js");
     const localApi = createMockExtensionAPI();
     const runtime = createExtensionRuntime(localApi.api as any);
     registerTools(runtime);
@@ -255,7 +263,7 @@ describe("event listener registration", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   it("registers session_start listener", () => {
     expect(api.listeners.some((l) => l.event === "session_start")).toBe(true);
@@ -268,9 +276,8 @@ describe("event listener registration", () => {
   });
 
   it("injects current guidance only while the Agent tool is active", async () => {
-    // Guidance reads the real registry; session_start never fires in this
-    // suite, so seed it with the built-in default agents directly.
-    registerAgents(new Map());
+    // session_start never fires in this suite, so the assertion also pins that
+    // the activation-time registry already answers with the built-in types.
     const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
     const ctx = {
       model: { provider: "anthropic", id: "sonnet", reasoning: true },
@@ -296,7 +303,7 @@ describe("event listener registration", () => {
 
   it("continues shutdown cleanup after a display disposer fails", async () => {
     const { createExtensionRuntime } = await import("../src/bootstrap/extension-runtime.js");
-    const { setupEventListeners } = await import("../src/events.js");
+    const { setupEventListeners } = await import("../src/bootstrap/events.js");
     const localApi = createMockExtensionAPI();
     const runtime = createExtensionRuntime(localApi.api as any);
     setupEventListeners(runtime);
@@ -327,7 +334,7 @@ describe("Agent tool schema — worktree_path", () => {
   beforeAll(async () => {
     api = createMockExtensionAPI();
     await loadExtension(api.api);
-  });
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   it("worktree_path is optional in the schema", () => {
     const tool = api.tools.find((t) => t.name === "Agent")!;

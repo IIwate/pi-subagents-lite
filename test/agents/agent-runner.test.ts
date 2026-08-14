@@ -17,14 +17,17 @@ const fakePi = makeFakePi();
 // bootstrap load time. vi.hoisted runs before the imports below, so the
 // custom-mode cases can write and remove that file to exercise the real
 // read path instead of doubling an in-repo module.
-const promptHome = await vi.hoisted(async () => {
+const { homeDirectory, promptHome } = await vi.hoisted(async () => {
   const { mkdtempSync, mkdirSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const path = await import("node:path");
   const home = mkdtempSync(path.join(tmpdir(), "agent-runner-home-"));
   mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
   process.env.HOME = home;
-  return path.join(home, ".pi", "agent", "subagents-lite-prompt.md");
+  return {
+    homeDirectory: home,
+    promptHome: path.join(home, ".pi", "agent", "subagents-lite-prompt.md"),
+  };
 });
 
 // --- Vendor session/loader doubles (the only mocked seam) ---
@@ -106,6 +109,11 @@ function runAgent(ctx: any, type: string, prompt: string, options: any) {
     ? { ...model, maxTokens: configuredOutputLimit }
     : model;
   return runAgentWithPolicy(ctx, type, prompt, {
+    // Both paths are composition-root values in production; the suite supplies
+    // the temp home so user-level skills and the custom prompt file stay inside
+    // the fixture instead of the developer's real home.
+    customPromptPath: promptHome,
+    homeDirectory,
     ...options,
     acceptedPolicy: {
       definition,
@@ -1457,7 +1465,7 @@ describe("runAgent — context file gating", () => {
 /*  runAgent — system prompt modes (replace, inherit, custom)         */
 /* ------------------------------------------------------------------ */
 
-describe("runAgent — system prompt modes", () => {
+describe("REQ-AGENT-001 runAgent — system prompt modes", () => {
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
@@ -1494,7 +1502,7 @@ describe("runAgent — system prompt modes", () => {
     expect(prompt).toContain("You are a test agent.");
   });
 
-  it("falls back gracefully when getSystemPrompt throws in inherit mode", async () => {
+  it("fails the run when getSystemPrompt throws in inherit mode", async () => {
     currentSystemPromptMode = "inherit";
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
@@ -1504,17 +1512,12 @@ describe("runAgent — system prompt modes", () => {
     ctx.getSystemPrompt = vi.fn().mockImplementation(() => { throw new Error("no prompt"); });
     ctx.ui = { notify: vi.fn() };
 
-    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
-
-    // Notified about the failure
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to get parent system prompt"),
-      "warning",
-    );
-    // The prompt still assembles — with the generic header instead of the parent's
-    const prompt = generatedPrompt();
-    expect(prompt).toContain("You are a Pi, an expert coding sub-agent.");
-    expect(prompt).not.toContain("parent prompt content");
+    // An inherited persona is the reason the mode was chosen, so silently
+    // running under the generic header would report success for work done
+    // under different instructions. No session is created at all.
+    await expect(runAgent(ctx, "test-agent", "do something", { pi: fakePi }))
+      .rejects.toThrow("no prompt");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
   });
 });
 
@@ -1522,7 +1525,7 @@ describe("runAgent — system prompt modes", () => {
 /*  runAgent — custom mode (file reading, fallback)                   */
 /* ------------------------------------------------------------------ */
 
-describe("runAgent — custom mode", () => {
+describe("REQ-AGENT-001 runAgent — custom mode", () => {
   function readySession() {
     const session = createMockSession();
     session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);

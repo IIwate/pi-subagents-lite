@@ -13,8 +13,8 @@ Deterministically assemble extension-controlled Agent guidance and Subagent syst
 
 ## Supported product requirements
 
-- [REQ-MODEL-006](../../../../docs/product/prd/model-access.md#req-model-006)
-- [REQ-AGENT-001](../../../../docs/product/prd/agent-calls.md#req-agent-001)
+- [REQ-MODEL-006](../../../../docs/product/prd/model-access.md#req-model-006--guidance-consistency)
+- [REQ-AGENT-001](../../../../docs/product/prd/agent-calls.md#req-agent-001--spawn-through-agent)
 
 These are supported requirements, not prompt-owned product capabilities. Their owning modules remain `model-access` and `subagent-runtime`.
 

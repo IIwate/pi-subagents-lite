@@ -6,11 +6,16 @@ import {
   type SessionInspectResult,
 } from "../../modules/subagent-runtime/public.js";
 import { getSessionContextPercent } from "../../agents/usage.js";
+import { parseThinkingLevel } from "../../utils.js";
 import { continueAgentSession, runAgent } from "./agent-session.js";
 
 export interface CreatePiSessionDriverOptions {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
+  /** Absolute path of the optional custom system-prompt file for "custom" mode. */
+  customPromptPath: string;
+  /** Resolved home directory used for user-level skill discovery. */
+  homeDirectory: string;
   teardownTimeoutMs?: number;
 }
 
@@ -20,6 +25,18 @@ interface LiveSession {
 
 function asImages(images: unknown[] | undefined): ImageContent[] | undefined {
   return images?.length ? images as ImageContent[] : undefined;
+}
+
+/**
+ * The transcript is the one bulk payload leaving this adapter, and Pi's message
+ * objects are host types, not JSON: optional fields hold `undefined`, and
+ * nothing stops a future field from holding something worse. Serializing once
+ * here makes the value what the port contract says it is; a cast would leave
+ * the receiving check to reject the whole record set over one field it never
+ * needed.
+ */
+function asPortResult(result: unknown): SessionInspectResult {
+  return JSON.parse(JSON.stringify(result)) as SessionInspectResult;
 }
 
 export function createPiSessionDriver(options: CreatePiSessionDriverOptions): SessionDriver {
@@ -32,19 +49,17 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
     if (!live) return { found: false, live: false, streaming: false, messages: [] };
     const session = live.session;
     const streamingMessage = (session.agent?.state as { streamingMessage?: unknown } | undefined)?.streamingMessage;
-    return {
+    return asPortResult({
       found: true,
       live: true,
       streaming: session.isStreaming,
       modelId: session.model?.id,
       provider: session.model?.provider,
-      thinkingLevel: session.thinkingLevel,
+      thinkingLevel: parseThinkingLevel(session.thinkingLevel),
       contextPercent: getSessionContextPercent(session),
-      messages: Array.isArray(session.messages)
-        ? [...(session.messages as unknown as SessionInspectResult["messages"])]
-        : [],
-      streamingMessage: streamingMessage as unknown as SessionInspectResult["streamingMessage"],
-    };
+      messages: Array.isArray(session.messages) ? [...session.messages] : [],
+      streamingMessage,
+    });
   };
 
   return {
@@ -53,6 +68,8 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
         pi: options.pi,
         agentId: request.agentId,
         acceptedPolicy: request.acceptedPolicy,
+        customPromptPath: options.customPromptPath,
+        homeDirectory: options.homeDirectory,
         cwd: request.worktreePath,
         debugFault: request.debugFault,
         onSessionSetupStarted: () => {
@@ -69,7 +86,10 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
             sessionId: request.sessionId,
             modelId: session.model?.id,
             provider: session.model?.provider,
-            thinkingLevel: session.thinkingLevel,
+            // Pi reports whatever the model exposes; the port contract accepts
+            // only the canonical set, so an unrecognized level is dropped here
+            // instead of being rejected as a whole session-ready event.
+            thinkingLevel: parseThinkingLevel(session.thinkingLevel),
           });
         },
         onToolUse: () => {

@@ -18,6 +18,9 @@ import {
 // Type-only: constructing the record must not load the real bootstrap graph
 // (and its configuration file reads) into unit tests.
 import type { ExtensionRuntime } from "../src/bootstrap/extension-runtime.js";
+import { createAgentRegistry, type AgentRegistry } from "../src/agents/agent-registry.js";
+import { createAgentCatalogueRuntime } from "../src/bootstrap/agent-catalogue.js";
+import type { AgentConfig } from "../src/agents/types.js";
 import type {
   AgentSettingsStore,
   ResolvedAgentSettings,
@@ -124,8 +127,22 @@ export function fakeExtensionRuntime(
     navigator: null,
     agentSettings: inertAgentSettings(),
     modelAccess: disabledModelAccess,
+    worktree: { inspect: async () => ({ ok: true as const }) },
+    // A per-record registry with the built-in types only: tests that need
+    // discovery from disk call register()/setScanRoots() on this instance, so
+    // one test's catalogue can never leak into another's.
+    agents: testAgentRegistry(),
     ...overrides,
   };
+}
+
+/** A registry over the real catalogue module, seeded with the built-in types. */
+export function testAgentRegistry(
+  userAgents: Map<string, AgentConfig> = new Map(),
+): AgentRegistry {
+  const registry = createAgentRegistry({ catalogue: createAgentCatalogueRuntime() });
+  registry.register(userAgents);
+  return registry;
 }
 
 import {

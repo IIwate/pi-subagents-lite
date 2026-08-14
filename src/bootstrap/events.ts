@@ -1,29 +1,27 @@
 import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
-import { registerAgents, setAgentScanDirs } from "./agents/agent-types.js";
-import type { AgentConfig } from "./agents/types.js";
-import { createAgentCatalogueRuntime } from "./bootstrap/agent-catalogue.js";
-import { configRoot, configuration, configurationSectionIO } from "./bootstrap/configuration.js";
-import { userAgentsDirPath } from "./platform/fs/config-paths.js";
+import type { AgentConfig } from "../agents/types.js";
+import { createAgentCatalogueRuntime } from "./agent-catalogue.js";
+import { configRoot, configuration, configurationSectionIO } from "./configuration.js";
+import { userAgentsDirPath } from "../platform/fs/config-paths.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
-} from "./modules/agent-catalogue/public.js";
-import { concurrencyRuntimeLimits } from "./bootstrap/concurrency.js";
-import { createHostSubagentRuntime } from "./bootstrap/subagent-runtime.js";
-import { ChildScreenHost } from "./bootstrap/child-screen.js";
-import type { ExtensionRuntime } from "./bootstrap/extension-runtime.js";
-import { createParentGuidanceRuntime } from "./bootstrap/prompt.js";
+} from "../modules/agent-catalogue/public.js";
+import { concurrencyRuntimeLimits } from "./concurrency.js";
+import { createHostSubagentRuntime } from "./subagent-runtime.js";
+import { ChildScreenHost } from "./child-screen.js";
+import type { ExtensionRuntime } from "./extension-runtime.js";
+import { createParentGuidanceRuntime } from "./prompt.js";
 import {
   applyDeliveryCommand,
   interactAgent,
   isParentRunSuccessful,
   wireHostDelivery,
-} from "./bootstrap/session-host.js";
+} from "./session-host.js";
 
 const agentCatalogue = createAgentCatalogueRuntime();
-const parentGuidance = createParentGuidanceRuntime();
 
 function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
   const { source, ...config } = structuredClone(definition);
@@ -43,6 +41,7 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
     const manager = createHostSubagentRuntime({
       pi: runtime.pi,
       ctx,
+      worktreeInspector: runtime.worktree,
       limits: concurrencyRuntimeLimits(),
     });
     runtime.manager = manager;
@@ -59,6 +58,7 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
       async (agentId, text) => interactAgent(runtime, agentId, text),
       () => runtime.delivery?.pendingResultCount(),
       runtime.agentSettings.read().expandListByDefault,
+      (type) => runtime.agents.resolvedConfig(type).displayName,
     );
     // Stats visibility follows the persisted display settings.
     runtime.agentSettings.syncNavigatorStats();
@@ -70,7 +70,7 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
  * Scan agent files from user and project directories, merge with defaults,
  * and register into the type registry.
  */
-async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
+async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
   const userAgentDir = userAgentsDirPath(configRoot);
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
@@ -86,14 +86,14 @@ async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
     throw new TypeError("Agent catalogue configuration is invalid.");
   }
   const disableDefaults = catalogueConfiguration.disableDefaultAgents === true;
-  setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);
+  runtime.agents.setScanRoots(userAgentDir, projectAgentDir, disableDefaults);
   const result = await agentCatalogue.execute({
     kind: "discover",
     roots: { globalDirectory: userAgentDir, projectDirectory: projectAgentDir },
     configuration: catalogueConfiguration,
   });
   if (!result.ok) throw new Error(result.error.message);
-  registerAgents(new Map(
+  runtime.agents.register(new Map(
     result.catalogue.definitions.map((definition) => [definition.name, toAgentConfig(definition)]),
   ), { disableDefaultAgents: true });
 }
@@ -104,7 +104,7 @@ async function loadConfigAndRegisterAgents(runtime: ExtensionRuntime, ctx: Exten
   configurationSectionIO.reload();
   ensureManagerAndNavigator(runtime, ctx);
   runtime.agentSettings.syncNavigatorStats();
-  await scanAndRegisterAgents(ctx);
+  await scanAndRegisterAgents(runtime, ctx);
 }
 
 // ============================================================================
@@ -114,6 +114,7 @@ async function loadConfigAndRegisterAgents(runtime: ExtensionRuntime, ctx: Exten
 /** Register all pi.on() event listeners as closures over one runtime. */
 export function setupEventListeners(runtime: ExtensionRuntime): void {
   const { pi } = runtime;
+  const parentGuidance = createParentGuidanceRuntime(runtime.agents);
 
   pi.on("before_agent_start", (event, ctx) => {
     const { manager, delivery } = runtime;
