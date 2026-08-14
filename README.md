@@ -20,7 +20,7 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list agents, or read one exact result by `agent_id` without polling or waiting.
 
-Once a subagent exists, progress appears in the below-editor list or its folded Footer summary. The list has a sticky Main row and up to six visible subagents scrolled around the focused row. It starts expanded by default; `/agents` → Display settings → Expand list by default persists a different initial choice for new conversations. After changing it, the menu reports that `/reload` applies the new default immediately by recreating the current conversation's extension runtime. `Alt+A` toggles only the current runtime, and that choice remains even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. Agent rows retain manager order:
+Once a subagent exists, progress appears in the below-editor list or its folded Footer summary. The list has a sticky Main row and up to six visible subagents scrolled around the focused row. It starts expanded by default; `/agents` → Display settings → Expand list by default persists a different initial choice for new conversations. After changing it, the menu reports that `/reload` applies the new default immediately by recreating the current conversation's extension runtime. `Alt+A` toggles only the current runtime, and that choice remains even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. Agent rows use status-rank order: attention (Error, Aborted, Turn limit), then Running, then Queued, then archived Done and Stopped. Same-rank rows keep acceptance order:
 
 ```text
 › ● Main (1 running · 3 total · Alt+A collapse)
@@ -179,7 +179,7 @@ Run `/agents` to configure:
 - the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and Inactive Provider / Inactive Model rows;
 - force-background mode, grace turns, and exact Agent/model Thinking access overrides;
 - system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
-- implicit skill and extension loading, built-in agents, initial list expansion, and visible list statistics;
+- implicit skill and extension loading, built-in agents, initial list expansion, and visible list statistics. `/agents` → Display settings → Show context % controls the list `%` and compaction `↻`;
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
 - one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 

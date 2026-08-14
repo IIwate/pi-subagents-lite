@@ -10,11 +10,11 @@ This plan is based on local `re` branch commit `37162c8`. During migration it im
 
 The migration priorities initially used the author-scoped evidence in the refactoring history audit, a temporary anti-survivor-bias ledger recording how repeated patches exposed unstable boundaries and missed scenarios. It was never a product requirement, architecture authority, or maintenance guide. Every actionable finding was internalized into the document that owns it — the mapping is recorded in the [migration baseline](architecture/migration-baseline.md#history-finding-ownership) — and the audit file was retired in Phase 9.
 
-The `re` branch carries the plan and will carry the complete refactoring implementation. Work remains a sequence of independently verified vertical slices on that branch; no second refactoring branch or parallel implementation tree is created. The repository owner freezes feature development on `main` for the duration, so routine synchronization from `main` is not part of the plan. An exceptional `main` change stops the active slice and requires an explicit integration decision.
+The `re` branch carried this plan as independently verified vertical slices; no second refactoring branch or parallel implementation tree was created. Phase 9 closed at `c20dd5d` — already recorded in [migration-baseline.md](architecture/migration-baseline.md) and `e71976c`. Later commits are post-checkpoint repairs (policy projection at the door, list DTOs, TUI hot path, status-rank, and similar), not remaining module migration. Feature development on `main` stayed frozen for the duration; an exceptional `main` change stopped the active slice and required an explicit integration decision.
 
 ## Evidence baseline
 
-The baseline is measured from the repository, not inferred from file names:
+The table is the Phase 0 historical snapshot at `37162c8` (10,275 production TypeScript lines, 849 tests, `AgentNavigator` as the largest file). It is not a current inventory. Those values were measured from the repository, not inferred from file names:
 
 | Signal | Baseline | Meaning |
 |:--|--:|:--|
@@ -540,7 +540,7 @@ Any failure blocks completion. One or two failures are fixed in the same task. T
 
 ## Completion criteria
 
-The refactor is complete only when all of these are true:
+The refactor was complete when all of these were true. Phase 9 closed that gate at `c20dd5d`:
 
 - Public behavior remains consistent with the approved PRD, `CONTEXT.md`, final decision documents, and linked acceptance examples.
 - The source dependency graph is acyclic and follows the declared layer matrix.
@@ -554,4 +554,4 @@ The refactor is complete only when all of these are true:
 - The temporary history audit has been fully internalized and retired without losing a regression scenario or decision rationale.
 - Typecheck, the full suite, architecture tests, and the ten-item S.U.P.E.R. review all pass.
 
-Until those conditions are met, work is reported as an incomplete migration, not as a completed refactor.
+Later `re` commits are post-checkpoint repairs, not an open migration.

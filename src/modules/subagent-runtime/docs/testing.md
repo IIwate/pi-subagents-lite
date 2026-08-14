@@ -23,6 +23,7 @@ Lifecycle commands are exercised through `createSubagentRuntime` with in-memory 
 - Worktree validation is delegated through its serializable inspector port; an off-contract inspect result is refused before `.ok` or `.resolvedPath` is read.
 - `markResult(fields)` Checks the same `mark-result` command schema as `execute`.
 - The persisted limits fragment parses tolerantly, updates strictly, and derives the scheduler shape (`test/modules/subagent-runtime/limits-fragment.test.ts`). Invalid updates throw instead of returning a committable fragment.
+- `listSnapshots()` ranks attention, running, queued, then archive and keeps acceptance order inside a rank (`test/modules/subagent-runtime/lifecycle.test.ts`).
 
 ## Fixtures and doubles
 
