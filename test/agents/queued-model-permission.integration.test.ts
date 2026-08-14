@@ -295,8 +295,8 @@ describe("REQ-AGENT-002 queued invocation snapshots (session-driver / policy loc
     expect(queuedOptions.thinkingLevel).toBe("high");
     expect((await mocks.manager.waitUntilSettled(second.id))?.status, second.error).toBe("completed");
 
-    const future = await executeAgentTool("future", params("future", "other/worker-model"), undefined, undefined, mocks.ctx);
-    expect(future.isError).toBe(true);
+    await expect(executeAgentTool("future", params("future", "other/worker-model"), undefined, undefined, mocks.ctx))
+      .rejects.toThrow("Alternate models are OFF");
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
     await dispose();
   });
@@ -329,14 +329,15 @@ describe("REQ-AGENT-002 queued invocation snapshots (session-driver / policy loc
     expect((await mocks.manager.waitUntilSettled(queued.id))?.status, queued.error).toBe("completed");
     expect(mocks.ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("fallback"), expect.anything());
 
-    const future = await executeAgentTool(
-      "future",
-      params("future Explore", undefined, true, "Explore"),
-      undefined,
-      undefined,
-      mocks.ctx,
-    );
-    expect(future.isError).toBe(true);
+    await expect(
+      executeAgentTool(
+        "future",
+        params("future Explore", undefined, true, "Explore"),
+        undefined,
+        undefined,
+        mocks.ctx,
+      ),
+    ).rejects.toThrow("Unknown agent type: Explore");
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
     await dispose();
   });

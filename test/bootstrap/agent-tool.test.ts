@@ -8,8 +8,9 @@
  *   - agent types through the runtime's own registry, seeded per test
  *
  * Detailed worktree failure reasons are owned by worktree-validator.test.ts;
- * this suite only proves the executor surfaces validation results, enforces
- * model access, and hands a frozen accepted policy to the spawn seam.
+ * this suite proves pre-spawn refusals throw, model access is enforced, and
+ * a frozen accepted policy is handed to the spawn seam. Foreground snapshot
+ * errors after spawn still return isError — that is a run result.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -209,27 +210,25 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     expect(mgr.spawnCommands[0].parentCwd).toBe(ctx.cwd);
   });
 
-  it("returns the validator error and does not spawn for a foreign worktree", async () => {
+  it("throws the validator error and does not spawn for a foreign worktree", async () => {
     commonDirs.set(worktree, join(worktree, ".git"));
 
-    const result = await execute("tc-2", makeParams({ worktree_path: worktree }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe(WORKTREE_VALIDATION_ERRORS.DIFFERENT_REPO);
+    await expect(execute("tc-2", makeParams({ worktree_path: worktree }), undefined, undefined, ctx))
+      .rejects.toThrow(WORKTREE_VALIDATION_ERRORS.DIFFERENT_REPO);
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
-  it("surfaces filesystem rejections without invoking git", async () => {
-    const result = await execute(
-      "tc-missing",
-      makeParams({ worktree_path: join(worktree, "missing") }),
-      undefined,
-      undefined,
-      ctx,
-    );
+  it("throws filesystem rejections without invoking git", async () => {
+    await expect(
+      execute(
+        "tc-missing",
+        makeParams({ worktree_path: join(worktree, "missing") }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(WORKTREE_VALIDATION_ERRORS.PATH_DOES_NOT_EXIST);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe(WORKTREE_VALIDATION_ERRORS.PATH_DOES_NOT_EXIST);
     expect(exec).not.toHaveBeenCalled();
     expect(mgr.spawnCommands).toHaveLength(0);
   });
@@ -243,10 +242,8 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     });
     ctx.ui = { notify: vi.fn() };
 
-    const result = await execute("tc-warn", makeParams({ worktree_path: worktree }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("git rev-parse failed: EACCES permission denied");
+    await expect(execute("tc-warn", makeParams({ worktree_path: worktree }), undefined, undefined, ctx))
+      .rejects.toThrow("git rev-parse failed: EACCES permission denied");
     expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       `[pi-subagents-lite] git rev-parse --git-common-dir failed in ${repo}: EACCES permission denied`,
@@ -254,7 +251,7 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     );
   });
 
-  it("degrades to an error result when the warning notifier itself throws", async () => {
+  it("throws when the warning notifier itself throws", async () => {
     execute = buildExecutor({
       parentCwd: repo,
       exec: vi.fn(async () => {
@@ -267,10 +264,8 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
       }),
     };
 
-    const result = await execute("tc-crash", makeParams({ worktree_path: worktree }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe("worktree_path validation failed: notifier exploded");
+    await expect(execute("tc-crash", makeParams({ worktree_path: worktree }), undefined, undefined, ctx))
+      .rejects.toThrow("worktree_path validation failed: notifier exploded");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
@@ -353,9 +348,8 @@ describe("REQ-AGENT-001 executeAgentTool — spawn inputs and outcome", () => {
   });
 
   it("rejects an unknown agent type without reaching the scheduler", async () => {
-    const result = await execute("tc-unknown", makeParams({ agent: "no-such-type" }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
+    await expect(execute("tc-unknown", makeParams({ agent: "no-such-type" }), undefined, undefined, ctx))
+      .rejects.toThrow("Unknown agent type: no-such-type");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 });
@@ -401,17 +395,16 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     expect(result.content[0].text).toContain("delivered automatically");
   });
 
-  it("returns error for invalid worktree_path in background spawn", async () => {
-    const result = await execute(
-      "tc-bg-err",
-      makeParams({ worktree_path: join(worktree, "gone"), run_in_background: true }),
-      undefined,
-      undefined,
-      ctx,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe(WORKTREE_VALIDATION_ERRORS.PATH_DOES_NOT_EXIST);
+  it("throws for invalid worktree_path in background spawn", async () => {
+    await expect(
+      execute(
+        "tc-bg-err",
+        makeParams({ worktree_path: join(worktree, "gone"), run_in_background: true }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(WORKTREE_VALIDATION_ERRORS.PATH_DOES_NOT_EXIST);
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 });
@@ -436,13 +429,15 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
   it("asks discovery to scan the worktree path named by config-paths", async () => {
     const discoverNew = vi.spyOn(agents, "discoverNew");
 
-    await execute(
-      "tc-disc-path",
-      makeParams({ agent: "feature-reviewer", worktree_path: worktree }),
-      undefined,
-      undefined,
-      ctx,
-    );
+    await expect(
+      execute(
+        "tc-disc-path",
+        makeParams({ agent: "feature-reviewer", worktree_path: worktree }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Unknown agent type: feature-reviewer");
 
     expect(discoverNew).toHaveBeenCalledWith(projectAgentsDirPath(normalized(worktree)));
   });
@@ -468,17 +463,16 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     expect(mgr.spawnCommands[0].type).toBe("feature-reviewer");
   });
 
-  it("reports an unknown type when discovery without a worktree finds nothing", async () => {
-    const result = await execute(
-      "tc-disc-no-wt",
-      makeParams({ agent: "feature-reviewer" }),
-      undefined,
-      undefined,
-      ctx,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe("Unknown agent type: feature-reviewer");
+  it("throws an unknown type when discovery without a worktree finds nothing", async () => {
+    await expect(
+      execute(
+        "tc-disc-no-wt",
+        makeParams({ agent: "feature-reviewer" }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Unknown agent type: feature-reviewer");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 });
@@ -502,10 +496,8 @@ describe("executeAgentTool — thinking param", () => {
   });
 
   it("rejects free-form thinking values not in Pi's canonical list", async () => {
-    const result = await execute("tc-think-custom", makeParams({ thinking: "super-high" }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Allowed thinking levels");
+    await expect(execute("tc-think-custom", makeParams({ thinking: "super-high" }), undefined, undefined, ctx))
+      .rejects.toThrow("Allowed thinking levels");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 });
@@ -551,18 +543,18 @@ describe("executeAgentTool — model access", () => {
   it("rejects omitted and explicit Parent default use when Parent access is denied", async () => {
     routing.agentAccess["general-purpose"].parentModelAccess = false;
 
-    const omitted = await execute("parent-denied-omitted", makeParams({ model: undefined }), undefined, undefined, ctx);
-    expect(omitted.isError).toBe(true);
-    expect(omitted.content[0].text).toContain("parent model");
+    await expect(execute("parent-denied-omitted", makeParams({ model: undefined }), undefined, undefined, ctx))
+      .rejects.toThrow("parent model");
 
-    const explicit = await execute(
-      "parent-denied-explicit",
-      makeParams({ model: "test/parent-model" }),
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(explicit.isError).toBe(true);
+    await expect(
+      execute(
+        "parent-denied-explicit",
+        makeParams({ model: "test/parent-model" }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("parent model");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
@@ -584,16 +576,15 @@ describe("executeAgentTool — model access", () => {
 
   it("rejects every non-parent explicit model while routing is OFF", async () => {
     routing.enabled = false;
-    const result = await execute("off", makeParams({ model: "test/other-model" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Alternate models are OFF");
+    await expect(execute("off", makeParams({ model: "test/other-model" }), undefined, undefined, ctx))
+      .rejects.toThrow("Alternate models are OFF");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
   it("requires a parent only when model is omitted", async () => {
     ctx.model = undefined;
-    const omitted = await execute("missing-parent", makeParams({ model: undefined }), undefined, undefined, ctx);
-    expect(omitted.content[0].text).toContain("parent session has no active model");
+    await expect(execute("missing-parent", makeParams({ model: undefined }), undefined, undefined, ctx))
+      .rejects.toThrow("parent session has no active model");
 
     await execute("explicit-no-parent", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
     expect(mgr.spawnCommands).toHaveLength(1);
@@ -601,8 +592,8 @@ describe("executeAgentTool — model access", () => {
 
   it("requires the provider to be globally enabled", async () => {
     routing.enabledProviders = [];
-    const result = await execute("provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain('provider "cpa-responses" is disabled');
+    await expect(execute("provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx))
+      .rejects.toThrow('provider "cpa-responses" is disabled');
   });
 
   it("does not bypass explicit Provider access for current-parent-provider alternates", async () => {
@@ -610,9 +601,8 @@ describe("executeAgentTool — model access", () => {
     routing.agentAccess = {
       "general-purpose": { providers: { test: { models: ["other-model"] } } },
     };
-    const denied = await execute("parent-provider-alternate", makeParams({ model: "test/other-model" }), undefined, undefined, ctx);
-    expect(denied.isError).toBe(true);
-    expect(denied.content[0].text).toContain('provider "test" is disabled');
+    await expect(execute("parent-provider-alternate", makeParams({ model: "test/other-model" }), undefined, undefined, ctx))
+      .rejects.toThrow('provider "test" is disabled');
     expect(mgr.spawnCommands).toHaveLength(0);
 
     routing.enabledProviders = ["test"];
@@ -622,20 +612,19 @@ describe("executeAgentTool — model access", () => {
 
   it("applies policy gates before registry availability for qualified models", async () => {
     routing.enabledProviders = [];
-    const result = await execute("unknown-provider", makeParams({ model: "missing/worker" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain('provider "missing" is disabled');
-    expect(result.content[0].text).not.toContain("Unknown model id");
+    await expect(execute("unknown-provider", makeParams({ model: "missing/worker" }), undefined, undefined, ctx))
+      .rejects.toThrow('provider "missing" is disabled');
   });
 
   it("requires an Agent/provider rule", async () => {
     routing.agentAccess = {};
-    const result = await execute("agent-provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("has no access rule");
+    await expect(execute("agent-provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx))
+      .rejects.toThrow("has no access rule");
   });
 
   it("requires a matching exact model rule", async () => {
-    const result = await execute("model-rule", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("not authorized by the saved model access rule");
+    await expect(execute("model-rule", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx))
+      .rejects.toThrow("not authorized by the saved model access rule");
   });
 
   it("allows an all-model rule", async () => {
@@ -646,28 +635,27 @@ describe("executeAgentTool — model access", () => {
 
   it("rejects catalogue-only alternate models", async () => {
     ctx.modelRegistry.getAvailable = vi.fn(() => [{ provider: "test", id: "parent-model" }]);
-    const result = await execute("availability", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("not currently available to Pi");
+    await expect(execute("availability", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx))
+      .rejects.toThrow("not currently available to Pi");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
   it("rejects alternate models outside active scope", async () => {
     ctx.scopedModels = [{ model: makeModel("test", "parent-model") }];
-    const result = await execute("scope", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("active model scope");
+    await expect(execute("scope", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx))
+      .rejects.toThrow("active model scope");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
   it("rejects bare model IDs", async () => {
-    const result = await execute("bare", makeParams({ model: "grok-4.5" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("provider/model");
+    await expect(execute("bare", makeParams({ model: "grok-4.5" }), undefined, undefined, ctx))
+      .rejects.toThrow("provider/model");
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
   it("rejects the retired model:thinking shorthand", async () => {
-    const result = await execute("shorthand", makeParams({ model: "cpa-responses/grok-4.5:low" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
+    await expect(execute("shorthand", makeParams({ model: "cpa-responses/grok-4.5:low" }), undefined, undefined, ctx))
+      .rejects.toThrow();
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
@@ -716,25 +704,22 @@ describe("executeAgentTool — model access", () => {
     ctx.model = makeModel("cpa-responses", "grok-4.5", { maxTokens: 0 });
     ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
 
-    const result = await execute("invalid-policy-detail", makeParams({ model: undefined }), undefined, undefined, ctx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("produced an invalid accepted run policy");
-    expect(result.content[0].text).toMatch(/outputTokenLimit|maxTokens|exclusiveMinimum/);
+    await expect(execute("invalid-policy-detail", makeParams({ model: undefined }), undefined, undefined, ctx))
+      .rejects.toThrow(/produced an invalid accepted run policy[\s\S]*(outputTokenLimit|maxTokens|exclusiveMinimum)/);
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
   it("makes a Model scope thinking pin authoritative", async () => {
     ctx.scopedModels = [{ model: makeModel("cpa-responses", "grok-4.5"), thinkingLevel: "medium" }];
-    const rejected = await execute(
-      "thinking",
-      makeParams({ model: "cpa-responses/grok-4.5", thinking: "xhigh" }),
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(rejected.isError).toBe(true);
-    expect(rejected.content[0].text).toContain("medium");
+    await expect(
+      execute(
+        "thinking",
+        makeParams({ model: "cpa-responses/grok-4.5", thinking: "xhigh" }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("medium");
     expect(mgr.spawnCommands).toHaveLength(0);
 
     await execute("thinking-default", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
@@ -752,16 +737,15 @@ describe("executeAgentTool — model access", () => {
     expect(mgr.spawnCommands[0].acceptedPolicy.thinkingLevel).toBe("low");
 
     execute = buildExecutor();
-    const rejected = await execute(
-      "thinking-denied",
-      makeParams({ model: "cpa-responses/grok-4.5", thinking: "high" }),
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(rejected.isError).toBe(true);
-    expect(rejected.content[0].text).toContain("low");
-    expect(rejected.content[0].text).toContain("medium");
+    await expect(
+      execute(
+        "thinking-denied",
+        makeParams({ model: "cpa-responses/grok-4.5", thinking: "high" }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(/low[\s\S]*medium|medium[\s\S]*low/);
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 
@@ -771,8 +755,8 @@ describe("executeAgentTool — model access", () => {
   });
 
   it("never falls back after an explicit denial", async () => {
-    const result = await execute("no-fallback", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
+    await expect(execute("no-fallback", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx))
+      .rejects.toThrow();
     expect(mgr.spawnCommands).toHaveLength(0);
   });
 });

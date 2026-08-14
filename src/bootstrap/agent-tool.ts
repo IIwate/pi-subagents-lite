@@ -9,7 +9,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { getStatusNote } from "../status-note.js";
-import type { AgentSnapshot } from "../modules/subagent-runtime/public.js";
+import type { AgentSnapshot, WorktreeInspectResult } from "../modules/subagent-runtime/public.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import {
   describeAcceptedRunPolicyFailure,
@@ -55,7 +55,13 @@ function successResult(text: string) {
   return { content: [{ type: "text", text }] };
 }
 
-/** Shortcut for an error tool result. */
+/**
+ * A finished run's text, not a refusal to start. Pi 0.84 writes
+ * isError:false on every execute that returns; only a throw is a tool
+ * error. After spawn the work already happened, so the snapshot is the
+ * result even when status is error. Revisit if Pi honors a returned
+ * isError — pre-spawn refusals still have to throw until then.
+ */
 function errorResult(text: string) {
   return { content: [{ type: "text", text }], isError: true as const };
 }
@@ -94,13 +100,18 @@ async function executeAgentTool(
   _onUpdate: ((update: any) => void) | undefined,
   ctx: ExtensionContext,
 ): Promise<any> {
-  // Validate worktree_path early — needed for on-demand agent discovery
+  // Pi 0.84 writes isError:false on every execute that returns. Returning
+  // { isError: true } before spawn is a flag the host never keeps; the
+  // parent is told the tool succeeded. Throw so the refusal is a tool
+  // error. After spawn the agent already ran — that snapshot may return.
+  // Revisit if Pi honors a returned isError; the throw stays until then.
   const rawWorktreePath = params.worktree_path as string | undefined;
   let validatedWorktreePath: string | undefined;
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
+    let validation: WorktreeInspectResult;
     try {
       const parentCwd = runtime.sessionCtx?.cwd ?? ctx.cwd;
-      const validation = await runtime.worktree.inspect({
+      validation = await runtime.worktree.inspect({
         worktreePath: rawWorktreePath,
         parentCwd,
       });
@@ -108,13 +119,15 @@ async function executeAgentTool(
         for (const msg of validation.warnings ?? []) {
           if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
         }
-        return errorResult(validation.error);
       }
-      validatedWorktreePath = validation.resolvedPath;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return errorResult(`worktree_path validation failed: ${msg}`);
+      throw new Error(`worktree_path validation failed: ${msg}`);
     }
+    if (!validation.ok) {
+      throw new Error(validation.error);
+    }
+    validatedWorktreePath = validation.resolvedPath;
   }
 
   const type = (params.agent as string) || "general-purpose";
@@ -127,12 +140,12 @@ async function executeAgentTool(
     // A broken scan is reported instead of being read as "no such type": the
     // parent would otherwise correct a spelling that was never wrong.
     if (!discovered.ok) {
-      return errorResult(`Agent type lookup failed: ${discovered.message}`);
+      throw new Error(`Agent type lookup failed: ${discovered.message}`);
     }
     resolvedType = runtime.agents.resolveType(type);
   }
   if (!resolvedType) {
-    return errorResult(`Unknown agent type: ${type}`);
+    throw new Error(`Unknown agent type: ${type}`);
   }
 
   const prompt = params.prompt as string;
@@ -143,7 +156,7 @@ async function executeAgentTool(
   const runInBackground = requestedBackground === true || agentSettings.forceBackground;
   const routing = runtime.modelAccess();
   const explicitModel = Object.hasOwn(params, "model") && params.model !== undefined;
-  if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
+  if (!explicitModel && !ctx.model) throw new Error(missingParentModelError());
 
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
   const selectedModelSpec = explicitModel && typeof params.model === "string"
@@ -152,8 +165,8 @@ async function executeAgentTool(
       ? ""
       : parentModelRef;
   const parsedModelKey = parseModelKey(selectedModelSpec);
-  if (explicitModel && !parsedModelKey) return errorResult(unknownModelError(selectedModelSpec));
-  if (!selectedModelSpec) return errorResult(missingSubagentModelError());
+  if (explicitModel && !parsedModelKey) throw new Error(unknownModelError(selectedModelSpec));
+  if (!selectedModelSpec) throw new Error(missingSubagentModelError());
   const resolvedModelKey = selectedModelSpec;
 
   const scopedKeys = scopedModelKeys(scopedModels);
@@ -168,35 +181,35 @@ async function executeAgentTool(
     scopedKeys: scopedKeys ? [...scopedKeys] : null,
   });
   if ("error" in verdict) {
-    return errorResult(`Agent "${resolvedType}" produced an invalid model access decision.`);
+    throw new Error(`Agent "${resolvedType}" produced an invalid model access decision.`);
   }
   if (!verdict.ok) {
     const provider = resolvedModelKey.slice(0, resolvedModelKey.indexOf("/"));
     if (verdict.reason === "parent-model-denied") {
-      return errorResult(`Agent "${resolvedType}" is not authorized to use the parent model.`);
+      throw new Error(`Agent "${resolvedType}" is not authorized to use the parent model.`);
     }
     if (verdict.reason === "out-of-scope") {
-      return errorResult(outOfScopeModelError(resolvedModelKey, scopedKeys!));
+      throw new Error(outOfScopeModelError(resolvedModelKey, scopedKeys!));
     }
     if (verdict.reason === "routing-disabled") {
-      return errorResult(routingDisabledModelError(selectedModelSpec));
+      throw new Error(routingDisabledModelError(selectedModelSpec));
     }
     if (verdict.reason === "provider-disabled") {
-      return errorResult(providerDisabledError(resolvedModelKey, provider));
+      throw new Error(providerDisabledError(resolvedModelKey, provider));
     }
     if (verdict.reason === "agent-provider-denied") {
-      return errorResult(agentProviderDeniedError(resolvedModelKey, resolvedType, provider));
+      throw new Error(agentProviderDeniedError(resolvedModelKey, resolvedType, provider));
     }
     if (verdict.reason === "model-denied") {
-      return errorResult(modelDeniedError(resolvedModelKey, resolvedType));
+      throw new Error(modelDeniedError(resolvedModelKey, resolvedType));
     }
-    return errorResult(modelUnavailableError(resolvedModelKey));
+    throw new Error(modelUnavailableError(resolvedModelKey));
   }
 
   const model = resolvedModelKey === parentModelRef && ctx.model
     ? ctx.model
     : resolveExactModel(resolvedModelKey, ctx.modelRegistry);
-  if (!model) return errorResult(unknownModelError(resolvedModelKey));
+  if (!model) throw new Error(unknownModelError(resolvedModelKey));
 
   const policyInputs = runtime.agents.policyInputs(resolvedType, {
     loadSkillsImplicitly: agentSettings.loadSkillsImplicitly,
@@ -206,7 +219,7 @@ async function executeAgentTool(
     parentModelKey: parentModelRef,
   });
   if (!policyInputs) {
-    return errorResult(`Unknown agent type: ${type}`);
+    throw new Error(`Unknown agent type: ${type}`);
   }
 
   const configuredOutputLimit = policyInputs.definition.maxTokens;
@@ -231,7 +244,7 @@ async function executeAgentTool(
     fallbackLevel: capability.fallbackLevel,
   });
   if (!thinkingPolicy) {
-    return errorResult(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);
+    throw new Error(`Model "${resolvedModelKey}" has no effective Thinking access policy for Agent "${resolvedType}".`);
   }
   const hasRequestedThinking = Object.hasOwn(params, "thinking") && params.thinking !== undefined;
   const requestedThinking = typeof params.thinking === "string" ? params.thinking.trim() : undefined;
@@ -239,7 +252,7 @@ async function executeAgentTool(
     ? { ok: false as const, reason: "thinking-denied" as const, allowed: [...thinkingPolicy.allowed] }
     : selectThinkingLevel(thinkingPolicy, requestedThinking);
   if (!thinkingSelection.ok) {
-    return errorResult(
+    throw new Error(
       `Thinking "${requestedThinking ?? ""}" is not authorized for Agent "${resolvedType}" on "${resolvedModelKey}". `
       + `Allowed thinking levels: ${thinkingSelection.allowed.join(", ")}.`,
     );
@@ -261,7 +274,7 @@ async function executeAgentTool(
   });
   const acceptedPolicy = parseAcceptedRunPolicy(acceptedPolicyInput);
   if (!acceptedPolicy) {
-    return errorResult(
+    throw new Error(
       `Agent "${resolvedType}" produced an invalid accepted run policy. `
       + describeAcceptedRunPolicyFailure(acceptedPolicyInput),
     );
