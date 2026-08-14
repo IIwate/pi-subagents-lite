@@ -8,7 +8,7 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // recorded value down; this list is not auto-lowered.
 const sizeWarningBaseline: Readonly<Record<string, number>> = {
   "src/platform/pi/agent-session.ts": 756,
-  "src/platform/pi/agent-types.ts": 171,
+  "src/platform/pi/agent-types.ts": 166,
 };
 
 describe("size review signals", () => {
