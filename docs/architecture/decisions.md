@@ -1,6 +1,6 @@
 # Architecture decisions
 
-This file is the final owner of cross-module decisions: their context, trade-offs, rejected alternatives, and supersession history. Module-specific rationale lives in each module's `docs/decisions.md`. The migration ADRs that first recorded these decisions were consolidated here and retired in Phase 9; the [refactoring plan](../refactoring-plan.md) and [migration baseline](./migration-baseline.md) remain the historical record of how the migration itself was run.
+This file is the final owner of cross-module decisions: their context, trade-offs, rejected alternatives, and supersession history. Module-specific rationale lives in each module's `docs/decisions.md`. The migration ADRs that first recorded these decisions were consolidated here and retired in Phase 9. The migration archives that recorded how the migration itself was run have been retired.
 
 ## Capability-oriented modular monolith
 
@@ -18,7 +18,7 @@ Every request, response, event, snapshot, and persisted value crossing a module,
 
 ### Enforcement
 
-The architecture is mechanically enforced by zero-tolerance test guards: no import cycle (including type-only), no inward layer importing an outward layer, no platform packages in `contracts`/`core`/`application`, module-external imports only through `public.ts`, no `vi.mock` of internal modules, `globalThis` confined to `platform/process/process-state.ts`, valid repository-local documentation links, and every PRD requirement ID present in at least one executed test title whose body contains an AST `expect(`. Size thresholds (400-line file, 60-line function) are review signals, not architectural proof; the ten-item S.U.P.E.R. checklist applies at review.
+The architecture is mechanically enforced by zero-tolerance test guards: no import cycle (including type-only), no inward layer importing an outward layer, no platform packages in `contracts`/`core`/`application`, module-external imports only through `public.ts`, no `vi.mock` of internal modules, `globalThis` confined to `platform/process/process-state.ts`, valid repository-local documentation links, and every PRD requirement ID present in at least one executed test title whose body contains an AST `expect(`. Public test-seam definitions live in [testing.md](./testing.md). Size thresholds (400-line file, 60-line function) are review signals, not architectural proof; the ten-item S.U.P.E.R. checklist applies at review.
 
 ### Replaceability checks
 

@@ -1,4 +1,6 @@
-# Lessons Learned
+# Lessons learned
+
+These are contributor notes. They are non-normative and are not a product or architecture authority.
 
 ## General
 

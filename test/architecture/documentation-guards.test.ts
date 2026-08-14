@@ -83,7 +83,6 @@ function requirementIds(): { defined: Set<string>; referenced: Set<string> } {
 
   const referenced = new Set<string>();
   const sources = [
-    resolve(projectRoot, "docs/refactoring-plan.md"),
     ...markdownFiles(resolve(projectRoot, "src/modules")),
   ];
   for (const file of sources) {
