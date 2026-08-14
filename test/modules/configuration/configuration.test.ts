@@ -3,6 +3,7 @@ import { Check } from "typebox/value";
 import {
   CommitConfigurationFragmentCommandSchema,
   CommitConfigurationFragmentResultSchema,
+  ConfigurationResultSchema,
   ReadConfigurationValueCommandSchema,
   ReadConfigurationValueResultSchema,
   createConfiguration,
@@ -209,9 +210,27 @@ describe("configuration public seam", () => {
 
   it("rejects a command outside the configuration schema", () => {
     const configuration = createConfiguration({ repository: memoryRepository({}) });
-    expect(configuration.execute({ kind: "commit-fragment", section: "agent" })).toEqual({
+    const result = configuration.execute({ kind: "commit-fragment", section: "agent" });
+    expect(Check(ConfigurationResultSchema, result)).toBe(true);
+    expect(result).toEqual({
       ok: false,
       error: { code: "invalid-command", message: "Configuration command is invalid." },
     });
+  });
+
+  it("checks every execute result against the aggregate configuration contract", () => {
+    const repository = memoryRepository({ agent: { graceTurns: 6 } });
+    const configuration = createConfiguration({ repository });
+    const read = configuration.execute({ kind: "read-value", path: ["agent", "graceTurns"] });
+    const commit = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "agent",
+      assignments: { graceTurns: 9 },
+    });
+    const reload = configuration.execute({ kind: "reload" });
+    expect(Check(ConfigurationResultSchema, read)).toBe(true);
+    expect(Check(ConfigurationResultSchema, commit)).toBe(true);
+    expect(Check(ConfigurationResultSchema, reload)).toBe(true);
   });
 });

@@ -4,7 +4,9 @@ import ts from "typescript";
  * Requirement IDs are collected from executed describe/it/test titles, not
  * from comments or skipped calls. A regex over the file cannot tell those
  * apart: `// it("REQ-…")` and `it.skip("REQ-…")` both look like coverage.
- * Titles that are not string literals are left uncounted rather than guessed.
+ * An `it("REQ-…")` nested under `describe.skip` is the same non-coverage:
+ * the title never runs. Titles that are not string literals are left
+ * uncounted rather than guessed.
  */
 
 const TEST_CALLEES = new Set(["describe", "it", "test"]);
@@ -39,6 +41,20 @@ function rootTestCallee(expression: ts.Expression): { name: string; modifiers: s
   return undefined;
 }
 
+function skippedAncestor(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isCallExpression(current)) {
+      const callee = rootTestCallee(current.expression);
+      if (callee?.modifiers.some((modifier) => SKIPPED_MODIFIERS.has(modifier))) {
+        return true;
+      }
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
 export function scanRequirementTags(sourceText: string, fileName: string): string[] {
   const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true);
   const tagged = new Set<string>();
@@ -46,7 +62,11 @@ export function scanRequirementTags(sourceText: string, fileName: string): strin
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = rootTestCallee(node.expression);
-      if (callee && !callee.modifiers.some((modifier) => SKIPPED_MODIFIERS.has(modifier))) {
+      if (
+        callee
+        && !callee.modifiers.some((modifier) => SKIPPED_MODIFIERS.has(modifier))
+        && !skippedAncestor(node)
+      ) {
         const title = titleLiteral(node.arguments[0]);
         if (title !== undefined) {
           for (const id of title.matchAll(/REQ-[A-Z]+-\d+/g)) tagged.add(id[0]);

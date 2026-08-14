@@ -69,6 +69,17 @@ export const ThinkingSelectionSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+export const ResolveThinkingAccessQuerySchema = Type.Object({
+  routing: Type.Unknown(),
+  agentType: Type.String({ minLength: 1 }),
+  modelKey: Type.String({ minLength: 1 }),
+  parentModelKey: Type.String(),
+  parentThinkingLevel: Type.Optional(Type.String()),
+  scopedThinkingLevel: Type.Optional(Type.String()),
+  supportedLevels: Type.Array(ThinkingLevelSchema),
+  fallbackLevel: ThinkingLevelSchema,
+}, { additionalProperties: false });
+
 export const AuthorizationDenialReasonSchema = Type.Union([
   Type.Literal("parent-model-denied"),
   Type.Literal("routing-disabled"),
@@ -113,6 +124,7 @@ export type AgentModelAccess = Static<typeof AgentModelAccessSchema>;
 export type ModelAccessFragment = Static<typeof ModelAccessFragmentSchema>;
 export type ThinkingAccessPolicy = Static<typeof ThinkingAccessPolicySchema>;
 export type ThinkingSelection = Static<typeof ThinkingSelectionSchema>;
+export type ResolveThinkingAccessQuery = Static<typeof ResolveThinkingAccessQuerySchema>;
 export type AuthorizationDenialReason = Static<typeof AuthorizationDenialReasonSchema>;
 export type AuthorizeModelCommand = Static<typeof AuthorizeModelCommandSchema>;
 export type AuthorizeModelResult = Static<typeof AuthorizeModelResultSchema>;

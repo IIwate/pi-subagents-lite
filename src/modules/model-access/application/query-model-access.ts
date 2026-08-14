@@ -1,7 +1,10 @@
 import { Check } from "typebox/value";
 import {
   ModelAccessFragmentSchema,
+  ResolveThinkingAccessQuerySchema,
+  ThinkingAccessPolicySchema,
   type ModelAccessFragment,
+  type ResolveThinkingAccessQuery,
 } from "../contracts/model-access-contracts.js";
 import { listEffectiveAlternateKeys } from "../core/effective-alternates.js";
 import { listAgentTypesForProvider, listUnavailableModelRules } from "../core/provider-rules.js";
@@ -59,6 +62,22 @@ export function unavailableModelRules(
   });
 }
 
+function asThinkingQuery(input: unknown): ResolveThinkingAccessQuery | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const raw = input as Record<string, unknown>;
+  const query = {
+    routing: raw.routing,
+    agentType: raw.agentType,
+    modelKey: raw.modelKey,
+    parentModelKey: raw.parentModelKey,
+    supportedLevels: raw.supportedLevels,
+    fallbackLevel: raw.fallbackLevel,
+    ...(raw.parentThinkingLevel !== undefined ? { parentThinkingLevel: raw.parentThinkingLevel } : {}),
+    ...(raw.scopedThinkingLevel !== undefined ? { scopedThinkingLevel: raw.scopedThinkingLevel } : {}),
+  };
+  return Check(ResolveThinkingAccessQuerySchema, query) ? query : undefined;
+}
+
 export function resolveThinkingAccess(input: {
   routing: unknown;
   agentType: string;
@@ -69,19 +88,23 @@ export function resolveThinkingAccess(input: {
   supportedLevels: readonly ThinkingLevel[];
   fallbackLevel: ThinkingLevel;
 }): ThinkingAccessPolicy | null {
-  const fragment = asFragment(input.routing);
+  const query = asThinkingQuery(input);
+  if (!query) return null;
+  const fragment = asFragment(query.routing);
   const override = fragment
-    ? fragment.agentAccess[input.agentType]?.thinking?.[input.modelKey]
+    ? fragment.agentAccess[query.agentType]?.thinking?.[query.modelKey]
     : undefined;
-  return decideThinkingAccess({
-    modelKey: input.modelKey,
-    parentModelKey: input.parentModelKey,
-    parentThinkingLevel: input.parentThinkingLevel,
-    scopedThinkingLevel: input.scopedThinkingLevel,
-    supportedLevels: input.supportedLevels,
-    fallbackLevel: input.fallbackLevel,
+  const policy = decideThinkingAccess({
+    modelKey: query.modelKey,
+    parentModelKey: query.parentModelKey,
+    parentThinkingLevel: query.parentThinkingLevel,
+    scopedThinkingLevel: query.scopedThinkingLevel,
+    supportedLevels: query.supportedLevels,
+    fallbackLevel: query.fallbackLevel,
     override,
   });
+  if (policy !== null && !Check(ThinkingAccessPolicySchema, policy)) return null;
+  return policy;
 }
 
 export function selectThinkingLevel(

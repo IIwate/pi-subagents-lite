@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { ThinkingLevelSchema } from "../../model-access/public.js";
 import { AgentStatusSchema } from "../../subagent-runtime/public.js";
 
 const JsonValueSchema = Type.Cyclic({
@@ -32,7 +33,7 @@ export const ChildSessionViewSchema = Type.Object({
   streaming: Type.Boolean(),
   modelId: Type.Optional(Type.String()),
   provider: Type.Optional(Type.String()),
-  thinkingLevel: Type.Optional(Type.String()),
+  thinkingLevel: Type.Optional(ThinkingLevelSchema),
   contextPercent: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
   messages: Type.Array(JsonValueSchema),
   streamingMessage: Type.Optional(JsonValueSchema),
@@ -52,7 +53,7 @@ export const ChildRecordSummarySchema = Type.Object({
   invocation: Type.Optional(Type.Object({
     providerName: Type.Optional(Type.String()),
     modelName: Type.Optional(Type.String()),
-    thinkingLevel: Type.Optional(Type.String()),
+    thinkingLevel: Type.Optional(ThinkingLevelSchema),
   }, { additionalProperties: false })),
   stats: Type.Optional(Type.Object({
     toolUses: Type.Integer({ minimum: 0 }),

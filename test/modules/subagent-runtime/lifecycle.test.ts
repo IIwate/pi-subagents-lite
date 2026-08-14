@@ -756,6 +756,73 @@ describe("REQ-RUNTIME-006 shutdown", () => {
     expect(runtime.listSnapshots()).toEqual([]);
   });
 
+  it("keeps shutdown empty when abort rejects", async () => {
+    const memory = createMemoryDriver();
+    memory.driver.abort = async () => {
+      throw new Error("abort refused");
+    };
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    const disposed = await runtime.execute({ kind: "dispose" });
+    expect(Check(AgentCommandResultSchema, disposed)).toBe(true);
+    expect(disposed).toEqual({ ok: true });
+    expect(runtime.listSnapshots()).toEqual([]);
+    const late = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "late",
+      description: "late",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(late).toEqual({
+      ok: false,
+      error: { code: "disposed", message: "Subagent runtime is disposed." },
+    });
+  });
+
+  it("does not apply an unrelated session event to the target snapshot", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    const before = runtime.getSnapshot("agent-00000001");
+    expect(before?.status).toBe("running");
+    memory.runs.get("agent-00000001")?.emit({
+      type: "completed",
+      agentId: "agent-other",
+      sessionId: "session-other",
+      responseText: "foreign result",
+      aborted: false,
+      turnLimited: false,
+    });
+    memory.runs.get("agent-00000001")?.emit({
+      type: "session-ready",
+      agentId: "agent-ghost",
+      sessionId: "session-ghost",
+      modelId: "foreign/model",
+      provider: "foreign",
+    });
+    const after = runtime.getSnapshot("agent-00000001");
+    expect(after?.status).toBe("running");
+    expect(after?.result).toBeUndefined();
+    expect(after?.invocation?.modelName).toBe(before?.invocation?.modelName);
+    expect(runtime.getSnapshot("agent-other")).toBeUndefined();
+    expect(runtime.getSnapshot("agent-ghost")).toBeUndefined();
+    expect(memory.aborts).toContain("session-ghost");
+    expect(memory.closes).toContain("session-ghost");
+  });
+
   it("bounds a hung setup wait to the teardown timeout", async () => {
     const memory = createMemoryDriver();
     memory.driver.start = (request, emit) => {

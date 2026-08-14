@@ -58,7 +58,7 @@ Before a behavior is migrated, each fact is read from the artifact that owns it:
 
 ## Non-goals
 
-- No user-visible feature, command, menu, schema, or behavior change beyond the one approved persistence-failure correction.
+- No user-visible feature, command, menu, schema, or behavior change beyond the approved behavior corrections.
 - No rewrite in a second tree and no long-lived old/new compatibility path.
 - No framework, dependency-injection container, event-bus package, or state-management package.
 - No database, daemon, remote service, Docker requirement, or notification channel.
@@ -66,9 +66,14 @@ Before a behavior is migrated, each fact is read from the artifact that owns it:
 - No test-count target and no blanket pursuit of 100% coverage.
 - No release or package-version change as part of the refactor itself.
 
-### Approved behavior correction
+### Approved behavior corrections
 
-Configuration persistence failure is the only approved behavior correction inside the refactor. The current implementation can log and swallow a failed save after mutating its in-memory object. The target command returns an explicit user-visible failure and leaves the persisted and in-memory capability fragment unchanged. The PRD must assign this behavior its own requirement ID and acceptance examples; no other behavior change can be classified as refactoring without separate approval.
+Two silent substitutions are replaced by explicit outcomes, both of the same kind:
+
+- Configuration persistence failure: a failed save returns an explicit user-visible failure and leaves the persisted and in-memory capability fragment unchanged instead of presenting a non-persisted mutation as current (`REQ-CONFIG-001`).
+- Unavailable inherited prompt text: the run fails instead of silently continuing under the replace-mode header. An inherited persona is why the mode was chosen, and an empty, whitespace-only, or throwing host source is a malfunction the user cannot see or correct (`REQ-AGENT-001`).
+
+No other behavior change can be classified as refactoring without separate approval.
 
 ## Documentation baseline gate
 

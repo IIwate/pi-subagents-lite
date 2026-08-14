@@ -10,6 +10,7 @@ export {
   ThinkingAccessPolicySchema,
   ThinkingLevelSchema,
   ThinkingSelectionSchema,
+  ResolveThinkingAccessQuerySchema,
 } from "./contracts/model-access-contracts.js";
 export type {
   AgentModelAccess,
@@ -22,6 +23,7 @@ export type {
   ThinkingAccessPolicy,
   ThinkingLevel,
   ThinkingSelection,
+  ResolveThinkingAccessQuery,
 } from "./contracts/model-access-contracts.js";
 export { authorizeModelAccess } from "./application/authorize-model-access.js";
 export {

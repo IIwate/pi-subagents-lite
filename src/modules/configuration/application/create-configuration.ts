@@ -1,20 +1,16 @@
 import { Check } from "typebox/value";
 import {
   ConfigurationCommandSchema,
+  ConfigurationResultSchema,
   JsonObjectSchema,
-  type CommitConfigurationFragmentResult,
+  type ConfigurationResult,
   type JsonObject,
-  type ReadConfigurationValueResult,
-  type ReloadConfigurationResult,
 } from "../contracts/configuration-contracts.js";
 import { applyFragmentAssignments } from "../core/apply-fragment.js";
 import { readJsonPath } from "../core/read-json-path.js";
 import type { ConfigurationDocumentRepository } from "../ports/configuration-document-repository.js";
 
-export type ConfigurationResult =
-  | ReadConfigurationValueResult
-  | CommitConfigurationFragmentResult
-  | ReloadConfigurationResult;
+export type { ConfigurationResult };
 
 export interface Configuration {
   execute(command: unknown): ConfigurationResult;
@@ -33,6 +29,21 @@ type FailureCode =
 
 function failure(code: FailureCode, message: string): { ok: false; error: { code: FailureCode; message: string } } {
   return { ok: false, error: { code, message } };
+}
+
+/**
+ * The last door a configuration result walks through. A path read can hand
+ * back a value that was JSON when it was written and is not JSON now — a
+ * function parked on the document, a revision that stopped being an
+ * integer. Callers treat `ok` as a complete picture they can commit against,
+ * so a half-valid success is how one bad field becomes the next expected
+ * revision. invalid-command is the only failure this schema names for a
+ * broken view; persistence codes stay reserved for the port.
+ */
+function outbound(result: ConfigurationResult): ConfigurationResult {
+  return Check(ConfigurationResultSchema, result)
+    ? result
+    : failure("invalid-command", "Configuration result does not match its contract.");
 }
 
 /**
@@ -70,40 +81,44 @@ export function createConfiguration(options: CreateConfigurationOptions): Config
 
   return {
     execute(command: unknown): ConfigurationResult {
-      if (!Check(ConfigurationCommandSchema, command)) {
-        return failure("invalid-command", "Configuration command is invalid.");
-      }
-
-      switch (command.kind) {
-        case "read-value": {
-          const read = readJsonPath(document, command.path);
-          return read.found
-            ? { ok: true, revision, found: true, value: read.value }
-            : { ok: true, revision, found: false };
-        }
-        case "commit-fragment": {
-          if (command.expectedRevision !== revision) {
-            return failure(
-              "revision-conflict",
-              `Expected revision ${command.expectedRevision} but the current document is at ${revision}.`,
-            );
-          }
-          const candidate = applyFragmentAssignments(document, command.section, command.assignments);
-          try {
-            options.repository.persist(candidate);
-          } catch (error) {
-            // The old fragment stays effective for every consumer; the caller
-            // must surface this failure instead of assuming the update landed.
-            const message = error instanceof Error ? error.message : "Unknown persistence failure.";
-            return failure("persistence-failure", message);
-          }
-          document = candidate;
-          revision += 1;
-          return { ok: true, revision };
-        }
-        case "reload":
-          return loadFromRepository();
-      }
+      return outbound(run(command));
     },
   };
+
+  function run(command: unknown): ConfigurationResult {
+    if (!Check(ConfigurationCommandSchema, command)) {
+      return failure("invalid-command", "Configuration command is invalid.");
+    }
+
+    switch (command.kind) {
+      case "read-value": {
+        const read = readJsonPath(document, command.path);
+        return read.found
+          ? { ok: true, revision, found: true, value: read.value }
+          : { ok: true, revision, found: false };
+      }
+      case "commit-fragment": {
+        if (command.expectedRevision !== revision) {
+          return failure(
+            "revision-conflict",
+            `Expected revision ${command.expectedRevision} but the current document is at ${revision}.`,
+          );
+        }
+        const candidate = applyFragmentAssignments(document, command.section, command.assignments);
+        try {
+          options.repository.persist(candidate);
+        } catch (error) {
+          // The old fragment stays effective for every consumer; the caller
+          // must surface this failure instead of assuming the update landed.
+          const message = error instanceof Error ? error.message : "Unknown persistence failure.";
+          return failure("persistence-failure", message);
+        }
+        document = candidate;
+        revision += 1;
+        return { ok: true, revision };
+      }
+      case "reload":
+        return loadFromRepository();
+    }
+  }
 }

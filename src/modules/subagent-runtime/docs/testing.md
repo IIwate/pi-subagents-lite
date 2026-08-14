@@ -17,6 +17,7 @@ Lifecycle commands are exercised through `createSubagentRuntime` with in-memory 
 - Stop during setup aborts the session when it becomes ready and does not flush pending steers.
 - Foreground interruption stops and retains records while background work remains detached.
 - Setup, provider, abort, timeout, continuation, and close failures produce ordinary terminal outcomes.
+- Outbound `execute()` results that fail `AgentCommandResultSchema` are refused as `invalid-command` rather than handed out.
 - Retention, pinning, cleanup, late usage, and idempotent shutdown use an injected clock.
 - Special failure retention, selection-paused cleanup, and queue revalidation remain absent regression cases.
 - Worktree validation is delegated through its serializable inspector port.

@@ -90,6 +90,12 @@ export const ReloadConfigurationResultSchema = Type.Union([
   ConfigurationFailureSchema,
 ]);
 
+export const ConfigurationResultSchema = Type.Union([
+  ReadConfigurationValueResultSchema,
+  CommitConfigurationFragmentResultSchema,
+  ReloadConfigurationResultSchema,
+]);
+
 // Candidates for one operational setting, already read from their sources by
 // the composition root. Only operational settings pass through this contract;
 // interactive product policies never receive environment or .env candidates.
@@ -110,4 +116,5 @@ export type ConfigurationCommand = Static<typeof ConfigurationCommandSchema>;
 export type ReadConfigurationValueResult = Static<typeof ReadConfigurationValueResultSchema>;
 export type CommitConfigurationFragmentResult = Static<typeof CommitConfigurationFragmentResultSchema>;
 export type ReloadConfigurationResult = Static<typeof ReloadConfigurationResultSchema>;
+export type ConfigurationResult = Static<typeof ConfigurationResultSchema>;
 export type OperationalValueCandidates = Static<typeof OperationalValueCandidatesSchema>;

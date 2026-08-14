@@ -210,6 +210,37 @@ describe("command registration", () => {
     const cmdNames = api.commands.map((c) => c.name).sort();
     expect(cmdNames).toEqual(["agents"]);
   });
+
+  it("REQ-AGENT-001 /agents remains a management workflow and does not spawn", async () => {
+    const agentsCmd = api.commands.find((c) => c.name === "agents");
+    const agentTool = findTool(api, "Agent");
+    expect(agentsCmd).toBeDefined();
+    expect(agentTool).toBeDefined();
+
+    const execute = vi.fn(agentTool!.execute);
+    agentTool!.execute = execute;
+    const ctx = {
+      modelRegistry: {
+        getAll: () => [],
+        getAvailable: () => [],
+        getError: () => undefined,
+      },
+      scopedModels: undefined,
+      model: undefined,
+      ui: {
+        custom: vi.fn(async () => ({
+          ok: true,
+          snapshot: { page: "root", title: "Agents", presentation: "menu", rows: [] },
+          effect: { kind: "close" },
+        })),
+        notify: vi.fn(),
+      },
+    };
+
+    await agentsCmd!.handler("", ctx);
+    expect(execute).not.toHaveBeenCalled();
+    expect(ctx.ui.custom).toHaveBeenCalled();
+  });
 });
 
 /* ------------------------------------------------------------------ */

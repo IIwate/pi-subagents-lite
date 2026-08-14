@@ -115,4 +115,25 @@ describe("Subagent system prompt public seam", () => {
       error: { code: "invalid-command", message: "Subagent prompt command is invalid." },
     });
   });
+
+  it("fails inherit mode when the header is missing, empty, or whitespace-only", () => {
+    for (const header of [null, "", "   \n\t"]) {
+      const result = assembleSubagentPrompt({
+        kind: "assemble-subagent-prompt",
+        mode: "inherit",
+        agentName: "reviewer",
+        agentInstructions: "Review the diff.",
+        cwd: "C:/project",
+        env: { isGitRepo: false, branch: null, platform: "linux" },
+        header,
+        contextFiles: [],
+        skillElements: [],
+      });
+      expect(Check(SubagentPromptResultSchema, result)).toBe(true);
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "invalid-command", message: "Inherited parent prompt is unavailable." },
+      });
+    }
+  });
 });

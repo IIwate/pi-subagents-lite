@@ -11,6 +11,7 @@ Test source resolution and fragment transactions through `configuration/public.t
 - Successful fragment commits preserve sibling keys and unrelated sections and advance the in-memory revision, which never appears in the document.
 - Failed persistence returns an explicit failure and leaves the prior snapshot effective; stale revisions are rejected before writing.
 - Malformed persisted data and unknown sections are handled according to the approved current-format contract.
+- Outbound `execute()` results that fail `ConfigurationResultSchema` are refused as `invalid-command` rather than handed out.
 - Load/save round trips preserve the current `modelRouting`, `agent`, and `concurrency` shape.
 
 ## Fixtures and doubles

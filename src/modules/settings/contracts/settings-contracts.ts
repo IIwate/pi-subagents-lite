@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 // The prompt module owns what a mode means; the settings page only offers the
 // choices assembly can honor.
 import { SystemPromptModeSchema } from "../../prompt/public.js";
+import { ThinkingLevelSchema } from "../../model-access/public.js";
 
 // ── Workflow surface ──────────────────────────────────────────────
 
@@ -300,7 +301,7 @@ export const ModelAccessAgentDetailViewSchema = Type.Object({
   parentModelKey: Type.String(),
   parentAllowed: Type.Boolean(),
   // Effective default thinking level for parent use; "" when unavailable.
-  parentDefaultLevel: Type.String(),
+  parentDefaultLevel: Type.Union([ThinkingLevelSchema, Type.Literal("")]),
   // Effective alternate providers; empty while routing is disabled.
   providers: Type.Array(Type.String()),
   thinkingTargetCount: Type.Integer({ minimum: 0 }),
@@ -330,7 +331,7 @@ export const ModelAccessThinkingTargetSchema = Type.Object({
 
 export const ModelAccessThinkingViewSchema = Type.Object({
   levels: Type.Array(Type.Object({
-    level: Type.String({ minLength: 1 }),
+    level: ThinkingLevelSchema,
     allowed: Type.Boolean(),
     isDefault: Type.Boolean(),
   }, { additionalProperties: false })),

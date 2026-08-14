@@ -99,6 +99,22 @@ describe("REQ-MODEL-005 resolveThinkingAccess", () => {
       source: "baseline",
     });
   });
+
+  it("rejects an off-contract query instead of copying invalid thinking levels", () => {
+    expect(resolve({
+      supportedLevels: ["off", "vendor-ultra"] as unknown as ThinkingLevel[],
+      fallbackLevel: "off",
+    })).toBeNull();
+    expect(resolve({
+      agentType: "",
+      supportedLevels: ["off"],
+      fallbackLevel: "off",
+    })).toBeNull();
+    expect(resolve({
+      fallbackLevel: "vendor-ultra" as ThinkingLevel,
+      supportedLevels: ["off"],
+    })).toBeNull();
+  });
 });
 
 describe("selectThinkingLevel", () => {

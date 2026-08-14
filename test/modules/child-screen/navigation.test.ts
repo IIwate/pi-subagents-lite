@@ -390,6 +390,20 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
     });
   });
 
+  it("rejects a record whose thinking level is outside the shared vocabulary", () => {
+    const screen = createChildScreen();
+    const result = screen.execute({
+      kind: "replace-records",
+      records: [record({
+        invocation: { thinkingLevel: "vendor-ultra" as never },
+      })],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Navigator command is invalid." },
+    });
+  });
+
   it("rejects a malformed command at the public seam", () => {
     const screen = createChildScreen();
     expect(screen.execute({ kind: "not-a-command" })).toEqual({

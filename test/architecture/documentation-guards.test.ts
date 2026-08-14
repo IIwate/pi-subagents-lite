@@ -140,6 +140,7 @@ describe("documentation guards", () => {
         "it.skipIf(true)(\"REQ-GHOST-005\", () => {});",
         "xit(\"REQ-GHOST-006\", () => {});",
         "it(`REQ-${id}`, () => {});",
+        "describe.skip(\"parked\", () => { it(\"REQ-GHOST-007 nested in skipped describe\", () => {}); });",
         "it(\"REQ-REAL-001 runs\", () => {});",
         "describe(\"REQ-REAL-002 suite\", () => {});",
       ].join("\n"),

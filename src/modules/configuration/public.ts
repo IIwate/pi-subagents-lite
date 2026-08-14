@@ -10,6 +10,7 @@ export {
   ReadConfigurationValueResultSchema,
   ReloadConfigurationCommandSchema,
   ReloadConfigurationResultSchema,
+  ConfigurationResultSchema,
 } from "./contracts/configuration-contracts.js";
 export type {
   CommitConfigurationFragmentCommand,

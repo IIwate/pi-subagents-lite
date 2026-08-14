@@ -1,5 +1,7 @@
 import { Check } from "typebox/value";
 import {
+  ModelAccessAgentDetailViewSchema,
+  ModelAccessThinkingViewSchema,
   SettingsCommandSchema,
   SettingsResultSchema,
   type SettingsNotice,
@@ -102,7 +104,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   const current = (): Page => stack[stack.length - 1]!;
   const push = (page: Page): void => { stack.push(page); };
 
-  const buildSnapshot = (page: Page, notice?: SettingsNotice): SettingsSnapshot => {
+  const buildSnapshot = (page: Page, notice?: SettingsNotice): SettingsSnapshot | undefined => {
     const withNotice = (snapshot: Omit<SettingsSnapshot, "notice">): SettingsSnapshot =>
       ({ ...snapshot, ...(notice ? { notice } : {}) });
     switch (page.id) {
@@ -176,13 +178,16 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           presentation: "menu",
           rows: buildAgentListRows(options.modelAccess.agents()),
         });
-      case "ma-agent":
+      case "ma-agent": {
+        const view = options.modelAccess.agentDetail(page.type);
+        if (!Check(ModelAccessAgentDetailViewSchema, view)) return undefined;
         return withNotice({
           page: "model-access/agent",
           title: `Agent Access · ${page.type}`,
           presentation: "menu",
-          rows: buildAgentDetailRows(options.modelAccess.agentDetail(page.type)),
+          rows: buildAgentDetailRows(view),
         });
+      }
       case "ma-models":
         return withNotice({
           page: "model-access/models",
@@ -199,13 +204,16 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           presentation: "menu",
           rows: buildThinkingTargetRows(options.modelAccess.thinkingTargets(page.type)),
         });
-      case "ma-thinking":
+      case "ma-thinking": {
+        const view = options.modelAccess.thinking(page.type, page.modelKey);
+        if (!Check(ModelAccessThinkingViewSchema, view)) return undefined;
         return withNotice({
           page: "model-access/thinking",
           title: `Thinking · ${page.type} · ${page.modelKey}`,
           presentation: "menu",
-          rows: buildThinkingRows(options.modelAccess.thinking(page.type, page.modelKey)),
+          rows: buildThinkingRows(view),
         });
+      }
       case "ma-unavailable":
         return withNotice({
           page: "model-access/unavailable",
@@ -236,26 +244,31 @@ export function createSettings(options: CreateSettingsOptions): Settings {
   const failure = (code: SettingsFailureCode, message: string): SettingsResult =>
     ({ ok: false, error: { code, message } });
 
+  const snapshotResult = (
+    snapshot: SettingsSnapshot | undefined,
+    extra?: { effect?: { kind: "close" } },
+  ): SettingsResult =>
+    snapshot
+      ? { ok: true, snapshot, ...extra }
+      : failure("invalid-snapshot", "Settings page does not match its contract.");
+
   const failureNotice = (message: string): SettingsNotice =>
     ({ severity: "error", message: `Failed to save setting: ${message}` });
 
   const infoSnapshot = (message: string): SettingsResult =>
-    ({ ok: true, snapshot: buildSnapshot(current(), { severity: "info", message }) });
+    snapshotResult(buildSnapshot(current(), { severity: "info", message }));
 
   /** Route a committed-or-failed owner update into the current page snapshot. */
   const updated = (
     result: { ok: true } | { ok: false; message: string },
     notice: string,
-  ): SettingsResult => ({
-    ok: true,
-    snapshot: buildSnapshot(current(), result.ok
-      ? { severity: "info", message: notice }
-      : failureNotice(result.message)),
-  });
+  ): SettingsResult => snapshotResult(buildSnapshot(current(), result.ok
+    ? { severity: "info", message: notice }
+    : failureNotice(result.message)));
 
   const navigate = (page: Page): SettingsResult => {
     push(page);
-    return { ok: true, snapshot: buildSnapshot(current()) };
+    return snapshotResult(buildSnapshot(current()));
   };
 
   const setDisplayValue = (id: string, value: string): SettingsResult => {
@@ -309,12 +322,9 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     if (id === "createPromptFile") {
       const path = options.prompt.read().customPromptPath;
       const result = options.prompt.createCustomPromptFile();
-      return {
-        ok: true,
-        snapshot: buildSnapshot(current(), result.ok
-          ? { severity: "info", message: `Created prompt file: ${path}` }
-          : { severity: "error", message: `Failed to create prompt file: ${result.message}` }),
-      };
+      return snapshotResult(buildSnapshot(current(), result.ok
+        ? { severity: "info", message: `Created prompt file: ${path}` }
+        : { severity: "error", message: `Failed to create prompt file: ${result.message}` }));
     }
     return failure("unknown-row", `Page system-prompt has no editable row ${id}.`);
   };
@@ -463,7 +473,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       .find((candidate) => candidate.provider === provider);
     // A provider can drop out of the inventory while the page is open;
     // refresh silently instead of acting on the stale row.
-    if (!entry) return { ok: true, snapshot: buildSnapshot(current()) };
+    if (!entry) return snapshotResult(buildSnapshot(current()));
     return updated(
       options.modelAccess.setProviderEnabled(provider, !entry.enabled),
       `${provider} ${entry.enabled ? "disabled" : "enabled"} for routed models`,
@@ -510,7 +520,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     if (!modelId) return failure("unknown-row", `Page models has no selectable row ${id}.`);
     const known = options.modelAccess.models(page.type, page.provider).models
       .some((candidate) => candidate.id === modelId);
-    if (!known) return { ok: true, snapshot: buildSnapshot(current()) };
+    if (!known) return snapshotResult(buildSnapshot(current()));
     return updated(options.modelAccess.toggleModel(page.type, page.provider, modelId, page.quick), notice);
   };
 
@@ -556,7 +566,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     if (!provider) return failure("unknown-row", `Page unavailable providers has no selectable row ${id}.`);
     const known = options.modelAccess.root().unavailableProviders
       .some((candidate) => candidate.provider === provider);
-    if (!known) return { ok: true, snapshot: buildSnapshot(current()) };
+    if (!known) return snapshotResult(buildSnapshot(current()));
     return navigate({ id: "ma-unavailable-provider", provider });
   };
 
@@ -567,7 +577,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     const entry = options.modelAccess.root().unavailableProviders
       .find((candidate) => candidate.provider === page.provider);
     // buildSnapshot pops the stale page itself when the subject disappeared.
-    if (!entry) return { ok: true, snapshot: buildSnapshot(current()) };
+    if (!entry) return snapshotResult(buildSnapshot(current()));
     if (id === "routing") {
       return updated(
         options.modelAccess.setProviderEnabled(page.provider, !entry.routingEnabled),
@@ -628,14 +638,14 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     switch (command.kind) {
       case "open": {
         stack = [{ id: "root" }];
-        return { ok: true, snapshot: buildSnapshot(current()) };
+        return snapshotResult(buildSnapshot(current()));
       }
       case "back": {
         if (stack.length > 1) {
           stack.pop();
-          return { ok: true, snapshot: buildSnapshot(current()) };
+          return snapshotResult(buildSnapshot(current()));
         }
-        return { ok: true, snapshot: buildSnapshot(current()), effect: { kind: "close" } };
+        return snapshotResult(buildSnapshot(current()), { effect: { kind: "close" } });
       }
       case "select":
         return select(command.id);

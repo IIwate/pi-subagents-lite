@@ -24,20 +24,27 @@ export function decideThinkingAccess(input: {
     return { allowed: [scopeLevel], default: scopeLevel, source: "scope" };
   }
 
-  const supportedSet = new Set<ThinkingLevel>(input.supportedLevels);
+  // Host catalogues have been wrong before. Copying supportedLevels as-is is
+  // how a vendor nickname becomes a policy the rest of the product cannot
+  // name. Levels outside the vocabulary are dropped; an empty remainder is
+  // no policy at all. Revisit if Pi grows a stable thinking enum we can trust.
+  const allowed = CANONICAL_THINKING_LEVELS.filter((level) => input.supportedLevels.includes(level));
+  const supportedSet = new Set<ThinkingLevel>(allowed);
+  if (allowed.length === 0) return null;
   if (input.override) {
-    const allowed = input.override.allowed.filter((level) => supportedSet.has(level));
-    if (allowed.length === 0 || !supportedSet.has(input.override.default) || !allowed.includes(input.override.default)) {
+    const overrideAllowed = input.override.allowed.filter((level) => supportedSet.has(level));
+    if (overrideAllowed.length === 0 || !supportedSet.has(input.override.default) || !overrideAllowed.includes(input.override.default)) {
       return null;
     }
-    return { allowed: [...allowed], default: input.override.default, source: "override" };
+    return { allowed: [...overrideAllowed], default: input.override.default, source: "override" };
   }
 
   const parentDefault = canonicalLevel(input.parentThinkingLevel);
   const defaultLevel = input.modelKey === input.parentModelKey && parentDefault && supportedSet.has(parentDefault)
     ? parentDefault
     : input.fallbackLevel;
-  return { allowed: [...input.supportedLevels], default: defaultLevel, source: "baseline" };
+  if (!supportedSet.has(defaultLevel)) return null;
+  return { allowed: [...allowed], default: defaultLevel, source: "baseline" };
 }
 
 export function decideThinkingSelection(

@@ -1,5 +1,6 @@
 import { Check } from "typebox/value";
 import {
+  AgentCommandResultSchema,
   AgentCommandSchema,
   AgentSnapshotSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
@@ -148,6 +149,28 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     return Check(AgentSnapshotSchema, copy) ? copy : undefined;
   }
 
+  /**
+   * Snapshots already pass through outbound(). The envelope is the rest of
+   * the answer — a missing error code, an interaction reason the schema
+   * never named. Callers branch on ok and then read fields; a half-valid
+   * success is how a dropped snapshot comes back as a present one.
+   */
+  function outboundResult(result: AgentCommandResult): AgentCommandResult {
+    return Check(AgentCommandResultSchema, result)
+      ? result
+      : failure("invalid-command", "Lifecycle result does not match its contract.");
+  }
+
+  /**
+   * Abort is teardown, not a state transition. A rejected abort must not
+   * put a snapshot back or fail the command that already decided the
+   * session was over. Revisit if the driver grows a way to report that
+   * the process is still live after abort.
+   */
+  function abortSession(sessionId: string): void {
+    void options.sessionDriver.abort({ sessionId }).catch(() => {});
+  }
+
   function snapshotCopy(id: string): AgentSnapshot | undefined {
     return outbound(snapshots.get(id));
   }
@@ -193,7 +216,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
 
   function rejectLateSession(sessionId: string): void {
     pendingSteers.delete(sessionId);
-    void options.sessionDriver.abort({ sessionId });
+    abortSession(sessionId);
     void options.sessionDriver.close({ sessionId });
   }
 
@@ -440,7 +463,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       snapshot.settled = true;
       if (notify) notifyComplete(snapshot);
     } else if (snapshot.liveSession && snapshot.sessionId) {
-      void options.sessionDriver.abort({ sessionId: snapshot.sessionId });
+      abortSession(snapshot.sessionId);
     }
     return true;
   }
@@ -590,7 +613,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     cleanupHandle.clear();
     for (const snapshot of snapshots.values()) {
       if (snapshot.status === "running" && snapshot.sessionId) {
-        void options.sessionDriver.abort({ sessionId: snapshot.sessionId });
+        abortSession(snapshot.sessionId);
       }
     }
     for (const snapshot of snapshots.values()) {
@@ -624,56 +647,60 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     }
   }
 
+  async function run(command: unknown): Promise<AgentCommandResult> {
+    if (!Check(AgentCommandSchema, command)) {
+      return failure("invalid-command", "Lifecycle command is invalid.");
+    }
+    const next = command as AgentCommand;
+    switch (next.kind) {
+      case "spawn":
+        return spawn(next);
+      case "stop":
+        return ok({ stopped: stop(next.id, next.initiator), snapshot: snapshotCopy(next.id) });
+      case "interact":
+        return interact(next.id, next.message, next.images);
+      case "inspect":
+        return next.id
+          ? snapshots.has(next.id)
+            ? ok({ snapshot: snapshotCopy(next.id) })
+            : failure("not-found", `Unknown Subagent: ${next.id}`)
+          : ok({ snapshots: listCopies() });
+      case "pin":
+        return pin(next.id);
+      case "expire":
+        return ok({ expiredIds: await expireRecords() });
+      case "close":
+        return close(next.id, next.initiator);
+      case "replace-limits":
+        if (!Check(ConcurrencyLimitsSchema, next.limits)) {
+          return failure("invalid-command", "Concurrency limits are invalid.");
+        }
+        scheduler.replaceLimits(next.limits);
+        drainQueue();
+        return ok();
+      case "arm-debug-fault":
+        armedFault = next.fault;
+        return ok();
+      case "clear-debug-fault":
+        armedFault = undefined;
+        return ok();
+      case "mark-result": {
+        const snapshot = snapshots.get(next.id);
+        if (!snapshot) return failure("not-found", `Unknown Subagent: ${next.id}`);
+        if (next.persisted != null) snapshot.resultPersisted = next.persisted;
+        if (next.consumed != null) snapshot.resultConsumed = next.consumed;
+        if (next.deliveryId != null) snapshot.resultDeliveryId = next.deliveryId;
+        return ok({ snapshot: outbound(snapshot) });
+      }
+      case "dispose":
+        await disposeRuntime();
+        return ok();
+    }
+  }
+
   return {
     async execute(command: unknown): Promise<AgentCommandResult> {
-      if (!Check(AgentCommandSchema, command)) {
-        return failure("invalid-command", "Lifecycle command is invalid.");
-      }
-      const next = command as AgentCommand;
-      switch (next.kind) {
-        case "spawn":
-          return spawn(next);
-        case "stop":
-          return ok({ stopped: stop(next.id, next.initiator), snapshot: snapshotCopy(next.id) });
-        case "interact":
-          return interact(next.id, next.message, next.images);
-        case "inspect":
-          return next.id
-            ? snapshots.has(next.id)
-              ? ok({ snapshot: snapshotCopy(next.id) })
-              : failure("not-found", `Unknown Subagent: ${next.id}`)
-            : ok({ snapshots: listCopies() });
-        case "pin":
-          return pin(next.id);
-        case "expire":
-          return ok({ expiredIds: await expireRecords() });
-        case "close":
-          return close(next.id, next.initiator);
-        case "replace-limits":
-          if (!Check(ConcurrencyLimitsSchema, next.limits)) {
-            return failure("invalid-command", "Concurrency limits are invalid.");
-          }
-          scheduler.replaceLimits(next.limits);
-          drainQueue();
-          return ok();
-        case "arm-debug-fault":
-          armedFault = next.fault;
-          return ok();
-        case "clear-debug-fault":
-          armedFault = undefined;
-          return ok();
-        case "mark-result": {
-          const snapshot = snapshots.get(next.id);
-          if (!snapshot) return failure("not-found", `Unknown Subagent: ${next.id}`);
-          if (next.persisted != null) snapshot.resultPersisted = next.persisted;
-          if (next.consumed != null) snapshot.resultConsumed = next.consumed;
-          if (next.deliveryId != null) snapshot.resultDeliveryId = next.deliveryId;
-          return ok({ snapshot: outbound(snapshot) });
-        }
-        case "dispose":
-          await disposeRuntime();
-          return ok();
-      }
+      return outboundResult(await run(command));
     },
     getSnapshot(id: string): AgentSnapshot | undefined {
       return snapshotCopy(id);

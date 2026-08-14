@@ -175,12 +175,12 @@ describe("buildAgentPrompt — system prompt modes", () => {
     expect(result).not.toContain("You are a Pi, an expert coding sub-agent.");
   });
 
-  it("inherit mode falls back to replace when parentSystemPrompt is missing", () => {
-    const result = buildAgentPrompt(baseConfig, "/test/cwd", env, {}, "inherit");
-
-    // Should have generic header (fallback)
-    expect(result).toContain("You are a Pi, an expert coding sub-agent.");
-    expect(result).toContain("You have been invoked to handle a specific task autonomously.");
+  it("inherit mode hard-fails when parentSystemPrompt is missing, empty, or whitespace-only", () => {
+    for (const extras of [{}, { parentSystemPrompt: undefined }, { parentSystemPrompt: "" }, { parentSystemPrompt: "   \n\t" }]) {
+      expect(() => buildAgentPrompt(baseConfig, "/test/cwd", env, extras, "inherit")).toThrow(
+        "Inherited parent prompt is unavailable.",
+      );
+    }
   });
 
   it("custom mode falls back to replace when customSystemPrompt is missing", () => {
@@ -416,11 +416,9 @@ Current working directory: /home/user/project`;
   });
 
   it("handles empty parent prompt", () => {
-    const result = buildAgentPrompt(baseConfig, "/test/cwd", env, { parentSystemPrompt: "" }, "inherit");
-
-    // Falls back to replace mode header
-    expect(result).toContain("You are a Pi, an expert coding sub-agent.");
-    expect(result).toContain("<agent_instructions>");
+    expect(() => buildAgentPrompt(baseConfig, "/test/cwd", env, { parentSystemPrompt: "" }, "inherit")).toThrow(
+      "Inherited parent prompt is unavailable.",
+    );
   });
 
   it("handles parent prompt with only scaffolding", () => {

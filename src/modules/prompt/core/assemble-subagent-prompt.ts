@@ -14,6 +14,18 @@ function stripScaffolding(prompt: string): string {
   return result.trim();
 }
 
+/**
+ * Inherit asked for a persona the user cannot see or correct. Whitespace is
+ * the same absence as `null`: there is nothing to strip and nothing to show.
+ * Custom is different — the file is a settings page the user already owns —
+ * so a missing header is left for the replace fallback the host announced.
+ * Revisit if inherit snapshots the parent text at queue time instead of
+ * asking the host when the run starts.
+ */
+export function isVisiblePromptHeader(header: string | null | undefined): header is string {
+  return typeof header === "string" && header.trim().length > 0;
+}
+
 export function assembleSubagentPromptText(request: SubagentPromptRequest): string {
   const envLines = [
     "# Environment",
@@ -58,9 +70,15 @@ export function assembleSubagentPromptText(request: SubagentPromptRequest): stri
     contextSuffix = `\n\n${lines.join("\n")}`;
   }
 
-  const customHeader = request.mode !== "replace" && request.header
-    ? stripScaffolding(request.header)
-    : undefined;
+  let customHeader: string | undefined;
+  if (request.mode === "inherit") {
+    if (!isVisiblePromptHeader(request.header)) {
+      throw new TypeError("Inherited parent prompt is unavailable.");
+    }
+    customHeader = stripScaffolding(request.header);
+  } else if (request.mode === "custom" && isVisiblePromptHeader(request.header)) {
+    customHeader = stripScaffolding(request.header);
+  }
   const basePrompt = customHeader
     ? `${customHeader}\n\n${envBlock}`
     : `You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously.\n\n${envBlock}`;

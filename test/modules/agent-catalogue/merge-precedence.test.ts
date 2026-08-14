@@ -69,4 +69,44 @@ describe("REQ-CATALOGUE-001 source precedence public seam", () => {
       resultValid: true,
     });
   });
+
+  it("refuses a discover result whose merged definitions violate the snapshot contract", async () => {
+    const definitions = [{
+      name: "explorer",
+      description: "User explorer",
+      systemPrompt: "user prompt",
+      source: "global" as const,
+    }];
+    const catalogue = createAgentCatalogue({
+      repository: {
+        async load() {
+          return {
+            definitions,
+            get worktreeDefinitions() {
+              // Hostile port: inbound Check already accepted this payload.
+              // Emptying the name after that is how a passing load becomes an
+              // unregisterable snapshot — outbound must refuse it.
+              definitions[0] = { ...definitions[0]!, name: "" };
+              return [];
+            },
+          };
+        },
+      },
+      builtInDefinitions: [],
+    });
+
+    const result = await catalogue.execute({
+      kind: "discover",
+      roots: {
+        globalDirectory: "C:/agents/global",
+        projectDirectory: "C:/project/.pi/agents",
+      },
+      configuration: {},
+    });
+    expect(Check(AgentCatalogueResultSchema, result)).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Agent catalogue result does not match its contract." },
+    });
+  });
 });

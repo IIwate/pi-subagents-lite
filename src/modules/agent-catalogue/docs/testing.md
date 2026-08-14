@@ -14,6 +14,7 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 - Malformed frontmatter rejected without hiding valid definitions.
 - Tool, skill, and extension loading is resolved through the public policy command, including implicit defaults and a host-supplied fallback tool list.
 - A repository failure produces a serializable failure result.
+- Outbound `execute()` results that fail `AgentCatalogueResultSchema` are refused as `invalid-command` rather than handed out.
 
 ## Fixtures and doubles
 

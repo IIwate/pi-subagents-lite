@@ -442,6 +442,20 @@ describe("REQ-SETTINGS-002 spawn options page", () => {
     ]);
   });
 
+  it("REQ-SETTINGS-003 applies a successful mutation only through the settings workflow owner", () => {
+    const { settings, spawnUpdates, spawnView } = harness();
+    expect(spawnView.forceBackground).toBe(false);
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "spawn-options" });
+    expectOk(settings.execute({ kind: "set-value", id: "forceBackground", value: "ON" }));
+    expect(spawnUpdates).toEqual([{ id: "forceBackground", value: true }]);
+    expect(spawnView.forceBackground).toBe(true);
+    settings.execute({ kind: "back" });
+    settings.execute({ kind: "back" });
+    const again = expectOk(settings.execute({ kind: "select", id: "spawn-options" }));
+    expect(again.snapshot.rows.find((row) => row.id === "forceBackground")!.value).toBe("ON");
+  });
+
   it("reports disable-default-agents changes with availability wording", () => {
     const { settings } = harness();
     settings.execute({ kind: "open" });
@@ -1026,6 +1040,22 @@ describe("REQ-MODEL-007 model access pages", () => {
       message: "At least one thinking level must stay allowed",
     });
     expect(modelAccessState.calls).toHaveLength(3);
+  });
+
+  it("refuses a thinking page whose owner copies a non-canonical level", () => {
+    const { settings, modelAccessState } = openModelAccess();
+    modelAccessState.thinkingLevels = [
+      { level: "vendor-ultra", allowed: true, isDefault: true },
+    ];
+    settings.execute({ kind: "select", id: "agentAccess" });
+    settings.execute({ kind: "select", id: "type:general-purpose" });
+    settings.execute({ kind: "select", id: "thinking" });
+    const result = settings.execute({ kind: "select", id: "target:openai/gpt-5" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-snapshot", message: "Settings page does not match its contract." },
+    });
+    expect(Check(SettingsResultSchema, result)).toBe(true);
   });
 
   it("manages saved unavailable providers: routing toggle, rule deletion, and stale unwind", () => {

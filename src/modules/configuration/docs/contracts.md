@@ -10,6 +10,7 @@
 - `ReadConfigurationValueCommandSchema` defines a non-empty document path; `ReadConfigurationValueResultSchema` reports a found value, a missing path, or a serializable failure.
 - `CommitConfigurationFragmentCommandSchema` submits one section's assignments together with the `expectedRevision` the caller last observed. `CommitConfigurationFragmentResultSchema` returns the next revision or an explicit `revision-conflict`/`persistence-failure`.
 - `ReloadConfigurationCommandSchema` re-reads the persisted document and advances the revision.
+- `ConfigurationResultSchema` is the aggregate outbound contract for `execute()`; every success and failure is checked against it before callers see the result.
 
 The persisted JSON remains in its current unversioned shape; the revision is runtime transaction metadata only.
 

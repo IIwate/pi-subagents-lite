@@ -1502,6 +1502,21 @@ describe("REQ-AGENT-001 runAgent — system prompt modes", () => {
     expect(prompt).toContain("You are a test agent.");
   });
 
+  it("fails the run when getSystemPrompt returns empty text in inherit mode", async () => {
+    currentSystemPromptMode = "inherit";
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    const ctx = fakeCtx();
+    ctx.getSystemPrompt = vi.fn().mockReturnValue("");
+    ctx.ui = { notify: vi.fn() };
+
+    await expect(runAgent(ctx, "test-agent", "do something", { pi: fakePi }))
+      .rejects.toThrow("Inherited parent prompt is unavailable.");
+    expect(mockModules.mockCreateAgentSession).not.toHaveBeenCalled();
+  });
+
   it("fails the run when getSystemPrompt throws in inherit mode", async () => {
     currentSystemPromptMode = "inherit";
     const session = createMockSession();
