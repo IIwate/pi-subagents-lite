@@ -216,7 +216,7 @@ An adapter can keep a private map from session ID to Pi `AgentSession`. That han
 
 | Replace | Files allowed to change | Core/application change |
 |:--|:--|:--|
-| Pi host | `platform/pi/**`, `bootstrap/**` | None |
+| Pi host | `src/index.ts`, `platform/pi/**`, `bootstrap/**` | None |
 | Pi TUI | `platform/pi/tui/**`, bootstrap wiring | None |
 | JSON config file | one `ConfigurationDocumentRepository` platform implementation | None |
 | Pi child-session engine | one `SessionDriver` adapter | None |
