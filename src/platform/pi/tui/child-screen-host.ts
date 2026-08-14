@@ -85,12 +85,19 @@ function toKey(data: string): NavigatorKey | undefined {
   return undefined;
 }
 
+function isLocalNavKey(key: NavigatorKey): boolean {
+  return key === "down" || key === "up" || key === "escape" || key === "space" || key === "ctrl-d";
+}
+
 export class ChildScreenHost {
   private uiCtx: NavigatorUICtx | undefined;
   private readonly screen: ChildScreen;
   private footerStatus: string | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
-  private lastRenderSig = "";
+  private lastRecordsSig = "";
+  private lastElapsedSig = "";
+  private paintInvalidated = false;
+  private cachedSelectedId: string | null = null;
   private shrinkClearingTui: TUI | undefined;
   private previousClearOnShrink: boolean | undefined;
   private lastAgentStatus = new Map<string, AgentSnapshot["status"]>();
@@ -193,20 +200,31 @@ export class ChildScreenHost {
     });
   }
 
+  private runScreen(command: unknown) {
+    const result = this.screen.execute(command);
+    if (result.ok) this.cachedSelectedId = result.snapshot.selectedAgentId;
+    return result;
+  }
+
   private syncRecords(highlightIndex?: number, snapshots?: AgentSnapshot[]) {
     const records = snapshots ?? this.manager.listSnapshots();
     const pending = this.pendingResultState();
-    return this.screen.execute({
+    return this.runScreen({
       kind: "replace-records",
-      records: this.presentationRecords(records, this.snapshot()?.selectedAgentId ?? null),
+      records: this.presentationRecords(records, this.cachedSelectedId),
       ...(pending != null ? { pendingResultCount: pending } : {}),
       ...(highlightIndex != null ? { highlightIndex } : {}),
     });
   }
 
   private snapshot() {
-    const inspected = this.screen.execute({ kind: "inspect" });
+    const inspected = this.runScreen({ kind: "inspect" });
     return inspected.ok ? inspected.snapshot : undefined;
+  }
+
+  private invalidatePaint(): void {
+    this.paintInvalidated = true;
+    this.lastElapsedSig = "";
   }
 
   /** Schema-defined read-only navigator state (the module's inspect query). */
@@ -228,6 +246,8 @@ export class ChildScreenHost {
     this.screenSwap = undefined;
     this.layoutWarningShown = false;
     this.errorWarningShown = false;
+    this.lastRecordsSig = "";
+    this.invalidatePaint();
 
     const previousEditor = ctx.getEditorComponent();
     ctx.setEditorComponent((tui, theme, keybindings) => {
@@ -246,8 +266,8 @@ export class ChildScreenHost {
 
   toggleList(): void {
     this.syncRecords();
-    this.screen.execute({ kind: "toggle-fold" });
-    this.lastRenderSig = "";
+    this.runScreen({ kind: "toggle-fold" });
+    this.invalidatePaint();
     this.update();
   }
 
@@ -271,14 +291,14 @@ export class ChildScreenHost {
   }
 
   setDebugStatusPreview(status: DebugStatusPreview | undefined): void {
-    this.screen.execute({ kind: "set-debug-preview", ...(status ? { status } : {}) });
-    this.lastRenderSig = "";
+    this.runScreen({ kind: "set-debug-preview", ...(status ? { status } : {}) });
+    this.invalidatePaint();
     this.requestRender(true);
   }
 
   setStatsVisibility(visible: StatsVisibility): void {
-    this.screen.execute({ kind: "set-stats-visibility", visibility: visible });
-    this.lastRenderSig = "";
+    this.runScreen({ kind: "set-stats-visibility", visibility: visible });
+    this.invalidatePaint();
     this.requestRender();
   }
 
@@ -315,22 +335,25 @@ export class ChildScreenHost {
   }
 
   handleTerminalInput(data: string): { consume?: boolean } | undefined {
-    this.syncRecords();
-    const previousSelected = this.snapshot()?.selectedAgentId ?? null;
     const key = toKey(data);
     if (!key) return undefined;
-    const result = this.screen.execute({
+    // Local motion only changes chrome the screen already holds. Syncing
+    // first re-clones every snapshot and TypeBox-checks the table for a
+    // key that asked to move a highlight. The 1s tick owns freshness.
+    // Space writes pinned from togglePinned's boolean rather than listing
+    // again; a pin another writer flipped in the same tick stays hidden
+    // until the next list. Revisit if Down must see a spawn that has not
+    // been projected yet.
+    if (isLocalNavKey(key)) return this.handleLocalNavKey(key);
+    this.syncRecords();
+    const previousSelected = this.cachedSelectedId;
+    const result = this.runScreen({
       kind: "key",
       key,
       editorEmpty: this.uiCtx?.getEditorText() === "",
     });
     if (!result.ok) return undefined;
     if (result.notify) this.uiCtx?.notify(result.notify.message, result.notify.level);
-    if (result.effect?.type === "toggle-pin") {
-      const pinned = this.manager.togglePinned(result.effect.agentId);
-      if (pinned == null) this.uiCtx?.notify("Agent not found", "warning");
-      else this.uiCtx?.notify(pinned ? "Subagent pinned" : "Subagent unpinned", "info");
-    }
     if (result.effect?.type === "clear") {
       const cleared = this.manager.clear(result.effect.agentId, "user");
       if (!cleared) this.uiCtx?.notify("Agent not found", "warning");
@@ -342,8 +365,9 @@ export class ChildScreenHost {
     // activate() returns true then without a screen clear; matching that
     // avoids a 2J of the list for a no-op confirmation.
     if (key === "enter" && result.consume && selected !== previousSelected) {
+      this.lastRecordsSig = "";
       if (!this.applySelection(selected)) {
-        this.screen.execute({ kind: "select", agentId: previousSelected });
+        this.runScreen({ kind: "select", agentId: previousSelected });
         this.warnUnsupportedLayout();
       } else {
         if (selected && !this.refreshTimer) this.ensureTimer();
@@ -355,8 +379,45 @@ export class ChildScreenHost {
     return result.consume ? { consume: true } : undefined;
   }
 
+  private handleLocalNavKey(key: NavigatorKey): { consume?: boolean } | undefined {
+    const result = this.runScreen({
+      kind: "key",
+      key,
+      editorEmpty: this.uiCtx?.getEditorText() === "",
+    });
+    if (!result.ok || !result.consume) return undefined;
+    if (result.notify) this.uiCtx?.notify(result.notify.message, result.notify.level);
+    if (result.effect?.type === "toggle-pin") {
+      this.applyPinFromToggle(result.effect.agentId, result.snapshot);
+    }
+    this.paintListFromCurrentRecords();
+    return { consume: true };
+  }
+
+  private applyPinFromToggle(agentId: string, snapshot: NavigatorSnapshot): void {
+    const pinned = this.manager.togglePinned(agentId);
+    if (pinned == null) {
+      this.uiCtx?.notify("Agent not found", "warning");
+      return;
+    }
+    this.uiCtx?.notify(pinned ? "Subagent pinned" : "Subagent unpinned", "info");
+    // togglePinned already returned the diamond. Listing again would
+    // re-Check the table; inspecting would drag the selected transcript
+    // along for a boolean. We stamp the rows the key just cloned.
+    // pendingResultCount must be repeated or replace-records forgets it.
+    this.runScreen({
+      kind: "replace-records",
+      records: snapshot.records.map((record) => (
+        record.id === agentId ? { ...record, pinned } : record
+      )),
+      ...(snapshot.pendingResultCount != null
+        ? { pendingResultCount: snapshot.pendingResultCount }
+        : {}),
+    });
+  }
+
   beginInteraction(agentId: string): number {
-    const begun = this.screen.execute({ kind: "begin-interaction", agentId });
+    const begun = this.runScreen({ kind: "begin-interaction", agentId });
     return begun.ok ? begun.interactionRequestId ?? begun.snapshot.interactionRequestId : -1;
   }
 
@@ -380,16 +441,16 @@ export class ChildScreenHost {
       : result.reason === "queued"
         ? "Blocked: selected subagent is queued"
         : "Blocked: selected subagent is unavailable";
-    this.screen.execute({ kind: "set-interaction-notice", notice });
-    this.lastRenderSig = "";
+    this.runScreen({ kind: "set-interaction-notice", notice });
+    this.invalidatePaint();
     this.update();
     return true;
   }
 
   clearInteractionNotice(): void {
     if (!this.snapshot()?.interactionNotice) return;
-    this.screen.execute({ kind: "set-interaction-notice" });
-    this.lastRenderSig = "";
+    this.runScreen({ kind: "set-interaction-notice" });
+    this.invalidatePaint();
     this.update();
   }
 
@@ -397,10 +458,11 @@ export class ChildScreenHost {
     const current = this.snapshot()?.selectedAgentId ?? null;
     if (id === current) return true;
     this.syncRecords();
-    const selected = this.screen.execute({ kind: "select", agentId: id });
+    const selected = this.runScreen({ kind: "select", agentId: id });
+    this.lastRecordsSig = "";
     if (!selected.ok) return false;
     if (!this.applySelection(id)) {
-      this.screen.execute({ kind: "select", agentId: current });
+      this.runScreen({ kind: "select", agentId: current });
       this.warnUnsupportedLayout();
       return false;
     }
@@ -482,10 +544,19 @@ export class ChildScreenHost {
     tui?.requestRender(force);
   }
 
+  private paintListFromCurrentRecords(): void {
+    if (!this.selectorRegistered) {
+      this.update();
+      return;
+    }
+    this.invalidatePaint();
+    this.requestRender();
+  }
+
   private updateFooterStatus(): void {
     const ctx = this.uiCtx;
     if (!ctx) return;
-    const projected = this.screen.execute({
+    const projected = this.runScreen({
       kind: "project",
       columns: this.selectorTui?.terminal.columns ?? 120,
       rows: this.selectorTui?.terminal.rows ?? 40,
@@ -504,12 +575,12 @@ export class ChildScreenHost {
   }
 
   forceLayoutReflow(): void {
-    this.lastRenderSig = "";
+    this.invalidatePaint();
     this.requestRender(true);
   }
 
   private renderSelector(tui: TUI): string[] {
-    const projected = this.screen.execute({
+    const projected = this.runScreen({
       kind: "project",
       columns: tui.terminal.columns,
       rows: tui.terminal.rows,
@@ -522,7 +593,7 @@ export class ChildScreenHost {
   }
 
   private renderActiveTranscript(width: number): string[] {
-    const projected = this.screen.execute({
+    const projected = this.runScreen({
       kind: "project",
       columns: width,
       rows: this.selectorTui?.terminal.rows ?? 40,
@@ -543,24 +614,43 @@ export class ChildScreenHost {
 
   private updateHost(): void {
     if (!this.uiCtx) return;
+    // listSnapshots still walks the outbound gate. Everything after that
+    // used to rebuild the screen to learn the cheap fields had not moved.
+    // elapsedSec is a paint lie: the clock advances, the records do not.
+    // A selected transcript therefore sleeps until a listed field changes.
+    // Revisit when the list is allowed to show live messages.
     const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
-    const wasSelected = this.snapshot()?.selectedAgentId ?? null;
-    this.syncRecords(undefined, records);
-    const selected = this.snapshot()?.selectedAgentId ?? null;
-    if (records.length === 0 && !pending) {
-      this.updateFooterStatus();
-      if (restoreMain(this.screenSwap)) this.clearScrollbackAndRender();
-      this.lastRenderSig = "";
-      this.lastAgentStatus.clear();
-      this.requestRender();
+    const recordsSig = this.listDataSignature(records, pending);
+    const elapsedSig = this.listElapsedSignature(records);
+    const empty = records.length === 0 && !pending;
+    const recordsChanged = recordsSig !== this.lastRecordsSig;
+
+    if (empty) {
+      if (recordsChanged || this.paintInvalidated) {
+        this.syncRecords(undefined, records);
+        this.updateFooterStatus();
+        if (restoreMain(this.screenSwap)) this.clearScrollbackAndRender();
+        this.lastAgentStatus.clear();
+        this.requestRender();
+      }
+      this.lastRecordsSig = recordsSig;
+      this.lastElapsedSig = elapsedSig;
+      this.paintInvalidated = false;
       this.stopRefreshTimer();
       return;
     }
-    if (wasSelected && !selected) {
-      if (restoreMain(this.screenSwap)) this.clearScrollbackAndRender();
+
+    if (recordsChanged) {
+      const wasSelected = this.cachedSelectedId;
+      this.syncRecords(undefined, records);
+      if (wasSelected && !this.cachedSelectedId) {
+        if (restoreMain(this.screenSwap)) this.clearScrollbackAndRender();
+      }
     }
-    this.updateFooterStatus();
+    if (recordsChanged || this.paintInvalidated) {
+      this.updateFooterStatus();
+    }
 
     if (!this.selectorRegistered) {
       this.uiCtx.setWidget(SELECTOR_WIDGET_KEY, (tui) => {
@@ -582,19 +672,21 @@ export class ChildScreenHost {
         return selector;
       }, { placement: "belowEditor" });
       this.selectorRegistered = true;
-      this.lastRenderSig = "";
+      this.invalidatePaint();
     }
 
-    const sig = this.listRenderSignature(records);
-    if (sig !== this.lastRenderSig) {
-      this.lastRenderSig = sig;
+    const elapsedChanged = elapsedSig !== this.lastElapsedSig;
+    if (recordsChanged || elapsedChanged || this.paintInvalidated) {
+      this.lastRecordsSig = recordsSig;
+      this.lastElapsedSig = elapsedSig;
+      this.paintInvalidated = false;
       const completed = this.consumeTerminalTransitions(records);
       this.requestRender(completed);
     } else {
       this.consumeTerminalTransitions(records);
     }
 
-    if (!selected && !records.some((record) =>
+    if (!this.cachedSelectedId && !records.some((record) =>
       record.status === "running" || record.status === "queued"
     )) {
       this.stopRefreshTimer();
@@ -638,15 +730,10 @@ export class ChildScreenHost {
     return terminalTransition;
   }
 
-  private listRenderSignature(records: AgentSnapshot[]): string {
-    const state = this.snapshot();
+  private listDataSignature(records: AgentSnapshot[], pending: number | undefined): string {
     const parts = records.map((record) => {
       const invocation = record.invocation;
       const usage = record.stats.lifetimeUsage;
-      const contextPercent = record.stats.contextPercent ?? null;
-      const elapsedSec = Math.floor(
-        ((record.completedAt ?? Date.now()) - record.startedAt) / 1000,
-      );
       return [
         record.id,
         record.type,
@@ -664,24 +751,20 @@ export class ChildScreenHost {
         record.stats.toolUses,
         record.stats.turnCount,
         record.stats.maxTurns ?? "",
-        elapsedSec,
         usage.input,
         usage.output,
         usage.cost,
-        contextPercent ?? "",
+        record.stats.contextPercent ?? "",
         record.stats.compactionCount,
       ].join(":");
     });
-    return [
-      parts.join("|"),
-      state?.selectedAgentId ?? "",
-      state?.highlightedAgentId ?? "",
-      state?.listFocused ? "1" : "0",
-      state?.confirmingClearId ?? "",
-      state?.interactionNotice ?? "",
-      state?.listExpanded ? "1" : "0",
-      this.pendingResultState() ? String(this.pendingResultState()) : "",
-    ].join("#");
+    return [parts.join("|"), pending ? String(pending) : ""].join("#");
+  }
+
+  private listElapsedSignature(records: AgentSnapshot[]): string {
+    return records.map((record) => Math.floor(
+      ((record.completedAt ?? Date.now()) - record.startedAt) / 1000,
+    )).join(",");
   }
 
   private enableShrinkClearing(tui: TUI): void {

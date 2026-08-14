@@ -54,7 +54,145 @@ describe("ChildScreenHost", () => {
       host.handleTerminalInput("\r");
       inspect.mockClear();
       host.update();
+      expect(inspect, "unchanged tick must not re-inspect the selected transcript").not.toHaveBeenCalled();
+
+      first.stats.toolUses += 1;
+      host.update();
       expect(inspect.mock.calls.map((call) => call[0])).toEqual([first.id]);
+    });
+
+    it("does not relist or inspect agents when Down focuses the list from an empty editor", () => {
+      const records = Array.from({ length: 20 }, (_, index) =>
+        makeRecord(`agent-${String(index + 1).padStart(8, "0")}`),
+      );
+      const manager = makeManager(records);
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      const { selector } = mountSelector(ui);
+      listSnapshots.mockClear();
+      inspect.mockClear();
+
+      expect(host.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      expect(inspect, "enter-list must not inspect every live transcript").not.toHaveBeenCalled();
+      expect(listSnapshots, "enter-list must not clone/Check the snapshot table").not.toHaveBeenCalled();
+      expect(host.inspectState()?.listFocused).toBe(true);
+      expect(selector.render(120).join("\n")).toContain("↑↓ Move");
+    });
+
+    it.each([
+      ["Up", "\x1b[A"],
+      ["Escape", "\x1b"],
+      ["Space", " "],
+      ["Ctrl+D", "\x04"],
+    ] as const)("does not relist or inspect when %s is handled on a focused list", (_name, key) => {
+      const records = [makeRecord("agent-11111111"), makeRecord("agent-22222222")];
+      const manager = makeManager(records);
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      expect(host.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      listSnapshots.mockClear();
+      inspect.mockClear();
+
+      expect(host.handleTerminalInput(key)).toEqual({ consume: true });
+      expect(inspect, "local nav must not inspect every live transcript").not.toHaveBeenCalled();
+      expect(listSnapshots, "local nav must not clone/Check the snapshot table").not.toHaveBeenCalled();
+    });
+
+    it("does not relist when Up or Down moves the highlight inside a focused list", () => {
+      const records = [makeRecord("agent-11111111"), makeRecord("agent-22222222")];
+      const manager = makeManager(records);
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      expect(host.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      listSnapshots.mockClear();
+      inspect.mockClear();
+
+      expect(host.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      expect(host.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
+      expect(listSnapshots, "highlight motion must not clone/Check the snapshot table").not.toHaveBeenCalled();
+      expect(inspect).not.toHaveBeenCalled();
+      expect(host.inspectState()?.highlightedAgentId).toBeNull();
+      expect(host.inspectState()?.listFocused).toBe(true);
+    });
+
+    it("shows a pin change immediately without listing or inspecting", () => {
+      const done = makeRecord("agent-done", "completed");
+      const records = [done];
+      const manager = makeManager(records);
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      const { selector } = mountSelector(ui);
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\x1b[B");
+      listSnapshots.mockClear();
+      inspect.mockClear();
+
+      expect(host.handleTerminalInput(" ")).toEqual({ consume: true });
+      expect(listSnapshots, "pin must not listSnapshots to paint the diamond").not.toHaveBeenCalled();
+      expect(inspect, "pin must not inspect a transcript").not.toHaveBeenCalled();
+      expect(selector.render(120).join("\n")).toContain("◇");
+      expect(ui.ctx.notify).toHaveBeenCalledWith("Subagent pinned", "info");
+    });
+
+    it("does not relist when Ctrl+D enters clear confirmation, and relists after Enter confirms", () => {
+      const r1 = makeRecord("agent-11111111");
+      const r2 = makeRecord("agent-22222222");
+      const records = [r1, r2];
+      const manager = makeManager(records) as any;
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      manager.clear = vi.fn((id: string) => {
+        const index = records.findIndex((record: { id: string }) => record.id === id);
+        if (index < 0) return false;
+        records.splice(index, 1);
+        return true;
+      });
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      const { selector } = mountSelector(ui);
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\x1b[B");
+      listSnapshots.mockClear();
+      inspect.mockClear();
+
+      expect(host.handleTerminalInput("\x04")).toEqual({ consume: true });
+      expect(listSnapshots, "entering clear confirmation must not listSnapshots").not.toHaveBeenCalled();
+      expect(inspect).not.toHaveBeenCalled();
+      expect(selector.render(120)[0]).toBe('  Remove “Inspect the project”? · Enter Remove · Esc Cancel');
+
+      host.handleTerminalInput("\r");
+      expect(listSnapshots, "confirming clear must refresh the table").toHaveBeenCalled();
+      expect(selector.render(120).join("\n")).not.toContain("Remove “Inspect the project”?");
     });
 
     it("registers a below-editor selector containing Main and subagents", () => {
@@ -848,6 +986,35 @@ describe("ChildScreenHost", () => {
       expect(tui.requestRender).toHaveBeenCalledWith(false);
     });
 
+    it("skips replace-records, inspect, and project when the list data signature is unchanged", () => {
+      const record = makeRecord("agent-12345678", "completed");
+      record.completedAt = record.startedAt + 15_000;
+      const records = [record];
+      const manager = makeManager(records);
+      const listSnapshots = vi.fn(() => records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.listSnapshots = listSnapshots;
+      manager.inspectSession = inspect;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      const screen = (host as unknown as { screen: { execute: (command: unknown) => unknown } }).screen;
+      const execute = vi.spyOn(screen, "execute");
+      listSnapshots.mockClear();
+      inspect.mockClear();
+      execute.mockClear();
+
+      host.update();
+
+      expect(listSnapshots, "tick must still listSnapshots for outbound Check").toHaveBeenCalledTimes(1);
+      expect(inspect).not.toHaveBeenCalled();
+      const kinds = execute.mock.calls.map((call) => (call[0] as { kind?: string }).kind);
+      expect(kinds.filter((kind) => kind === "replace-records"), "unchanged sig must not replace-records").toEqual([]);
+      expect(kinds.filter((kind) => kind === "project"), "unchanged sig must not project").toEqual([]);
+    });
+
     it("refreshes the elapsed time column once per second", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
@@ -855,17 +1022,29 @@ describe("ChildScreenHost", () => {
       record.startedAt = Date.now() - 15_000;
       record.stats.toolUses = 0;
       record.stats.turnCount = 0;
+      const records = [record];
+      const manager = makeManager(records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      manager.inspectSession = inspect;
       const ui = makeUI({ value: "" });
-      host = new ChildScreenHost(makeManager([record]));
+      host = new ChildScreenHost(manager);
       host.setUICtx(ui.ctx as any);
       host.ensureTimer();
       const { tui, selector } = mountSelector(ui);
+      const screen = (host as unknown as { screen: { execute: (command: unknown) => unknown } }).screen;
+      const execute = vi.spyOn(screen, "execute");
 
       const row0 = selector.render(120)[1];
       expect(row0).toHaveLength(120);
       expect(row0).toMatch(/15s$/);
 
+      inspect.mockClear();
+      execute.mockClear();
+      tui.requestRender.mockClear();
       vi.advanceTimersByTime(1000);
+      const kinds = execute.mock.calls.map((call) => (call[0] as { kind?: string }).kind);
+      expect(inspect, "elapsed-only tick must not inspect").not.toHaveBeenCalled();
+      expect(kinds.filter((kind) => kind === "replace-records"), "elapsed-only tick must not replace-records").toEqual([]);
       const row1 = selector.render(120)[1];
       expect(row1).toMatch(/16s$/);
       expect(tui.requestRender).toHaveBeenCalled();

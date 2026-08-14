@@ -74,6 +74,25 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     expect(snapshot.footerStatus).toBeUndefined();
   });
 
+  it("keeps Main summary segments colored instead of flattening them", () => {
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+
+    const main = project(screen).listLines![0]!;
+    expect(lineText(main)).toBe("  ● Main (1 running · 1 total · Alt+A collapse)");
+    expect(main.parts).toEqual(expect.arrayContaining([
+      { text: "●", color: "accent" },
+      { text: "Main", bold: true },
+      { text: "1 running", color: "dim" },
+      { text: "1 total", color: "dim" },
+      { text: "Alt+A collapse", color: "dim" },
+    ]));
+    expect(
+      main.parts.some((part) => part.color || part.bold),
+      "Main must keep per-part color roles for paint",
+    ).toBe(true);
+  });
+
   it("hides zero running and queued counts when only terminal records remain", () => {
     const screen = openScreen();
     screen.execute({
@@ -287,6 +306,25 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     );
   });
 
+  it("paints the confirming Remove action as error and the rest as dim", () => {
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "down", editorEmpty: true });
+    screen.execute({ kind: "key", key: "ctrl-d", editorEmpty: true });
+
+    const prompt = project(screen).listLines![0]!;
+    expect(lineText(prompt)).toBe(
+      "  Remove “Inspect the project”? · Enter Remove · Esc Cancel",
+    );
+    expect(prompt.parts).toEqual([
+      { text: "  " },
+      { text: "Remove “Inspect the project”? · Enter ", color: "dim" },
+      { text: "Remove", color: "error" },
+      { text: " · Esc Cancel", color: "dim" },
+    ]);
+  });
+
   it("respects the statsVisibility showCost toggle", () => {
     const screen = openScreen();
     screen.execute({
@@ -400,6 +438,12 @@ describe("REQ-CHILD-002 folded footer status", () => {
     expect(listTexts(expanded)[0]).toBe(
       "  ○ Main (Blocked: cliproxyapi/gpt-5.6-sol concurrency limit reached · Alt+A collapse · Alt+M main)",
     );
+    const expandedNotice = expanded.listLines![0]!.parts.find((part) => part.text.startsWith("Blocked:"));
+    expect(expandedNotice).toEqual({
+      text: "Blocked: cliproxyapi/gpt-5.6-sol concurrency limit reached",
+      color: "warning",
+      bold: true,
+    });
 
     screen.execute({ kind: "toggle-fold" });
     const folded = project(screen);

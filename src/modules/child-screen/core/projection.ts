@@ -70,6 +70,40 @@ function joinDim(parts: LinePart[]): LinePart[] {
   return joined;
 }
 
+// Main used to join these parts into one colorless string so truncate
+// could take a single width. That was the moment Remove, Blocked, and
+// the Main marker forgot the roles paint already knew how to apply.
+// We cut part by part instead. A part that cannot fit is truncated
+// with the layout's ellipsis and everything after it is dropped.
+// Revisit if TextLayout grows a native part-aware cut.
+function truncateParts(
+  parts: readonly LinePart[],
+  width: number,
+  layout: TextLayout,
+): LinePart[] {
+  const out: LinePart[] = [];
+  let used = 0;
+  for (const part of parts) {
+    const remaining = width - used;
+    if (remaining <= 0) break;
+    const partWidth = layout.visibleWidth(part.text);
+    if (partWidth <= remaining) {
+      out.push(part);
+      used += partWidth;
+      continue;
+    }
+    const cut = layout.truncate(part.text, remaining);
+    if (cut) {
+      const next: LinePart = { text: cut };
+      if (part.color) next.color = part.color;
+      if (part.bold) next.bold = part.bold;
+      out.push(next);
+    }
+    break;
+  }
+  return out;
+}
+
 export function projectFooterStatus(
   records: readonly ChildRecordSummary[],
   options: {
@@ -151,8 +185,14 @@ export function projectList(options: {
     if (confirmingClearId) {
       const record = records.find((item) => item.id === confirmingClearId);
       const target = layout.truncate(record?.description ?? "agent", 32);
-      const confirmation = `Remove “${target}”? · Enter Remove · Esc Cancel`;
-      lines.push(line([{ text: `  ${layout.truncate(confirmation, commandWidth)}` }]));
+      lines.push(line([
+        { text: "  " },
+        ...truncateParts([
+          { text: `Remove “${target}”? · Enter `, color: "dim" },
+          { text: "Remove", color: "error" },
+          { text: " · Esc Cancel", color: "dim" },
+        ], commandWidth, layout),
+      ]));
     } else {
       const pinHint = highlighted ? ` · Space ${highlighted.pinned ? "Unpin" : "Pin"}` : "";
       lines.push(line([{
@@ -170,16 +210,16 @@ export function projectList(options: {
   const { start, end } = computeListWindow(records.length, Math.max(0, focusIndex), rows);
   const summary = joinDim(summaryParts(records, pending, interactionNotice, true, selectedAgentId != null));
   const mainLine: LinePart[] = [
-    { text: mainHighlighted ? "›" : " ", color: mainHighlighted ? "accent" : undefined },
+    mainHighlighted ? { text: "›", color: "accent" } : { text: " " },
     { text: " " },
     { text: mainActive ? "●" : "○", color: mainActive ? "accent" : "dim" },
     { text: " " },
-    { text: "Main", bold: mainActive || mainHighlighted },
+    mainActive || mainHighlighted ? { text: "Main", bold: true } : { text: "Main" },
     { text: " (", color: "dim" },
     ...summary,
     { text: ")", color: "dim" },
   ];
-  lines.push(line([{ text: layout.truncate(mainLine.map((part) => part.text).join(""), columns) }]));
+  lines.push(line(truncateParts(mainLine, columns, layout)));
 
   if (start > 0) {
     lines.push(line([{ text: `  ↑ ${start} hidden`, color: "dim" }]));
