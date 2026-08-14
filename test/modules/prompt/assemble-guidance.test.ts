@@ -53,7 +53,7 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
         "Agent tool rules:",
         "- Agents start with a fresh conversation.",
         "- For background work, set `run_in_background: true`; results are delivered automatically. Do not poll, sleep, or timeout-wait.",
-        "- A background Agent error is final. Do not spawn a replacement unless the user explicitly asks to retry.",
+        "- A background Agent error is final. Do not spawn a replacement unless the user explicitly asks to retry. The user can continue it from the Child screen; a successful continue delivers a new result and does not retract the first delivery.",
         "- Prefer background for independent work; use foreground when the result gates the next parent action.",
         "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
         "- Omit `model` only when the chosen Agent type has an authorized parent default.",

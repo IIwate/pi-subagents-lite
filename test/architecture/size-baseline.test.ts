@@ -7,7 +7,7 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // so the baseline cannot rot silently. Shrinking a file may ratchet the
 // recorded value down; this list is not auto-lowered.
 const sizeWarningBaseline: Readonly<Record<string, number>> = {
-  "src/platform/pi/agent-session.ts": 756,
+  "src/platform/pi/agent-session.ts": 759,
   "src/platform/pi/agent-types.ts": 166,
 };
 
