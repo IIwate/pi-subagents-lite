@@ -12,6 +12,7 @@
 - Disabling a Provider or losing Pi availability suspends rules without deleting them; dormant rules reappear when their prerequisite returns. Deletion is always an explicit user action (the unavailable-provider exception flow, or catalogue-proven `Clean unavailable rules`), never a side effect of evaluation.
 - The accepted-work snapshot locks definition, policy, model, parent model, thinking, scope state, output limit, and grace turns when an Agent call is accepted; later policy edits, provider changes, or scope changes affect only future calls.
 - Frontmatter `max_tokens` is a runtime output limit applied to a child-only copy of the selected model, never a routing permission or a mutation of the registry or parent model object.
+- Canonical model keys, host-supplied scope snapshots, and authorization error text live in this module so bootstrap and the Pi adapter share one owner instead of a third `src/models` tree.
 
 ## Superseded
 

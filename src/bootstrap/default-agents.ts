@@ -5,11 +5,11 @@
  * Kept: general-purpose + Explore. Plan removed (user can create via .md file).
  */
 
-import type { AgentConfig } from "./types.js";
+import type { AgentDefinitionSnapshot } from "../modules/agent-catalogue/public.js";
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find"];
 
-export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
+export const DEFAULT_AGENTS: Map<string, AgentDefinitionSnapshot> = new Map([
   [
     "general-purpose",
     {

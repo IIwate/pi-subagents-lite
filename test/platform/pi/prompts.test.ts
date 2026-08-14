@@ -12,16 +12,15 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildAgentPrompt } from "../../src/prompt/prompts.ts";
-import type { AgentConfig } from "../../src/agents/types.ts";
-import type { EnvInfo } from "../../src/types.ts";
+import { buildAgentPrompt } from "../../../src/platform/pi/prompts.ts";
+import type { EnvInfo } from "../../../src/types.ts";
 
 /** The shape the Pi skill formatter produces for one whitelisted skill. */
 function skillElement(name: string, description: string, location: string): string {
   return `<skill><name>${name}</name><description>${description}</description><location>${location}</location></skill>`;
 }
 
-const baseConfig: AgentConfig = {
+const baseConfig = {
   name: "test-agent",
   description: "Test agent",
   extensions: true,

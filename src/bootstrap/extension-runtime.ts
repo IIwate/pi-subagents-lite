@@ -19,7 +19,7 @@ import type { SubagentRuntime, WorktreeInspector } from "../modules/subagent-run
 import type { BackgroundDelivery } from "../modules/background-result-delivery/public.js";
 import type { ModelAccessFragment } from "../modules/model-access/public.js";
 import { createFsWorktreeInspector } from "../platform/fs/worktree-inspector.js";
-import { createAgentRegistry, type AgentRegistry } from "../agents/agent-registry.js";
+import { createAgentRegistry, type AgentRegistry } from "./agent-registry.js";
 import type { AgentCatalogue } from "../modules/agent-catalogue/public.js";
 import { createAgentCatalogueRuntime } from "./agent-catalogue.js";
 import type { ChildScreenHost } from "./child-screen.js";

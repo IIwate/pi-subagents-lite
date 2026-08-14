@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractText } from "../../src/prompt/context.js";
+import { extractText } from "../../../src/platform/pi/extract-text.js";
 
 describe("extractText", () => {
   it("extracts text from a simple content array", () => {

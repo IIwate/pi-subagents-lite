@@ -13,7 +13,7 @@
 
 ## Superseded
 
-- Session-start `scanAndMerge`, on-demand `mergeAgents`, and `src/agents/agent-discovery.ts` are superseded by the catalogue facade plus `platform/fs` frontmatter scanning. The in-process registry remains the runtime sink until its callers move.
+- Session-start `scanAndMerge`, on-demand `mergeAgents`, and `src/agents/agent-discovery.ts` are superseded by the catalogue facade plus `platform/fs` frontmatter scanning. The in-process registry lives in `bootstrap` as the activation-scoped sink.
 
 ## Implementation-only
 

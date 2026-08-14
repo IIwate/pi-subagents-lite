@@ -54,3 +54,16 @@ export {
   selectThinkingLevel,
   unavailableModelRules,
 } from "./application/query-model-access.js";
+export {
+  agentProviderDeniedError,
+  missingParentModelError,
+  missingSubagentModelError,
+  modelDeniedError,
+  modelKey,
+  modelUnavailableError,
+  outOfScopeModelError,
+  providerDisabledError,
+  routingDisabledModelError,
+  scopedModelKeys,
+  scopedThinkingLevel,
+} from "./core/model-scope.js";

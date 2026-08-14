@@ -2,7 +2,7 @@
 
 ## Primary seam
 
-Test authorization commands and effective policy snapshots through `model-access/public.ts` with plain JSON inputs.
+Test authorization commands and effective policy snapshots through `model-access/public.ts` with plain JSON inputs. Scope key helpers and authorization error text use the same public surface (`test/modules/model-access/model-scope.test.ts`).
 
 ## Required scenarios
 

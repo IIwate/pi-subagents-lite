@@ -1,4 +1,4 @@
-import { DEFAULT_AGENTS } from "../agents/default-agents.js";
+import { DEFAULT_AGENTS } from "./default-agents.js";
 import {
   createAgentCatalogue,
   type AgentCatalogue,

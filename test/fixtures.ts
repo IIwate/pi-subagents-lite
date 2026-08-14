@@ -18,9 +18,8 @@ import {
 // Type-only: constructing the record must not load the real bootstrap graph
 // (and its configuration file reads) into unit tests.
 import type { ExtensionRuntime } from "../src/bootstrap/extension-runtime.js";
-import { createAgentRegistry, type AgentRegistry } from "../src/agents/agent-registry.js";
 import { createAgentCatalogueRuntime } from "../src/bootstrap/agent-catalogue.js";
-import type { AgentConfig } from "../src/agents/types.js";
+import { createAgentRegistry, type AgentConfig, type AgentRegistry } from "../src/bootstrap/agent-registry.js";
 import type {
   AgentSettingsStore,
   ResolvedAgentSettings,

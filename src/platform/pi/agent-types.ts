@@ -2,7 +2,7 @@
  * agent-types.ts — Tool visibility policy for a subagent session.
  *
  * Pure rules over names: which tool schemas an agent may see, and which set the
- * host session may register. The live type registry lives in agent-registry.ts;
+ * host session may register. The live type registry lives in bootstrap;
  * nothing here holds state.
  */
 
@@ -15,6 +15,9 @@
  * with no real benefit.
  */
 export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "grep", "find"];
+
+/** Agent type: any string name (built-in defaults or user-defined). */
+export type SubagentType = string;
 
 /** Tools a Subagent must never inherit; see agent-catalogue/docs/decisions.md. */
 export const EXCLUDED_TOOL_NAMES = ["Agent"];

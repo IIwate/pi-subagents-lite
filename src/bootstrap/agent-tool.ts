@@ -30,7 +30,7 @@ import {
   agentProviderDeniedError,
   modelDeniedError,
   modelUnavailableError,
-} from "../models/model-scope.js";
+} from "../modules/model-access/public.js";
 import {
   authorizeModelAccess,
   resolveThinkingAccess,

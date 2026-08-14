@@ -2,12 +2,12 @@ import type { SourceGraph } from "./source-graph.js";
 
 /**
  * The declared layers, covering every file under `src/`. "shared" is not a
- * leftover bucket: it is the host-agnostic kernel (shared types, pure helpers,
- * agent policy and the activation-scoped registry) that adapters and the
- * composition root both need, and it is held to the same inward rules as a
- * module — no host packages, no adapters, no composition root. Anything outside
- * the four known directories lands here, so a new top-level directory inherits
- * the strictest rules instead of escaping the matrix.
+ * leftover bucket: it is the host-agnostic kernel (shared types and pure
+ * helpers) that adapters and the composition root both need, and it is held
+ * to the same inward rules as a module — no host packages, no adapters, no
+ * composition root. Anything outside the four known directories lands here,
+ * so a new top-level directory inherits the strictest rules instead of
+ * escaping the matrix.
  */
 export type SourceLayer = "module" | "shared" | "platform" | "bootstrap" | "entry";
 

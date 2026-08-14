@@ -14,7 +14,7 @@ import {
   resolveVisibleTools,
   EXCLUDED_TOOL_NAMES,
   BUILTIN_TOOL_NAMES,
-} from "../../src/agents/agent-types.js";
+} from "../../../src/platform/pi/agent-types.js";
 
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */

@@ -21,20 +21,20 @@ import {
 import {
   resolveSessionAllowedTools,
   resolveVisibleTools,
-} from "../../agents/agent-types.js";
-import { extractText } from "../../prompt/context.js";
-import type { LifetimeUsage } from "../../agents/usage.js";
+} from "./agent-types.js";
+import { extractText } from "./extract-text.js";
+import type { LifetimeUsage } from "./usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../../utils.js";
-import { missingSubagentModelError } from "../../models/model-scope.js";
-import { buildAgentPrompt, type PromptExtras } from "../../prompt/prompts.js";
+import { missingSubagentModelError } from "../../modules/model-access/public.js";
+import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { formatSkillMetaElements, loadSkillMeta, preloadSkills } from "./skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, SHORT_ID_LENGTH } from "../../types.js";
 import { DEFAULT_GRACE_TURNS } from "../../modules/subagent-runtime/public.js";
-import type { SubagentType } from "../../agents/types.js";
+import type { SubagentType } from "./agent-types.js";
 import { withSubagentSpawn } from "../process/process-state.js";
 import { readCustomPromptFile, readProjectContextFiles } from "../fs/prompt-files.js";
 import { PENDING_RESULT_ENTRY, RESULT_ACK_ENTRY } from "./result-repository.js";
-import { debugFaultMessage, type DebugFaultKind } from "../../agents/debug-fault.js";
+import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
 function normalizeMaxTurns(n: number | undefined): number | undefined {

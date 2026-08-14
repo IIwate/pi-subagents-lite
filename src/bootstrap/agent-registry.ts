@@ -14,14 +14,17 @@
  */
 
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
-import type { AgentConfig, SystemPromptMode } from "./types.js";
+import { BUILTIN_TOOL_NAMES } from "../platform/pi/agent-types.js";
+import type { SystemPromptMode } from "../modules/prompt/public.js";
 import {
   resolveAgentDefinitionPolicy,
   type AgentCatalogue,
   type AgentDefinitionSnapshot,
   type ResolvedAgentLoadingPolicy,
 } from "../modules/agent-catalogue/public.js";
+
+/** Session-facing definition: the catalogue snapshot, with built-in source omitted. */
+export type AgentConfig = AgentDefinitionSnapshot;
 
 /** Options for registering a freshly discovered catalogue. */
 export interface RegisterAgentsOptions {
