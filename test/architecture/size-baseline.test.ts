@@ -16,7 +16,7 @@ describe("size review signals", () => {
     const warnings: string[] = [];
     for (const [file, baseline] of Object.entries(sizeWarningBaseline)) {
       const lineCount = readFileSync(resolve(projectRoot, file), "utf8").split(/\r?\n/).length - 1;
-      if (lineCount > baseline) warnings.push(${file}:  -> );
+      if (lineCount > baseline) warnings.push(`${file}: ${baseline} -> ${lineCount}`);
     }
     expect(warnings).toEqual([]);
   });
