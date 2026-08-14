@@ -218,6 +218,23 @@ async function completeRun(
   await Promise.resolve();
 }
 
+async function failRun(
+  memory: ReturnType<typeof createMemoryDriver>,
+  id: string,
+  error = "boom",
+): Promise<void> {
+  const run = memory.runs.get(id);
+  if (!run) throw new Error(`missing run ${id}`);
+  run.emit({
+    type: "failed",
+    agentId: id,
+    sessionId: id,
+    error,
+  });
+  run.resolve();
+  await Promise.resolve();
+}
+
 describe("REQ-RUNTIME-002 lifecycle public seam", () => {
   it("spawns, queues, stops, and inspects without a Pi session object", async () => {
     const memory = createMemoryDriver();
@@ -318,6 +335,75 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
       "agent-00000001",
       "agent-00000002",
     ]);
+  });
+
+  it("listSnapshots ranks attention above running, running above queued, queued above done, and keeps acceptance order inside a rank", async () => {
+    let now = 1_000;
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      clock: { now: () => { now += 1; return now; } },
+      limits: {
+        defaultModelLimit: 1,
+        modelLimits: { "llamacpp/4b_small": 1 },
+        providerLimits: {},
+      },
+    });
+
+    for (const description of [
+      "first done",
+      "error",
+      "aborted",
+      "turn limited",
+      "second done",
+      "running",
+      "stopped",
+      "queued",
+    ]) {
+      await runtime.execute({
+        kind: "spawn",
+        type: "general-purpose",
+        prompt: description,
+        description,
+        acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small"),
+      });
+    }
+
+    await completeRun(memory, "agent-00000001");
+    await failRun(memory, "agent-00000002");
+    await completeRun(memory, "agent-00000003", { aborted: true });
+    await completeRun(memory, "agent-00000004", { turnLimited: true });
+    await completeRun(memory, "agent-00000005");
+    await runtime.execute({ kind: "stop", id: "agent-00000007", initiator: "user" });
+    expect(await runtime.execute({ kind: "pin", id: "agent-00000001" })).toMatchObject({
+      ok: true,
+      pinned: true,
+    });
+
+    const listed = runtime.listSnapshots();
+    expect(
+      listed.map((snapshot) => `${snapshot.id}:${snapshot.status}`),
+      "error/aborted/turn_limited, then running, then queued, then archive in acceptance order; pin must not lift the first done row",
+    ).toEqual([
+      "agent-00000002:error",
+      "agent-00000003:aborted",
+      "agent-00000004:turn_limited",
+      "agent-00000006:running",
+      "agent-00000008:queued",
+      "agent-00000001:completed",
+      "agent-00000005:completed",
+      "agent-00000007:stopped",
+    ]);
+    const queued = listed.find((snapshot) => snapshot.status === "queued");
+    const firstDone = listed.find((snapshot) => snapshot.id === "agent-00000001");
+    const secondDone = listed.find((snapshot) => snapshot.id === "agent-00000005");
+    expect(secondDone?.startedAt).toBeGreaterThan(queued?.startedAt ?? 0);
+    expect(secondDone?.startedAt).toBeGreaterThan(firstDone?.startedAt ?? 0);
+    expect(firstDone?.pinnedAt).toEqual(expect.any(Number));
+
+    const inspected = await runtime.execute({ kind: "inspect" });
+    expect(inspected.ok && inspected.snapshots?.map((snapshot) => snapshot.id)).toEqual(
+      listed.map((snapshot) => snapshot.id),
+    );
   });
 
   it("rejects a worktree target through the inspector port", async () => {

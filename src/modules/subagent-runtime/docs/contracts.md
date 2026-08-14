@@ -10,7 +10,7 @@
 - `AgentInvocationSchema`, `ThinkingLevelSchema`, and `SystemPromptModeSchema` define the serializable invocation vocabulary used by that snapshot.
 - `AcceptedModelSnapshotSchema` and `AcceptedScopedModelSchema` describe the serializable Pi model data needed by the platform session driver.
 - `parseAcceptedRunPolicy` accepts only a contract object: plain JSON, `AcceptedRunPolicySchema`, and consistent derived parent-model / output / turn values. It does not project vendor leftovers. Pi 0.84.1 model snapshots are projected at bootstrap packaging before this parser runs.
-- `AgentListSnapshotSchema` is the list-row contract: the same snapshot fields except `acceptedPolicy`. `listSnapshots()` Checks this schema. Full `AgentSnapshotSchema` (including the real accepted call) remains the gate for `getSnapshot`, settlement, and command results.
+- `AgentListSnapshotSchema` is the list-row contract: the same snapshot fields except `acceptedPolicy`. `listSnapshots()` Checks this schema and returns rows in status-rank order (attention, running, queued, archive) with acceptance order inside a rank. Full `AgentSnapshotSchema` (including the real accepted call) remains the gate for `getSnapshot`, settlement, and command results.
 
 - `ConcurrencyLimitsSchema` and `ConcurrencyDecisionSchema` define hierarchical reserve/release decisions.
 - `ConcurrencyLimitsFragmentSchema` and `ConcurrencyLimitsUpdateSchema` define the persisted `concurrency` document section this module owns: `parseConcurrencyLimitsFragment` tolerates hand-edited junk (invalid entries drop, an invalid default becomes the capability default), `applyConcurrencyLimitsUpdate` and `runtimeLimitsFromFragment` Check inbound and outbound so a bad update cannot commit then throw on `replaceLimits`.

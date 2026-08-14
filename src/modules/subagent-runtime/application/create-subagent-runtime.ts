@@ -36,6 +36,7 @@ import {
   concurrencyKeyFromPolicy,
   emptyUsage,
   isTerminalStatus,
+  listStatusRank,
 } from "../core/lifecycle-status.js";
 import { shouldExpire, unpinCleanupPausedMs } from "../core/retention.js";
 import { createConcurrencyScheduler, type ConcurrencyScheduler } from "./create-concurrency-scheduler.js";
@@ -214,19 +215,28 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     return outbound(snapshots.get(id));
   }
 
+  function snapshotsInListOrder(): AgentSnapshot[] {
+    // Status rank is the list now: a finished row used to keep the seat
+    // it earned at spawn, so Done sat above work still burning.
+    // Recency-by-startedAt looked like a fix until a later queued stamp
+    // climbed over a run that had already begun. Pins still do not move
+    // rows — they only pause the grave. Revisit if pinned rows should
+    // be nailed to the visible window, or if AgentStatus should stay in
+    // acceptance order while the TUI ranks.
+    return [...snapshots.values()].sort(
+      (left, right) => listStatusRank(left.status) - listStatusRank(right.status),
+    );
+  }
+
   function listRows(): AgentListSnapshot[] {
-    // Acceptance order is the list. Recency-by-startedAt looked harmless
-    // until a later queued row, stamped at enqueue, climbed over running
-    // work that had already begun. Pins must not move rows either.
-    // Revisit only if product names an explicit status rank.
-    return [...snapshots.values()].flatMap((snapshot) => {
+    return snapshotsInListOrder().flatMap((snapshot) => {
       const emitted = outboundList(snapshot);
       return emitted ? [emitted] : [];
     });
   }
 
   function snapshotCopies(): AgentSnapshot[] {
-    return [...snapshots.values()].flatMap((snapshot) => {
+    return snapshotsInListOrder().flatMap((snapshot) => {
       const emitted = outbound(snapshot);
       return emitted ? [emitted] : [];
     });
