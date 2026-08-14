@@ -4,9 +4,8 @@ import type { PromptSettingsView, SettingsRow } from "../contracts/settings-cont
 
 /**
  * Choices come from the prompt module's schema, not a parallel list.
- * Bootstrap still has its own VALID_SYSTEM_PROMPT_MODES copy; import this
- * export when that workstream wires it. Revisit if TypeBox stops exposing
- * union members on `anyOf`.
+ * Bootstrap imports this list so validation cannot drift. Revisit if TypeBox
+ * stops exposing union members on `anyOf`.
  */
 function modesFromSchema(): readonly SystemPromptMode[] {
   const modes = SystemPromptModeSchema.anyOf.map((variant) => {

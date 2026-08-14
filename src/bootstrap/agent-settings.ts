@@ -10,10 +10,11 @@
 
 import type { SystemPromptMode } from "../modules/prompt/public.js";
 import type { JsonValue } from "../modules/configuration/public.js";
+import { SYSTEM_PROMPT_MODES } from "../modules/settings/public.js";
 import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
 import type { ConfigSectionIO } from "./configuration.js";
 
-const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
+const VALID_SYSTEM_PROMPT_MODES = new Set<string>(SYSTEM_PROMPT_MODES);
 
 /** Persisted shape of the `agent` section; every key optional on disk. */
 interface AgentSettings {
