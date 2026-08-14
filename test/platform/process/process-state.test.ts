@@ -1,6 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createJiti } from "jiti";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const PROCESS_STATE_V2 = Symbol.for("@iiwate/pi-subagents-lite/process-state-v2");
+const PROCESS_STATE_V3 = Symbol.for("@iiwate/pi-subagents-lite/process-state-v3");
 
 const pendingResult = {
   deliveryId: "delivery-1",
@@ -20,6 +25,7 @@ describe("process-state platform contract", () => {
     const processState = await import("../../../src/platform/process/process-state.js");
     processState.takeFallbackResults("session-a");
     processState.takeFallbackResults("session-b");
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_STATE_V2];
   });
 
   it("keeps another session's fallback until that session consumes it", async () => {
@@ -73,6 +79,42 @@ describe("process-state platform contract", () => {
     });
     const parent = await jiti.import<typeof import("../../../src/platform/process/process-state.js")>(modulePath);
     expect(parent.isInsideSubagentSpawn()).toBe(false);
+  });
+
+  it("pins the current process-state symbol name", () => {
+    const source = readFileSync(path.resolve("src/platform/process/process-state.ts"), "utf8");
+    expect(source).toContain('Symbol.for("@iiwate/pi-subagents-lite/process-state-v3")');
+    expect(source).toContain('Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")');
+  });
+
+  it("adopts a live v2 Map inbox on same-process reload", async () => {
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_STATE_V3];
+    const inbox = new Map<string, typeof pendingResult[]>([["session-a", [pendingResult]]]);
+    (globalThis as Record<symbol, unknown>)[PROCESS_STATE_V2] = {
+      fallbackResults: inbox,
+      subagentSpawn: new AsyncLocalStorage<boolean>(),
+    };
+
+    vi.resetModules();
+    const reloaded = await import("../../../src/platform/process/process-state.js");
+
+    expect((globalThis as Record<symbol, { fallbackResults: Map<string, unknown> }>)[PROCESS_STATE_V3].fallbackResults)
+      .toBe(inbox);
+    expect(reloaded.takeFallbackResults("session-a")).toEqual([pendingResult]);
+    expect(Object.getOwnPropertySymbols(globalThis)).not.toContain(PROCESS_STATE_V2);
+  });
+
+  it("does not convert a non-Map leftover under the retired v2 key", async () => {
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_STATE_V3];
+    (globalThis as Record<symbol, unknown>)[PROCESS_STATE_V2] = {
+      fallbackResults: { sessionId: "session-a", results: [pendingResult] },
+      subagentSpawn: new AsyncLocalStorage<boolean>(),
+    };
+
+    vi.resetModules();
+    const reloaded = await import("../../../src/platform/process/process-state.js");
+
+    expect(reloaded.takeFallbackResults("session-a")).toEqual([]);
   });
 
   it("keeps the child marker across reload only in the child async context", async () => {

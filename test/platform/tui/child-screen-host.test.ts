@@ -700,11 +700,15 @@ describe("ChildScreenHost", () => {
 
   describe("refresh and error containment (REQ-CHILD-004)", () => {
     it("does not start a refresh timer before a TUI context is attached", () => {
+      vi.useFakeTimers();
+      const ui = makeUI({ value: "" });
       host = new ChildScreenHost(makeManager([makeRecord()]));
 
       host.ensureTimer();
 
-      expect((host as any).refreshTimer).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(ui.statuses.size).toBe(0);
+      expect(ui.widgets.size).toBe(0);
     });
 
     it("keeps footer reconciliation active while a completed child is selected", () => {
@@ -714,20 +718,23 @@ describe("ChildScreenHost", () => {
       host = new ChildScreenHost(makeManager([record]));
       host.setUICtx(ui.ctx as any);
       host.ensureTimer();
-      expect((host as any).refreshTimer).toBeUndefined();
-      mountSelector(ui);
+      expect(vi.getTimerCount()).toBe(0);
+      const { tui } = mountSelector(ui);
+      expect(tui.footerContainer.render(120)).toEqual(["parent cwd", "parent stats"]);
 
       host.handleTerminalInput("\x1b[B");
       host.handleTerminalInput("\x1b[B");
       host.handleTerminalInput("\r");
 
-      expect((host as any).refreshTimer).toBeDefined();
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      expect(tui.footerContainer.render(120)).toEqual([]);
       const update = vi.spyOn(host, "update");
       update.mockClear();
       vi.advanceTimersByTime(999);
       expect(update).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
       expect(update).toHaveBeenCalled();
+      expect(tui.footerContainer.render(120)).toEqual([]);
     });
 
     it("requests a redraw when the displayed model changes", () => {
@@ -807,6 +814,7 @@ describe("ChildScreenHost", () => {
     });
 
     it("contains repeated selector render failures and warns once", () => {
+      vi.useFakeTimers();
       const record = makeRecord();
       const ui = makeUI({ value: "" });
       const manager = makeManager([record]) as any;
@@ -814,10 +822,11 @@ describe("ChildScreenHost", () => {
       host.setUICtx(ui.ctx as any);
       host.ensureTimer();
       const { selector } = mountSelector(ui);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
       manager.listSnapshots = vi.fn(() => { throw new Error("selector state unavailable"); });
 
       expect(selector.render(120)).toEqual([]);
-      expect((host as any).refreshTimer).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
       expect(selector.render(120)).toEqual([]);
 
       expect(ui.ctx.notify).toHaveBeenCalledTimes(1);
@@ -841,7 +850,8 @@ describe("ChildScreenHost", () => {
 
       expect(() => host?.dispose()).not.toThrow();
 
-      expect((host as any).refreshTimer).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(ui.statuses.size).toBe(0);
       expect((host as any).uiCtx).toBeUndefined();
       expect(tui.getClearOnShrink()).toBe(false);
       expect(ui.ctx.notify).toHaveBeenCalledWith(

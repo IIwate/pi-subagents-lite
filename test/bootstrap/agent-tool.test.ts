@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createAgentToolExecutor } from "../../src/bootstrap/agent-tool.js";
+import { projectAgentsDirPath } from "../../src/platform/fs/config-paths.js";
 import { createFsWorktreeInspector } from "../../src/platform/fs/worktree-inspector.js";
 import { WORKTREE_VALIDATION_ERRORS } from "../../src/platform/fs/worktree-validator.js";
 import type { AgentRegistry } from "../../src/agents/agent-registry.js";
@@ -430,6 +431,20 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
       [worktree, join(repo, ".git")],
     ]);
     execute = buildExecutor({ parentCwd: repo, exec: gitProbe(commonDirs) });
+  });
+
+  it("asks discovery to scan the worktree path named by config-paths", async () => {
+    const discoverNew = vi.spyOn(agents, "discoverNew");
+
+    await execute(
+      "tc-disc-path",
+      makeParams({ agent: "feature-reviewer", worktree_path: worktree }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(discoverNew).toHaveBeenCalledWith(projectAgentsDirPath(normalized(worktree)));
   });
 
   it("discovers a worktree-local agent type on demand", async () => {
