@@ -768,6 +768,74 @@ describe("REQ-RUNTIME-005 continuation and interaction", () => {
     });
     expect(result).toMatchObject({ ok: true, interaction: { accepted: false, reason: "queued" } });
   });
+
+  it("rejects an off-contract inspect result instead of continuing on live:\"yes\"", async () => {
+    const memory = createMemoryDriver();
+    memory.driver.inspect = () => ({
+      found: true,
+      live: "yes",
+      streaming: false,
+      messages: [],
+    } as never);
+    const runtime = createRuntime(memory.driver);
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await completeRun(memory, "agent-00000001");
+
+    const result = await runtime.execute({
+      kind: "interact",
+      id: "agent-00000001",
+      message: "follow up",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      interaction: { accepted: false, reason: "unavailable" },
+    });
+    expect(memory.continues.size).toBe(0);
+    expect(runtime.inspectSession("agent-00000001")).toEqual({
+      found: false,
+      live: false,
+      streaming: false,
+      messages: [],
+    });
+  });
+
+  it("rejects an off-contract steer result instead of accepting on accepted:\"yes\"", async () => {
+    const memory = createMemoryDriver();
+    const steers: Array<{ sessionId: string; message: string }> = [];
+    memory.driver.steer = async (request) => {
+      steers.push({ sessionId: request.sessionId, message: request.message });
+      return { accepted: "yes" } as never;
+    };
+    const runtime = createRuntime(memory.driver);
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    const result = await runtime.execute({
+      kind: "interact",
+      id: "agent-00000001",
+      message: "new direction",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      interaction: { accepted: false, reason: "unavailable" },
+    });
+    expect(steers).toEqual([
+      { sessionId: "agent-00000001", message: "new direction" },
+    ]);
+  });
 });
 
 describe("REQ-RUNTIME-002 close", () => {

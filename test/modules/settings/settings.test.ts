@@ -25,6 +25,7 @@ import {
   createSettings,
   DebugFaultSchema,
   DebugStatusPreviewSchema,
+  RootSummariesSchema,
   SettingsResultSchema,
   SettingsUpdateResultSchema,
   SYSTEM_PROMPT_MODES,
@@ -1317,6 +1318,12 @@ describe("embedded owner schemas", () => {
     expect(ConcurrencyLimitUpdateSchema).toBe(ConcurrencyLimitsUpdateSchema);
     expect(DebugFaultSchema).toBe(DebugFaultKindSchema);
     expect(DebugStatusPreviewSchema).toBe(AgentStatusSchema);
+  });
+
+  it("requires RootSummaries.concurrencyDefault to be an integer ≥ 1", () => {
+    expect(Check(RootSummariesSchema, { modelAccessEnabled: false, concurrencyDefault: 4 })).toBe(true);
+    expect(Check(RootSummariesSchema, { modelAccessEnabled: false, concurrencyDefault: 0 })).toBe(false);
+    expect(Check(RootSummariesSchema, { modelAccessEnabled: false, concurrencyDefault: 1.5 })).toBe(false);
   });
 
   it("derives system prompt mode choices from SystemPromptModeSchema", () => {

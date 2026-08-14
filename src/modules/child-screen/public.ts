@@ -1,5 +1,6 @@
 export {
   ChildRecordSummarySchema,
+  ChildStatusSchema,
   NavigatorCommandResultSchema,
   NavigatorCommandSchema,
   NavigatorSnapshotSchema,

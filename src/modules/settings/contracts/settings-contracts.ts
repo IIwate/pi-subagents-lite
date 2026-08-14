@@ -153,7 +153,8 @@ export const SettingsUpdateResultSchema = Type.Union([
 
 export const RootSummariesSchema = Type.Object({
   modelAccessEnabled: Type.Boolean(),
-  concurrencyDefault: Type.Number(),
+  // Same integer ≥1 the runtime concurrency fragment uses for `default`.
+  concurrencyDefault: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
 
 export const SpawnSettingsViewSchema = Type.Object({

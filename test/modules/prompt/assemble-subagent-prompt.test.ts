@@ -136,4 +136,23 @@ describe("Subagent system prompt public seam", () => {
       });
     }
   });
+
+  it("fails inherit mode when stripping scaffolding leaves an empty header", () => {
+    const result = assembleSubagentPrompt({
+      kind: "assemble-subagent-prompt",
+      mode: "inherit",
+      agentName: "reviewer",
+      agentInstructions: "Review the diff.",
+      cwd: "C:/project",
+      env: { isGitRepo: false, branch: null, platform: "linux" },
+      header: "Current date: 2026-01-01\nCurrent working directory: /tmp\n",
+      contextFiles: [],
+      skillElements: [],
+    });
+    expect(Check(SubagentPromptResultSchema, result)).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Inherited parent prompt is unavailable." },
+    });
+  });
 });

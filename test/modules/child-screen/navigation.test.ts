@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
+import { AgentStatusSchema } from "../../../src/modules/subagent-runtime/public.js";
 import {
+  ChildStatusSchema,
   NavigatorCommandResultSchema,
   createAsciiTextLayout,
   createChildScreen,
@@ -473,5 +475,11 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
       error: { code: "invalid-command", message: "Navigator result does not match its contract." },
     });
     expect(Check(NavigatorCommandResultSchema, result)).toBe(true);
+  });
+});
+
+describe("embedded owner schemas", () => {
+  it("aliases ChildStatusSchema to the runtime AgentStatusSchema", () => {
+    expect(ChildStatusSchema).toBe(AgentStatusSchema);
   });
 });

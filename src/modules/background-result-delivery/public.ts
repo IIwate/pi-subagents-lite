@@ -4,6 +4,7 @@ export {
   DeliveryCommandResultSchema,
   DeliveryEventSchema,
   DeliverySnapshotSchema,
+  DeliveryStatusSchema,
 } from "./contracts/delivery.js";
 export type {
   BackgroundResultRecord,

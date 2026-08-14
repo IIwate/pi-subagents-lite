@@ -69,13 +69,20 @@ export const ThinkingSelectionSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+/**
+ * Parent/scoped thinking embed the vocabulary. Hosts may still hand in
+ * dirty vendor strings; the query seam canonicalizes those to a member
+ * or omits them before Check, so a nickname cannot fail the whole
+ * policy. Outbound `ThinkingAccessPolicy` is Checked either way.
+ * Revisit if every host already sends `ThinkingLevelSchema` values.
+ */
 export const ResolveThinkingAccessQuerySchema = Type.Object({
   routing: Type.Unknown(),
   agentType: Type.String({ minLength: 1 }),
   modelKey: Type.String({ minLength: 1 }),
   parentModelKey: Type.String(),
-  parentThinkingLevel: Type.Optional(Type.String()),
-  scopedThinkingLevel: Type.Optional(Type.String()),
+  parentThinkingLevel: Type.Optional(ThinkingLevelSchema),
+  scopedThinkingLevel: Type.Optional(ThinkingLevelSchema),
   supportedLevels: Type.Array(ThinkingLevelSchema),
   fallbackLevel: ThinkingLevelSchema,
 }, { additionalProperties: false });
