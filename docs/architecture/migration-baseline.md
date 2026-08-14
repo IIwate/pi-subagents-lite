@@ -28,7 +28,7 @@ Phase 0 recorded 62 source TypeScript files, 196 internal source edges, one stro
 
 Current guards require an empty SCC list and zero internal mocks. `test/architecture/architecture-guards.test.ts` rejects any cycle, including type-only, and any `vi.mock` of an internal module. The Phase 0 cycle and mock counts are closed migration debt, not a remaining allowance.
 
-The first Agent catalogue tracer removed the direct `agents/types.ts` and `types.ts` cycle. Later slices removed the last cycle and the last internal mocks. No slice may add a cycle or an internal mock without an approved architecture decision.
+The first Agent catalogue tracer removed the direct `agents/types.ts` and `types.ts` cycle. Later slices removed the last cycle and the last internal mocks. No slice may add a cycle or an internal mock.
 
 ## Approved seams
 
