@@ -24,14 +24,11 @@ The two skipped scenarios are not replaced by ordinary directories or junctions.
 
 ## Dependency baseline
 
-- Source TypeScript files: 62.
-- Internal source edges: 196.
-- Existing strongly connected components: 1.
-- The remaining allowed cycle fingerprint was migration debt; Phase 9 removed the last cycle and `test/architecture/architecture-guards.test.ts` now rejects any cycle outright.
-- Existing internal `vi.mock` baseline: 27 test files, 69 calls.
-- New internal mocks and new cycles fail the architecture guard immediately.
+Phase 0 recorded 62 source TypeScript files, 196 internal source edges, one strongly connected component, and 27 test files / 69 internal `vi.mock` calls.
 
-The allowed cycle and mock entries are migration debt. The first Agent catalogue tracer removed the direct `agents/types.ts` and `types.ts` cycle. A migration slice removes a resolved entry in the same change; no slice may add a new baseline entry without an approved architecture decision.
+Current guards require an empty SCC list and zero internal mocks. `test/architecture/architecture-guards.test.ts` rejects any cycle, including type-only, and any `vi.mock` of an internal module. The Phase 0 cycle and mock counts are closed migration debt, not a remaining allowance.
+
+The first Agent catalogue tracer removed the direct `agents/types.ts` and `types.ts` cycle. Later slices removed the last cycle and the last internal mocks. No slice may add a cycle or an internal mock without an approved architecture decision.
 
 ## Approved seams
 
@@ -83,7 +80,7 @@ The audit file itself was retired in Phase 9 with the other migration-only evide
 - The runtime receives one validated JSON copy containing model, parent model, scope, Thinking, output, turn, and grace limits. Scheduling derives its concurrency key from that accepted model snapshot; callers cannot provide a parallel model key.
 - The filesystem catalogue adapter isolates malformed definitions before returning its schema-valid result, preserving valid definitions in the same request.
 - The architecture guard enforces the full inward matrix inside each capability module, including ports, and requires every module-external consumer to use the target module's `public.ts`.
-- The direct `src/agents/types.ts` to `src/types.ts` cycle was removed; the remaining cycle is unchanged migration debt.
+- The direct `src/agents/types.ts` to `src/types.ts` cycle was removed. The remaining cycle named at that review was later closed; current guards require an empty SCC.
 - Formal review of `46728e2..50c89c1` found no unresolved issues. Recorded verification: `bun run typecheck` pass; `bun run test` 50 files, 866 passed; architecture guard 9 passed; `git diff --check` pass.
 
 ## Phase 1 exit review
@@ -121,4 +118,4 @@ The audit file itself was retired in Phase 9 with the other migration-only evide
 
 ## Phases 4–9
 
-This baseline stopped recording per-phase verification tables after Phase 3. The remaining phase purposes, exit conditions, and slice rules live in the [refactoring plan](../refactoring-plan.md#phase-4-replace-subagent-runtime). Phase-end `Review-Result: PASS` checkpoints on `re` are the historical record of those slices; Phase 9 closed at `c20dd5d`.
+This baseline stopped recording per-phase verification tables after Phase 3. The remaining phase purposes, exit conditions, and slice rules live in the [refactoring plan](../refactoring-plan.md#phase-4-replace-subagent-runtime). Phase-end `Review-Result: PASS` checkpoints on `re` are the historical record of those slices; Phase 9 closed at `c20dd5d`. The thirteen `Review-Result: PASS` lines and the empty-tree phase checkpoints are historical process debt, not current product debt.

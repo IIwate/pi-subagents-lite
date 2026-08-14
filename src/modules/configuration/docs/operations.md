@@ -6,12 +6,12 @@ For operational settings only, the resolver uses:
 
 1. environment variables;
 2. `.env` values;
-3. the persisted `subagents-lite.json` file;
+3. a configured file value when the setting can have one;
 4. defaults owned by the capability that consumes the setting.
 
 Interactive product policies such as Model access and Thinking access are not silently overridden by environment values: the document facade has no environment port, and only the composition root resolves operational values.
 
-The home directory is the one operational setting today. Its config-file step is inapplicable because the document's own location derives from it; a set-but-empty variable counts as absent so it cannot blank out a usable lower-precedence source.
+The home directory is the one operational setting today. Its composition-root call site passes three candidates — environment, `.env`, and the OS home fallback — and does not pass a config-file value: the document's own location derives from this setting, so the file cannot locate itself. A set-but-empty variable counts as absent so it cannot blank out a usable lower-precedence source.
 
 ## Physical format
 

@@ -6,7 +6,7 @@ Test source resolution and fragment transactions through `configuration/public.t
 
 ## Required scenarios
 
-- Environment > `.env` > persisted file > capability-owned defaults for operational settings.
+- Environment > `.env` > persisted file > capability-owned defaults for operational settings that supply a configured value. HOME's call site passes only environment, `.env`, and fallback.
 - Interactive Model and Thinking policies are not implicitly overridden by environment values.
 - Successful fragment commits preserve sibling keys and unrelated sections and advance the in-memory revision, which never appears in the document.
 - Failed persistence returns an explicit failure and leaves the prior snapshot effective; stale revisions are rejected before writing.

@@ -14,7 +14,7 @@
 
 The persisted JSON remains in its current unversioned shape; the revision is runtime transaction metadata only.
 
-- `OperationalValueCandidatesSchema` carries the already-read source values for one operational setting; `resolveOperationalValue` applies the fixed environment > `.env` > configured > fallback order. Interactive product policies never pass through this contract.
+- `OperationalValueCandidatesSchema` carries the already-read source values for one operational setting; `resolveOperationalValue` applies the fixed environment > `.env` > configured > fallback order. The HOME call site omits `configured` and passes only environment, `.env`, and fallback. Interactive product policies never pass through this contract.
 
 ## Ports
 

@@ -6,6 +6,7 @@
 - Each capability owns its fragment schema, defaults, normalization, and update command.
 - The existing unversioned persisted JSON shape is preserved during the refactor.
 - Generic path reads return opaque JSON values; the consuming capability validates and interprets them.
+- The HOME call site passes three candidates: environment, `.env`, and the OS home fallback. It does not pass a persisted-file value, because that file's path is derived from HOME.
 
 ## Superseded
 

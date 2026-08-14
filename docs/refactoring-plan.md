@@ -221,7 +221,7 @@ An adapter can keep a private map from session ID to Pi `AgentSession`. That han
 | JSON config file | one `ConfigurationDocumentRepository` platform implementation | None |
 | Pi child-session engine | one `SessionDriver` adapter | None |
 | Result persistence | one `ResultRepository` adapter | None |
-| Scheduler policy | `core/scheduling/**` and its tests | No other feature area |
+| Scheduler policy | `core/concurrency-scheduler.ts`, `application/create-concurrency-scheduler.ts`, and their tests | No other feature area |
 | Agent definition source | one catalogue repository adapter | None |
 
 If a replacement requires edits outside its row, the boundary has failed and the slice is not complete.
