@@ -333,6 +333,45 @@ describe("REQ-DELIVERY-004 preflight injection", () => {
     });
     expect(Check(DeliveryEventSchema, preflight.ok && preflight.events[0])).toBe(true);
   });
+
+  it("persists the full result while the parent wake injection is truncated", () => {
+    const body = `${"w".repeat(4000)}!`;
+    const memory = createMemory();
+    const recorded = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ result: body }),
+      stillPresent: true,
+    });
+
+    expect(recorded.ok && recorded.snapshot.pending[0]?.result).toBe(body);
+    expect(memory.pending[0]?.result).toBe(body);
+    expect(memory.delivery.getStoredResult("agent-1")?.result).toBe(body);
+    expect(memory.sent[0]?.content).toContain("w".repeat(4000));
+    expect(memory.sent[0]?.content).not.toContain(body);
+    expect(memory.sent[0]?.content).toContain('AgentStatus({ agent_id: "agent-1" })');
+  });
+
+  it("truncates each preflight result independently and leaves persisted records intact", () => {
+    const first = `${"a".repeat(4000)}X`;
+    const second = `${"b".repeat(4000)}Y`;
+    const pending = [
+      record({ deliveryId: "d1", agentId: "a1", result: first }),
+      record({ deliveryId: "d2", agentId: "a2", result: second }),
+    ];
+    const memory = createMemory({ pending, latest: pending });
+    const preflight = memory.delivery.execute({ kind: "parent-preflight" });
+
+    expect(preflight.ok && preflight.snapshot.pending.map((item) => item.result)).toEqual([first, second]);
+    expect(preflight.ok && preflight.injection?.content).toContain("a".repeat(4000));
+    expect(preflight.ok && preflight.injection?.content).toContain("b".repeat(4000));
+    expect(preflight.ok && preflight.injection?.content).not.toContain(first);
+    expect(preflight.ok && preflight.injection?.content).not.toContain(second);
+    expect(preflight.ok && preflight.injection?.content).toContain('AgentStatus({ agent_id: "a1" })');
+    expect(preflight.ok && preflight.injection?.content).toContain('AgentStatus({ agent_id: "a2" })');
+
+    const inspect = memory.delivery.execute({ kind: "inspect", agentId: "a1" });
+    expect(inspect.ok && inspect.stored?.result).toBe(first);
+  });
 });
 
 describe("REQ-DELIVERY-005 restore and tree navigation", () => {
