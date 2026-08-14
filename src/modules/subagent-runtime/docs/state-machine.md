@@ -26,7 +26,7 @@ Required invariants:
 
 - Queueing never revalidates the Accepted run policy.
 - Stop is idempotent and does not retract a previously persisted terminal result.
-- Continuation is a new prompt to a still-settled live session, not persisted resume.
+- Continuation is a new prompt to a still-settled live session, not persisted resume. A successful continue delivers a new terminal result and does not retract the first delivery.
 - Cleanup never removes a pinned record and never changes delivery eligibility.
 - Late platform events are ignored or translated through the session ID without reviving a closed record.
 - Retention start, pause, expiry, pin, continuation, and close decisions use an injected runtime clock.

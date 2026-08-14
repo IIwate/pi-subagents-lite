@@ -4,6 +4,8 @@
 **Tests:** `bun run test` (the full suite; `--maxWorkers=1` is a CI-stability choice and stays the official script). `bun run test:parallel` runs without that cap.
 **Before committing:** run typecheck and the full test suite.
 
+**Worktrees:** When creating a worktree, link reusable dependency directories such as `node_modules` to the main checkout; do not copy, reinstall, or move the main checkout's `node_modules`. Keep the main checkout and worktree on the same filesystem side (both Windows or both WSL/Linux); do not cross-link Win↔WSL. **Windows:** `cmd /c mklink /J <worktree>/node_modules <main>/node_modules`; unlink with `cmd /c rmdir <worktree>/node_modules` (do not Recurse-delete a junction). **WSL / Linux:** `ln -s <main>/node_modules <worktree>/node_modules`; unlink with `rm <worktree>/node_modules` (`rm` on a symlink only removes the link). After merge, unlink first, then remove the worktree and leftover branches.
+
 # Repository language and style
 
 **Commits:** English Conventional Commits; add concise `-` bullets for non-trivial changes.

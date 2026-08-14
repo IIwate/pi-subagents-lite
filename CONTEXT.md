@@ -108,7 +108,7 @@ The selected Subagent transcript and input route displayed in place of Main's ch
 _Avoid_: Child TUI, replacement session, alternate Main
 
 **Background result delivery**:
-The automatic presentation of a terminal background Subagent result into the parent session that originated the Agent call. Persist-before-wake, coalesced wake, eligibility, and acknowledgement rules live in [background-result-delivery decisions](src/modules/background-result-delivery/docs/decisions.md).
+The automatic presentation of a terminal background Subagent result into the parent session that originated the Agent call. Each injected wake body is clipped to 4000 characters; persist and `AgentStatus` keep the full text. Persist-before-wake, coalesced wake, eligibility, and acknowledgement rules live in [background-result-delivery decisions](src/modules/background-result-delivery/docs/decisions.md).
 _Avoid_: Session-global injection, 200ms debounce, logical task batch, join mode
 
 ## Relationships
@@ -153,4 +153,4 @@ _Avoid_: Session-global injection, 200ms debounce, logical task batch, join mode
 
 ## Tests
 
-- `bun run test` runs the complete suite; GitHub Actions executes it on Ubuntu.
+- `bun run test` runs the complete suite; GitHub Actions executes it on Linux and Windows.

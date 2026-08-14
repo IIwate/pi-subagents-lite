@@ -6,7 +6,7 @@ Test delivery state transitions through the public application surface using ser
 
 ## Required scenarios
 
-- Persistence before one automatic wake.
+- Persistence before one automatic wake. Each injected wake body is clipped to 4000 characters; persist and AgentStatus keep the full text.
 - Active origin-branch eligibility and unrelated-branch hiding.
 - Coalesced wake requests, failed parent turns, later completions, reload, and `/tree` restoration.
 - Explicit AgentStatus acknowledgement only after successful parent settlement.

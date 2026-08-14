@@ -51,7 +51,7 @@ A prompt source that fails to resolve is not silently replaced by a different mo
 
 | Fragment or rule | Owner | Public-seam test |
 |:--|:--|:--|
-| Guidance header, tool rules, required `model`, exact alternates | `assemble-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` required-model golden |
+| Guidance header, tool rules (including continue-re-delivers), required `model`, exact alternates | `assemble-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` required-model golden |
 | Guidance name sort, unavailable types, `maxTurns` | `assemble-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` sort/unavailable |
 | Guidance malformed command | `assemble-agent-guidance.ts` | `test/modules/prompt/assemble-guidance.test.ts` invalid-command |
 | Catalogue reader for Parent guidance | `create-parent-guidance.ts` | `test/modules/prompt/parent-guidance.test.ts` |

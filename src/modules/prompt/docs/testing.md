@@ -7,7 +7,7 @@ Test guidance and system-prompt assembly through `prompt/public.ts` with literal
 ## Required scenarios
 
 - Stable fragment ordering and deterministic output.
-- Parent guidance exact callable model keys and required `model` behavior.
+- Parent guidance exact callable model keys, required `model` behavior, and the continue-re-delivers tool rule.
 - Subagent system prompt modes, Agent instructions, skills, context files, and runtime environment.
 - Missing optional source, malformed source, and unavailable policy inputs.
 - Inherit mode with a missing, empty, or whitespace-only header fails closed instead of assembling the replace-mode header.
