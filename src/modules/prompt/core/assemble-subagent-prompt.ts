@@ -15,15 +15,17 @@ function stripScaffolding(prompt: string): string {
 }
 
 /**
- * Inherit asked for a persona the user cannot see or correct. Whitespace is
- * the same absence as `null`: there is nothing to strip and nothing to show.
- * Custom is different — the file is a settings page the user already owns —
- * so a missing header is left for the replace fallback the host announced.
+ * Inherit asked for a persona the user cannot see or correct. Whitespace
+ * and a header that is only parent scaffolding are the same absence as
+ * `null`: after the strip there is nothing to show, and falling through
+ * to the generic Pi header would still be reported as inherit. Custom is
+ * different — the file is a settings page the user already owns — so a
+ * missing header is left for the replace fallback the host announced.
  * Revisit if inherit snapshots the parent text at queue time instead of
  * asking the host when the run starts.
  */
 export function isVisiblePromptHeader(header: string | null | undefined): header is string {
-  return typeof header === "string" && header.trim().length > 0;
+  return typeof header === "string" && stripScaffolding(header).length > 0;
 }
 
 export function assembleSubagentPromptText(request: SubagentPromptRequest): string {

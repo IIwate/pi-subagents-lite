@@ -432,15 +432,9 @@ Current working directory: /home/user/project`;
 Current date: 2026-01-01
 Current working directory: /tmp`;
 
-    const result = buildAgentPrompt(baseConfig, "/test/cwd", env, { parentSystemPrompt: parentPrompt }, "inherit");
-
-    // All scaffolding gone — falls back to replace mode header since nothing remains
-    expect(result).not.toContain("<project_context>");
-    expect(result).not.toContain("<available_skills>");
-    expect(result).not.toContain("Current date:");
-    expect(result).not.toContain("Current working directory:");
-    // Still has agent instructions
-    expect(result).toContain("<agent_instructions>");
+    expect(() => buildAgentPrompt(baseConfig, "/test/cwd", env, { parentSystemPrompt: parentPrompt }, "inherit")).toThrow(
+      "Inherited parent prompt is unavailable.",
+    );
   });
 
   it("preserves special characters in base prompt", () => {

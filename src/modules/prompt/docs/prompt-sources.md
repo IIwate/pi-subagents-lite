@@ -44,7 +44,7 @@ The host owns Pi skill XML formatting and filesystem reads. Prompt assembly only
 
 A prompt source that fails to resolve is not silently replaced by a different mode. The host distinguishes two cases:
 
-- Inherited parent text is supplied by the host callback. If that callback throws, or the supplied text is missing, empty, or whitespace-only, the run fails. The condition is a host malfunction the user cannot see or correct, and an inherited persona is the reason the mode was chosen — work produced under a generic header would still be reported as a success.
+- Inherited parent text is supplied by the host callback. If that callback throws, or the supplied text is missing, empty, whitespace-only, or only parent scaffolding (date/cwd/project/skill blocks that strip to nothing), the run fails. The condition is a host malfunction the user cannot see or correct, and an inherited persona is the reason the mode was chosen — work produced under a generic header would still be reported as a success.
 - The custom prompt file is a state the settings page shows and offers to create. An absent or unreadable file degrades to replace mode with a notice, keeping the delegation alive over a condition the user already owns.
 
 ## Owning tests
@@ -58,6 +58,7 @@ A prompt source that fails to resolve is not silently replaced by a different mo
 | Replace-mode env, context, skill wrapper | `assemble-subagent-prompt.ts` | `test/modules/prompt/assemble-subagent-prompt.test.ts` replace golden |
 | Inherit scaffolding strip | `assemble-subagent-prompt.ts` | inherit date/cwd strip |
 | Inherit missing, empty, or whitespace header | `assemble-subagent-prompt.ts` | inherit unavailable header |
+| Inherit header that strips to empty | `assemble-subagent-prompt.ts` | inherit scaffolding-only header |
 | Custom header and leftover context/skill strip | `assemble-subagent-prompt.ts` | custom scaffolding strip |
 | Replace mode ignores host header | `assemble-subagent-prompt.ts` | replace ignores header |
 | Subagent malformed command | `assemble-subagent-prompt.ts` | invalid-command |

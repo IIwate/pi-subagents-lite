@@ -105,6 +105,25 @@ describe("REQ-MODEL-005 resolveThinkingAccess", () => {
     });
   });
 
+  it("drops dirty host thinking strings instead of rejecting the query", () => {
+    expect(resolve({
+      modelKey: "openai/gpt-5",
+      parentModelKey: "openai/gpt-5",
+      parentThinkingLevel: "vendor-ultra",
+    })).toEqual({
+      allowed: ["off", "minimal", "low", "medium", "high", "xhigh"],
+      default: "high",
+      source: "baseline",
+    });
+    expect(resolve({
+      scopedThinkingLevel: "vendor-ultra",
+    })).toEqual({
+      allowed: ["off", "minimal", "low", "medium", "high", "xhigh"],
+      default: "high",
+      source: "baseline",
+    });
+  });
+
   it("rejects an off-contract query instead of copying invalid thinking levels", () => {
     expect(resolve({
       supportedLevels: ["off", "vendor-ultra"] as unknown as ThinkingLevel[],

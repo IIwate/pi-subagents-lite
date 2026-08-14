@@ -40,6 +40,7 @@ export {
   DebugDiagnosticsSchema,
   DebugFaultKindSchema,
   InteractionResultSchema,
+  MarkResultCommandSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
   DEFAULT_CONCURRENCY_LIMIT,
   DEFAULT_GRACE_TURNS,
@@ -57,14 +58,26 @@ export type {
   StopInitiator,
 } from "./contracts/lifecycle.js";
 export {
+  SessionAbortRequestSchema,
+  SessionCloseRequestSchema,
+  SessionContinueRequestSchema,
   SessionEventSchema,
+  SessionInspectRequestSchema,
   SessionInspectResultSchema,
   SessionStartRequestSchema,
+  SessionSteerRequestSchema,
+  SessionSteerResultSchema,
 } from "./contracts/session.js";
 export type {
+  SessionAbortRequest,
+  SessionCloseRequest,
+  SessionContinueRequest,
   SessionEvent,
+  SessionInspectRequest,
   SessionInspectResult,
   SessionStartRequest,
+  SessionSteerRequest,
+  SessionSteerResult,
 } from "./contracts/session.js";
 export {
   WorktreeInspectRequestSchema,

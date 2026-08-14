@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => {
     const session: any = {
       model: options.model,
       thinkingLevel: options.thinkingLevel,
+      isStreaming: false,
       agent: { onPayload: undefined },
       extensionRunner: { emit: vi.fn(async () => {}) },
       setSessionName: vi.fn(),

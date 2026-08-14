@@ -1,20 +1,19 @@
 import { Check } from "typebox/value";
 import {
+  CANONICAL_THINKING_LEVELS,
   ModelAccessFragmentSchema,
   ResolveThinkingAccessQuerySchema,
   ThinkingAccessPolicySchema,
   ThinkingSelectionSchema,
   type ModelAccessFragment,
   type ResolveThinkingAccessQuery,
+  type ThinkingAccessPolicy,
+  type ThinkingLevel,
+  type ThinkingSelection,
 } from "../contracts/model-access-contracts.js";
 import { listEffectiveAlternateKeys } from "../core/effective-alternates.js";
 import { listAgentTypesForProvider, listUnavailableModelRules } from "../core/provider-rules.js";
 import { decideThinkingAccess, decideThinkingSelection } from "../core/thinking-access.js";
-import type {
-  ThinkingAccessPolicy,
-  ThinkingLevel,
-  ThinkingSelection,
-} from "../contracts/model-access-contracts.js";
 
 function asFragment(routing: unknown): ModelAccessFragment | undefined {
   return Check(ModelAccessFragmentSchema, routing) ? routing : undefined;
@@ -63,9 +62,21 @@ export function unavailableModelRules(
   });
 }
 
+function asCanonicalThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  return typeof value === "string"
+    ? CANONICAL_THINKING_LEVELS.find((level) => level === value)
+    : undefined;
+}
+
 function asThinkingQuery(input: unknown): ResolveThinkingAccessQuery | undefined {
   if (!input || typeof input !== "object") return undefined;
   const raw = input as Record<string, unknown>;
+  // Host catalogues have handed us vendor nicknames. Embedding
+  // ThinkingLevelSchema without this pre-clean would fail the whole
+  // query; omitting a dirty string keeps the fallback path core already
+  // models. Revisit if hosts only send canonical levels.
+  const parentThinkingLevel = asCanonicalThinkingLevel(raw.parentThinkingLevel);
+  const scopedThinkingLevel = asCanonicalThinkingLevel(raw.scopedThinkingLevel);
   const query = {
     routing: raw.routing,
     agentType: raw.agentType,
@@ -73,8 +84,8 @@ function asThinkingQuery(input: unknown): ResolveThinkingAccessQuery | undefined
     parentModelKey: raw.parentModelKey,
     supportedLevels: raw.supportedLevels,
     fallbackLevel: raw.fallbackLevel,
-    ...(raw.parentThinkingLevel !== undefined ? { parentThinkingLevel: raw.parentThinkingLevel } : {}),
-    ...(raw.scopedThinkingLevel !== undefined ? { scopedThinkingLevel: raw.scopedThinkingLevel } : {}),
+    ...(parentThinkingLevel !== undefined ? { parentThinkingLevel } : {}),
+    ...(scopedThinkingLevel !== undefined ? { scopedThinkingLevel } : {}),
   };
   return Check(ResolveThinkingAccessQuerySchema, query) ? query : undefined;
 }

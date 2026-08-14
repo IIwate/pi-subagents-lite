@@ -21,7 +21,9 @@ import { WorktreeInspectResultSchema } from "../contracts/worktree.js";
 import {
   SessionEventSchema,
   SessionInspectResultSchema,
+  SessionSteerResultSchema,
   type SessionEvent,
+  type SessionInspectResult,
   type SessionSteerRequest,
 } from "../contracts/session.js";
 import type { SessionDriver } from "../ports/session-driver.js";
@@ -40,6 +42,22 @@ import { copyJson } from "./copy-json.js";
 
 function asImages(images: unknown[] | undefined): SessionSteerRequest["images"] {
   return images as SessionSteerRequest["images"];
+}
+
+function absentSessionView(): SessionInspectResult {
+  return { found: false, live: false, streaming: false, messages: [] };
+}
+
+/**
+ * The session driver is a replaceable port. A typed-but-false inspect —
+ * `live: "yes"`, a missing messages array — would let continue treat a
+ * lie as a live idle session. The same absence inspectSession already
+ * degrades to: no live session, the state every caller already renders
+ * while a run is queued. Revisit if the port itself starts returning a
+ * checked envelope.
+ */
+function sessionInspectView(view: unknown): SessionInspectResult {
+  return Check(SessionInspectResultSchema, view) ? view : absentSessionView();
 }
 
 function canOverwriteStatus(status: AgentSnapshot["status"]): boolean {
@@ -496,15 +514,24 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         message,
         images: asImages(images),
       });
+      // Same fail-closed gate as inspect: `accepted: "yes"` is not a
+      // successful steer. The driver already saw the message; we refuse
+      // to report acceptance from a payload the schema never named.
+      if (!Check(SessionSteerResultSchema, steered) || !steered.accepted) {
+        return ok({
+          interaction: { accepted: false, reason: "unavailable" },
+          snapshot: outbound(snapshot),
+        });
+      }
       return ok({
-        interaction: steered.accepted ? { accepted: true } : { accepted: false, reason: "unavailable" },
+        interaction: { accepted: true },
         snapshot: outbound(snapshot),
       });
     }
 
     const view = snapshot.sessionId
-      ? options.sessionDriver.inspect({ sessionId: snapshot.sessionId })
-      : { found: false, live: false, streaming: false, messages: [] };
+      ? sessionInspectView(options.sessionDriver.inspect({ sessionId: snapshot.sessionId }))
+      : absentSessionView();
     if (!snapshot.sessionId || !snapshot.settled || !view.live || view.streaming) {
       return ok({ interaction: { accepted: false, reason: "unavailable" }, snapshot: outbound(snapshot) });
     }
@@ -743,13 +770,8 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     },
     inspectSession(id: string) {
       const snapshot = snapshots.get(id);
-      const absent = { found: false, live: false, streaming: false, messages: [] };
-      if (!snapshot?.sessionId) return absent;
-      const view = options.sessionDriver.inspect({ sessionId: snapshot.sessionId });
-      // An off-contract driver view degrades to "no live session" — the state
-      // the caller already renders while a run is queued — rather than
-      // travelling into transcript rendering as a partially valid object.
-      return Check(SessionInspectResultSchema, view) ? view : absent;
+      if (!snapshot?.sessionId) return absentSessionView();
+      return sessionInspectView(options.sessionDriver.inspect({ sessionId: snapshot.sessionId }));
     },
     stop(id, initiator) {
       return stop(id, initiator);

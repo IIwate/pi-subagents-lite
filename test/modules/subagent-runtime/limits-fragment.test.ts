@@ -44,7 +44,9 @@ describe("parseConcurrencyLimitsFragment", () => {
       models: {},
     });
     expect(Object.hasOwn(parsed.providers, "__proto__")).toBe(true);
-    expect(Object.keys({})).toEqual([]);
+    expect(parsed.providers["__proto__"]).toBe(2);
+    expect(Object.hasOwn({}, "__proto__")).toBe(false);
+    expect("polluted" in {}).toBe(false);
   });
 });
 
