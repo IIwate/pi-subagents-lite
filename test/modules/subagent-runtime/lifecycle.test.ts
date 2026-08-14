@@ -3,6 +3,7 @@ import { Check } from "typebox/value";
 import { acceptedRunPolicy } from "../../fixtures.ts";
 import {
   AgentCommandResultSchema,
+  AgentListSnapshotSchema,
   AgentSnapshotSchema,
   createSubagentRuntime,
   DEFAULT_RETENTION_MS,
@@ -246,6 +247,8 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     expect(Check(AgentCommandResultSchema, first)).toBe(true);
     expect(Check(AgentCommandResultSchema, JSON.parse(JSON.stringify(first)))).toBe(true);
     expect(Check(AgentCommandResultSchema, second)).toBe(true);
+    expect(first.ok && first.snapshot?.acceptedPolicy.model.id).toBe("4b_small");
+    expect(first.ok && first.snapshot?.acceptedPolicy.model.id).not.toBe("outbound-stub");
     expect(first).toMatchObject({ ok: true, snapshot: { status: "running", id: "agent-00000001" } });
     expect(second).toMatchObject({ ok: true, snapshot: { status: "queued", id: "agent-00000002" } });
     expect(memory.runs.has("agent-00000001")).toBe(true);
@@ -1092,6 +1095,7 @@ describe("session-driver contract", () => {
       toolUse: true,
       usage: { input: 3, output: 2, cacheWrite: 1, cost: 0.5 },
       turnCount: 2,
+      contextPercent: 33,
     });
     await completeRun(memory, "agent-00000001", { responseText: "ok" });
 
@@ -1100,6 +1104,7 @@ describe("session-driver contract", () => {
       toolUses: 1,
       turnCount: 2,
       lifetimeUsage: { input: 3, output: 2, cacheWrite: 1, cost: 0.5 },
+      contextPercent: 33,
     });
 
     const continued = await runtime.execute({
@@ -1170,7 +1175,8 @@ describe("session-driver contract", () => {
     const published = runtime.getSnapshot("agent-00000001") as AgentSnapshot;
     expect(Check(AgentSnapshotSchema, published)).toBe(true);
     expect(published.invocation?.thinkingLevel).toBeUndefined();
-    expect(runtime.listSnapshots().every((snapshot) => Check(AgentSnapshotSchema, snapshot))).toBe(true);
+    expect(runtime.listSnapshots().every((snapshot) => Check(AgentListSnapshotSchema, snapshot))).toBe(true);
+    expect(runtime.listSnapshots().every((snapshot) => !("acceptedPolicy" in snapshot))).toBe(true);
     // Dropping the event whole is the documented cost: readiness never lands,
     // so interaction queues instead of steering a session the runtime cannot
     // describe. Asserted here so the failure boundary stays visible.
@@ -1179,7 +1185,39 @@ describe("session-driver contract", () => {
     expect(memory.steers).toEqual([]);
   });
 
-  it("listSnapshots shares the spawn-validated acceptedPolicy instead of recloning it", async () => {
+  it("listSnapshots omits acceptedPolicy and does not write through to the live record", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    const spawned = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(Check(AgentCommandResultSchema, spawned)).toBe(true);
+    expect(spawned.ok && spawned.snapshot?.acceptedPolicy.model.id).toBe("model");
+
+    const listed = runtime.listSnapshots()[0];
+    const fetched = runtime.getSnapshot("agent-00000001");
+    expect(listed).toBeDefined();
+    expect(fetched).toBeDefined();
+    expect(Check(AgentListSnapshotSchema, listed)).toBe(true);
+    expect(Check(AgentSnapshotSchema, fetched)).toBe(true);
+    expect(listed).not.toHaveProperty("acceptedPolicy");
+    expect(fetched?.acceptedPolicy.model.id).toBe("model");
+
+    if (listed) {
+      listed.status = "error";
+      listed.stats.contextPercent = 1;
+    }
+    if (fetched) fetched.acceptedPolicy.model.id = "mutated";
+    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("running");
+    expect(runtime.getSnapshot("agent-00000001")?.acceptedPolicy.model.id).toBe("model");
+    expect(runtime.listSnapshots()[0]?.stats.contextPercent).toBeUndefined();
+  });
+
+  it("writes progress contextPercent onto stats so an unselected list row can read it", async () => {
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver);
     await runtime.execute({
@@ -1189,12 +1227,26 @@ describe("session-driver contract", () => {
       description: "task",
       acceptedPolicy: acceptedRunPolicy("test/model"),
     });
-    const listed = runtime.listSnapshots()[0];
-    const fetched = runtime.getSnapshot("agent-00000001");
-    expect(listed?.acceptedPolicy).toBe(fetched?.acceptedPolicy);
-    expect(listed?.status).toBe("running");
-    if (listed) listed.status = "error";
-    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("running");
+
+    memory.runs.get("agent-00000001")?.emit({
+      type: "progress",
+      agentId: "agent-00000001",
+      sessionId: "agent-00000001",
+      toolUse: true,
+      contextPercent: 42,
+    });
+    expect(runtime.listSnapshots()[0]?.stats.contextPercent).toBe(42);
+    expect(runtime.getSnapshot("agent-00000001")?.stats.contextPercent).toBe(42);
+
+    memory.runs.get("agent-00000001")?.emit({
+      type: "progress",
+      agentId: "agent-00000001",
+      sessionId: "agent-00000001",
+      turnCount: 2,
+      contextPercent: 57,
+    });
+    expect(runtime.listSnapshots()[0]?.stats.contextPercent).toBe(57);
+    expect(Check(AgentListSnapshotSchema, runtime.listSnapshots()[0])).toBe(true);
   });
 });
 

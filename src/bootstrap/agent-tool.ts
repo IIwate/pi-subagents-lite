@@ -15,6 +15,7 @@ import {
   describeAcceptedRunPolicyFailure,
   parseAcceptedRunPolicy,
 } from "../modules/subagent-runtime/public.js";
+import { projectPiAcceptedRunPolicyInput } from "./project-pi-accepted-run-policy.js";
 
 import {
   parseModelKey,
@@ -248,7 +249,7 @@ async function executeAgentTool(
   const turnLimit = configuredTurnLimit == null || configuredTurnLimit === 0
     ? null
     : Math.max(1, configuredTurnLimit);
-  const acceptedPolicyInput = {
+  const acceptedPolicyInput = projectPiAcceptedRunPolicyInput({
     ...policyInputs,
     model: acceptedModel,
     parentModel: ctx.model ? structuredClone(ctx.model) : null,
@@ -257,7 +258,7 @@ async function executeAgentTool(
     outputTokenLimit: acceptedModel.maxTokens,
     turnLimit,
     graceTurns: agentSettings.graceTurns,
-  };
+  });
   const acceptedPolicy = parseAcceptedRunPolicy(acceptedPolicyInput);
   if (!acceptedPolicy) {
     return errorResult(

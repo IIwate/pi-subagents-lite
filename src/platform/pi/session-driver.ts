@@ -28,6 +28,34 @@ function asImages(images: unknown[] | undefined): ImageContent[] | undefined {
 }
 
 /**
+ * Context% is a session-stat, not a transcript. Putting it on progress
+ * keeps the list timer from inspecting every child's messages just to
+ * paint a percentage. The number is whatever getSessionStats says at
+ * this event; a quiet stream between events will look frozen until the
+ * next tool, usage, compaction, or turn. Revisit if the list needs
+ * sub-event freshness without opening the transcript.
+ */
+function progressEvent(
+  agentId: string,
+  sessionId: string,
+  session: AgentSession | undefined,
+  extra: {
+    toolUse?: boolean;
+    usage?: { input: number; output: number; cacheWrite: number; cost: number };
+    compaction?: boolean;
+    turnCount?: number;
+  },
+) {
+  return {
+    type: "progress" as const,
+    agentId,
+    sessionId,
+    ...extra,
+    contextPercent: getSessionContextPercent(session),
+  };
+}
+
+/**
  * The transcript is the one bulk payload leaving this adapter, and Pi's message
  * objects are host types, not JSON: optional fields hold `undefined`, and
  * nothing stops a future field from holding something worse. Serializing once
@@ -64,6 +92,7 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
 
   return {
     async start(request, emit) {
+      let liveSession: AgentSession | undefined;
       const result = await runAgent(options.ctx, request.agentType, request.prompt, {
         pi: options.pi,
         agentId: request.agentId,
@@ -79,6 +108,7 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
           emit({ type: "setup-finished", agentId: request.agentId, sessionId: request.sessionId });
         },
         onSessionCreated: (session) => {
+          liveSession = session;
           sessions.set(request.sessionId, { session });
           emit({
             type: "session-ready",
@@ -93,16 +123,16 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
           });
         },
         onToolUse: () => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, toolUse: true });
+          emit(progressEvent(request.agentId, request.sessionId, liveSession, { toolUse: true }));
         },
         onAssistantUsage: (usage) => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, usage });
+          emit(progressEvent(request.agentId, request.sessionId, liveSession, { usage }));
         },
         onCompaction: () => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, compaction: true });
+          emit(progressEvent(request.agentId, request.sessionId, liveSession, { compaction: true }));
         },
         onTurnEnd: (turnCount) => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, turnCount });
+          emit(progressEvent(request.agentId, request.sessionId, liveSession, { turnCount }));
         },
       });
       sessions.set(request.sessionId, { session: result.session });
@@ -132,16 +162,16 @@ export function createPiSessionDriver(options: CreatePiSessionDriverOptions): Se
         maxTurns: request.maxTurns,
         graceTurns: request.graceTurns,
         onToolUse: () => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, toolUse: true });
+          emit(progressEvent(request.agentId, request.sessionId, live.session, { toolUse: true }));
         },
         onAssistantUsage: (usage) => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, usage });
+          emit(progressEvent(request.agentId, request.sessionId, live.session, { usage }));
         },
         onCompaction: () => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, compaction: true });
+          emit(progressEvent(request.agentId, request.sessionId, live.session, { compaction: true }));
         },
         onTurnEnd: (turnCount) => {
-          emit({ type: "progress", agentId: request.agentId, sessionId: request.sessionId, turnCount });
+          emit(progressEvent(request.agentId, request.sessionId, live.session, { turnCount }));
         },
       });
       emit({

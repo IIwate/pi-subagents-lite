@@ -80,6 +80,18 @@ export const AgentSnapshotSchema = Type.Object({
   worktreePath: Type.Optional(Type.String()),
 }, { additionalProperties: false });
 
+/**
+ * List ticks never read the accepted call. Checking that catalog on every
+ * refresh was the hitch; stubbing it and hanging the live object back was
+ * the hole. A row without the policy is the gate the list can actually pay
+ * for. Revisit if a list consumer starts needing the accepted call.
+ */
+export const AgentListSnapshotSchema = Type.Omit(
+  AgentSnapshotSchema,
+  ["acceptedPolicy"],
+  { additionalProperties: false },
+);
+
 const JsonValueSchema = Type.Cyclic({
   JsonValue: Type.Union([
     Type.Null(),
@@ -245,6 +257,7 @@ export type DebugFaultKind = Static<typeof DebugFaultKindSchema>;
 export type LifetimeUsage = Static<typeof LifetimeUsageSchema>;
 export type AgentStats = Static<typeof AgentStatsSchema>;
 export type AgentSnapshot = Static<typeof AgentSnapshotSchema>;
+export type AgentListSnapshot = Static<typeof AgentListSnapshotSchema>;
 export type AgentCommand = Static<typeof AgentCommandSchema>;
 export type SpawnCommand = Static<typeof SpawnCommandSchema>;
 export type InteractionResult = Static<typeof InteractionResultSchema>;

@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { errorMessage } from "../../../utils.js";
 import type {
-  AgentSnapshot,
+  AgentListSnapshot,
   InteractionResult,
   SubagentRuntime,
 } from "../../../modules/subagent-runtime/public.js";
@@ -93,7 +93,7 @@ export class ChildScreenHost {
   private lastRenderSig = "";
   private shrinkClearingTui: TUI | undefined;
   private previousClearOnShrink: boolean | undefined;
-  private lastAgentStatus = new Map<string, AgentSnapshot["status"]>();
+  private lastAgentStatus = new Map<string, AgentListSnapshot["status"]>();
   private selectorRegistered = false;
   private selectorTui: TUI | undefined;
   private hostTui: TUI | undefined;
@@ -132,7 +132,7 @@ export class ChildScreenHost {
    * starts rendering message previews.
    */
   private presentationRecords(
-    snapshots: AgentSnapshot[],
+    snapshots: AgentListSnapshot[],
     selectedId: string | null,
   ): ChildRecordSummary[] {
     return snapshots.map((record) => {
@@ -193,7 +193,7 @@ export class ChildScreenHost {
     });
   }
 
-  private syncRecords(highlightIndex?: number, snapshots?: AgentSnapshot[]) {
+  private syncRecords(highlightIndex?: number, snapshots?: AgentListSnapshot[]) {
     const records = snapshots ?? this.manager.listSnapshots();
     const pending = this.pendingResultState();
     return this.screen.execute({
@@ -616,11 +616,11 @@ export class ChildScreenHost {
     } catch { /* Notification failures must not reopen the UI error boundary. */ }
   }
 
-  private isTerminalStatus(status: AgentSnapshot["status"]): boolean {
+  private isTerminalStatus(status: AgentListSnapshot["status"]): boolean {
     return status !== "running" && status !== "queued";
   }
 
-  private consumeTerminalTransitions(records: AgentSnapshot[]): boolean {
+  private consumeTerminalTransitions(records: AgentListSnapshot[]): boolean {
     let terminalTransition = false;
     const seen = new Set<string>();
     for (const record of records) {
@@ -638,7 +638,7 @@ export class ChildScreenHost {
     return terminalTransition;
   }
 
-  private listRenderSignature(records: AgentSnapshot[]): string {
+  private listRenderSignature(records: AgentListSnapshot[]): string {
     const state = this.snapshot();
     const parts = records.map((record) => {
       const invocation = record.invocation;

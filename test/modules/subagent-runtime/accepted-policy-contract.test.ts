@@ -130,121 +130,65 @@ describe("accepted Agent call contract", () => {
       .toContain("parentModelKey \"other/model\" does not match \"\"");
   });
 
-  it("accepts a Pi 0.84.1 runtime model snapshot and drops host-only leftovers", () => {
-    // Literals taken from installed @earendil-works/pi-ai 0.84.1 deepseek.json,
-    // pi-coding-agent provider-composer modelFromJson, and model-resolver
-    // scopedModels.push({ model, thinkingLevel }) when the pattern has no :level.
-    const deepseekFlash = {
-      id: "deepseek-v4-flash",
-      name: "DeepSeek V4 Flash",
-      api: "openai-completions",
-      baseUrl: "https://api.deepseek.com",
-      provider: "deepseek",
-      reasoning: true,
-      input: ["text"],
-      cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
-      contextWindow: 1_000_000,
-      maxTokens: 384_000,
-      compat: {
-        supportsStore: false,
-        supportsDeveloperRole: false,
-        requiresReasoningContentOnAssistantMessages: true,
-        thinkingFormat: "deepseek",
-      },
-      thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", max: "max" },
-    };
-    const modelsJsonModel = {
-      id: "gpt-5.6-sol",
-      name: "GPT-5.6 Sol",
-      api: "openai-responses",
-      provider: "CloseAI",
-      baseUrl: "http://127.0.0.1:8317/v1",
-      reasoning: true,
-      thinkingLevelMap: { high: "high", xhigh: "xhigh", max: "max" },
-      input: ["text", "image"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 372_000,
-      maxTokens: 128_000,
-      samplingParams: undefined,
-      headers: undefined,
-      compat: undefined,
+  it("rejects a Pi 0.84.1 runtime model snapshot that still carries host leftovers", () => {
+    const model = {
+      ...modelSnapshot,
       source: "models_json",
-    };
-    const cliproxyLuna = {
-      id: "gpt-5.6-luna",
-      name: "GPT 5.6 Luna",
-      api: "cliproxyapi-codex-responses",
-      provider: "cliproxyapi",
-      baseUrl: "http://127.0.0.1:8317/backend-api/",
-      reasoning: true,
-      input: ["text", "image"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 372_000,
-      maxTokens: 16_384,
-      thinkingLevelMap: {
-        off: null,
-        minimal: null,
-        low: "low",
-        medium: "medium",
-        high: "high",
-        xhigh: "xhigh",
-        max: "max",
-        ultra: "ultra",
-      },
     };
     const policy = {
       definition: {
-        name: "Explore",
-        displayName: "Explore",
-        description: "Fast codebase exploration agent (read-only)",
-        registeredTools: ["read", "bash", "grep", "find"],
-        systemPrompt: "Search only.",
+        name: "reviewer",
+        description: "Review",
+        systemPrompt: "Review the task.",
       },
-      registeredTools: ["read", "bash", "grep", "find"],
+      registeredTools: ["read"],
       restrictToRegisteredTools: true,
-      extensions: true,
-      skills: true,
+      tools: ["read"],
+      extensions: false,
+      skills: false,
       systemPromptMode: "replace",
-      includeContextFiles: true,
-      parentModelKey: "deepseek/deepseek-v4-flash",
-      model: { ...deepseekFlash },
-      parentModel: { ...deepseekFlash },
-      scopedModels: [
-        { model: modelsJsonModel, thinkingLevel: undefined },
-        { model: cliproxyLuna, thinkingLevel: "max" },
-        { model: deepseekFlash, thinkingLevel: "max" },
-      ],
-      thinkingLevel: "max",
-      outputTokenLimit: 384_000,
+      includeContextFiles: false,
+      parentModelKey: "",
+      model,
+      parentModel: null,
+      scopedModels: [],
+      thinkingLevel: null,
+      outputTokenLimit: modelSnapshot.maxTokens,
       turnLimit: null,
       graceTurns: 6,
     };
 
-    const accepted = parseAcceptedRunPolicy(policy);
-    expect(accepted).toEqual({
-      ...policy,
-      model: deepseekFlash,
-      parentModel: deepseekFlash,
-      scopedModels: [
-        {
-          model: {
-            id: "gpt-5.6-sol",
-            name: "GPT-5.6 Sol",
-            api: "openai-responses",
-            provider: "CloseAI",
-            baseUrl: "http://127.0.0.1:8317/v1",
-            reasoning: true,
-            thinkingLevelMap: { high: "high", xhigh: "xhigh", max: "max" },
-            input: ["text", "image"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 372_000,
-            maxTokens: 128_000,
-          },
-        },
-        { model: cliproxyLuna, thinkingLevel: "max" },
-        { model: deepseekFlash, thinkingLevel: "max" },
-      ],
-    });
+    expect(Check(AcceptedRunPolicySchema, policy)).toBe(false);
+    expect(parseAcceptedRunPolicy(policy)).toBeUndefined();
+    expect(describeAcceptedRunPolicyFailure(policy)).toContain("source");
+  });
+
+  it("rejects undefined own keys on a Pi runtime model instead of dropping them", () => {
+    const policy = {
+      definition: {
+        name: "reviewer",
+        description: "Review",
+        systemPrompt: "Review the task.",
+      },
+      registeredTools: ["read"],
+      restrictToRegisteredTools: true,
+      tools: ["read"],
+      extensions: false,
+      skills: false,
+      systemPromptMode: "replace",
+      includeContextFiles: false,
+      parentModelKey: "",
+      model: { ...modelSnapshot, headers: undefined },
+      parentModel: null,
+      scopedModels: [{ model: modelSnapshot, thinkingLevel: undefined }],
+      thinkingLevel: null,
+      outputTokenLimit: modelSnapshot.maxTokens,
+      turnLimit: null,
+      graceTurns: 6,
+    };
+
+    expect(parseAcceptedRunPolicy(policy)).toBeUndefined();
+    expect(describeAcceptedRunPolicyFailure(policy)).toMatch(/headers|thinkingLevel|plain JSON/);
   });
 
   it("still rejects a policy that remains illegal after host leftovers are dropped", () => {

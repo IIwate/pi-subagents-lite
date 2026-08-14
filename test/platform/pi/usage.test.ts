@@ -13,6 +13,7 @@ import {
   addUsage,
   formatTokens,
   formatCost,
+  getSessionContextPercent,
 } from "../../../src/platform/pi/usage.js";
 
 /* ------------------------------------------------------------------ */
@@ -120,5 +121,30 @@ describe("formatCost", () => {
 
   it("formats very small cost as $0.00", () => {
     expect(formatCost(0.001)).toBe("$0.00");
+  });
+});
+
+describe("getSessionContextPercent", () => {
+  it("reads contextUsage.percent without touching messages", () => {
+    const session = {
+      getSessionStats() {
+        return { tokens: { input: 1, output: 2, cacheWrite: 0 }, contextUsage: { percent: 44 } };
+      },
+    };
+    expect(getSessionContextPercent(session)).toBe(44);
+  });
+
+  it("returns null when the session or percent is unavailable", () => {
+    expect(getSessionContextPercent(undefined)).toBeNull();
+    expect(getSessionContextPercent({
+      getSessionStats() {
+        return { tokens: { input: 0, output: 0, cacheWrite: 0 } };
+      },
+    })).toBeNull();
+    expect(getSessionContextPercent({
+      getSessionStats() {
+        throw new Error("stats unavailable");
+      },
+    })).toBeNull();
   });
 });
