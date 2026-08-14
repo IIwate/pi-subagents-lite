@@ -20,6 +20,7 @@ import type { BackgroundDelivery } from "../modules/background-result-delivery/p
 import type { ModelAccessFragment } from "../modules/model-access/public.js";
 import { createFsWorktreeInspector } from "../platform/fs/worktree-inspector.js";
 import { createAgentRegistry, type AgentRegistry } from "../agents/agent-registry.js";
+import type { AgentCatalogue } from "../modules/agent-catalogue/public.js";
 import { createAgentCatalogueRuntime } from "./agent-catalogue.js";
 import type { ChildScreenHost } from "./child-screen.js";
 import { configurationSectionIO } from "./configuration.js";
@@ -48,9 +49,16 @@ export interface ExtensionRuntime {
   readonly worktree: WorktreeInspector;
   /** The activation's live Agent type registry, backed by the catalogue module. */
   readonly agents: AgentRegistry;
+  /**
+   * The one catalogue instance for this activation. session_start rescans
+   * through this object so discovery and the live registry share one wiring
+   * rather than a second factory call beside the registry.
+   */
+  readonly catalogue: AgentCatalogue;
 }
 
 export function createExtensionRuntime(pi: ExtensionAPI): ExtensionRuntime {
+  const catalogue = createAgentCatalogueRuntime();
   const runtime: ExtensionRuntime = {
     pi,
     sessionCtx: null,
@@ -58,7 +66,8 @@ export function createExtensionRuntime(pi: ExtensionAPI): ExtensionRuntime {
     delivery: null,
     navigator: null,
     worktree: createFsWorktreeInspector(pi),
-    agents: createAgentRegistry({ catalogue: createAgentCatalogueRuntime() }),
+    catalogue,
+    agents: createAgentRegistry({ catalogue }),
     // The thunk reads the runtime's own navigator lazily: the store exists
     // from activation, the navigator only after session_start.
     agentSettings: createAgentSettingsStore(configurationSectionIO, () => runtime.navigator),

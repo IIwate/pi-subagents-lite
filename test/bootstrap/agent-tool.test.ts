@@ -327,8 +327,10 @@ describe("REQ-AGENT-001 executeAgentTool — spawn inputs and outcome", () => {
       type: "general-purpose",
       description: "Reviewer run",
       prompt: "Review the diff",
-      runInBackground: false,
     });
+    // Background vs foreground is a host scheduling choice; the runtime
+    // command must not carry it or additionalProperties: false rejects spawn.
+    expect(mgr.spawnCommands[0]).not.toHaveProperty("runInBackground");
     expect(result.isError).toBeUndefined();
   });
 

@@ -45,7 +45,7 @@ function authorize(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe("authorizeModel", () => {
+describe("REQ-MODEL-002 alternate model authorization", () => {
   it("allows the exact parent when Parent model access is omitted", () => {
     expect(authorize({
       modelKey: "anthropic/sonnet",

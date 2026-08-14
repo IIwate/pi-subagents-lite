@@ -429,6 +429,29 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
     });
   });
 
+  it("refuses an inspect result whose host context produces an off-contract snapshot", () => {
+    const delivery = createBackgroundDelivery({
+      repository: {
+        read: () => ({ pending: [], latest: [] }),
+        append: () => true,
+        acknowledge: () => true,
+      },
+      messenger: { send: () => true },
+      context: {
+        parentSessionId: () => null as unknown as string,
+        activeBranchIds: () => [],
+        isIdle: () => true,
+      },
+      fallback: { take: () => [], save() {} },
+    });
+    const result = delivery.execute({ kind: "inspect" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Delivery result does not match its contract." },
+    });
+    expect(Check(DeliveryCommandResultSchema, result)).toBe(true);
+  });
+
   it("drops off-contract records read from the repository and the fallback inbox", () => {
     const stale = { deliveryId: "stale", parentSessionId: "session-a", status: "finished" };
     const memory = createMemory({

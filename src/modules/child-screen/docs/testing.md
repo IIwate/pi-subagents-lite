@@ -18,6 +18,7 @@ Test navigation commands and snapshots without Pi TUI. Test Pi behavior separate
 - Expanded/folded state, default preference, and current-runtime override.
 - Running, queued, terminal, blocked, and empty states.
 - Regular/fullscreen switches, shrink clearing, footer replacement, ownership conflict, disposal, and reload.
+- Outbound `execute()` results that fail `NavigatorCommandResultSchema` are refused as `invalid-command` rather than handed out.
 
 ## Fixtures and doubles
 

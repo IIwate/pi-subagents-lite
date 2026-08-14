@@ -15,7 +15,7 @@ Resolve external configuration sources and atomically transact serialized fragme
 - [REQ-CONFIG-001](../../../../docs/product/prd/settings.md#req-config-001--atomic-persistence-failure-correction)
 - [Settings PRD](../../../../docs/product/prd/settings.md)
 
-`REQ-CONFIG-001` is the only persistence behavior correction owned by this support module. All other settings requirements remain owned by `settings` or the policy module they delegate to.
+This module implements the atomic document transaction that `REQ-CONFIG-001` requires. Ownership stays with [settings](../../settings/docs/index.md); this support module does not own product requirements.
 
 ## Domain terms
 

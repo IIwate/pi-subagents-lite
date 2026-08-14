@@ -4,7 +4,7 @@ This directory is the product-level requirements baseline for the `re` refactor.
 
 ## Status
 
-Draft for review. Implementation is blocked until this PRD set, the domain glossary, migration decisions, and the required module documentation are approved together.
+Implemented. This PRD set is the active product baseline for the completed modular-monolith refactor on the `re` branch.
 
 ## Requirement ID scheme
 

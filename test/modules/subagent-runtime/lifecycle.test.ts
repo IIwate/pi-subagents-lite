@@ -6,6 +6,7 @@ import {
   AgentSnapshotSchema,
   createSubagentRuntime,
   DEFAULT_RETENTION_MS,
+  DEFAULT_TEARDOWN_TIMEOUT_MS,
   type AgentSnapshot,
   type ConcurrencyScheduler,
   type SessionDriver,
@@ -691,7 +692,7 @@ describe("REQ-RUNTIME-005 continuation and interaction", () => {
   });
 });
 
-describe("REQ-RUNTIME-006 shutdown", () => {
+describe("REQ-RUNTIME-002 close", () => {
   it("closes a snapshot and ignores later driver completion", async () => {
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver);
@@ -709,6 +710,74 @@ describe("REQ-RUNTIME-006 shutdown", () => {
     expect(runtime.getSnapshot("agent-00000001")).toBeUndefined();
     expect(memory.aborts).toEqual(["agent-00000001"]);
     expect(memory.closes).toEqual(["agent-00000001"]);
+  });
+});
+
+describe("REQ-RUNTIME-006 shutdown", () => {
+  it("is idempotent and rejects later spawn after disposal", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.dispose();
+    await runtime.dispose();
+    expect(runtime.listSnapshots()).toEqual([]);
+    const late = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "late",
+      description: "late",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(late).toEqual({
+      ok: false,
+      error: { code: "disposed", message: "Subagent runtime is disposed." },
+    });
+  });
+
+  it("drops late driver events after disposal instead of resurrecting snapshots", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.dispose();
+    await completeRun(memory, "agent-00000001");
+    expect(runtime.getSnapshot("agent-00000001")).toBeUndefined();
+    expect(runtime.listSnapshots()).toEqual([]);
+  });
+
+  it("bounds a hung setup wait to the teardown timeout", async () => {
+    const memory = createMemoryDriver();
+    memory.driver.start = (request, emit) => {
+      emit({ type: "setup-started", agentId: request.agentId, sessionId: request.sessionId });
+      return new Promise(() => {});
+    };
+    const timers = createTimers();
+    const runtime = createRuntime(memory.driver, { timers: timers.port });
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await Promise.resolve();
+    const disposing = runtime.dispose();
+    const teardown = timers.timeouts.find((entry) => entry.ms === DEFAULT_TEARDOWN_TIMEOUT_MS);
+    expect(teardown).toBeDefined();
+    teardown!.run();
+    await disposing;
+    expect(runtime.listSnapshots()).toEqual([]);
   });
 });
 

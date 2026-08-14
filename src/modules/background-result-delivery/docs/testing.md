@@ -11,6 +11,7 @@ Test delivery state transitions through the public application surface using ser
 - Coalesced wake requests, failed parent turns, later completions, reload, and `/tree` restoration.
 - Explicit AgentStatus acknowledgement only after successful parent settlement.
 - Session-keyed fallback isolation, malformed-record handling, and off-contract records dropped on the way in.
+- Outbound `execute()` results that fail `DeliveryCommandResultSchema` are refused as `invalid-command` rather than handed out.
 
 ## Fixtures and doubles
 

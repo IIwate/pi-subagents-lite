@@ -118,3 +118,7 @@ The audit file itself was retired in Phase 9 with the other migration-only evide
 - Every documented prompt fragment has a public-seam owner test.
 - Prompt-module tests do not require Pi, filesystem, configuration store, or runtime services.
 - The Phase 3 checkpoint records `Review-Result: PASS` after the review and the verification results above.
+
+## Phases 4–9
+
+This baseline stopped recording per-phase verification tables after Phase 3. The remaining phase purposes, exit conditions, and slice rules live in the [refactoring plan](../refactoring-plan.md#phase-4-replace-subagent-runtime). Phase-end `Review-Result: PASS` checkpoints on `re` are the historical record of those slices; Phase 9 closed at `c20dd5d`.

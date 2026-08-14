@@ -2,7 +2,6 @@ import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import type { AgentConfig } from "../agents/types.js";
-import { createAgentCatalogueRuntime } from "./agent-catalogue.js";
 import { configRoot, configuration, configurationSectionIO } from "./configuration.js";
 import { userAgentsDirPath } from "../platform/fs/config-paths.js";
 import {
@@ -20,8 +19,6 @@ import {
   isParentRunSuccessful,
   wireHostDelivery,
 } from "./session-host.js";
-
-const agentCatalogue = createAgentCatalogueRuntime();
 
 function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
   const { source, ...config } = structuredClone(definition);
@@ -87,7 +84,7 @@ async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionCo
   }
   const disableDefaults = catalogueConfiguration.disableDefaultAgents === true;
   runtime.agents.setScanRoots(userAgentDir, projectAgentDir, disableDefaults);
-  const result = await agentCatalogue.execute({
+  const result = await runtime.catalogue.execute({
     kind: "discover",
     roots: { globalDirectory: userAgentDir, projectDirectory: projectAgentDir },
     configuration: catalogueConfiguration,

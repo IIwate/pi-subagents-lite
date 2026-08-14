@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { scanRequirementTags } from "./requirement-tag-scan.js";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 const requiredModuleDocs = ["index.md", "contracts.md", "testing.md", "decisions.md"];
@@ -129,14 +130,24 @@ describe("documentation guards", () => {
     expect([...defined].filter((id) => !referenced.has(id))).toEqual([]);
   });
 
+  it("collects executed requirement titles and ignores comments and skipped tests", () => {
+    expect(scanRequirementTags(
+      [
+        "// it(\"REQ-GHOST-001 comment only\")",
+        "it.skip(\"REQ-GHOST-002 skipped\", () => {});",
+        "it.todo(\"REQ-GHOST-003\");",
+        "describe.skip(\"REQ-GHOST-004\", () => {});",
+        "it.skipIf(true)(\"REQ-GHOST-005\", () => {});",
+        "xit(\"REQ-GHOST-006\", () => {});",
+        "it(`REQ-${id}`, () => {});",
+        "it(\"REQ-REAL-001 runs\", () => {});",
+        "describe(\"REQ-REAL-002 suite\", () => {});",
+      ].join("\n"),
+      "fixture.test.ts",
+    )).toEqual(["REQ-REAL-001", "REQ-REAL-002"]);
+  });
+
   it("keeps every active requirement exercised by at least one executed tagged test title", () => {
-    // An acceptance example is a describe/it title carrying the requirement
-    // ID. Matching the title argument rather than the whole file is what makes
-    // this a real check: a passing mention in a comment would otherwise let a
-    // requirement claim coverage it does not have. Skipped and pending titles
-    // are excluded for the same reason — a title that never runs proves nothing,
-    // and letting one count is how a requirement keeps its badge after its test
-    // was parked.
     const { defined } = requirementIds();
     const tagged = new Set<string>();
     const visit = (directory: string): void => {
@@ -147,11 +158,7 @@ describe("documentation guards", () => {
           continue;
         }
         if (!path.endsWith(".ts")) continue;
-        const source = readFileSync(path, "utf8");
-        for (const call of source.matchAll(/\b(?:describe|it|test)((?:\.\w+)*)\s*\(\s*(["'`])((?:[^\\]|\\.)*?)\2/g)) {
-          if (/\.(?:skip|todo|skipIf|runIf|fails)\b/.test(call[1])) continue;
-          for (const id of call[3].matchAll(/REQ-[A-Z]+-\d+/g)) tagged.add(id[0]);
-        }
+        for (const id of scanRequirementTags(readFileSync(path, "utf8"), path)) tagged.add(id);
       }
     };
     visit(resolve(projectRoot, "test"));

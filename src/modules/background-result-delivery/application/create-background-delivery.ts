@@ -1,6 +1,7 @@
 import { Check } from "typebox/value";
 import {
   BackgroundResultRecordSchema,
+  DeliveryCommandResultSchema,
   DeliveryCommandSchema,
   type BackgroundResultRecord,
   type DeliveryCommand,
@@ -35,6 +36,21 @@ function failure(
   message: string,
 ): DeliveryCommandResult {
   return { ok: false, error: { code, message } };
+}
+
+/**
+ * The last door a result walks through. Pending maps and host callbacks can
+ * hold a record that was valid when it arrived and is not valid now — a status
+ * overwritten in place, a session id that stopped being a string. Wake and
+ * inspect treat a successful result as a complete picture, so a half-valid
+ * snapshot is how one bad field becomes a parent message. invalid-command is
+ * the only failure this schema names; a dedicated contract code would be worth
+ * adding if callers ever needed to tell inbound garbage from a broken view.
+ */
+function outbound(result: DeliveryCommandResult): DeliveryCommandResult {
+  return Check(DeliveryCommandResultSchema, result)
+    ? result
+    : failure("invalid-command", "Delivery result does not match its contract.");
 }
 
 /**
@@ -223,88 +239,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   return {
     execute(command: unknown): DeliveryCommandResult {
       events = [];
-      if (!Check(DeliveryCommandSchema, command)) {
-        return failure("invalid-command", "Delivery command is invalid.");
-      }
-      const next = command as DeliveryCommand;
-      switch (next.kind) {
-        case "record-terminal":
-          return recordTerminal(next.record, next.stillPresent);
-        case "track-origin":
-          // Dropped by the next refresh on purpose: by then the host reports
-          // the entry itself, or the user navigated away and the result no
-          // longer belongs to the visible branch.
-          if (!disposed) activeBranchIds.add(next.originEntryId);
-          return ok();
-        case "parent-preflight": {
-          if (disposed) return ok();
-          refreshActiveBranch();
-          parentRunPhase = "preflight";
-          flushFallbackResults();
-          const results = eligiblePendingResults();
-          const injection = buildResultMessage(results);
-          if (!injection) return ok();
-          parentWakeActive = true;
-          parentWakeCompletionVersion = completionVersion;
-          parentRunSucceeded = false;
-          parentTurnResultIds = new Set(results.map((result) => result.deliveryId));
-          lastWakeFailed = false;
-          emit({ type: "injected", deliveryIds: results.map((result) => result.deliveryId) });
-          return ok({ injection });
-        }
-        case "parent-start":
-          if (!disposed) {
-            parentRunPhase = "running";
-            requestParentWake();
-          }
-          return ok();
-        case "parent-end":
-          parentRunPhase = "settling";
-          parentRunSucceeded = next.succeeded;
-          return ok();
-        case "parent-settled":
-          return parentSettled();
-        case "restore":
-          if (!disposed) {
-            refreshActiveBranch();
-            flushFallbackResults();
-            const restored = eligiblePendingResults();
-            if (restored.length > 0) {
-              emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
-              requestParentWake();
-            }
-          }
-          return ok();
-        case "session-tree":
-          if (!disposed) {
-            refreshActiveBranch();
-            parentRunPhase = "idle";
-            parentWakeActive = false;
-            parentTurnResultIds.clear();
-            parentWakeCompletionVersion = completionVersion;
-            lastWakeFailed = false;
-            flushFallbackResults();
-            const restored = eligiblePendingResults();
-            if (restored.length > 0) {
-              emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
-              requestParentWake();
-            }
-          }
-          return ok();
-        case "mark-presented":
-          flushFallbackResults();
-          if (pendingResults.has(next.deliveryId)) parentTurnResultIds.add(next.deliveryId);
-          return ok();
-        case "inspect":
-          return next.agentId
-            ? ok({ stored: getStored(next.agentId, next.deliveryId) })
-            : ok();
-        case "dispose":
-          flushFallbackResults();
-          options.fallback.save(options.context.parentSessionId(), [...fallbackResults.values()]);
-          disposed = true;
-          return ok();
-      }
+      return outbound(run(command));
     },
     pendingResultCount() {
       return snapshot().visiblePendingCount;
@@ -313,6 +248,91 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       return getStored(agentId, deliveryId);
     },
   };
+
+  function run(command: unknown): DeliveryCommandResult {
+    if (!Check(DeliveryCommandSchema, command)) {
+      return failure("invalid-command", "Delivery command is invalid.");
+    }
+    const next = command as DeliveryCommand;
+    switch (next.kind) {
+      case "record-terminal":
+        return recordTerminal(next.record, next.stillPresent);
+      case "track-origin":
+        // Dropped by the next refresh on purpose: by then the host reports
+        // the entry itself, or the user navigated away and the result no
+        // longer belongs to the visible branch.
+        if (!disposed) activeBranchIds.add(next.originEntryId);
+        return ok();
+      case "parent-preflight": {
+        if (disposed) return ok();
+        refreshActiveBranch();
+        parentRunPhase = "preflight";
+        flushFallbackResults();
+        const results = eligiblePendingResults();
+        const injection = buildResultMessage(results);
+        if (!injection) return ok();
+        parentWakeActive = true;
+        parentWakeCompletionVersion = completionVersion;
+        parentRunSucceeded = false;
+        parentTurnResultIds = new Set(results.map((result) => result.deliveryId));
+        lastWakeFailed = false;
+        emit({ type: "injected", deliveryIds: results.map((result) => result.deliveryId) });
+        return ok({ injection });
+      }
+      case "parent-start":
+        if (!disposed) {
+          parentRunPhase = "running";
+          requestParentWake();
+        }
+        return ok();
+      case "parent-end":
+        parentRunPhase = "settling";
+        parentRunSucceeded = next.succeeded;
+        return ok();
+      case "parent-settled":
+        return parentSettled();
+      case "restore":
+        if (!disposed) {
+          refreshActiveBranch();
+          flushFallbackResults();
+          const restored = eligiblePendingResults();
+          if (restored.length > 0) {
+            emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
+            requestParentWake();
+          }
+        }
+        return ok();
+      case "session-tree":
+        if (!disposed) {
+          refreshActiveBranch();
+          parentRunPhase = "idle";
+          parentWakeActive = false;
+          parentTurnResultIds.clear();
+          parentWakeCompletionVersion = completionVersion;
+          lastWakeFailed = false;
+          flushFallbackResults();
+          const restored = eligiblePendingResults();
+          if (restored.length > 0) {
+            emit({ type: "restored", deliveryIds: restored.map((result) => result.deliveryId) });
+            requestParentWake();
+          }
+        }
+        return ok();
+      case "mark-presented":
+        flushFallbackResults();
+        if (pendingResults.has(next.deliveryId)) parentTurnResultIds.add(next.deliveryId);
+        return ok();
+      case "inspect":
+        return next.agentId
+          ? ok({ stored: getStored(next.agentId, next.deliveryId) })
+          : ok();
+      case "dispose":
+        flushFallbackResults();
+        options.fallback.save(options.context.parentSessionId(), [...fallbackResults.values()]);
+        disposed = true;
+        return ok();
+    }
+  }
 
   function getStored(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined {
     if (deliveryId) {

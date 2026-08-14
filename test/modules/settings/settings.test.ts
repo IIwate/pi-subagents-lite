@@ -406,7 +406,7 @@ describe("REQ-SETTINGS-002 display page delegation", () => {
   });
 });
 
-describe("REQ-SETTINGS-003 spawn options page", () => {
+describe("REQ-SETTINGS-002 spawn options page", () => {
   it("renders toggles and the numeric grace-turns row from the owner's values", () => {
     const { settings } = harness({ spawn: { forceBackground: true, graceTurns: 9 } });
     settings.execute({ kind: "open" });
@@ -541,7 +541,7 @@ describe("REQ-SETTINGS-002 system prompt page", () => {
   });
 });
 
-describe("REQ-SETTINGS-005 concurrency page", () => {
+describe("REQ-SETTINGS-002 concurrency page", () => {
   it("renders fallback, active overrides, pickers, and the reset action", () => {
     const { settings } = harness({
       concurrency: {
@@ -841,7 +841,7 @@ describe("REQ-CONFIG-001 explicit persistence failure", () => {
   });
 });
 
-describe("REQ-MODEL-002/007 model access pages", () => {
+describe("REQ-MODEL-007 model access pages", () => {
   function openModelAccess(options: HarnessOptions = {}) {
     const h = harness(options);
     h.settings.execute({ kind: "open" });

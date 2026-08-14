@@ -131,6 +131,7 @@ export function fakeExtensionRuntime(
     // A per-record registry with the built-in types only: tests that need
     // discovery from disk call register()/setScanRoots() on this instance, so
     // one test's catalogue can never leak into another's.
+    catalogue: createAgentCatalogueRuntime(),
     agents: testAgentRegistry(),
     ...overrides,
   };

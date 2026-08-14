@@ -397,4 +397,21 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
       error: { code: "invalid-command", message: "Navigator command is invalid." },
     });
   });
+
+  it("refuses a projected snapshot whose layout port violates the line contract", () => {
+    const screen = createChildScreen({
+      textLayout: {
+        visibleWidth: () => 1,
+        truncate: () => ({ not: "a string" } as unknown as string),
+        wrap: (text) => [text],
+      },
+    });
+    screen.execute({ kind: "replace-records", records: [record()] });
+    const result = screen.execute({ kind: "project", columns: 80, rows: 20, now: 0 });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Navigator result does not match its contract." },
+    });
+    expect(Check(NavigatorCommandResultSchema, result)).toBe(true);
+  });
 });

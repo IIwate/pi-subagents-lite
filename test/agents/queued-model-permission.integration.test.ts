@@ -336,7 +336,7 @@ describe("REQ-AGENT-002 queued invocation snapshots", () => {
     await dispose();
   });
 
-  it("deep-copies a queued custom policy while future calls use its replacement", async () => {
+  it("REQ-SETTINGS-003 deep-copies a queued custom policy while future calls use its replacement", async () => {
     // Real skill files: which lists were accepted is proven by which skill
     // bodies and descriptions reach the generated system prompt.
     const skillRoot = tempDirWithFiles([], "queued-skills");

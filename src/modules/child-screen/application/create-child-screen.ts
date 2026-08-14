@@ -1,5 +1,6 @@
 import { Check } from "typebox/value";
 import {
+  NavigatorCommandResultSchema,
   NavigatorCommandSchema,
   type ChildRecordSummary,
   type ChildStatus,
@@ -27,6 +28,20 @@ function failure(
   message: string,
 ): NavigatorCommandResult {
   return { ok: false, error: { code, message } };
+}
+
+/**
+ * The last door a result walks through. A layout port or an in-memory record
+ * can hold a value that typechecked when it was written and is garbage by the
+ * time it is projected. The host treats a successful result as a complete
+ * picture it can paint, so a half-valid snapshot is how one bad field becomes
+ * a row the user can act on. invalid-command is the only failure this schema
+ * names for a broken view; not-found stays reserved for a missing Subagent.
+ */
+function outbound(result: NavigatorCommandResult): NavigatorCommandResult {
+  return Check(NavigatorCommandResultSchema, result)
+    ? result
+    : failure("invalid-command", "Navigator result does not match its contract.");
 }
 
 export function createChildScreen(options: CreateChildScreenOptions = {}): ChildScreen {
@@ -235,65 +250,69 @@ export function createChildScreen(options: CreateChildScreenOptions = {}): Child
 
   return {
     execute(command: unknown): NavigatorCommandResult {
-      if (!Check(NavigatorCommandSchema, command)) {
-        return failure("invalid-command", "Navigator command is invalid.");
-      }
-      const next = command as NavigatorCommand;
-      switch (next.kind) {
-        case "replace-records":
-          records = structuredClone(next.records);
-          pendingResultCount = next.pendingResultCount;
-          forgetMissing();
-          if (next.highlightIndex != null) {
-            const entries = entryIds();
-            highlightedAgentId = entries[Math.min(next.highlightIndex, Math.max(0, entries.length - 1))] ?? null;
-            if (entries.length <= 1) {
-              listFocused = false;
-              highlightedAgentId = null;
-            }
-          }
-          return ok();
-        case "select":
-          if (next.agentId && !records.some((record) => record.id === next.agentId)) {
-            return failure("not-found", "Selected Subagent is not in the current list.");
-          }
-          selectedAgentId = next.agentId;
-          highlightedAgentId = next.agentId;
-          interactionRequestId += 1;
-          interactionNotice = undefined;
-          return ok();
-        case "toggle-fold":
-          if (!visible()) return ok();
-          listExpanded = !listExpanded;
-          if (!listExpanded) {
-            listFocused = false;
-            confirmingClearId = null;
-            highlightedAgentId = selectedAgentId;
-          }
-          return ok();
-        case "key":
-          return handleKey(next.key, next.editorEmpty);
-        case "set-stats-visibility":
-          statsVisibility = { ...next.visibility };
-          return ok();
-        case "set-debug-preview":
-          debugPreview = next.status;
-          return ok();
-        case "set-interaction-notice":
-          interactionNotice = next.notice;
-          return ok();
-        case "begin-interaction":
-          if (next.agentId !== selectedAgentId) return ok({ interactionRequestId: -1 });
-          interactionRequestId += 1;
-          return ok({ interactionRequestId });
-        case "project":
-          lastColumns = next.columns;
-          lastRows = next.rows;
-          lastNow = next.now;
-          return ok({}, true);
-        case "inspect":
-          return ok();
-      }
+      return outbound(run(command));
     },
   };
+
+  function run(command: unknown): NavigatorCommandResult {
+    if (!Check(NavigatorCommandSchema, command)) {
+      return failure("invalid-command", "Navigator command is invalid.");
+    }
+    const next = command as NavigatorCommand;
+    switch (next.kind) {
+      case "replace-records":
+        records = structuredClone(next.records);
+        pendingResultCount = next.pendingResultCount;
+        forgetMissing();
+        if (next.highlightIndex != null) {
+          const entries = entryIds();
+          highlightedAgentId = entries[Math.min(next.highlightIndex, Math.max(0, entries.length - 1))] ?? null;
+          if (entries.length <= 1) {
+            listFocused = false;
+            highlightedAgentId = null;
+          }
+        }
+        return ok();
+      case "select":
+        if (next.agentId && !records.some((record) => record.id === next.agentId)) {
+          return failure("not-found", "Selected Subagent is not in the current list.");
+        }
+        selectedAgentId = next.agentId;
+        highlightedAgentId = next.agentId;
+        interactionRequestId += 1;
+        interactionNotice = undefined;
+        return ok();
+      case "toggle-fold":
+        if (!visible()) return ok();
+        listExpanded = !listExpanded;
+        if (!listExpanded) {
+          listFocused = false;
+          confirmingClearId = null;
+          highlightedAgentId = selectedAgentId;
+        }
+        return ok();
+      case "key":
+        return handleKey(next.key, next.editorEmpty);
+      case "set-stats-visibility":
+        statsVisibility = { ...next.visibility };
+        return ok();
+      case "set-debug-preview":
+        debugPreview = next.status;
+        return ok();
+      case "set-interaction-notice":
+        interactionNotice = next.notice;
+        return ok();
+      case "begin-interaction":
+        if (next.agentId !== selectedAgentId) return ok({ interactionRequestId: -1 });
+        interactionRequestId += 1;
+        return ok({ interactionRequestId });
+      case "project":
+        lastColumns = next.columns;
+        lastRows = next.rows;
+        lastNow = next.now;
+        return ok({}, true);
+      case "inspect":
+        return ok();
+    }
+  }
 }
