@@ -1,7 +1,7 @@
 /**
  * Core execution engine: creates sessions, runs agents, collects results.
  *
- * Tool visibility policy is owned by agent-types.ts (resolveVisibleTools).
+ * Tool visibility uses the accepted catalogue policy; inherited-tool exclusion is not owned here.
  */
 
 import path from "node:path";

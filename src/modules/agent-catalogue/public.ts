@@ -35,3 +35,4 @@ export {
   type CreateAgentCatalogueOptions,
 } from "./application/discover-agent-catalogue.js";
 export { resolveAgentDefinitionPolicy } from "./application/resolve-agent-policy.js";
+export { excludeInheritedTools } from "./core/exclude-inherited-tools.js";
