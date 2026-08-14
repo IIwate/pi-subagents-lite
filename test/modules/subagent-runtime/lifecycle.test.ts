@@ -310,6 +310,36 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     });
     expect(runtime.listSnapshots()).toEqual([]);
   });
+
+  it("rejects an off-contract worktree inspect result before using .ok or .resolvedPath", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      worktree: {
+        async inspect() {
+          return { ok: false } as never;
+        },
+      },
+    });
+
+    const result = await runtime.execute({
+      kind: "spawn",
+      type: "Explore",
+      prompt: "look",
+      description: "look",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+      worktreePath: "../other-repo",
+      parentCwd: "/repo",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "worktree-invalid",
+        message: "Worktree inspect result does not match its contract.",
+      },
+    });
+    expect(runtime.listSnapshots()).toEqual([]);
+  });
 });
 
 describe("REQ-RUNTIME-001 queue release", () => {
@@ -1043,5 +1073,38 @@ describe("session-driver contract", () => {
     expect(published.liveSession).toBe(false);
     await runtime.execute({ kind: "interact", id: "agent-00000001", message: "nudge" });
     expect(memory.steers).toEqual([]);
+  });
+});
+
+describe("mark-result command schema", () => {
+  it("rejects invalid markResult fields without copying them onto the snapshot", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    expect(runtime.markResult("agent-00000001", { persisted: "yes" as never })).toBeUndefined();
+    expect(runtime.getSnapshot("agent-00000001")?.resultPersisted).toBeUndefined();
+
+    const rejected = await runtime.execute({
+      kind: "mark-result",
+      id: "agent-00000001",
+      persisted: "yes",
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: "invalid-command", message: "Lifecycle command is invalid." },
+    });
+    expect(runtime.getSnapshot("agent-00000001")?.resultPersisted).toBeUndefined();
+
+    expect(runtime.markResult("agent-00000001", { persisted: true })?.resultPersisted).toBe(true);
+    const marked = await runtime.execute({ kind: "mark-result", id: "agent-00000001", consumed: true });
+    expect(marked).toMatchObject({ ok: true, snapshot: { resultPersisted: true, resultConsumed: true } });
+    expect(Check(AgentCommandResultSchema, JSON.parse(JSON.stringify(marked)))).toBe(true);
   });
 });

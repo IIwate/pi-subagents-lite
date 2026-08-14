@@ -17,6 +17,7 @@ import {
   RootSummariesSchema,
   SettingsCommandSchema,
   SettingsResultSchema,
+  SettingsUpdateResultSchema,
   SpawnSettingsViewSchema,
   type ConcurrencySettingsView,
   type DebugAgentType,
@@ -35,9 +36,10 @@ import {
   type SettingsNotice,
   type SettingsResult,
   type SettingsSnapshot,
+  type SettingsUpdateResult,
   type SpawnSettingsView,
 } from "../contracts/settings-contracts.js";
-import type { SystemPromptMode } from "../../prompt/public.js";
+import { SystemPromptModeSchema, type SystemPromptMode } from "../../prompt/public.js";
 import {
   buildConcurrencyRows,
   CONCURRENCY_LIMIT_MINIMUM,
@@ -138,6 +140,15 @@ const DebugAgentTypesSchema = Type.Array(DebugAgentTypeSchema);
 // revisit only if a view is documented as partially available.
 function ownerView<T>(schema: TSchema, value: unknown): T | undefined {
   return Check(schema, value) ? value as T : undefined;
+}
+
+/**
+ * Owner writes are replaceable ports. Reading `.ok` on an unchecked
+ * payload is how `{ ok: "yes" }` becomes a success notice after nothing
+ * was saved. Fail closed before the page treats the write as committed.
+ */
+function ownerWrite(result: unknown): SettingsUpdateResult | undefined {
+  return Check(SettingsUpdateResultSchema, result) ? result : undefined;
 }
 
 export function createSettings(options: CreateSettingsOptions): Settings {
@@ -353,12 +364,13 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     snapshotResult(buildSnapshot(current(), { severity: "info", message }));
 
   /** Route a committed-or-failed owner update into the current page snapshot. */
-  const updated = (
-    result: { ok: true } | { ok: false; message: string },
-    notice: string,
-  ): SettingsResult => snapshotResult(buildSnapshot(current(), result.ok
-    ? { severity: "info", message: notice }
-    : failureNotice(result.message)));
+  const updated = (result: unknown, notice: string): SettingsResult => {
+    const checked = ownerWrite(result);
+    if (!checked) return failure("invalid-snapshot", "Settings update result does not match its contract.");
+    return snapshotResult(buildSnapshot(current(), checked.ok
+      ? { severity: "info", message: notice }
+      : failureNotice(checked.message)));
+  };
 
   const navigate = (page: Page): SettingsResult => {
     push(page);
@@ -400,7 +412,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
 
   const setSystemPromptValue = (id: string, value: string): SettingsResult => {
     if (id === "systemPromptMode") {
-      if (!SYSTEM_PROMPT_MODES.includes(value)) {
+      if (!Check(SystemPromptModeSchema, value)) {
         return failure("invalid-value", `System prompt mode accepts ${SYSTEM_PROMPT_MODES.join(", ")}, not ${value}.`);
       }
       const mode = value as SystemPromptMode;
@@ -417,7 +429,8 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       const prompt = ownerView<PromptSettingsView>(PromptSettingsViewSchema, options.prompt.read());
       if (!prompt) return failure("invalid-snapshot", "Settings page does not match its contract.");
       const path = prompt.customPromptPath;
-      const result = options.prompt.createCustomPromptFile();
+      const result = ownerWrite(options.prompt.createCustomPromptFile());
+      if (!result) return failure("invalid-snapshot", "Settings update result does not match its contract.");
       return snapshotResult(buildSnapshot(current(), result.ok
         ? { severity: "info", message: `Created prompt file: ${path}` }
         : { severity: "error", message: `Failed to create prompt file: ${result.message}` }));
@@ -462,13 +475,15 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     }
     const preview = previewForRow(id);
     if (preview !== undefined) {
-      const result = options.debug.setStatusPreview(preview);
+      const result = ownerWrite(options.debug.setStatusPreview(preview));
+      if (!result) return failure("invalid-snapshot", "Settings update result does not match its contract.");
       if (!result.ok) return infoSnapshot(result.message);
       return infoSnapshot(previewNotice(preview, previewLabel(id)));
     }
     const fault = faultForRow(id);
     if (fault !== undefined) {
-      const result = options.debug.armFault(fault);
+      const result = ownerWrite(options.debug.armFault(fault));
+      if (!result) return failure("invalid-snapshot", "Settings update result does not match its contract.");
       if (!result.ok) return infoSnapshot(result.message);
       return infoSnapshot(fault ? `Armed ${fault} for the next agent` : "Cleared armed fault");
     }
@@ -555,7 +570,8 @@ export function createSettings(options: CreateSettingsOptions): Settings {
         return navigate({ id: "ma-unavailable" });
       case "cleanUnavailableRules": {
         const before = view.unavailableRules.length;
-        const result = options.modelAccess.cleanUnavailableRules();
+        const result = ownerWrite(options.modelAccess.cleanUnavailableRules());
+        if (!result) return failure("invalid-snapshot", "Settings update result does not match its contract.");
         if (!result.ok) return updated(result, "");
         const after = ownerView<ModelAccessRootView>(ModelAccessRootViewSchema, options.modelAccess.root())
           ?.unavailableRules.length ?? before;

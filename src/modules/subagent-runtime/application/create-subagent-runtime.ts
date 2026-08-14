@@ -4,6 +4,7 @@ import {
   AgentCommandSchema,
   AgentSnapshotSchema,
   DebugDiagnosticsSchema,
+  MarkResultCommandSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
   DEFAULT_CONCURRENCY_LIMIT,
   DEFAULT_RETENTION_MS,
@@ -16,6 +17,7 @@ import {
   type SpawnCommand,
 } from "../contracts/lifecycle.js";
 import { ConcurrencyLimitsSchema } from "../contracts/scheduling.js";
+import { WorktreeInspectResultSchema } from "../contracts/worktree.js";
 import {
   SessionEventSchema,
   SessionInspectResultSchema,
@@ -387,6 +389,14 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         worktreePath,
         parentCwd: command.parentCwd,
       });
+      // The inspector is a replaceable port. A typed-but-false payload —
+      // ok without a discriminant the schema named, an error that is not
+      // a string — would let spawn treat garbage as a path or a reason.
+      // Fail closed before reading either field. Revisit if the port
+      // itself starts returning a checked envelope.
+      if (!Check(WorktreeInspectResultSchema, inspected)) {
+        return failure("worktree-invalid", "Worktree inspect result does not match its contract.");
+      }
       if (!inspected.ok) return failure("worktree-invalid", inspected.error);
       worktreePath = inspected.resolvedPath;
     }
@@ -648,6 +658,20 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     }
   }
 
+  function applyMarkResult(command: {
+    id: string;
+    persisted?: boolean;
+    consumed?: boolean;
+    deliveryId?: string;
+  }): AgentSnapshot | undefined {
+    const snapshot = snapshots.get(command.id);
+    if (!snapshot) return undefined;
+    if (command.persisted != null) snapshot.resultPersisted = command.persisted;
+    if (command.consumed != null) snapshot.resultConsumed = command.consumed;
+    if (command.deliveryId != null) snapshot.resultDeliveryId = command.deliveryId;
+    return outbound(snapshot);
+  }
+
   async function run(command: unknown): Promise<AgentCommandResult> {
     if (!Check(AgentCommandSchema, command)) {
       return failure("invalid-command", "Lifecycle command is invalid.");
@@ -686,12 +710,10 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         armedFault = undefined;
         return ok();
       case "mark-result": {
-        const snapshot = snapshots.get(next.id);
-        if (!snapshot) return failure("not-found", `Unknown Subagent: ${next.id}`);
-        if (next.persisted != null) snapshot.resultPersisted = next.persisted;
-        if (next.consumed != null) snapshot.resultConsumed = next.consumed;
-        if (next.deliveryId != null) snapshot.resultDeliveryId = next.deliveryId;
-        return ok({ snapshot: outbound(snapshot) });
+        const snapshot = applyMarkResult(next);
+        return snapshot
+          ? ok({ snapshot })
+          : failure("not-found", `Unknown Subagent: ${next.id}`);
       }
       case "dispose":
         await disposeRuntime();
@@ -733,12 +755,13 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       return stop(id, initiator);
     },
     markResult(id, fields) {
-      const snapshot = snapshots.get(id);
-      if (!snapshot) return undefined;
-      if (fields.persisted != null) snapshot.resultPersisted = fields.persisted;
-      if (fields.consumed != null) snapshot.resultConsumed = fields.consumed;
-      if (fields.deliveryId != null) snapshot.resultDeliveryId = fields.deliveryId;
-      return outbound(snapshot);
+      // Same command schema as execute({ kind: "mark-result" }). The
+      // convenience method used to copy fields that the command seam
+      // would have refused, so a host typo could mark a result consumed
+      // with a non-boolean and leave the snapshot unreadable outbound.
+      const command = { kind: "mark-result" as const, id, ...fields };
+      if (!Check(MarkResultCommandSchema, command)) return undefined;
+      return applyMarkResult(command);
     },
     togglePinned(id) {
       const result = pin(id);

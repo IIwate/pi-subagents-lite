@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
+import { SystemPromptModeSchema } from "../../../src/modules/prompt/public.js";
 import {
+  AgentStatusSchema,
+  ConcurrencyLimitsUpdateSchema,
+  DebugFaultKindSchema,
+} from "../../../src/modules/subagent-runtime/public.js";
+import {
+  ConcurrencyLimitUpdateSchema,
   createSettings,
+  DebugFaultSchema,
+  DebugStatusPreviewSchema,
   SettingsResultSchema,
+  SYSTEM_PROMPT_MODES,
   type ConcurrencyLimitUpdate,
   type ConcurrencySettingsOwner,
   type ConcurrencySettingsView,
@@ -46,6 +56,8 @@ interface HarnessOptions {
   debugUnavailableWith?: string;
   modelAccess?: ModelAccessFakeOptions;
   failUpdatesWith?: string;
+  /** Off-contract owner write: owners are replaceable ports. */
+  corruptWrite?: unknown;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -98,6 +110,7 @@ function harness(options: HarnessOptions = {}) {
   const display: DisplaySettingsOwner = {
     read: () => ({ ...view }),
     update(id, value) {
+      if (options.corruptWrite !== undefined) return options.corruptWrite as never;
       if (failUpdatesWith) return { ok: false, message: failUpdatesWith };
       updates.push({ id, value });
       view[id] = value;
@@ -157,6 +170,7 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true, diagnostics: structuredClone(options.debugDiagnostics ?? { agents: [] }) };
     },
     setStatusPreview(preview) {
+      if (options.corruptWrite !== undefined) return options.corruptWrite as never;
       if (options.debugUnavailableWith) return { ok: false, message: options.debugUnavailableWith };
       debugState.previews.push(preview);
       return { ok: true };
@@ -1182,5 +1196,46 @@ describe("REQ-SETTINGS-005 serializable result contract", () => {
       error: { code: "invalid-snapshot", message: "Settings page does not match its contract." },
     });
     expect(Check(SettingsResultSchema, result)).toBe(true);
+  });
+
+  it("rejects an off-contract owner write instead of treating it as committed", () => {
+    const { settings, view } = harness({ corruptWrite: { ok: "yes" } });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "display" });
+    const result = settings.execute({ kind: "set-value", id: "showTools", value: "OFF" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-snapshot", message: "Settings update result does not match its contract." },
+    });
+    expect(view.showTools).toBe(true);
+    expect(Check(SettingsResultSchema, JSON.parse(JSON.stringify(result)))).toBe(true);
+  });
+
+  it("rejects an off-contract debug write instead of applying a preview", () => {
+    const { settings, debugState } = harness({ corruptWrite: { ok: true, extra: true } });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "debug" });
+    const result = settings.execute({ kind: "set-value", id: "preview-queued", value: "Apply" });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-snapshot", message: "Settings update result does not match its contract." },
+    });
+    expect(debugState.previews).toEqual([]);
+  });
+});
+
+describe("embedded owner schemas", () => {
+  it("embeds runtime concurrency, status, and fault schemas instead of restating them", () => {
+    expect(ConcurrencyLimitUpdateSchema).toBe(ConcurrencyLimitsUpdateSchema);
+    expect(DebugFaultSchema).toBe(DebugFaultKindSchema);
+    expect(DebugStatusPreviewSchema).toBe(AgentStatusSchema);
+  });
+
+  it("derives system prompt mode choices from SystemPromptModeSchema", () => {
+    expect([...SYSTEM_PROMPT_MODES]).toEqual(["replace", "inherit", "custom"]);
+    for (const mode of SYSTEM_PROMPT_MODES) {
+      expect(Check(SystemPromptModeSchema, mode)).toBe(true);
+    }
+    expect(Check(SystemPromptModeSchema, "yolo")).toBe(false);
   });
 });

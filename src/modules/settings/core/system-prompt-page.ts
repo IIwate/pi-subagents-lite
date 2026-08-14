@@ -1,6 +1,27 @@
+import { Check } from "typebox/value";
+import { SystemPromptModeSchema, type SystemPromptMode } from "../../prompt/public.js";
 import type { PromptSettingsView, SettingsRow } from "../contracts/settings-contracts.js";
 
-export const SYSTEM_PROMPT_MODES: readonly string[] = ["replace", "inherit", "custom"];
+/**
+ * Choices come from the prompt module's schema, not a parallel list.
+ * Bootstrap still has its own VALID_SYSTEM_PROMPT_MODES copy; import this
+ * export when that workstream wires it. Revisit if TypeBox stops exposing
+ * union members on `anyOf`.
+ */
+function modesFromSchema(): readonly SystemPromptMode[] {
+  const modes = SystemPromptModeSchema.anyOf.map((variant) => {
+    if (typeof variant.const !== "string" || !Check(SystemPromptModeSchema, variant.const)) {
+      throw new TypeError("System prompt mode schema is not a string-literal union.");
+    }
+    return variant.const;
+  });
+  if (modes.length === 0) {
+    throw new TypeError("System prompt mode schema has no variants.");
+  }
+  return modes;
+}
+
+export const SYSTEM_PROMPT_MODES = modesFromSchema();
 
 export function buildSystemPromptRows(view: PromptSettingsView): SettingsRow[] {
   const rows: SettingsRow[] = [

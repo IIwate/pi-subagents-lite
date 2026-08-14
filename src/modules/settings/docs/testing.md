@@ -10,6 +10,7 @@ Test settings navigation, snapshots, delegation, and action results through `set
 - Delegating Model access, Thinking, concurrency, prompt mode, display, and debug updates.
 - Quick model setup sharing the full model-access command semantics.
 - Successful persistence and explicit persistence failure with no partial state.
+- Off-contract owner write results are refused as `invalid-snapshot` rather than treated as committed.
 - Inactive-limit management and future-call-only effect boundaries.
 - Numeric input validation (digits-only, minimum bound) rejecting host garbage before the owner is called.
 - Conditional actions (create prompt file) appearing only while actionable and reporting explicit failure.
