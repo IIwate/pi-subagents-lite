@@ -281,6 +281,42 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     });
   });
 
+  it("listSnapshots keeps acceptance order so a later queued row does not precede a running row", async () => {
+    let now = 1_000;
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      clock: { now: () => { now += 1; return now; } },
+      limits: {
+        defaultModelLimit: 1,
+        modelLimits: { "llamacpp/4b_small": 1 },
+        providerLimits: {},
+      },
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "running first",
+      description: "running first",
+      acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small"),
+    });
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "queued later",
+      description: "queued later",
+      acceptedPolicy: acceptedRunPolicy("llamacpp/4b_small"),
+    });
+
+    const listed = runtime.listSnapshots();
+    expect(listed.map((snapshot) => snapshot.status)).toEqual(["running", "queued"]);
+    expect(listed[1]!.startedAt).toBeGreaterThan(listed[0]!.startedAt);
+    expect(runtime.listSnapshots().map((snapshot) => snapshot.id)).toEqual([
+      "agent-00000001",
+      "agent-00000002",
+    ]);
+  });
+
   it("rejects a worktree target through the inspector port", async () => {
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver, {

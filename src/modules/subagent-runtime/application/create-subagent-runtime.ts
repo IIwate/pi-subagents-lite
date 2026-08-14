@@ -256,12 +256,14 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   }
 
   function listCopies(): AgentSnapshot[] {
-    return [...snapshots.values()]
-      .sort((left, right) => right.startedAt - left.startedAt)
-      .flatMap((snapshot) => {
-        const emitted = outbound(snapshot);
-        return emitted ? [emitted] : [];
-      });
+    // Acceptance order is the list. Recency-by-startedAt looked harmless
+    // until a later queued row, stamped at enqueue, climbed over running
+    // work that had already begun. Pins must not move rows either.
+    // Revisit only if product names an explicit status rank.
+    return [...snapshots.values()].flatMap((snapshot) => {
+      const emitted = outbound(snapshot);
+      return emitted ? [emitted] : [];
+    });
   }
 
   function notifyComplete(snapshot: AgentSnapshot): void {
