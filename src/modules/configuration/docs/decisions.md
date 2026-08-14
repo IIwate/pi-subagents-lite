@@ -2,7 +2,7 @@
 
 ## Current
 
-- Configuration owns source precedence and atomic document transactions, not product policy.
+- Configuration owns source precedence and atomic document transactions, not product policy. The precedence list and the HOME three-candidate call site live in [operations.md](./operations.md); other documents point there rather than restating the list.
 - Each capability owns its fragment schema, defaults, normalization, and update command.
 - The existing unversioned persisted JSON shape is preserved during the refactor.
 - Generic path reads return opaque JSON values; the consuming capability validates and interprets them.

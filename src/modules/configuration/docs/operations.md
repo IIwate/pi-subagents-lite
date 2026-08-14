@@ -2,6 +2,8 @@
 
 ## Source precedence
 
+This document is the owner of the operational source-precedence list.
+
 For operational settings only, the resolver uses:
 
 1. environment variables;

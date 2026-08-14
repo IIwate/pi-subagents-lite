@@ -4,7 +4,7 @@ This directory is the system-level map for the S.U.P.E.R. modular monolith. It i
 
 ## Authorities
 
-- [Architecture decisions](./decisions.md) owns cross-module decisions: module direction, serializable contracts, composition-root ownership, tool-registration and configuration-precedence rules, and their supersession history. The migration ADRs and the temporary history audit were consolidated into this file and the module decision documents, then retired.
+- [Architecture decisions](./decisions.md) owns cross-module decisions: module direction, serializable contracts, composition-root ownership, tool-registration rules, and their supersession history. The migration ADRs and the temporary history audit were consolidated into this file and the module decision documents, then retired. Configuration source precedence is owned by the [configuration operations contract](../../src/modules/configuration/docs/operations.md).
 - [Refactoring plan](../refactoring-plan.md) is the historical record of migration evidence, phases, gates, and delivery cadence.
 - [Migration baseline](./migration-baseline.md) is the historical record of measured starting values, approved test seams, and per-phase verification.
 
