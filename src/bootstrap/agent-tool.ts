@@ -36,6 +36,7 @@ import {
   resolveThinkingAccess,
   selectThinkingLevel,
 } from "../modules/model-access/public.js";
+import { projectAgentsDirPath } from "../platform/fs/config-paths.js";
 import { piModelCapability } from "../platform/pi/agent-guidance-request.js";
 import type { ExtensionRuntime } from "./extension-runtime.js";
 import type { SubagentRuntime } from "../modules/subagent-runtime/public.js";
@@ -117,7 +118,7 @@ async function executeAgentTool(
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
     // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
-    const worktreeDir = validatedWorktreePath ? `${validatedWorktreePath}/.pi/agents` : undefined;
+    const worktreeDir = validatedWorktreePath ? projectAgentsDirPath(validatedWorktreePath) : undefined;
     const discovered = await runtime.agents.discoverNew(worktreeDir);
     // A broken scan is reported instead of being read as "no such type": the
     // parent would otherwise correct a spelling that was never wrong.

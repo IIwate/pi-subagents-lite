@@ -26,26 +26,67 @@ interface ProcessState {
   subagentSpawn: AsyncLocalStorage<boolean>;
 }
 
-// v3 is the Map-shaped inbox. An older build parked under a previous
-// symbol is left behind: converting that leftover would keep a shape this
-// module no longer names, and a live process cannot present the old
-// single-slot once the key has moved. Revisit only if a documented reload
-// contract must read that older key again.
-const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v3")] ??= {
-  fallbackResults: new Map<string, BackgroundResultRecord[]>(),
-  subagentSpawn: new AsyncLocalStorage<boolean>(),
-}) as ProcessState;
+const PROCESS_STATE_V2 = Symbol.for("@iiwate/pi-subagents-lite/process-state-v2");
+const PROCESS_STATE_V3 = Symbol.for("@iiwate/pi-subagents-lite/process-state-v3");
+
+function isMapInbox(value: unknown): value is ProcessState {
+  return !!value
+    && typeof value === "object"
+    && (value as ProcessState).fallbackResults instanceof Map;
+}
+
+/**
+ * v3 is the name this build writes. A same-process `/reload` used to park
+ * results under v2; a fresh Map here would leave that live bucket where the
+ * returning parent can no longer reach it.
+ *
+ * When v3 is absent and v2 still holds a Map, both keys name that same
+ * object until the inbox is empty. A non-Map leftover is ignored: that
+ * shape cannot appear after the Map-keyed v2 release, and inventing a
+ * conversion would keep a type this module no longer owns. Revisit if a
+ * documented older key or shape must be read again.
+ */
+function resolveProcessState(): ProcessState {
+  const globalState = globalThis as Record<symbol, unknown>;
+  const current = globalState[PROCESS_STATE_V3];
+  if (isMapInbox(current)) return current;
+
+  const previous = globalState[PROCESS_STATE_V2];
+  if (isMapInbox(previous)) {
+    globalState[PROCESS_STATE_V3] = previous;
+    return previous;
+  }
+
+  const created: ProcessState = {
+    fallbackResults: new Map<string, BackgroundResultRecord[]>(),
+    subagentSpawn: new AsyncLocalStorage<boolean>(),
+  };
+  globalState[PROCESS_STATE_V3] = created;
+  return created;
+}
+
+const processState = resolveProcessState();
+
+function releaseRetiredInboxAlias(): void {
+  if (processState.fallbackResults.size > 0) return;
+  const globalState = globalThis as Record<symbol, unknown>;
+  if (globalState[PROCESS_STATE_V2] === processState) {
+    delete globalState[PROCESS_STATE_V2];
+  }
+}
 
 /** Transfer unpersisted final results only within the same parent session. */
 export function takeFallbackResults(sessionId: string): BackgroundResultRecord[] {
   const results = processState.fallbackResults.get(sessionId) ?? [];
   processState.fallbackResults.delete(sessionId);
+  releaseRetiredInboxAlias();
   return results;
 }
 
 export function setFallbackResults(sessionId: string, results: readonly BackgroundResultRecord[]): void {
   if (results.length > 0) processState.fallbackResults.set(sessionId, [...results]);
   else processState.fallbackResults.delete(sessionId);
+  releaseRetiredInboxAlias();
 }
 
 /** Run child setup/execution in a context visible to freshly imported extension modules. */

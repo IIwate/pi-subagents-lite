@@ -4,6 +4,7 @@ import {
   createConfiguration,
   resolveOperationalValue,
   type Configuration,
+  type ConfigurationResult,
   type JsonValue,
 } from "../modules/configuration/public.js";
 import { createProcessEnvironmentSource } from "../platform/process/environment-source.js";
@@ -53,11 +54,18 @@ export const configuration: Configuration = createConfiguration({
 /** Top-level document sections with a live owner. */
 type ConfigSection = "modelRouting" | "agent" | "concurrency";
 
+type ConfigSectionFailureCode = Extract<ConfigurationResult, { ok: false }>["error"]["code"];
+
+/** Outcome of a section commit. Failure includes the module error code. */
+export type ConfigSectionCommitResult =
+  | { ok: true }
+  | { ok: false; code: ConfigSectionFailureCode; message: string };
+
 /** Section-level document access, backed by the configuration module. */
 export interface ConfigSectionIO {
   reload(): void;
   read(section: ConfigSection): unknown;
-  commit(section: ConfigSection, assignments: Record<string, JsonValue>): { ok: true } | { ok: false; message: string };
+  commit(section: ConfigSection, assignments: Record<string, JsonValue>): ConfigSectionCommitResult;
 }
 
 /**
@@ -66,7 +74,7 @@ export interface ConfigSectionIO {
  * fragment at the start of each update can therefore never commit against a
  * revision another owner already advanced.
  */
-function createConfigurationSectionIO(source: Configuration): ConfigSectionIO {
+export function createConfigurationSectionIO(source: Configuration): ConfigSectionIO {
   let revision = 0;
   return {
     reload() {
@@ -86,7 +94,9 @@ function createConfigurationSectionIO(source: Configuration): ConfigSectionIO {
         section,
         assignments,
       });
-      if (!result.ok) return { ok: false, message: result.error.message };
+      // Callers distinguish persistence-failure from revision-conflict; a
+      // message alone collapses those into a toast they cannot branch on.
+      if (!result.ok) return { ok: false, code: result.error.code, message: result.error.message };
       revision = result.revision;
       return { ok: true };
     },

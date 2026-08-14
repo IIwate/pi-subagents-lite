@@ -8,7 +8,7 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 // recorded value down; this list is not auto-lowered.
 const sizeWarningBaseline: Readonly<Record<string, number>> = {
   "src/platform/pi/agent-session.ts": 756,
-  "src/platform/pi/agent-types.ts": 410,
+  "src/platform/pi/agent-types.ts": 171,
 };
 
 describe("size review signals", () => {
@@ -16,7 +16,7 @@ describe("size review signals", () => {
     const warnings: string[] = [];
     for (const [file, baseline] of Object.entries(sizeWarningBaseline)) {
       const lineCount = readFileSync(resolve(projectRoot, file), "utf8").split(/\r?\n/).length - 1;
-      if (lineCount > baseline) warnings.push(`${file}: ${baseline} -> ${lineCount}`);
+      if (lineCount > baseline) warnings.push(${file}:  -> );
     }
     expect(warnings).toEqual([]);
   });

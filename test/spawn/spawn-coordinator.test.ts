@@ -222,6 +222,25 @@ describe("session host delivery", () => {
     });
   }
 
+  it("rejects a background spawn that names an origin when delivery is not wired", async () => {
+    const ext = fakeExtensionRuntime({
+      pi: mockGetPiInstance(),
+      sessionCtx: hostSessionCtx(),
+      manager: manager as any,
+      delivery: null,
+    });
+    const { spawnAgent } = await import("../../src/bootstrap/session-host.js");
+
+    await expect(spawnAgent(ext, ctx, {
+      type: "builder",
+      prompt: "do something",
+      description: "Test spawn",
+      acceptedPolicy: acceptedRunPolicy(),
+      runInBackground: true,
+    })).rejects.toThrow("Background result delivery is not wired.");
+    expect(manager.execute).not.toHaveBeenCalled();
+  });
+
   it("captures the parent delivery target only for background work", async () => {
     const coordinator = createHost(manager as any);
     const result = await spawnBackground(coordinator);

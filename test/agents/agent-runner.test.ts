@@ -71,6 +71,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 
 // --- Import the module under test ---
 
+import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { continueAgentSession, runAgent as runAgentWithPolicy, subscribeToSessionEvents } from "../../src/platform/pi/agent-session.js";
 
 const defaultConfig = {
@@ -526,6 +527,14 @@ describe("runAgent — transient transport retry", () => {
   beforeEach(() => {
     resetMocks();
     fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("still exposes AgentSession._isRetryableError so the wrap can extend Codex stream retry", () => {
+    const prototype = AgentSession.prototype as unknown as {
+      _isRetryableError?: unknown;
+    };
+
+    expect(typeof prototype._isRetryableError).toBe("function");
   });
 
   it("extends Pi retry classification without changing existing results", async () => {
