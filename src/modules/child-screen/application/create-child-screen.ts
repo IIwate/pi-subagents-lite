@@ -2,6 +2,7 @@ import { Check } from "typebox/value";
 import {
   NavigatorCommandResultSchema,
   NavigatorCommandSchema,
+  PendingResultCountSchema,
   type ChildRecordSummary,
   type ChildStatus,
   type NavigatorCommand,
@@ -47,6 +48,15 @@ function outbound(result: NavigatorCommandResult): NavigatorCommandResult {
     : failure("invalid-command", "Navigator result does not match its contract.");
 }
 
+/**
+ * Pending count is a host-supplied integer, not a flag. Zero, a string,
+ * or a mutated in-memory value would paint "results pending" from a
+ * number this contract never named. Drop it rather than copy it.
+ */
+function checkedPendingCount(value: unknown): number | undefined {
+  return Check(PendingResultCountSchema, value) ? value : undefined;
+}
+
 export function createChildScreen(options: CreateChildScreenOptions): ChildScreen {
   const layout = options.textLayout;
   let selectedAgentId: string | null = null;
@@ -65,10 +75,11 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
   let lastNow = 0;
 
   function visible(): boolean {
-    return records.length > 0 || pendingResultCount != null;
+    return records.length > 0 || checkedPendingCount(pendingResultCount) != null;
   }
 
   function snapshot(withProjection: boolean): NavigatorSnapshot {
+    const pending = checkedPendingCount(pendingResultCount);
     const next: NavigatorSnapshot = {
       selectedAgentId,
       highlightedAgentId,
@@ -81,7 +92,7 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
       records: structuredClone(records),
     };
     if (interactionNotice) next.interactionNotice = interactionNotice;
-    if (pendingResultCount != null) next.pendingResultCount = pendingResultCount;
+    if (pending != null) next.pendingResultCount = pending;
     if (withProjection && listExpanded && visible()) {
       next.listLines = projectList({
         records,
@@ -90,7 +101,7 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
         listFocused,
         confirmingClearId,
         interactionNotice,
-        pending: pendingResultCount,
+        pending,
         columns: lastColumns,
         rows: lastRows,
         now: lastNow,
@@ -101,7 +112,7 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
     }
     const footer = projectFooterStatus(records, {
       listExpanded,
-      pending: pendingResultCount,
+      pending,
       notice: interactionNotice,
       selected: selectedAgentId != null,
     });
@@ -265,7 +276,7 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
     switch (next.kind) {
       case "replace-records":
         records = structuredClone(next.records);
-        pendingResultCount = next.pendingResultCount;
+        pendingResultCount = checkedPendingCount(next.pendingResultCount);
         forgetMissing();
         if (next.highlightIndex != null) {
           const entries = entryIds();

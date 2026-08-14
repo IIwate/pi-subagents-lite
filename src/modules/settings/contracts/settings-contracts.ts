@@ -3,6 +3,11 @@ import { Type, type Static } from "typebox";
 // choices assembly can honor.
 import { SystemPromptModeSchema } from "../../prompt/public.js";
 import { ThinkingLevelSchema } from "../../model-access/public.js";
+import {
+  AgentStatusSchema,
+  ConcurrencyLimitsUpdateSchema,
+  DebugFaultKindSchema,
+} from "../../subagent-runtime/public.js";
 
 // ── Workflow surface ──────────────────────────────────────────────
 
@@ -197,40 +202,18 @@ export const ConcurrencySettingsViewSchema = Type.Object({
   activeModels: Type.Array(Type.String()),
 }, { additionalProperties: false });
 
-export const ConcurrencyLimitUpdateSchema = Type.Union([
-  Type.Object({
-    scope: Type.Literal("default"),
-    limit: Type.Integer({ minimum: 1 }),
-  }, { additionalProperties: false }),
-  Type.Object({
-    scope: Type.Union([Type.Literal("provider"), Type.Literal("model")]),
-    key: Type.String({ minLength: 1 }),
-    limit: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
-  }, { additionalProperties: false }),
-  Type.Object({
-    scope: Type.Literal("reset"),
-  }, { additionalProperties: false }),
-]);
+// Runtime owns the persisted concurrency update. A second union here is
+// how a settings page could commit a shape replaceLimits later refuses.
+export const ConcurrencyLimitUpdateSchema = ConcurrencyLimitsUpdateSchema;
 
 // ── Debug page boundary ───────────────────────────────────────────
 // The one-shot fault stays UI-only and unpersisted (REQ-RUNTIME-007); the
 // page only arms/clears it and mirrors runtime-reported provenance.
 
-export const DebugFaultSchema = Type.Union([
-  Type.Literal("output_blocked"),
-  Type.Literal("provider_error"),
-]);
-
-// UI-only lifecycle presentation override for the child screen list.
-export const DebugStatusPreviewSchema = Type.Union([
-  Type.Literal("queued"),
-  Type.Literal("running"),
-  Type.Literal("completed"),
-  Type.Literal("turn_limited"),
-  Type.Literal("aborted"),
-  Type.Literal("stopped"),
-  Type.Literal("error"),
-]);
+// Runtime owns the status and fault vocabularies. A restated Type.String()
+// here is how a debug page could arm a label the child screen cannot paint.
+export const DebugFaultSchema = DebugFaultKindSchema;
+export const DebugStatusPreviewSchema = AgentStatusSchema;
 
 export const DebugAgentTypeSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
@@ -244,7 +227,7 @@ export const DebugAgentTypeSchema = Type.Object({
 export const DebugRuntimeAgentSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   type: Type.String(),
-  status: Type.String(),
+  status: AgentStatusSchema,
   session: Type.Union([Type.Literal("live"), Type.Literal("none")]),
   settled: Type.Boolean(),
   resultPersisted: Type.Boolean(),

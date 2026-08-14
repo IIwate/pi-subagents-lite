@@ -397,6 +397,45 @@ describe("REQ-CHILD-002 expanded and folded presentation", () => {
     });
   });
 
+  it("rejects a record whose debug fault is outside the runtime vocabulary", () => {
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records: [record()] });
+    const result = screen.execute({
+      kind: "replace-records",
+      records: [record({ debugFaultKind: "not-a-fault" as never })],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Navigator command is invalid." },
+    });
+    const inspected = screen.execute({ kind: "inspect" });
+    expect(inspected).toMatchObject({
+      ok: true,
+      snapshot: { records: [{ id: "agent-1" }] },
+    });
+    expect(inspected.ok && inspected.snapshot.records[0]).not.toHaveProperty("debugFaultKind");
+  });
+
+  it("rejects an off-contract pendingResultCount instead of copying it", () => {
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records: [record()], pendingResultCount: 2 });
+    const result = screen.execute({
+      kind: "replace-records",
+      records: [record()],
+      pendingResultCount: 0,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Navigator command is invalid." },
+    });
+    const inspected = screen.execute({ kind: "inspect" });
+    expect(inspected).toMatchObject({
+      ok: true,
+      snapshot: { pendingResultCount: 2, records: [{ id: "agent-1" }] },
+    });
+    expect(Check(NavigatorCommandResultSchema, JSON.parse(JSON.stringify(inspected)))).toBe(true);
+  });
+
   it("rejects a record whose thinking level is outside the shared vocabulary", () => {
     const screen = openScreen();
     const result = screen.execute({

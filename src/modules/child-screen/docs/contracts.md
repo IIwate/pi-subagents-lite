@@ -8,7 +8,8 @@
 
 - `NavigatorCommandSchema` and `NavigatorCommandResultSchema` cover records, select, fold, keys, notices, and project.
 - `NavigatorSnapshotSchema` and `RenderedLineSchema` are the serializable selection, fold, and presentation view.
-- `ChildStatusSchema` aliases the runtime's `AgentStatusSchema`; lifecycle vocabulary is owned there and only rendered here.
+- `ChildStatusSchema` aliases the runtime's `AgentStatusSchema`; `debugFaultKind` embeds `DebugFaultKindSchema`. Lifecycle vocabulary is owned there and only rendered here.
+- `PendingResultCountSchema` is the checked integer (`>= 1`) used on replace-records and the snapshot; off-contract counts are dropped rather than copied.
 - Session and invocation `thinkingLevel` embed `ThinkingLevelSchema` from model-access; this screen does not restate the vocabulary.
 
 Exact fields are defined once in TypeBox and are not duplicated here.

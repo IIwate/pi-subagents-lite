@@ -9,6 +9,8 @@ import { Check } from "typebox/value";
 import {
   applyConcurrencyLimitsUpdate,
   ConcurrencyLimitsFragmentSchema,
+  ConcurrencyLimitsSchema,
+  ConcurrencyLimitsUpdateSchema,
   parseConcurrencyLimitsFragment,
   runtimeLimitsFromFragment,
 } from "../../../src/modules/subagent-runtime/public.js";
@@ -70,6 +72,21 @@ describe("applyConcurrencyLimitsUpdate", () => {
       models: {},
     });
   });
+
+  it("rejects an invalid update or fragment instead of returning a committable shape", () => {
+    expect(() => applyConcurrencyLimitsUpdate(base, { scope: "default", limit: 0 } as never)).toThrow(TypeError);
+    expect(() => applyConcurrencyLimitsUpdate({ default: 0, providers: {}, models: {} } as never, { scope: "reset" })).toThrow(TypeError);
+    expect(base).toEqual({ default: 4, providers: { openai: 2 }, models: { "openai/gpt-5": 3 } });
+  });
+
+  it("round-trips a valid update and fragment through JSON", () => {
+    const update = { scope: "provider" as const, key: "google", limit: 1 };
+    expect(Check(ConcurrencyLimitsUpdateSchema, JSON.parse(JSON.stringify(update)))).toBe(true);
+    const next = applyConcurrencyLimitsUpdate(base, update);
+    const roundTripped = JSON.parse(JSON.stringify(next));
+    expect(Check(ConcurrencyLimitsFragmentSchema, roundTripped)).toBe(true);
+    expect(roundTripped).toEqual(next);
+  });
 });
 
 describe("runtimeLimitsFromFragment", () => {
@@ -83,5 +100,10 @@ describe("runtimeLimitsFromFragment", () => {
     });
     limits.providerLimits.openai = 99;
     expect(fragment.providers.openai).toBe(1);
+    expect(Check(ConcurrencyLimitsSchema, JSON.parse(JSON.stringify(limits)))).toBe(true);
+  });
+
+  it("rejects an off-contract fragment instead of deriving scheduler limits", () => {
+    expect(() => runtimeLimitsFromFragment({ default: 0, providers: {}, models: {} } as never)).toThrow(TypeError);
   });
 });

@@ -12,6 +12,8 @@ import { Check } from "typebox/value";
 import { DEFAULT_CONCURRENCY_LIMIT } from "../contracts/lifecycle.js";
 import {
   ConcurrencyLimitsFragmentSchema,
+  ConcurrencyLimitsSchema,
+  ConcurrencyLimitsUpdateSchema,
   type ConcurrencyLimits,
   type ConcurrencyLimitsFragment,
   type ConcurrencyLimitsUpdate,
@@ -50,30 +52,56 @@ export function parseConcurrencyLimitsFragment(raw: unknown): ConcurrencyLimitsF
   return Check(ConcurrencyLimitsFragmentSchema, parsed) ? parsed : factoryLimitsFragment();
 }
 
+/**
+ * Updates are the last honest moment before persist and `replaceLimits`.
+ * A typed-but-false fragment can commit, then throw when the scheduler
+ * refuses the derived shape — the saved document would already be the
+ * lie. Inbound and outbound Check fail closed here so a bad update never
+ * becomes the next written section. Revisit if updates grow a result
+ * envelope instead of throw-on-invalid.
+ */
 export function applyConcurrencyLimitsUpdate(
   fragment: ConcurrencyLimitsFragment,
   update: ConcurrencyLimitsUpdate,
 ): ConcurrencyLimitsFragment {
+  if (!Check(ConcurrencyLimitsFragmentSchema, fragment) || !Check(ConcurrencyLimitsUpdateSchema, update)) {
+    throw new TypeError("Concurrency limits update does not match its contract.");
+  }
+  let next: ConcurrencyLimitsFragment;
   switch (update.scope) {
     case "default":
-      return { ...fragment, default: update.limit };
+      next = { ...fragment, default: update.limit };
+      break;
     case "reset":
-      return factoryLimitsFragment();
+      next = factoryLimitsFragment();
+      break;
     case "provider":
     case "model": {
       const section = update.scope === "provider" ? "providers" : "models";
       const entries = { ...fragment[section] };
       if (update.limit === null) delete entries[update.key];
       else Object.defineProperty(entries, update.key, { value: update.limit, enumerable: true, configurable: true, writable: true });
-      return { ...fragment, [section]: entries };
+      next = { ...fragment, [section]: entries };
+      break;
     }
   }
+  if (!Check(ConcurrencyLimitsFragmentSchema, next)) {
+    throw new TypeError("Concurrency limits fragment does not match its contract.");
+  }
+  return next;
 }
 
 export function runtimeLimitsFromFragment(fragment: ConcurrencyLimitsFragment): ConcurrencyLimits {
-  return {
+  if (!Check(ConcurrencyLimitsFragmentSchema, fragment)) {
+    throw new TypeError("Concurrency limits fragment does not match its contract.");
+  }
+  const limits = {
     defaultModelLimit: fragment.default,
     providerLimits: { ...fragment.providers },
     modelLimits: { ...fragment.models },
   };
+  if (!Check(ConcurrencyLimitsSchema, limits)) {
+    throw new TypeError("Concurrency limits do not match their contract.");
+  }
+  return limits;
 }

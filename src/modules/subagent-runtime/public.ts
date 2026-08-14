@@ -38,6 +38,7 @@ export {
   AgentSnapshotSchema,
   AgentStatusSchema,
   DebugDiagnosticsSchema,
+  DebugFaultKindSchema,
   InteractionResultSchema,
   DEFAULT_CLEANUP_INTERVAL_MS,
   DEFAULT_CONCURRENCY_LIMIT,

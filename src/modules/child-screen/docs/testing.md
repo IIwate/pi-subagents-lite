@@ -19,6 +19,7 @@ Test navigation commands and snapshots without Pi TUI. Test Pi behavior separate
 - Running, queued, terminal, blocked, and empty states.
 - Regular/fullscreen switches, shrink clearing, footer replacement, ownership conflict, disposal, and reload.
 - Outbound `execute()` results that fail `NavigatorCommandResultSchema` are refused as `invalid-command` rather than handed out.
+- Invalid `debugFaultKind` and `pendingResultCount` payloads are rejected at the command seam and not copied onto the current snapshot.
 
 ## Fixtures and doubles
 

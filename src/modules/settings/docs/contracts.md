@@ -11,8 +11,9 @@
 - `SettingsResult` — a snapshot plus an optional `close` effect, or a serializable `invalid-command`/`unknown-row`/`invalid-value` failure.
 - `DisplayToggleId`, `DisplaySettingsView`, `SettingsUpdateResult`, and `RootSummaries` define the owner-facing fragment boundaries.
 - `SpawnSettingsView`/`SpawnSettingUpdate` and `PromptSettingsView`/`PromptSettingUpdate` (with `SystemPromptMode`) define the spawn-options and system-prompt fragment boundaries.
-- `ConcurrencySettingsView`/`ConcurrencyLimitUpdate` define the concurrency boundary: saved overrides plus the active provider/model inventory computed by the owner.
-- `DebugSettingsView`, `DebugAgentType`, `DebugDiagnosticsView`, `DebugFault`, and `DebugStatusPreview` define the debug boundary; the page formats reports from this structured JSON so owners never emit display text.
+- `ConcurrencySettingsView`/`ConcurrencyLimitUpdate` define the concurrency boundary: saved overrides plus the active provider/model inventory computed by the owner. `ConcurrencyLimitUpdateSchema` embeds the runtime's `ConcurrencyLimitsUpdateSchema`.
+- `DebugSettingsView`, `DebugAgentType`, `DebugDiagnosticsView`, `DebugFault`, and `DebugStatusPreview` define the debug boundary; the page formats reports from this structured JSON so owners never emit display text. Status and fault embed the runtime's `AgentStatusSchema` and `DebugFaultKindSchema`.
+- `SYSTEM_PROMPT_MODES` is derived from prompt's `SystemPromptModeSchema` and exported for bootstrap's `VALID_SYSTEM_PROMPT_MODES`.
 - `ModelAccessRootView`, `ModelAccessAgentRow`, `ModelAccessAgentDetailView`, `ModelAccessProvidersView`, `ModelAccessModelsView`, `ModelAccessThinkingTarget`, `ModelAccessThinkingView`, `ModelAccessUnavailableProvider`, and `ModelAccessUnavailableRule` define the model-access boundary as precomputed views; pages never derive policy from raw rules. Thinking levels embed `ThinkingLevelSchema`; the empty-string sentinel on `parentDefaultLevel` is the only extra token, used when no default is available.
 
 ## Ports

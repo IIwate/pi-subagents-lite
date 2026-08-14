@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { ThinkingLevelSchema } from "../../model-access/public.js";
-import { AgentStatusSchema } from "../../subagent-runtime/public.js";
+import { AgentStatusSchema, DebugFaultKindSchema } from "../../subagent-runtime/public.js";
 
 const JsonValueSchema = Type.Cyclic({
   JsonValue: Type.Union([
@@ -48,7 +48,7 @@ export const ChildRecordSummarySchema = Type.Object({
   displayName: Type.Optional(Type.String()),
   startedAt: Type.Optional(Type.Integer()),
   completedAt: Type.Optional(Type.Integer()),
-  debugFaultKind: Type.Optional(Type.String()),
+  debugFaultKind: Type.Optional(DebugFaultKindSchema),
   error: Type.Optional(Type.String()),
   invocation: Type.Optional(Type.Object({
     providerName: Type.Optional(Type.String()),
@@ -89,10 +89,12 @@ export const NavigatorKeySchema = Type.Union([
   Type.Literal("printable"),
 ]);
 
+export const PendingResultCountSchema = Type.Integer({ minimum: 1 });
+
 export const ReplaceRecordsCommandSchema = Type.Object({
   kind: Type.Literal("replace-records"),
   records: Type.Array(ChildRecordSummarySchema),
-  pendingResultCount: Type.Optional(Type.Integer({ minimum: 1 })),
+  pendingResultCount: Type.Optional(PendingResultCountSchema),
   highlightIndex: Type.Optional(Type.Integer({ minimum: 0 })),
 }, { additionalProperties: false });
 
@@ -175,7 +177,7 @@ export const NavigatorSnapshotSchema = Type.Object({
   interactionNotice: Type.Optional(Type.String()),
   interactionRequestId: Type.Integer({ minimum: 0 }),
   visible: Type.Boolean(),
-  pendingResultCount: Type.Optional(Type.Integer({ minimum: 1 })),
+  pendingResultCount: Type.Optional(PendingResultCountSchema),
   records: Type.Array(ChildRecordSummarySchema),
   listLines: Type.Optional(Type.Array(RenderedLineSchema)),
   footerStatus: Type.Optional(Type.Array(LinePartSchema)),
