@@ -9,8 +9,7 @@ import {
   type SpawnSettingsOwner,
 } from "../modules/settings/public.js";
 import { DEFAULT_CONCURRENCY_LIMIT } from "../modules/subagent-runtime/public.js";
-import { effectiveAlternateModelKeys } from "../modules/model-access/public.js";
-import { modelKey, scopedModelKeys } from "../models/model-scope.js";
+import { effectiveAlternateModelKeys, modelKey, scopedModelKeys } from "../modules/model-access/public.js";
 import { runSettingsScreen } from "../platform/pi/tui/settings-screen.js";
 import {
   createCustomPromptFile,

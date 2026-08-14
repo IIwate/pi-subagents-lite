@@ -9,10 +9,9 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { makeAgentMd, tempDirWithFiles } from "../fixtures.ts";
-import { createAgentRegistry, type AgentRegistry } from "../../src/agents/agent-registry.js";
 import { createAgentCatalogueRuntime } from "../../src/bootstrap/agent-catalogue.js";
+import { createAgentRegistry, type AgentConfig, type AgentRegistry } from "../../src/bootstrap/agent-registry.js";
 import type { AgentCatalogue } from "../../src/modules/agent-catalogue/public.js";
-import type { AgentConfig } from "../../src/agents/types.js";
 
 function newRegistry(catalogue: AgentCatalogue = createAgentCatalogueRuntime()): AgentRegistry {
   const registry = createAgentRegistry({ catalogue });

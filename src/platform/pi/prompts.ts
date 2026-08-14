@@ -1,13 +1,21 @@
 /**
- * prompts.ts — System prompt builder for agents.
+ * prompts.ts — Pi host adapter for Subagent system-prompt assembly.
  *
- * Every agent gets a fresh context — no inherited parent identity.
- * EnvInfo is imported from types.ts — branch is a string (empty when unknown).
+ * Skill XML wrapping and inherit/custom header selection stay here because
+ * they bind Pi-loaded skill bytes to the prompt module. Assembly itself is
+ * assembleSubagentPrompt. Inherit mode is a first-class request that module
+ * already honors; this file must not pretend agents have no parent identity.
  */
 
-import type { EnvInfo } from "../types.js";
-import type { AgentConfig, SystemPromptMode } from "../agents/types.js";
-import { assembleSubagentPrompt } from "../modules/prompt/public.js";
+import type { EnvInfo } from "../../types.js";
+import type { SystemPromptMode } from "../../modules/prompt/public.js";
+import { assembleSubagentPrompt } from "../../modules/prompt/public.js";
+
+/** The fields assembleSubagentPrompt reads from an accepted definition. */
+interface AgentPromptConfig {
+  name: string;
+  systemPrompt: string;
+}
 
 /** One preloaded skill: full content inlined into the prompt. */
 export interface PreloadedSkill {
@@ -47,7 +55,7 @@ export interface PromptExtras {
  * @param mode     System prompt mode (replace, inherit, custom).
  */
 export function buildAgentPrompt(
-  config: AgentConfig,
+  config: AgentPromptConfig,
   cwd: string,
   env: EnvInfo,
   extras?: PromptExtras,

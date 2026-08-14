@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
-import type { AgentConfig } from "../agents/types.js";
+import type { AgentConfig } from "./agent-registry.js";
 import { configRoot, configuration, configurationSectionIO } from "./configuration.js";
 import { projectAgentsDirPath, userAgentsDirPath } from "../platform/fs/config-paths.js";
 import {

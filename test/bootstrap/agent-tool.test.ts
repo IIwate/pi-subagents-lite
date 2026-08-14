@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { createAgentToolExecutor } from "../../src/bootstrap/agent-tool.js";
 import { createFsWorktreeInspector } from "../../src/platform/fs/worktree-inspector.js";
 import { WORKTREE_VALIDATION_ERRORS } from "../../src/platform/fs/worktree-validator.js";
-import type { AgentRegistry } from "../../src/agents/agent-registry.js";
+import type { AgentRegistry } from "../../src/bootstrap/agent-registry.js";
 import type { ModelAccessFragment } from "../../src/modules/model-access/public.js";
 import {
   disabledModelAccess,

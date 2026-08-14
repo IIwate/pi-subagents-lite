@@ -1,11 +1,10 @@
 /**
- * Model-scope helpers backed by the host's resolved session scope.
+ * Canonical keys, host-supplied scope snapshots, and authorization error text.
  *
- * Pi 0.84 exposes the exact scope on ExtensionContext, including unsaved
- * session changes and per-pattern thinking levels; the host adapter passes
- * that snapshot in. Keep it as the only source of truth instead of re-parsing
- * CLI arguments and settings here. The shape below is the repo-owned subset
- * these helpers read, so replacing the host does not reach into this file.
+ * The host passes the resolved scope in; this file never re-parses CLI
+ * arguments or settings. The snapshot shape is the repo-owned subset these
+ * helpers read, so a different host can supply the same records. Error
+ * strings live here so bootstrap and the Pi adapter do not grow a third copy.
  */
 
 interface ScopedModel {

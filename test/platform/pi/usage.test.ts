@@ -13,7 +13,7 @@ import {
   addUsage,
   formatTokens,
   formatCost,
-} from "../../src/agents/usage.js";
+} from "../../../src/platform/pi/usage.js";
 
 /* ------------------------------------------------------------------ */
 /*  LifetimeUsage type — cost field                                    */

@@ -14,8 +14,13 @@ import type {
   AgentGuidanceRequest,
   ParentGuidanceHostSnapshot,
 } from "../../modules/prompt/public.js";
-import type { ModelAccessFragment, ThinkingLevel } from "../../modules/model-access/public.js";
-import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../../models/model-scope.js";
+import {
+  modelKey,
+  scopedModelKeys,
+  scopedThinkingLevel,
+  type ModelAccessFragment,
+  type ThinkingLevel,
+} from "../../modules/model-access/public.js";
 
 export interface AgentGuidanceOptions {
   parentModel: Model<any> | undefined;

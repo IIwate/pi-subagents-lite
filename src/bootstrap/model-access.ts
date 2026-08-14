@@ -31,6 +31,9 @@ import {
   unavailableModelRules,
   type ModelAccessFragment,
   type ThinkingLevel,
+  modelKey,
+  scopedModelKeys,
+  scopedThinkingLevel,
 } from "../modules/model-access/public.js";
 import type {
   ModelAccessAgentDetailView,
@@ -43,7 +46,6 @@ import type {
   ModelAccessThinkingView,
   ModelAccessUnavailableRule,
 } from "../modules/settings/public.js";
-import { modelKey, scopedModelKeys, scopedThinkingLevel } from "../models/model-scope.js";
 import { configurationSectionIO, type ConfigSectionIO } from "./configuration.js";
 
 type UpdateResult = { ok: true } | { ok: false; message: string };

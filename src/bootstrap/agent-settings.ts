@@ -8,7 +8,7 @@
  * bound to that runtime's navigator.
  */
 
-import type { SystemPromptMode } from "../agents/types.js";
+import type { SystemPromptMode } from "../modules/prompt/public.js";
 import type { JsonValue } from "../modules/configuration/public.js";
 import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
 import type { ConfigSectionIO } from "./configuration.js";

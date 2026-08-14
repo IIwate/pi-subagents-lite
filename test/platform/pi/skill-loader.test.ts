@@ -17,8 +17,7 @@ import {
   loadSkillMeta,
   preloadSkills,
 } from "../../../src/platform/pi/skill-loader.ts";
-import { buildAgentPrompt } from "../../../src/prompt/prompts.ts";
-import type { AgentConfig } from "../../../src/agents/types.ts";
+import { buildAgentPrompt } from "../../../src/platform/pi/prompts.ts";
 import type { EnvInfo } from "../../../src/types.ts";
 import { createSkillDir, createFlatSkill } from "../../fixtures.ts";
 
@@ -219,7 +218,7 @@ describe("loadSkillMeta", () => {
 const SECRET_TOKEN = "PROOF_TOKEN_ALPHA_7X9K2M";
 const BODY_MARKER = "This line proves full content was loaded";
 
-const baseConfig: AgentConfig = {
+const baseConfig = {
   name: "test-agent",
   description: "Test agent",
   extensions: true,

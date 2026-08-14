@@ -5,7 +5,7 @@ import {
   type SessionDriver,
   type SessionInspectResult,
 } from "../../modules/subagent-runtime/public.js";
-import { getSessionContextPercent } from "../../agents/usage.js";
+import { getSessionContextPercent } from "./usage.js";
 import { parseThinkingLevel } from "../../utils.js";
 import { continueAgentSession, runAgent } from "./agent-session.js";
 

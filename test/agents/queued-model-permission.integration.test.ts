@@ -123,7 +123,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 }));
 
 import { createTestSubagentRuntime } from "../runtime-harness.js";
-import type { AgentConfig } from "../../src/agents/types.js";
+import type { AgentConfig } from "../../src/bootstrap/agent-registry.js";
 import { createAgentToolExecutor } from "../../src/bootstrap/agent-tool.js";
 import type { ExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";
 import { createPiResultRepository } from "../../src/platform/pi/result-repository.js";

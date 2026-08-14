@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRegistry } from "../agents/agent-registry.js";
+import type { AgentRegistry } from "./agent-registry.js";
 import { currentModelAccess } from "./model-access.js";
 import {
   createParentGuidance,

@@ -9,6 +9,7 @@
 - There is no manual briefing command, injected conversation message, or Debug-menu guidance action: guidance is runtime behavior, not a user-maintained message, and per-run injection is what removes stale briefings and refresh steps.
 - Prompt material is inspectable in source and module documentation, not through a new product capability.
 - Custom prompt and context-file bytes are read in `platform/fs` and enter prompt assembly as strings. Their [failure boundaries](./prompt-sources.md) are asymmetric on purpose: an unavailable inherited parent prompt fails the run, an unreadable custom file degrades to replace mode with a notice.
+- The Pi adapter maps skill blocks onto `assembleSubagentPrompt`; the leftover `src/prompt/prompts.ts` wrapper is retired. Inherit mode remains a first-class assembly request.
 
 ## Superseded
 

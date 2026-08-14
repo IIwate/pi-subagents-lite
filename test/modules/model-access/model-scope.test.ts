@@ -15,7 +15,7 @@ import {
   routingDisabledModelError,
   scopedModelKeys,
   scopedThinkingLevel,
-} from "../../src/models/model-scope.ts";
+} from "../../../src/modules/model-access/public.js";
 
 const grok = { provider: "cpa-responses", id: "grok-4.5" } as any;
 const gemini = { provider: "cpa-gemini", id: "gemini-3.5-flash" } as any;
