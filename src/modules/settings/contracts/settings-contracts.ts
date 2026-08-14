@@ -133,11 +133,21 @@ export const DisplaySettingsViewSchema = Type.Object({
   showTime: Type.Boolean(),
 }, { additionalProperties: false });
 
+// A failed persist names the two ways a save can refuse: the disk
+// rejected the write, or the revision moved while the page was open. The
+// field is optional because session-local owners (debug) and message-only
+// ports still speak without a code; requiring it would turn those into
+// contract crashes — the same class of lie a persist failure used to
+// become. Revisit if every owner write carries a configuration commit code.
 export const SettingsUpdateResultSchema = Type.Union([
   Type.Object({ ok: Type.Literal(true) }, { additionalProperties: false }),
   Type.Object({
     ok: Type.Literal(false),
     message: Type.String({ minLength: 1 }),
+    code: Type.Optional(Type.Union([
+      Type.Literal("persistence-failure"),
+      Type.Literal("revision-conflict"),
+    ])),
   }, { additionalProperties: false }),
 ]);
 

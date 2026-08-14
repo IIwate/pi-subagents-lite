@@ -7,7 +7,21 @@
  * input → commands.
  */
 
+// Pin HOME before importing ConfigSectionIO; that module opens the
+// process-scoped document at load time.
+await vi.hoisted(async () => {
+  const { mkdtempSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const home = mkdtempSync(path.join(tmpdir(), "settings-screen-persist-home-"));
+  mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+  process.env.HOME = home;
+});
+
 import { describe, expect, it, vi } from "vitest";
+import { createAgentSettingsStore } from "../../../src/bootstrap/agent-settings.js";
+import { createConfigurationSectionIO } from "../../../src/bootstrap/configuration.js";
+import { createConfiguration } from "../../../src/modules/configuration/public.js";
 import { runSettingsScreen } from "../../../src/platform/pi/tui/settings-screen.js";
 import {
   createSettings,
@@ -22,7 +36,41 @@ import {
   type SpawnSettingsView,
 } from "../../../src/modules/settings/public.js";
 
-function createRealSettings(options: { failUpdatesWith?: string } = {}) {
+function persistFailingDisplayOwner(message: string) {
+  const io = createConfigurationSectionIO(createConfiguration({
+    repository: {
+      load: () => ({ agent: { expandListByDefault: true, showTools: true } }),
+      persist() {
+        throw new Error(message);
+      },
+    },
+  }));
+  const store = createAgentSettingsStore(io, () => null);
+  const display: DisplaySettingsOwner = {
+    read() {
+      const agent = store.read();
+      return {
+        expandListByDefault: agent.expandListByDefault,
+        showTools: agent.showTools,
+        showTurns: agent.showTurns,
+        showInput: agent.showInput,
+        showOutput: agent.showOutput,
+        showContext: agent.showContext,
+        showCost: agent.showCost,
+        showTime: agent.showTime,
+      };
+    },
+    update(id, value) {
+      return store.update(id, value);
+    },
+  };
+  return { display, store };
+}
+
+function createRealSettings(options: {
+  failUpdatesWith?: string;
+  display?: DisplaySettingsOwner;
+} = {}) {
   const view: DisplaySettingsView = {
     expandListByDefault: true,
     showTools: true,
@@ -33,7 +81,7 @@ function createRealSettings(options: { failUpdatesWith?: string } = {}) {
     showCost: false,
     showTime: true,
   };
-  const display: DisplaySettingsOwner = {
+  const display: DisplaySettingsOwner = options.display ?? {
     read: () => ({ ...view }),
     update(id, value) {
       if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
@@ -260,6 +308,47 @@ describe("settings screen renderer contract", () => {
     expect(notifications).toHaveBeenCalledWith("Failed to save setting: disk full", "error");
     // The row shows the saved ON value again instead of the failed OFF attempt.
     expect(failedFormText).toMatch(/Expand list by default\s+ON/);
+  });
+
+  it("stays on the display form when the real owner returns persistence-failure", async () => {
+    const { display, store } = persistFailingDisplayOwner("disk full");
+    let ownerWrite: unknown;
+    let failedFormText = "";
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        for (let i = 0; i < 4; i++) component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\r");
+        failedFormText = component.render(120).join("\n");
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings({
+      display: {
+        read: () => display.read(),
+        update(id, value) {
+          ownerWrite = display.update(id, value);
+          return ownerWrite as ReturnType<DisplaySettingsOwner["update"]>;
+        },
+      },
+    }));
+
+    expect(ownerWrite).toEqual({
+      ok: false,
+      code: "persistence-failure",
+      message: "disk full",
+    });
+    expect(notifications).toHaveBeenCalledWith("Failed to save setting: disk full", "error");
+    expect(notifications).not.toHaveBeenCalledWith(
+      expect.stringContaining("does not match its contract"),
+      expect.anything(),
+    );
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
+    expect(failedFormText).toMatch(/Expand list by default\s+ON/);
+    expect(store.read().expandListByDefault).toBe(true);
   });
 
   it("edits grace turns through the numeric submenu with one commit per submit", async () => {

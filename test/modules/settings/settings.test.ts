@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
+// Importing ConfigSectionIO evaluates the process-scoped document; pin HOME
+// first so that load cannot read the developer's real settings file.
+await vi.hoisted(async () => {
+  const { mkdtempSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const home = mkdtempSync(path.join(tmpdir(), "settings-persist-home-"));
+  mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+  process.env.HOME = home;
+});
+
+import { describe, expect, it, vi } from "vitest";
 import { Check } from "typebox/value";
+import { createAgentSettingsStore } from "../../../src/bootstrap/agent-settings.js";
+import { createConfigurationSectionIO } from "../../../src/bootstrap/configuration.js";
+import { createConfiguration } from "../../../src/modules/configuration/public.js";
 import { SystemPromptModeSchema } from "../../../src/modules/prompt/public.js";
 import {
   AgentStatusSchema,
@@ -12,6 +26,7 @@ import {
   DebugFaultSchema,
   DebugStatusPreviewSchema,
   SettingsResultSchema,
+  SettingsUpdateResultSchema,
   SYSTEM_PROMPT_MODES,
   type ConcurrencyLimitUpdate,
   type ConcurrencySettingsOwner,
@@ -58,6 +73,8 @@ interface HarnessOptions {
   failUpdatesWith?: string;
   /** Off-contract owner write: owners are replaceable ports. */
   corruptWrite?: unknown;
+  /** Replace the in-memory display owner with a real persist path. */
+  displayOwner?: DisplaySettingsOwner;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -107,7 +124,7 @@ function harness(options: HarnessOptions = {}) {
   const spawnUpdates: Array<{ id: string; value: boolean | number }> = [];
   const promptUpdates: Array<{ id: string; value: boolean | string }> = [];
   const concurrencyUpdates: ConcurrencyLimitUpdate[] = [];
-  const display: DisplaySettingsOwner = {
+  const display: DisplaySettingsOwner = options.displayOwner ?? {
     read: () => ({ ...view }),
     update(id, value) {
       if (options.corruptWrite !== undefined) return options.corruptWrite as never;
@@ -842,6 +859,41 @@ describe("REQ-RUNTIME-007 debug page", () => {
   });
 });
 
+/**
+ * Production agent-section path: ConfigSectionIO.commit returns
+ * `{ ok:false, code, message }`, and the store forwards that object.
+ */
+function persistFailingDisplayOwner(message: string) {
+  const io = createConfigurationSectionIO(createConfiguration({
+    repository: {
+      load: () => ({ agent: { showTools: true } }),
+      persist() {
+        throw new Error(message);
+      },
+    },
+  }));
+  const store = createAgentSettingsStore(io, () => null);
+  const display: DisplaySettingsOwner = {
+    read() {
+      const agent = store.read();
+      return {
+        expandListByDefault: agent.expandListByDefault,
+        showTools: agent.showTools,
+        showTurns: agent.showTurns,
+        showInput: agent.showInput,
+        showOutput: agent.showOutput,
+        showContext: agent.showContext,
+        showCost: agent.showCost,
+        showTime: agent.showTime,
+      };
+    },
+    update(id, value) {
+      return store.update(id, value);
+    },
+  };
+  return { display, store };
+}
+
 describe("REQ-CONFIG-001 explicit persistence failure", () => {
   it("keeps the previous value effective and reports an explicit failure notice", () => {
     const { settings, view } = harness({ failUpdatesWith: "disk full" });
@@ -866,6 +918,42 @@ describe("REQ-CONFIG-001 explicit persistence failure", () => {
     const result = expectOk(settings.execute({ kind: "set-value", id: "showTools", value: "OFF" }));
     expect(result.snapshot.notice).toEqual({ severity: "info", message: "Show tools OFF" });
     expect(result.snapshot.rows.find((row) => row.id === "showTools")!.value).toBe("OFF");
+  });
+
+  it("keeps the display page and shows a save-failure notice when the real owner returns persistence-failure", () => {
+    const { display, store } = persistFailingDisplayOwner("disk full");
+    let ownerWrite: unknown;
+    const { settings } = harness({
+      displayOwner: {
+        read: () => display.read(),
+        update(id, value) {
+          ownerWrite = display.update(id, value);
+          return ownerWrite as ReturnType<DisplaySettingsOwner["update"]>;
+        },
+      },
+    });
+    settings.execute({ kind: "open" });
+    const page = expectOk(settings.execute({ kind: "select", id: "display" }));
+    expect(page.snapshot.page).toBe("display");
+
+    const result = settings.execute({ kind: "set-value", id: "showTools", value: "OFF" });
+    expect(ownerWrite).toEqual({
+      ok: false,
+      code: "persistence-failure",
+      message: "disk full",
+    });
+    expect(Check(SettingsUpdateResultSchema, ownerWrite)).toBe(true);
+    expect(result).toMatchObject({
+      ok: true,
+      snapshot: {
+        page: "display",
+        notice: { severity: "error", message: "Failed to save setting: disk full" },
+      },
+    });
+    expect(result.ok && result.snapshot.notice?.message).not.toMatch(/does not match its contract/);
+    expect(result.ok && result.snapshot.rows.find((row) => row.id === "showTools")?.value).toBe("ON");
+    expect(store.read().showTools).toBe(true);
+    expect(Check(SettingsResultSchema, result)).toBe(true);
   });
 });
 
