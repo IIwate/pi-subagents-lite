@@ -13,7 +13,7 @@ Test authorization commands and effective policy snapshots through `model-access
 - Scope-pinned Thinking and exact saved Thinking overrides.
 - `resolveThinkingAccess` rejects an off-contract query or a result whose levels are not in `ThinkingLevelSchema` instead of copying them through.
 - `authorizeModelAccess`, `selectThinkingLevel`, and fragment `parse*` / `apply*` reject an off-contract inbound or outbound payload instead of copying it through.
-- Quick model setup atomicity and persistence failure.
+- Quick model setup atomicity (a failed quick setup leaves no partial writes) is not covered here.
 - A running or queued Accepted run policy remaining unchanged after later updates.
 
 ## Fixtures and doubles
