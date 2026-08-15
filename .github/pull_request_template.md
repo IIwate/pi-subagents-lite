@@ -31,8 +31,15 @@
 ## Verification
 
 - [ ] `bun run typecheck`
-- [ ] `bun run test`
-- [ ] Architecture and document-link checks
+- [ ] Relevant checks selected by `pre-push-checks` are listed below
+- [ ] Architecture or document-link checks were run when affected
+- [ ] Full-suite CI status is recorded below
+
+Relevant local commands and outcomes:
+
+-
+
+Full-suite CI: pending
 
 Formal phase review result is recorded in the checkpoint commit as:
 

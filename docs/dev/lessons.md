@@ -10,7 +10,7 @@ These are contributor notes. They are non-normative and are not a product or arc
 - Always verify worktree branch exists and is checked out before spawning builder.
 
 ### Testing
-- Always `bun run test` after merging to main; clean merge ≠ passing tests.
+- After merging a changed base, reassess invalidated evidence with [pre-push-checks](../../.agents/skills/pre-push-checks/SKILL.md); a clean merge does not prove behavior.
 - Acceptance tests match planned interface (plan.md), not guessed implementation.
 - Test public interfaces and behaviour, not implementation details or hardcoded data.
 - User manual testing result ("all works") → record and proceed, don't insist on automated loop.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pre-push checks"
+  short_description: "Select minimal evidence before pushing changes"
+  default_prompt: "Use $pre-push-checks to inspect this branch and run the smallest credible pre-push checks."

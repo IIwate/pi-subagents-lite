@@ -19,6 +19,8 @@ function markdownFiles(directory: string): string[] {
 function scopedMarkdownFiles(): string[] {
   return [
     resolve(projectRoot, "AGENTS.md"),
+    resolve(projectRoot, "CLAUDE.md"),
+    resolve(projectRoot, ".agents/skills/pre-push-checks/SKILL.md"),
     resolve(projectRoot, "CONTEXT.md"),
     resolve(projectRoot, "README.md"),
     ...markdownFiles(resolve(projectRoot, "docs")),
