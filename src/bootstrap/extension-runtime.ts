@@ -23,7 +23,7 @@ import { createAgentRegistry, type AgentRegistry } from "./agent-registry.js";
 import type { AgentCatalogue } from "../modules/agent-catalogue/public.js";
 import { createAgentCatalogueRuntime } from "./agent-catalogue.js";
 import type { ChildScreenHost } from "./child-screen.js";
-import { configurationSectionIO } from "./configuration.js";
+import { configurationSectionIO, type ProjectConfigurationBinding } from "./configuration.js";
 import { createAgentSettingsStore, type AgentSettingsStore } from "./agent-settings.js";
 import { currentModelAccess } from "./model-access.js";
 
@@ -31,6 +31,8 @@ export interface ExtensionRuntime {
   readonly pi: ExtensionAPI;
   /** Current parent session context; replaced at each session_start. */
   sessionCtx: ExtensionContext | null;
+  /** Project configuration handle for this session's cwd; bound at session_start. */
+  projectConfig: ProjectConfigurationBinding | null;
   /** The subagent scheduler/runtime; created lazily at session_start. */
   manager: SubagentRuntime | null;
   /** Background result delivery facade; wired together with the manager. */
@@ -62,6 +64,7 @@ export function createExtensionRuntime(pi: ExtensionAPI): ExtensionRuntime {
   const runtime: ExtensionRuntime = {
     pi,
     sessionCtx: null,
+    projectConfig: null,
     manager: null,
     delivery: null,
     navigator: null,

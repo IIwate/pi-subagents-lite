@@ -11,6 +11,8 @@
 import type { JsonValue } from "../modules/configuration/public.js";
 import {
   applyConcurrencyLimitsUpdate,
+  mergeConcurrencyLayers,
+  parseConcurrencyLayer,
   parseConcurrencyLimitsFragment,
   runtimeLimitsFromFragment,
   type ConcurrencyLimits,
@@ -19,7 +21,7 @@ import {
   type SubagentRuntime,
 } from "../modules/subagent-runtime/public.js";
 import type { SettingsUpdateResult } from "../modules/settings/public.js";
-import { configurationSectionIO } from "./configuration.js";
+import { configurationSectionIO, type ProjectConfigurationBinding } from "./configuration.js";
 
 /** Current persisted fragment, read fresh so no stale copy is ever edited. */
 export function readConcurrencyFragment(): ConcurrencyLimitsFragment {
@@ -29,6 +31,19 @@ export function readConcurrencyFragment(): ConcurrencyLimitsFragment {
 /** Scheduler-shaped limits derived from the persisted fragment. */
 export function concurrencyRuntimeLimits(): ConcurrencyLimits {
   return runtimeLimitsFromFragment(readConcurrencyFragment());
+}
+
+/**
+ * Effective limits merged as capability defaults <- global <- trusted
+ * project (REQ-RUNTIME-008). An untrusted or absent project layer simply
+ * contributes nothing.
+ */
+export function concurrencyMergedLimits(binding: ProjectConfigurationBinding | null): ConcurrencyLimits {
+  const globalLayer = parseConcurrencyLayer(configurationSectionIO.read("concurrency"));
+  const projectLayer = binding?.sectionIO
+    ? parseConcurrencyLayer(binding.sectionIO.read("concurrency"))
+    : undefined;
+  return runtimeLimitsFromFragment(mergeConcurrencyLayers(globalLayer, projectLayer).effective);
 }
 
 /** Commit-first fragment update; republishes into the live scheduler only on success. */

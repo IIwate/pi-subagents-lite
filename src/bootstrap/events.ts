@@ -1,14 +1,14 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import type { AgentConfig } from "./agent-registry.js";
-import { configuration, configurationSectionIO } from "./configuration.js";
+import { bindProjectConfiguration, configuration, configurationSectionIO } from "./configuration.js";
 import { projectAgentsDirPath, userAgentsDirPath } from "../platform/fs/config-paths.js";
 import { hostInstallationPaths } from "../platform/pi/host-resources.js";
 import {
   AgentCatalogueConfigurationSchema,
   type AgentDefinitionSnapshot,
 } from "../modules/agent-catalogue/public.js";
-import { concurrencyRuntimeLimits } from "./concurrency.js";
+import { concurrencyMergedLimits } from "./concurrency.js";
 import { createHostSubagentRuntime } from "./subagent-runtime.js";
 import { ChildScreenHost } from "./child-screen.js";
 import type { ExtensionRuntime } from "./extension-runtime.js";
@@ -34,18 +34,20 @@ function toAgentConfig(definition: AgentDefinitionSnapshot): AgentConfig {
  * Idempotent — safe to call on every session_start.
  */
 export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: ExtensionContext): void {
+  const limits = concurrencyMergedLimits(runtime.projectConfig);
   if (!runtime.manager) {
     const manager = createHostSubagentRuntime({
       pi: runtime.pi,
       ctx,
-      limits: concurrencyRuntimeLimits(),
+      limits,
     });
     runtime.manager = manager;
     wireHostDelivery(runtime, manager);
   } else {
     // Reload path: the document may have changed on disk while the manager
-    // kept running, so republish the persisted limits into the scheduler.
-    runtime.manager.replaceLimits(concurrencyRuntimeLimits());
+    // kept running, so republish the persisted merged limits into the
+    // scheduler.
+    runtime.manager.replaceLimits(limits);
   }
 
   if (!runtime.navigator) {
@@ -104,8 +106,10 @@ async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionCo
 
 async function loadConfigAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
   // Re-read the persisted document (it may have changed on disk between
-  // sessions), then re-sync every consumer that mirrors it.
+  // sessions), then re-sync every consumer that mirrors it. The project
+  // binding is rebuilt from the freshly read trust verdict each session.
   configurationSectionIO.reload();
+  runtime.projectConfig = bindProjectConfiguration(ctx.isProjectTrusted(), ctx.cwd);
   ensureManagerAndNavigator(runtime, ctx);
   runtime.agentSettings.syncNavigatorStats();
   await scanAndRegisterAgents(runtime, ctx);
