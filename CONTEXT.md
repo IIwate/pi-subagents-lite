@@ -88,6 +88,18 @@ _Avoid_: Quick assignment, quick default
 Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Spawn options.
 _Avoid_: Grace period, extra turns
 
+**Project trust**:
+The boolean verdict Pi's session context reports for the current project. When false, project and worktree Agent definitions and the Project configuration layer are not loaded; when true, they load for this session.
+_Avoid_: Trusted folder, workspace trust, trust prompt
+
+**Project configuration layer**:
+The optional `subagents-lite.json` under the project's Pi config directory, acting as an override layer above the global document for a trusted project. Absence of a key means inheritance; the layer can be untrusted, absent, loaded, or malformed.
+_Avoid_: Project settings file, local config replacement
+
+**Provenance**:
+The per-value origin label (`default`, `global`, or `project`) shown beside effective concurrency values, derived from which layer physically defines the key.
+_Avoid_: Source tag, value origin marker
+
 ### Worktrees
 
 **Worktree**:

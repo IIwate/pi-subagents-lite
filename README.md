@@ -60,6 +60,8 @@ Agent definitions are Markdown files loaded from:
 
 Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field.
 
+Project and worktree agent definitions load only when Pi's session context reports the project as trusted; an untrusted session uses built-in and user-wide definitions only. Trust is re-read at every session start (`/reload`).
+
 ```markdown
 ---
 name: reviewer
@@ -190,6 +192,8 @@ Run `/agents` to configure:
 - one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
 Settings are stored in `<Pi agent directory>/subagents-lite.json` and custom prompt mode uses `<Pi agent directory>/subagents-lite-prompt.md`. The Pi agent directory defaults to `~/.pi/agent` and is relocated through Pi's own mechanism; the extension follows Pi and never reads former locations or migrates files automatically. If you previously relied on a custom `HOME` (for example under MSYS/Git Bash) to relocate these files, move them into the Pi agent directory — `HOME` now affects only the `~/.agents/skills` skill root.
+
+A trusted project may additionally provide `<project>/.pi/subagents-lite.json` as an override layer for concurrency limits: a project value overrides only the keys it names, everything else is inherited from the global settings, and the `/agents` concurrency page shows each effective value's origin (`Default`, `Global`, or `Project`) plus a write-target choice. A malformed project file is ignored and never overwritten.
 
 ## Upgrading on Windows
 
