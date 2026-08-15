@@ -1,6 +1,8 @@
 export {
   ConcurrencyLimitUpdateSchema,
+  ConcurrencyProjectLayerViewSchema,
   ConcurrencySettingsViewSchema,
+  ProjectLayerStateSchema,
   DebugAgentTypeSchema,
   DebugDiagnosticsViewSchema,
   DebugFaultSchema,
@@ -33,7 +35,9 @@ export {
 } from "./contracts/settings-contracts.js";
 export type {
   ConcurrencyLimitUpdate,
+  ConcurrencyProjectLayerView,
   ConcurrencySettingsView,
+  ProjectLayerState,
   DebugAgentType,
   DebugDiagnosticsView,
   DebugFault,

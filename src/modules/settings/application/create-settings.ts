@@ -44,6 +44,7 @@ import {
   buildConcurrencyRows,
   CONCURRENCY_LIMIT_MINIMUM,
   parseLimitRowId,
+  targetLabel,
 } from "../core/concurrency-page.js";
 import {
   buildDebugRows,
@@ -115,7 +116,9 @@ type Page =
   | { id: "display" }
   | { id: "spawn-options" }
   | { id: "system-prompt" }
-  | { id: "concurrency" }
+  // The write target is session-local page state: entering the page always
+  // starts on Global, and switching targets performs no IO (REQ-CONFIG-003).
+  | { id: "concurrency"; target: "global" | "project" }
   | { id: "debug" }
   | { id: "model-access" }
   | { id: "ma-quick-agents" }
@@ -207,7 +210,7 @@ export function createSettings(options: CreateSettingsOptions): Settings {
           page: "concurrency",
           title: "Concurrency",
           presentation: "form",
-          rows: buildConcurrencyRows(view),
+          rows: buildConcurrencyRows(view, page.target),
         });
       }
       case "debug": {
@@ -438,20 +441,41 @@ export function createSettings(options: CreateSettingsOptions): Settings {
     return failure("unknown-row", `Page system-prompt has no editable row ${id}.`);
   };
 
-  const setConcurrencyValue = (id: string, value: string): SettingsResult => {
+  const setConcurrencyValue = (page: Page & { id: "concurrency" }, id: string, value: string): SettingsResult => {
+    const view = ownerView<ConcurrencySettingsView>(ConcurrencySettingsViewSchema, options.concurrency.read());
+    if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    // A shadowed global write still lands on disk but changes only the
+    // inherited value; the notice must say so or the page looks broken.
+    const shadowSuffix = (shadowed: boolean): string =>
+      shadowed ? " (shadowed by a project override; effective value unchanged)" : "";
+    if (id === "writeTarget") {
+      if (value !== "Global" && value !== "Project") {
+        return failure("invalid-value", `Write target accepts Global or Project, not ${value}.`);
+      }
+      if (value === "Project" && !view.projectLayer.writable) {
+        return failure("unknown-row", "Project write target is not available in this session.");
+      }
+      // Pure page-state change: rebuild the row set, no IO, no commit.
+      page.target = value === "Global" ? "global" : "project";
+      return snapshotResult(buildSnapshot(current()));
+    }
     if (id === "defaultConcurrency") {
       const trimmed = value.trim();
       if (!/^\d+$/.test(trimmed) || Number(trimmed) < CONCURRENCY_LIMIT_MINIMUM) {
         return failure("invalid-value", `Fallback model limit must be an integer >= ${CONCURRENCY_LIMIT_MINIMUM}, not ${value}.`);
       }
       const limit = Number(trimmed);
+      const shadowed = page.target === "global" && view.provenance.default === "project";
       return updated(
-        options.concurrency.update({ scope: "default", limit }),
-        `Fallback model limit set to ${limit}`,
+        options.concurrency.update({ target: page.target, update: { scope: "default", limit } }),
+        `Fallback model limit set to ${limit} (${targetLabel(page.target)})${shadowSuffix(shadowed)}`,
       );
     }
     if (id === "resetAll") {
-      return updated(options.concurrency.update({ scope: "reset" }), "Concurrency reset");
+      return updated(
+        options.concurrency.update({ target: page.target, update: { scope: "reset" } }),
+        page.target === "global" ? "Concurrency reset" : "Project concurrency overrides reset",
+      );
     }
     return failure("unknown-row", `Page concurrency has no editable row ${id}.`);
   };
@@ -496,11 +520,18 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       | { kind: "update-limit"; id: string; limit: number | null }
       | { kind: "add-limit"; id: string; key: string; limit: number },
   ): SettingsResult => {
-    if (current().id !== "concurrency") {
-      return failure("unknown-row", `Page ${current().id} has no limit row ${command.id}.`);
+    const page = current();
+    if (page.id !== "concurrency") {
+      return failure("unknown-row", `Page ${page.id} has no limit row ${command.id}.`);
     }
     const view = ownerView<ConcurrencySettingsView>(ConcurrencySettingsViewSchema, options.concurrency.read());
     if (!view) return failure("invalid-snapshot", "Settings page does not match its contract.");
+    const layer = page.target === "global" ? view.global : view.project;
+    const shadowSuffix = (scope: "provider" | "model", key: string): string =>
+      page.target === "global"
+        && view.provenance[scope === "provider" ? "providers" : "models"][key] === "project"
+        ? " (shadowed by a project override; effective value unchanged)"
+        : "";
     if (command.kind === "add-limit") {
       const scope = command.id === "addProviderLimit"
         ? "provider" as const
@@ -511,31 +542,40 @@ export function createSettings(options: CreateSettingsOptions): Settings {
         return failure("invalid-value", `${command.key} is not in the active ${scope} inventory.`);
       }
       return updated(
-        options.concurrency.update({ scope, key: command.key, limit: command.limit }),
-        `${command.key} concurrency set to ${command.limit}`,
+        options.concurrency.update({
+          target: page.target,
+          update: { scope, key: command.key, limit: command.limit },
+        }),
+        `${command.key} concurrency set to ${command.limit} (${targetLabel(page.target)})${shadowSuffix(scope, command.key)}`,
       );
     }
     const target = parseLimitRowId(command.id);
     if (!target) return failure("unknown-row", `Page concurrency has no limit row ${command.id}.`);
-    const saved = target.scope === "provider" ? view.providerLimits : view.modelLimits;
+    const saved = (target.scope === "provider" ? layer.providers : layer.models) ?? {};
     if (!Object.hasOwn(saved, target.key)) {
-      return failure("unknown-row", `No saved ${target.scope} limit for ${target.key}.`);
+      return failure("unknown-row", `No saved ${target.scope} limit for ${target.key} in the ${targetLabel(page.target)} layer.`);
     }
     const scopeLabel = target.scope === "provider" ? "Provider" : "Model";
     return updated(
-      options.concurrency.update({ scope: target.scope, key: target.key, limit: command.limit }),
+      options.concurrency.update({
+        target: page.target,
+        update: { scope: target.scope, key: target.key, limit: command.limit },
+      }),
       command.limit === null
-        ? `Removed ${scopeLabel} limit for ${target.key}`
-        : `${target.key} concurrency set to ${command.limit}`,
+        ? `Removed ${scopeLabel} limit for ${target.key} (${targetLabel(page.target)})`
+        : `${target.key} concurrency set to ${command.limit} (${targetLabel(page.target)})${shadowSuffix(target.scope, target.key)}`,
     );
   };
 
   const selectOnRoot = (id: string): SettingsResult => {
+    if (id === "concurrency") {
+      // Entering the page always starts on the Global write target.
+      return navigate({ id: "concurrency", target: "global" });
+    }
     if (
       id === "display"
       || id === "spawn-options"
       || id === "system-prompt"
-      || id === "concurrency"
       || id === "debug"
       || id === "model-access"
     ) {
@@ -793,13 +833,14 @@ export function createSettings(options: CreateSettingsOptions): Settings {
       case "select":
         return select(command.id);
       case "set-value": {
-        switch (current().id) {
+        const page = current();
+        switch (page.id) {
           case "display": return setDisplayValue(command.id, command.value);
           case "spawn-options": return setSpawnValue(command.id, command.value);
           case "system-prompt": return setSystemPromptValue(command.id, command.value);
-          case "concurrency": return setConcurrencyValue(command.id, command.value);
+          case "concurrency": return setConcurrencyValue(page, command.id, command.value);
           case "debug": return setDebugValue(command.id);
-          default: return failure("unknown-row", `Page ${current().id} has no editable row ${command.id}.`);
+          default: return failure("unknown-row", `Page ${page.id} has no editable row ${command.id}.`);
         }
       }
       case "update-limit":

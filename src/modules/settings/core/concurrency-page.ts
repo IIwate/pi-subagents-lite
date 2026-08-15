@@ -1,9 +1,28 @@
-import type { ConcurrencySettingsView, SettingsRow } from "../contracts/settings-contracts.js";
+import type {
+  ConcurrencySettingsView,
+  SettingsRow,
+} from "../contracts/settings-contracts.js";
+import type { ConcurrencyTarget, ConcurrencyValueSource } from "../../subagent-runtime/public.js";
 
 export const CONCURRENCY_LIMIT_MINIMUM = 1;
 
 function limitLabel(limit: number): string {
   return `${limit} slot${limit === 1 ? "" : "s"}`;
+}
+
+const SOURCE_TAGS: Record<ConcurrencyValueSource, string> = {
+  default: "Default",
+  global: "Global",
+  project: "Project",
+};
+
+export function targetLabel(target: ConcurrencyTarget): string {
+  return target === "global" ? "Global" : "Project";
+}
+
+/** The selected write target's sparse fragment; rows derive from it, display from effective. */
+function layerFragment(view: ConcurrencySettingsView, target: ConcurrencyTarget) {
+  return target === "global" ? view.global : view.project;
 }
 
 /** Split a limit row id back into its scope and key. The page owns both sides of this encoding. */
@@ -19,7 +38,9 @@ export function parseLimitRowId(id: string): { scope: "provider" | "model"; key:
 function limitRow(options: {
   scope: "provider" | "model";
   key: string;
-  limit: number;
+  layerLimit: number;
+  effectiveLimit: number;
+  source: ConcurrencyValueSource;
   active: boolean;
 }): SettingsRow {
   const scopeLabel = options.scope === "provider" ? "Provider" : "Model";
@@ -32,41 +53,80 @@ function limitRow(options: {
         ? "Shared hard ceiling across this Provider."
         : "Per-model hard ceiling, enforced with any Provider ceiling.")
       : `Saved limit for a ${scopeLabel} outside the active inventory; edit or remove.`,
-    value: limitLabel(options.limit),
-    input: String(options.limit),
+    value: `${limitLabel(options.effectiveLimit)} · ${SOURCE_TAGS[options.source]}`,
+    input: String(options.layerLimit),
     min: CONCURRENCY_LIMIT_MINIMUM,
   };
 }
 
-export function buildConcurrencyRows(view: ConcurrencySettingsView): SettingsRow[] {
+export function buildConcurrencyRows(view: ConcurrencySettingsView, target: ConcurrencyTarget): SettingsRow[] {
+  const layer = layerFragment(view, target);
+  const layerProviders = layer.providers ?? {};
+  const layerModels = layer.models ?? {};
   const activeProviders = new Set(view.activeProviders);
   const activeModels = new Set(view.activeModels);
-  const isFactoryDefault = view.defaultLimit === view.factoryDefaultLimit;
 
-  const rows: SettingsRow[] = [{
+  const rows: SettingsRow[] = [];
+
+  // The project layer is described even when the user is writing globally,
+  // because effective values on this page can come from either file.
+  if (view.projectLayer.state !== "untrusted") {
+    const warning = view.projectLayer.ignoredEntryCount > 0
+      ? ` · ${view.projectLayer.ignoredEntryCount} unusable entr${view.projectLayer.ignoredEntryCount === 1 ? "y" : "ies"} ignored`
+      : "";
+    rows.push({
+      id: "projectLayerNote",
+      kind: "note",
+      label: `Project config · ${view.projectLayer.state}${warning}`,
+      ...(view.projectLayer.filePath ? { detail: view.projectLayer.filePath } : {}),
+    });
+  }
+  if (view.projectLayer.writable) {
+    rows.push({
+      id: "writeTarget",
+      kind: "choice",
+      label: "Write target",
+      detail: "Layer edited by the rows below; effective values always show merged state.",
+      value: targetLabel(target),
+      choices: ["Global", "Project"],
+    });
+  }
+
+  rows.push({
     id: "defaultConcurrency",
     kind: "numeric",
     label: "Fallback model limit",
     detail: "Per-model ceiling used when no Model override exists.",
-    value: `${limitLabel(view.defaultLimit)}${isFactoryDefault ? " · Default" : ""}`,
-    input: String(view.defaultLimit),
+    value: `${limitLabel(view.effective.default)} · ${SOURCE_TAGS[view.provenance.default]}`,
+    input: String(layer.default ?? view.factoryDefaultLimit),
     min: CONCURRENCY_LIMIT_MINIMUM,
     // Clearing the input restores the factory default instead of erroring.
     fallback: view.factoryDefaultLimit,
-  }];
+  });
 
-  const providerEntries = Object.entries(view.providerLimits).sort(([a], [b]) => a.localeCompare(b));
-  const modelEntries = Object.entries(view.modelLimits).sort(([a], [b]) => a.localeCompare(b));
+  const providerEntries = Object.entries(layerProviders).sort(([a], [b]) => a.localeCompare(b));
+  const modelEntries = Object.entries(layerModels).sort(([a], [b]) => a.localeCompare(b));
+  const rowFor = (scope: "provider" | "model", key: string, layerLimit: number, active: boolean): SettingsRow => {
+    const container = scope === "provider" ? "providers" : "models";
+    return limitRow({
+      scope,
+      key,
+      layerLimit,
+      effectiveLimit: view.effective[container][key] ?? layerLimit,
+      source: view.provenance[container][key] ?? target,
+      active,
+    });
+  };
 
   for (const [key, limit] of providerEntries) {
-    if (activeProviders.has(key)) rows.push(limitRow({ scope: "provider", key, limit, active: true }));
+    if (activeProviders.has(key)) rows.push(rowFor("provider", key, limit, true));
   }
   for (const [key, limit] of modelEntries) {
-    if (activeModels.has(key)) rows.push(limitRow({ scope: "model", key, limit, active: true }));
+    if (activeModels.has(key)) rows.push(rowFor("model", key, limit, true));
   }
 
   const addableProviders = view.activeProviders
-    .filter((provider) => !Object.hasOwn(view.providerLimits, provider))
+    .filter((provider) => !Object.hasOwn(layerProviders, provider))
     .sort();
   if (addableProviders.length > 0) {
     rows.push({
@@ -81,7 +141,7 @@ export function buildConcurrencyRows(view: ConcurrencySettingsView): SettingsRow
   }
 
   const addableModels = view.activeModels
-    .filter((model) => !Object.hasOwn(view.modelLimits, model));
+    .filter((model) => !Object.hasOwn(layerModels, model));
   if (addableModels.length > 0) {
     rows.push({
       id: "addModelLimit",
@@ -105,18 +165,27 @@ export function buildConcurrencyRows(view: ConcurrencySettingsView): SettingsRow
       .map(([key, limit]) => ({ scope: "model" as const, key, limit })),
   ].sort((a, b) => a.scope.localeCompare(b.scope) || a.key.localeCompare(b.key));
   for (const entry of inactive) {
-    rows.push(limitRow({ ...entry, active: false }));
+    rows.push(rowFor(entry.scope, entry.key, entry.limit, false));
   }
 
+  // Reset reflects the selected layer only: a project layer with no
+  // overrides (absent file included) offers nothing to reset.
   const hasOverrides = providerEntries.length > 0 || modelEntries.length > 0;
-  if (!isFactoryDefault || hasOverrides) {
+  const defaultDiffers = target === "global"
+    ? layer.default !== undefined && layer.default !== view.factoryDefaultLimit
+    : layer.default !== undefined;
+  if (defaultDiffers || hasOverrides) {
     rows.push({
       id: "resetAll",
       kind: "action",
-      label: "Reset concurrency",
-      detail: "Remove every override and restore the fallback default.",
+      label: target === "global" ? "Reset concurrency" : "Reset project overrides",
+      detail: target === "global"
+        ? "Remove every override and restore the fallback default."
+        : "Remove every project override and restore inheritance.",
       choices: ["Reset"],
-      confirm: "Reset all concurrency limits?",
+      confirm: target === "global"
+        ? "Reset all concurrency limits?"
+        : "Reset all project concurrency overrides?",
     });
   }
 

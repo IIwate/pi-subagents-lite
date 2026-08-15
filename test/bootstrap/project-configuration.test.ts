@@ -125,3 +125,97 @@ describe("normalizeConfigPathKey", () => {
     expect(normalizeConfigPathKey("/Repo/Project")).toBe("/Repo/Project");
   });
 });
+
+describe("REQ-RUNTIME-008 layered concurrency owner routing", () => {
+  function fakeManager() {
+    const replaced: unknown[] = [];
+    return { replaced, manager: { replaceLimits: (limits: unknown) => { replaced.push(limits); } } as any };
+  }
+
+  it("REQ-CONFIG-003 routes a project write to the project file only and republishes merged limits", async () => {
+    const { updateConcurrencyLimits, concurrencyMergedLimits } = await import("../../src/bootstrap/concurrency.js");
+    const cwd = tempProject();
+    const binding = bindProjectConfiguration(true, cwd);
+    const { replaced, manager } = fakeManager();
+
+    const result = updateConcurrencyLimits(
+      { target: "project", update: { scope: "provider", key: "openai", limit: 2 } },
+      manager,
+      binding,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(JSON.parse(readFileSync(configFileOf(cwd), "utf-8"))).toEqual({ concurrency: { providers: { openai: 2 } } });
+    expect(replaced).toHaveLength(1);
+    expect((replaced[0] as { providerLimits: Record<string, number> }).providerLimits.openai).toBe(2);
+    expect(concurrencyMergedLimits(binding).providerLimits.openai).toBe(2);
+  });
+
+  it("REQ-CONFIG-003 treats clearing an override the project never had as a no-op that creates no file", async () => {
+    const { updateConcurrencyLimits } = await import("../../src/bootstrap/concurrency.js");
+    const cwd = tempProject();
+    const binding = bindProjectConfiguration(true, cwd);
+    const { replaced, manager } = fakeManager();
+
+    const result = updateConcurrencyLimits(
+      { target: "project", update: { scope: "provider", key: "openai", limit: null } },
+      manager,
+      binding,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(existsSync(configFileOf(cwd))).toBe(false);
+    expect(replaced).toEqual([]);
+    expect(binding.getState()).toBe("absent");
+  });
+
+  it("REQ-RUNTIME-008 does not replace scheduler limits when the commit fails", async () => {
+    const { updateConcurrencyLimits } = await import("../../src/bootstrap/concurrency.js");
+    const cwd = tempProject();
+    const filePath = configFileOf(cwd);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "{ not json");
+    const binding = bindProjectConfiguration(true, cwd);
+    const { replaced, manager } = fakeManager();
+
+    const result = updateConcurrencyLimits(
+      { target: "project", update: { scope: "default", limit: 9 } },
+      manager,
+      binding,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "document-malformed" });
+    expect(replaced).toEqual([]);
+    expect(readFileSync(filePath, "utf-8")).toBe("{ not json");
+  });
+
+  it("REQ-RUNTIME-008 clearing a project override makes the scheduler adopt the latest global value", async () => {
+    const { updateConcurrencyLimits } = await import("../../src/bootstrap/concurrency.js");
+    const cwd = tempProject();
+    const filePath = configFileOf(cwd);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, JSON.stringify({ concurrency: { providers: { openai: 1 } } }));
+    const binding = bindProjectConfiguration(true, cwd);
+    const { replaced, manager } = fakeManager();
+
+    // Shadowed global write: persists but the effective value stays the
+    // project override.
+    const globalWrite = updateConcurrencyLimits(
+      { target: "global", update: { scope: "provider", key: "openai", limit: 7 } },
+      manager,
+      binding,
+    );
+    expect(globalWrite).toEqual({ ok: true });
+    expect((replaced[0] as { providerLimits: Record<string, number> }).providerLimits.openai).toBe(1);
+
+    const cleared = updateConcurrencyLimits(
+      { target: "project", update: { scope: "provider", key: "openai", limit: null } },
+      manager,
+      binding,
+    );
+    expect(cleared).toEqual({ ok: true });
+    expect((replaced[1] as { providerLimits: Record<string, number> }).providerLimits.openai).toBe(7);
+    // The project container emptied, so the key was removed entirely.
+    expect(JSON.parse(readFileSync(filePath, "utf-8"))).toEqual({ concurrency: {} });
+  });
+});

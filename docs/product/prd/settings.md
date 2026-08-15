@@ -26,15 +26,19 @@ If a setting cannot be persisted, the workflow shows an explicit failure and kee
 
 The global configuration document, the custom prompt file, and global Agent definitions live in the Pi agent directory reported by the host. Project resource directories use Pi's project config directory name. There is no fallback to former locations and no automatic migration of files from a previous location; relocating the agent directory is done through Pi's own mechanism.
 
+### REQ-CONFIG-003 — Project configuration override layer
+
+For a project the Pi context reports as trusted, `subagents-lite.json` under the project's Pi config directory is an override layer above the global document: a project value overrides only the keys it names, absence means inheritance, and the merged effective values are never written back. The layer has four states — untrusted, absent, loaded, malformed. Untrusted sessions never read the file and offer no project write target. A write from settings changes only the selected layer; clearing an override the layer never had is a no-op that creates no file. A malformed project file is excluded from the effective values, is refused as a write target, and is never overwritten or auto-repaired. Failed persistence keeps the previous effective value (REQ-CONFIG-001). This requirement does not promise that the file's presence triggers an explicit Pi trust confirmation.
+
 ### REQ-SETTINGS-005 — Renderer-independent state
 
 Settings state and action results remain meaningful without Pi TUI. Pi input translation and rendering remain local to the host integration.
 
 ## Out of scope
 
-- New settings, menus, commands, or prompt inspection capabilities.
-- Automatic migration of the persisted configuration file to a new physical schema.
+- New settings, menus, commands, or prompt inspection capabilities beyond the project write target and provenance display required by REQ-CONFIG-003 and REQ-RUNTIME-008.
+- Automatic migration of the persisted configuration file to a new physical schema or from a former location (REQ-CONFIG-002).
 
 ## Acceptance intent
 
-Acceptance examples cover settings navigation, delegated updates, quick model setup, concurrency and display options, prompt mode choices, atomic persistence failure, and the effect boundary between current and future calls.
+Acceptance examples cover settings navigation, delegated updates, quick model setup, concurrency and display options, prompt mode choices, atomic persistence failure, the effect boundary between current and future calls, canonical resource locations, and the project override layer's four states, write-target routing, and no-op clears.

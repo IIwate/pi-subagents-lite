@@ -44,11 +44,7 @@ export type {
   ConcurrencyValueSource,
   MergedConcurrencyLimits,
 } from "./contracts/scheduling.js";
-export {
-  applyConcurrencyLimitsUpdate,
-  parseConcurrencyLimitsFragment,
-  runtimeLimitsFromFragment,
-} from "./core/limits-fragment.js";
+export { runtimeLimitsFromFragment } from "./core/limits-fragment.js";
 export {
   applyConcurrencyLayerUpdate,
   mergeConcurrencyLayers,

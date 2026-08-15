@@ -8,7 +8,7 @@ import {
   type SettingsSummaryReader,
   type SpawnSettingsOwner,
 } from "../modules/settings/public.js";
-import { DEFAULT_CONCURRENCY_LIMIT } from "../modules/subagent-runtime/public.js";
+import { DEFAULT_CONCURRENCY_LIMIT, mergeConcurrencyLayers } from "../modules/subagent-runtime/public.js";
 import { effectiveAlternateModelKeys, modelKey, scopedModelKeys } from "../modules/model-access/public.js";
 import { runSettingsScreen } from "../platform/pi/tui/settings-screen.js";
 import {
@@ -16,7 +16,7 @@ import {
   customPromptFileExists,
 } from "../platform/fs/prompt-files.js";
 import { DEFAULT_GRACE_TURNS } from "../modules/subagent-runtime/public.js";
-import { readConcurrencyFragment, updateConcurrencyLimits } from "./concurrency.js";
+import { concurrencyMergedLimits, readConcurrencyLayers, updateConcurrencyLimits } from "./concurrency.js";
 import { customPromptPath } from "./configuration.js";
 import type { ExtensionRuntime } from "./extension-runtime.js";
 import { createModelAccessSettingsOwner, readModelAccessFragment } from "./model-access.js";
@@ -122,20 +122,30 @@ function activeModelKeys(runtime: ExtensionRuntime, ctx: ExtensionCommandContext
 function createConcurrencyOwner(runtime: ExtensionRuntime, ctx: ExtensionCommandContext): ConcurrencySettingsOwner {
   return {
     read() {
-      const fragment = readConcurrencyFragment();
+      const binding = runtime.projectConfig;
+      const { globalLayer, projectLayer } = readConcurrencyLayers(binding);
+      const merged = mergeConcurrencyLayers(globalLayer, projectLayer);
+      const state = binding?.getState() ?? "untrusted";
       const models = activeModelKeys(runtime, ctx);
       const providers = [...new Set(models.map((key) => key.split("/")[0]).filter((p): p is string => Boolean(p)))].sort();
       return {
-        defaultLimit: fragment.default,
+        effective: merged.effective,
+        provenance: merged.provenance,
+        global: globalLayer.fragment,
+        project: projectLayer?.fragment ?? {},
+        projectLayer: {
+          state,
+          ...(binding?.filePath ? { filePath: binding.filePath } : {}),
+          writable: state === "absent" || state === "loaded",
+          ignoredEntryCount: projectLayer?.ignoredEntryCount ?? 0,
+        },
         factoryDefaultLimit: DEFAULT_CONCURRENCY_LIMIT,
-        providerLimits: fragment.providers,
-        modelLimits: fragment.models,
         activeProviders: providers,
         activeModels: models,
       };
     },
     update(update) {
-      return updateConcurrencyLimits(update, runtime.manager);
+      return updateConcurrencyLimits(update, runtime.manager, runtime.projectConfig);
     },
   };
 }
@@ -199,12 +209,14 @@ function createDebugOwner(runtime: ExtensionRuntime): DebugSettingsOwner {
   };
 }
 
-function createSummaryReader(): SettingsSummaryReader {
+function createSummaryReader(runtime: ExtensionRuntime): SettingsSummaryReader {
   return {
     read() {
       return {
         modelAccessEnabled: readModelAccessFragment().enabled,
-        concurrencyDefault: readConcurrencyFragment().default,
+        // The root summary shows the merged effective default so it matches
+        // what the scheduler actually enforces.
+        concurrencyDefault: concurrencyMergedLimits(runtime.projectConfig).defaultModelLimit,
       };
     },
   };
@@ -213,7 +225,7 @@ function createSummaryReader(): SettingsSummaryReader {
 /** `/agents` entry point: the settings workflow rendered through the Pi host. */
 export async function showAgentsMenu(runtime: ExtensionRuntime, ctx: ExtensionCommandContext): Promise<void> {
   const settings = createSettings({
-    summaries: createSummaryReader(),
+    summaries: createSummaryReader(runtime),
     display: createDisplayOwner(runtime),
     spawn: createSpawnOwner(runtime),
     prompt: createPromptOwner(runtime),

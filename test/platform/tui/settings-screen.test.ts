@@ -19,6 +19,7 @@ await vi.hoisted(async () => {
 });
 
 import { describe, expect, it, vi } from "vitest";
+import { mergeConcurrencyLayers, parseConcurrencyLayer } from "../../../src/modules/subagent-runtime/public.js";
 import { createAgentSettingsStore } from "../../../src/bootstrap/agent-settings.js";
 import { createConfigurationSectionIO } from "../../../src/bootstrap/configuration.js";
 import { createConfiguration } from "../../../src/modules/configuration/public.js";
@@ -123,28 +124,37 @@ function createRealSettings(options: {
       return { ok: true };
     },
   };
-  const concurrencyView: ConcurrencySettingsView = {
-    defaultLimit: 4,
-    factoryDefaultLimit: 4,
-    providerLimits: { anthropic: 2 },
-    modelLimits: {},
-    activeProviders: ["anthropic", "openai"],
-    activeModels: ["anthropic/claude-sonnet-4", "openai/gpt-5"],
+  const globalFragment: { default?: number; providers: Record<string, number>; models: Record<string, number> } = {
+    default: 4,
+    providers: { anthropic: 2 },
+    models: {},
   };
   const concurrency: ConcurrencySettingsOwner = {
-    read: () => structuredClone(concurrencyView),
-    update(update) {
+    read: (): ConcurrencySettingsView => {
+      const merged = mergeConcurrencyLayers(parseConcurrencyLayer(structuredClone(globalFragment)));
+      return {
+        effective: merged.effective,
+        provenance: merged.provenance,
+        global: parseConcurrencyLayer(structuredClone(globalFragment)).fragment,
+        project: {},
+        projectLayer: { state: "untrusted", writable: false, ignoredEntryCount: 0 },
+        factoryDefaultLimit: 4,
+        activeProviders: ["anthropic", "openai"],
+        activeModels: ["anthropic/claude-sonnet-4", "openai/gpt-5"],
+      };
+    },
+    update({ update }) {
       if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
       if (update.scope === "default") {
-        concurrencyView.defaultLimit = update.limit;
+        globalFragment.default = update.limit;
       } else if (update.scope === "reset") {
-        concurrencyView.defaultLimit = concurrencyView.factoryDefaultLimit;
-        concurrencyView.providerLimits = {};
-        concurrencyView.modelLimits = {};
+        globalFragment.default = 4;
+        globalFragment.providers = {};
+        globalFragment.models = {};
       } else {
         const section = update.scope === "provider"
-          ? concurrencyView.providerLimits
-          : concurrencyView.modelLimits;
+          ? globalFragment.providers
+          : globalFragment.models;
         if (update.limit === null) delete section[update.key];
         else section[update.key] = update.limit;
       }
@@ -450,7 +460,7 @@ describe("settings screen renderer contract", () => {
     await runSettingsScreen(ctx, createRealSettings());
 
     expect(renders[1]).toContain("Provider · anthropic");
-    expect(notifications).toHaveBeenCalledWith("anthropic concurrency set to 5", "info");
+    expect(notifications).toHaveBeenCalledWith("anthropic concurrency set to 5 (Global)", "info");
   });
 
   it("removes a keyed limit through the explicit remove gesture", async () => {
@@ -470,7 +480,7 @@ describe("settings screen renderer contract", () => {
     ]);
     await runSettingsScreen(ctx, createRealSettings());
 
-    expect(notifications).toHaveBeenCalledWith("Removed Provider limit for anthropic", "info");
+    expect(notifications).toHaveBeenCalledWith("Removed Provider limit for anthropic (Global)", "info");
   });
 
   it("adds a model limit through the picker followed by the numeric step", async () => {
@@ -494,7 +504,7 @@ describe("settings screen renderer contract", () => {
     ]);
     await runSettingsScreen(ctx, createRealSettings());
 
-    expect(notifications).toHaveBeenCalledWith("openai/gpt-5 concurrency set to 3", "info");
+    expect(notifications).toHaveBeenCalledWith("openai/gpt-5 concurrency set to 3 (Global)", "info");
   });
 
   it("resets concurrency only after the confirm dialog answers Yes", async () => {

@@ -12,6 +12,7 @@ await vi.hoisted(async () => {
 });
 
 import { describe, expect, it, vi } from "vitest";
+import { mergeConcurrencyLayers, parseConcurrencyLayer } from "../../../src/modules/subagent-runtime/public.js";
 import { Check } from "typebox/value";
 import { createAgentSettingsStore } from "../../../src/bootstrap/agent-settings.js";
 import { createConfigurationSectionIO } from "../../../src/bootstrap/configuration.js";
@@ -68,7 +69,13 @@ interface HarnessOptions {
   display?: Partial<DisplaySettingsView>;
   spawn?: Partial<SpawnSettingsView>;
   prompt?: Partial<PromptSettingsView>;
-  concurrency?: Partial<ConcurrencySettingsView>;
+  concurrency?: {
+    global?: { default?: number; providers?: Record<string, number>; models?: Record<string, number> };
+    project?: { default?: number; providers?: Record<string, number>; models?: Record<string, number> };
+    projectLayer?: Partial<ConcurrencySettingsView["projectLayer"]>;
+    activeProviders?: string[];
+    activeModels?: string[];
+  };
   debugTypes?: DebugAgentType[];
   debugDiagnostics?: DebugDiagnosticsView;
   debugUnavailableWith?: string;
@@ -113,14 +120,33 @@ function harness(options: HarnessOptions = {}) {
     customPromptFileExists: false,
     ...options.prompt,
   };
-  const concurrencyView: ConcurrencySettingsView = {
-    defaultLimit: 4,
-    factoryDefaultLimit: 4,
-    providerLimits: {},
-    modelLimits: {},
-    activeProviders: ["anthropic", "openai"],
-    activeModels: ["anthropic/opus", "openai/gpt-5"],
-    ...options.concurrency,
+  const concurrencyLayers = {
+    global: structuredClone(options.concurrency?.global ?? {}),
+    project: structuredClone(options.concurrency?.project ?? {}),
+  };
+  const concurrencyProjectLayer: ConcurrencySettingsView["projectLayer"] = {
+    state: "untrusted",
+    writable: false,
+    ignoredEntryCount: 0,
+    ...options.concurrency?.projectLayer,
+  };
+  const readConcurrencyView = (): ConcurrencySettingsView => {
+    const globalParse = parseConcurrencyLayer(structuredClone(concurrencyLayers.global));
+    const projectActive = concurrencyProjectLayer.state === "loaded" || concurrencyProjectLayer.state === "absent";
+    const projectParse = projectActive
+      ? parseConcurrencyLayer(structuredClone(concurrencyLayers.project))
+      : undefined;
+    const merged = mergeConcurrencyLayers(globalParse, projectParse);
+    return {
+      effective: merged.effective,
+      provenance: merged.provenance,
+      global: globalParse.fragment,
+      project: projectParse?.fragment ?? {},
+      projectLayer: structuredClone(concurrencyProjectLayer),
+      factoryDefaultLimit: 4,
+      activeProviders: options.concurrency?.activeProviders ?? ["anthropic", "openai"],
+      activeModels: options.concurrency?.activeModels ?? ["anthropic/opus", "openai/gpt-5"],
+    };
   };
   let failUpdatesWith = options.failUpdatesWith;
   const updates: Array<{ id: string; value: boolean }> = [];
@@ -161,19 +187,28 @@ function harness(options: HarnessOptions = {}) {
     },
   };
   const concurrency: ConcurrencySettingsOwner = {
-    read: () => structuredClone(concurrencyView),
-    update(update) {
+    read: () => readConcurrencyView(),
+    update(limitUpdate) {
       if (failUpdatesWith) return { ok: false, message: failUpdatesWith };
-      concurrencyUpdates.push(update);
-      if (update.scope === "default") concurrencyView.defaultLimit = update.limit;
+      concurrencyUpdates.push(limitUpdate);
+      const { target, update } = limitUpdate;
+      const layer = target === "global" ? concurrencyLayers.global : concurrencyLayers.project;
+      if (update.scope === "default") layer.default = update.limit;
       else if (update.scope === "reset") {
-        concurrencyView.defaultLimit = concurrencyView.factoryDefaultLimit;
-        concurrencyView.providerLimits = {};
-        concurrencyView.modelLimits = {};
+        if (target === "global") {
+          concurrencyLayers.global = { default: 4, providers: {}, models: {} };
+        } else {
+          concurrencyLayers.project = {};
+        }
       } else {
-        const section = update.scope === "provider" ? "providerLimits" : "modelLimits";
-        if (update.limit === null) delete concurrencyView[section][update.key];
-        else concurrencyView[section][update.key] = update.limit;
+        const container = update.scope === "provider" ? "providers" : "models";
+        const entries = layer[container] ?? {};
+        if (update.limit === null) delete entries[update.key];
+        else entries[update.key] = update.limit;
+        layer[container] = entries;
+      }
+      if (target === "project" && concurrencyProjectLayer.state === "absent") {
+        concurrencyProjectLayer.state = "loaded";
       }
       return { ok: true };
     },
@@ -318,7 +353,7 @@ function harness(options: HarnessOptions = {}) {
     view,
     spawnView,
     promptView,
-    concurrencyView,
+    readConcurrencyView,
     debugState,
     modelAccessState,
     updates,
@@ -590,12 +625,10 @@ describe("REQ-SETTINGS-002 system prompt page", () => {
 });
 
 describe("REQ-SETTINGS-002 concurrency page", () => {
-  it("renders fallback, active overrides, pickers, and the reset action", () => {
+  it("renders fallback, active overrides, pickers, and the reset action with provenance tags", () => {
     const { settings } = harness({
       concurrency: {
-        defaultLimit: 4,
-        providerLimits: { anthropic: 2 },
-        modelLimits: { "openai/gpt-5": 3 },
+        global: { default: 4, providers: { anthropic: 2 }, models: { "openai/gpt-5": 3 } },
       },
     });
     settings.execute({ kind: "open" });
@@ -610,34 +643,34 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
       "resetAll",
     ]);
     const byId = new Map(result.snapshot.rows.map((row) => [row.id, row]));
-    expect(byId.get("defaultConcurrency")).toMatchObject({ kind: "numeric", value: "4 slots · Default", input: "4", min: 1 });
-    expect(byId.get("provider:anthropic")).toMatchObject({ kind: "limit", value: "2 slots", input: "2" });
+    expect(byId.get("defaultConcurrency")).toMatchObject({ kind: "numeric", value: "4 slots · Global", input: "4", min: 1 });
+    expect(byId.get("provider:anthropic")).toMatchObject({ kind: "limit", value: "2 slots · Global", input: "2" });
     // Only un-limited inventory entries stay addable.
     expect(byId.get("addProviderLimit")!.choices).toEqual(["openai"]);
     expect(byId.get("addModelLimit")!.choices).toEqual(["anthropic/opus"]);
     expect(byId.get("resetAll")).toMatchObject({ kind: "action", confirm: "Reset all concurrency limits?" });
   });
 
-  it("hides pickers and reset in the factory state and drops the Default tag after edits", () => {
+  it("hides pickers and reset in the factory state and tags the factory default", () => {
     const { settings } = harness({
       concurrency: { activeProviders: [], activeModels: [] },
     });
     settings.execute({ kind: "open" });
     const factory = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
     expect(factory.snapshot.rows.map((row) => row.id)).toEqual(["defaultConcurrency"]);
+    expect(factory.snapshot.rows[0]!.value).toBe("4 slots · Default");
 
     const edited = expectOk(settings.execute({ kind: "set-value", id: "defaultConcurrency", value: "9" }));
-    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "Fallback model limit set to 9" });
+    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "Fallback model limit set to 9 (Global)" });
     const fallbackRow = edited.snapshot.rows.find((row) => row.id === "defaultConcurrency")!;
-    expect(fallbackRow.value).toBe("9 slots");
+    expect(fallbackRow.value).toBe("9 slots · Global");
     expect(edited.snapshot.rows.some((row) => row.id === "resetAll")).toBe(true);
   });
 
   it("lists saved inactive limits with an explicit edit/remove path after the pickers", () => {
     const { settings } = harness({
       concurrency: {
-        providerLimits: { retiredhost: 2 },
-        modelLimits: { "retiredhost/old-model": 1 },
+        global: { providers: { retiredhost: 2 }, models: { "retiredhost/old-model": 1 } },
       },
     });
     settings.execute({ kind: "open" });
@@ -659,19 +692,19 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
 
   it("edits and removes keyed limits through update-limit", () => {
     const { settings, concurrencyUpdates } = harness({
-      concurrency: { providerLimits: { anthropic: 2 } },
+      concurrency: { global: { providers: { anthropic: 2 } } },
     });
     settings.execute({ kind: "open" });
     settings.execute({ kind: "select", id: "concurrency" });
     const edited = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 5 }));
-    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "anthropic concurrency set to 5" });
+    expect(edited.snapshot.notice).toEqual({ severity: "info", message: "anthropic concurrency set to 5 (Global)" });
 
     const removed = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: null }));
-    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed Provider limit for anthropic" });
+    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed Provider limit for anthropic (Global)" });
     expect(removed.snapshot.rows.some((row) => row.id === "provider:anthropic")).toBe(false);
     expect(concurrencyUpdates).toEqual([
-      { scope: "provider", key: "anthropic", limit: 5 },
-      { scope: "provider", key: "anthropic", limit: null },
+      { target: "global", update: { scope: "provider", key: "anthropic", limit: 5 } },
+      { target: "global", update: { scope: "provider", key: "anthropic", limit: null } },
     ]);
   });
 
@@ -680,12 +713,12 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
     settings.execute({ kind: "open" });
     settings.execute({ kind: "select", id: "concurrency" });
     const added = expectOk(settings.execute({ kind: "add-limit", id: "addModelLimit", key: "openai/gpt-5", limit: 2 }));
-    expect(added.snapshot.notice).toEqual({ severity: "info", message: "openai/gpt-5 concurrency set to 2" });
+    expect(added.snapshot.notice).toEqual({ severity: "info", message: "openai/gpt-5 concurrency set to 2 (Global)" });
     expect(added.snapshot.rows.some((row) => row.id === "model:openai/gpt-5")).toBe(true);
 
     const rejected = settings.execute({ kind: "add-limit", id: "addModelLimit", key: "unknown/model", limit: 2 });
     expect(rejected).toMatchObject({ ok: false, error: { code: "invalid-value" } });
-    expect(concurrencyUpdates).toEqual([{ scope: "model", key: "openai/gpt-5", limit: 2 }]);
+    expect(concurrencyUpdates).toEqual([{ target: "global", update: { scope: "model", key: "openai/gpt-5", limit: 2 } }]);
   });
 
   it("rejects unknown limit rows, zero limits, and limit commands on other pages", () => {
@@ -708,7 +741,7 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
 
   it("resets all limits through the confirmed action row", () => {
     const { settings, concurrencyUpdates } = harness({
-      concurrency: { defaultLimit: 9, providerLimits: { anthropic: 2 } },
+      concurrency: { global: { default: 9, providers: { anthropic: 2 } } },
     });
     settings.execute({ kind: "open" });
     settings.execute({ kind: "select", id: "concurrency" });
@@ -719,12 +752,12 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
       "addProviderLimit",
       "addModelLimit",
     ]);
-    expect(concurrencyUpdates).toEqual([{ scope: "reset" }]);
+    expect(concurrencyUpdates).toEqual([{ target: "global", update: { scope: "reset" } }]);
   });
 
   it("keeps the saved limits and reports an explicit notice when the commit fails", () => {
-    const { settings, concurrencyView } = harness({
-      concurrency: { providerLimits: { anthropic: 2 } },
+    const { settings, readConcurrencyView } = harness({
+      concurrency: { global: { providers: { anthropic: 2 } } },
       failUpdatesWith: "disk full",
     });
     settings.execute({ kind: "open" });
@@ -734,8 +767,134 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
       severity: "error",
       message: "Failed to save setting: disk full",
     });
-    expect(result.snapshot.rows.find((row) => row.id === "provider:anthropic")!.value).toBe("2 slots");
-    expect(concurrencyView.providerLimits.anthropic).toBe(2);
+    expect(result.snapshot.rows.find((row) => row.id === "provider:anthropic")!.value).toBe("2 slots · Global");
+    expect(readConcurrencyView().global.providers!.anthropic).toBe(2);
+  });
+});
+
+describe("REQ-CONFIG-003 project write target", () => {
+  const trustedProject = (overrides: Record<string, unknown> = {}) => ({
+    projectLayer: {
+      state: "loaded" as const,
+      filePath: "H:/repo/.pi/subagents-lite.json",
+      writable: true,
+      ignoredEntryCount: 0,
+      ...overrides,
+    },
+  });
+
+  it("REQ-CONFIG-003 shows no project note or write target while untrusted", () => {
+    const { settings } = harness();
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    expect(result.snapshot.rows.some((row) => row.id === "writeTarget")).toBe(false);
+    expect(result.snapshot.rows.some((row) => row.id === "projectLayerNote")).toBe(false);
+  });
+
+  it("REQ-CONFIG-003 defaults to the Global target and switches without any owner write", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: { ...trustedProject(), project: { providers: { anthropic: 1 } } },
+    });
+    settings.execute({ kind: "open" });
+    const opened = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    const targetRow = opened.snapshot.rows.find((row) => row.id === "writeTarget")!;
+    expect(targetRow).toMatchObject({ kind: "choice", value: "Global", choices: ["Global", "Project"] });
+
+    const switched = expectOk(settings.execute({ kind: "set-value", id: "writeTarget", value: "Project" }));
+    expect(switched.snapshot.rows.find((row) => row.id === "writeTarget")!.value).toBe("Project");
+    // Project layer rows now drive the set: its provider override is a row,
+    // the global one is not.
+    expect(switched.snapshot.rows.some((row) => row.id === "provider:anthropic")).toBe(true);
+    expect(concurrencyUpdates).toEqual([]);
+
+    // Leaving and re-entering the page resets the target to Global.
+    settings.execute({ kind: "back" });
+    const reopened = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    expect(reopened.snapshot.rows.find((row) => row.id === "writeTarget")!.value).toBe("Global");
+  });
+
+  it("REQ-CONFIG-003 routes project writes to the project layer and clears back to inheritance", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: {
+        ...trustedProject(),
+        global: { providers: { anthropic: 2 } },
+        project: { providers: { anthropic: 1 } },
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    settings.execute({ kind: "set-value", id: "writeTarget", value: "Project" });
+
+    const removed = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: null }));
+    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed Provider limit for anthropic (Project)" });
+    expect(concurrencyUpdates).toEqual([
+      { target: "project", update: { scope: "provider", key: "anthropic", limit: null } },
+    ]);
+    // The project layer no longer offers that row; the global override still
+    // exists but belongs to the Global target's row set.
+    expect(removed.snapshot.rows.find((r) => r.id === "provider:anthropic")).toBeUndefined();
+  });
+
+  it("REQ-RUNTIME-008 reports a shadowed global write without changing the effective value", () => {
+    const { settings, readConcurrencyView } = harness({
+      concurrency: {
+        ...trustedProject(),
+        global: { providers: { anthropic: 2 } },
+        project: { providers: { anthropic: 1 } },
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const result = expectOk(settings.execute({ kind: "update-limit", id: "provider:anthropic", limit: 9 }));
+    expect(result.snapshot.notice!.message).toBe(
+      "anthropic concurrency set to 9 (Global) (shadowed by a project override; effective value unchanged)",
+    );
+    const view = readConcurrencyView();
+    expect(view.effective.providers.anthropic).toBe(1);
+    expect(view.provenance.providers.anthropic).toBe("project");
+    // The visible row still shows the effective project value.
+    expect(result.snapshot.rows.find((row) => row.id === "provider:anthropic")!.value).toBe("1 slot · Project");
+  });
+
+  it("REQ-CONFIG-003 renders the project note with state, path, and ignored-entry warning", () => {
+    const { settings } = harness({
+      concurrency: trustedProject({ ignoredEntryCount: 2 }),
+    });
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    const note = result.snapshot.rows.find((row) => row.id === "projectLayerNote")!;
+    expect(note.kind).toBe("note");
+    expect(note.label).toBe("Project config · loaded · 2 unusable entries ignored");
+    expect(note.detail).toBe("H:/repo/.pi/subagents-lite.json");
+  });
+
+  it("REQ-CONFIG-003 offers no project write target for a malformed project file", () => {
+    const { settings } = harness({
+      concurrency: trustedProject({ state: "malformed", writable: false }),
+    });
+    settings.execute({ kind: "open" });
+    const result = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    expect(result.snapshot.rows.some((row) => row.id === "writeTarget")).toBe(false);
+    expect(result.snapshot.rows.find((row) => row.id === "projectLayerNote")!.label)
+      .toBe("Project config · malformed");
+    const forced = settings.execute({ kind: "set-value", id: "writeTarget", value: "Project" });
+    expect(forced).toMatchObject({ ok: false, error: { code: "unknown-row" } });
+  });
+
+  it("REQ-CONFIG-003 shows a document-malformed failure as an explicit notice with the previous value kept", () => {
+    const { settings, readConcurrencyView } = harness({
+      concurrency: { ...trustedProject(), project: { default: 2 } },
+      failUpdatesWith: "Configuration document is malformed",
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    settings.execute({ kind: "set-value", id: "writeTarget", value: "Project" });
+    const result = expectOk(settings.execute({ kind: "set-value", id: "defaultConcurrency", value: "7" }));
+    expect(result.snapshot.notice).toEqual({
+      severity: "error",
+      message: "Failed to save setting: Configuration document is malformed",
+    });
+    expect(readConcurrencyView().project.default).toBe(2);
   });
 });
 
@@ -1317,7 +1476,10 @@ describe("REQ-SETTINGS-005 serializable result contract", () => {
 
 describe("embedded owner schemas", () => {
   it("embeds runtime concurrency, status, and fault schemas instead of restating them", () => {
-    expect(ConcurrencyLimitUpdateSchema).toBe(ConcurrencyLimitsUpdateSchema);
+    // v2 wraps the runtime update with a write target instead of aliasing it.
+    expect(Check(ConcurrencyLimitUpdateSchema, { target: "project", update: { scope: "default", limit: 2 } })).toBe(true);
+    expect(Check(ConcurrencyLimitUpdateSchema, { target: "session", update: { scope: "default", limit: 2 } })).toBe(false);
+    expect(Check(ConcurrencyLimitUpdateSchema, { scope: "default", limit: 2 })).toBe(false);
     expect(DebugFaultSchema).toBe(DebugFaultKindSchema);
     expect(DebugStatusPreviewSchema).toBe(AgentStatusSchema);
   });

@@ -3,10 +3,15 @@ import { Type, type Static } from "typebox";
 // choices assembly can honor.
 import { SystemPromptModeSchema } from "../../prompt/public.js";
 import { ThinkingLevelSchema } from "../../model-access/public.js";
-import { ConfigurationCommitFailureCodeSchema } from "../../configuration/public.js";
+import { ConfigurationCommitFailureCodeSchema, ConfigurationDocumentStatusSchema } from "../../configuration/public.js";
 import {
   AgentStatusSchema,
+  ConcurrencyLayerFragmentSchema,
+  ConcurrencyLimitsFragmentSchema,
   ConcurrencyLimitsUpdateSchema,
+  ConcurrencyProjectFragmentSchema,
+  ConcurrencyProvenanceSchema,
+  ConcurrencyTargetSchema,
   DebugFaultKindSchema,
 } from "../../subagent-runtime/public.js";
 
@@ -200,21 +205,45 @@ export const PromptSettingUpdateSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
-// Concurrency view: saved overrides plus the active provider/model inventory
-// the owner computed, so the page can split active, inactive, and addable
-// rows without knowing where the inventory comes from.
+// Page-level vocabulary for the project configuration layer. The settings
+// module owns the word "untrusted"; configuration only reports document
+// status, and bootstrap composes the two.
+export const ProjectLayerStateSchema = Type.Union([
+  Type.Literal("untrusted"),
+  ConfigurationDocumentStatusSchema,
+]);
+
+export const ConcurrencyProjectLayerViewSchema = Type.Object({
+  state: ProjectLayerStateSchema,
+  /** Absent while untrusted; the page then never names the file. */
+  filePath: Type.Optional(Type.String({ minLength: 1 })),
+  /** trusted && state !== "malformed"; gates the write-target choice. */
+  writable: Type.Boolean(),
+  /** Parse warnings for the project layer; > 0 renders a non-blocking notice. */
+  ignoredEntryCount: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+
+// Concurrency view v2: the merged effective values and their provenance are
+// display-only; the sparse per-layer fragments drive the row sets for the
+// selected write target so the page never re-derives merge policy.
 export const ConcurrencySettingsViewSchema = Type.Object({
-  defaultLimit: Type.Integer({ minimum: 1 }),
+  effective: ConcurrencyLimitsFragmentSchema,
+  provenance: ConcurrencyProvenanceSchema,
+  global: ConcurrencyLayerFragmentSchema,
+  project: ConcurrencyProjectFragmentSchema,
+  projectLayer: ConcurrencyProjectLayerViewSchema,
   factoryDefaultLimit: Type.Integer({ minimum: 1 }),
-  providerLimits: Type.Record(Type.String(), Type.Integer({ minimum: 1 })),
-  modelLimits: Type.Record(Type.String(), Type.Integer({ minimum: 1 })),
   activeProviders: Type.Array(Type.String()),
   activeModels: Type.Array(Type.String()),
 }, { additionalProperties: false });
 
-// Runtime owns the persisted concurrency update. A second union here is
-// how a settings page could commit a shape replaceLimits later refuses.
-export const ConcurrencyLimitUpdateSchema = ConcurrencyLimitsUpdateSchema;
+// Runtime owns the persisted concurrency update vocabulary; the settings
+// command adds only the write target. A second union here is how a settings
+// page could commit a shape replaceLimits later refuses.
+export const ConcurrencyLimitUpdateSchema = Type.Object({
+  target: ConcurrencyTargetSchema,
+  update: ConcurrencyLimitsUpdateSchema,
+}, { additionalProperties: false });
 
 // ── Debug page boundary ───────────────────────────────────────────
 // The one-shot fault stays UI-only and unpersisted (REQ-RUNTIME-007); the
@@ -346,6 +375,8 @@ export type PromptSettingsView = Static<typeof PromptSettingsViewSchema>;
 export type PromptSettingUpdate = Static<typeof PromptSettingUpdateSchema>;
 export type ConcurrencySettingsView = Static<typeof ConcurrencySettingsViewSchema>;
 export type ConcurrencyLimitUpdate = Static<typeof ConcurrencyLimitUpdateSchema>;
+export type ProjectLayerState = Static<typeof ProjectLayerStateSchema>;
+export type ConcurrencyProjectLayerView = Static<typeof ConcurrencyProjectLayerViewSchema>;
 export type DebugFault = Static<typeof DebugFaultSchema>;
 export type DebugStatusPreview = Static<typeof DebugStatusPreviewSchema>;
 export type DebugAgentType = Static<typeof DebugAgentTypeSchema>;
