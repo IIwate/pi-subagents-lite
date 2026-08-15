@@ -13,6 +13,7 @@ The module exposes one `public.ts` surface. Cross-module values are JSON-seriali
 - `AgentSourceLoadRequestSchema` and `AgentSourceLoadResultSchema` define the filesystem repository boundary. Worktree files arrive in `worktreeDefinitions` so merge can keep them additive.
 - `ResolveAgentPolicyCommandSchema` and `ResolvedAgentLoadingPolicySchema` resolve tool, skill, and extension loading for one definition. Implicit defaults and the host's fallback registered-tool list arrive as command configuration.
 - `excludeInheritedTools` removes tool names a Subagent must not inherit. Policy resolve applies it to registered and allowlisted tools.
+- `AgentTypeResolutionSchema` and `ResolveAgentTypeNameQuerySchema` define the deterministic type-name resolution boundary (REQ-AGENT-004). `resolveAgentTypeName` checks the query and its own result and throws `TypeError` on either violation.
 - `AgentDefinitionSnapshotSchema` is also consumed by the runtime's `AcceptedRunPolicySchema` through the catalogue public surface.
 
 Exact fields are owned by the TypeBox schemas introduced in the relevant vertical slice. This document does not duplicate field lists.

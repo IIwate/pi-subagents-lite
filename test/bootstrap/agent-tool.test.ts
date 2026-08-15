@@ -547,6 +547,48 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     expect(mgr.spawnCommands[0].type).toBe("feature-reviewer");
   });
 
+  it("REQ-AGENT-004 refuses an ambiguous agent type with sorted candidates and does not spawn", async () => {
+    const definition = { description: "Ambiguous pair", systemPrompt: "Review." };
+    agents.register(new Map([
+      ["reviewer-X", { name: "reviewer-X", ...definition }],
+      ["Reviewer-x", { name: "Reviewer-x", ...definition }],
+    ]));
+
+    await expect(
+      execute(
+        "tc-ambiguous",
+        makeParams({ agent: "reviewer-x" }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow('Ambiguous agent type "reviewer-x". Matching agent types: Reviewer-x, reviewer-X');
+    expect(mgr.spawnCommands).toHaveLength(0);
+  });
+
+  it("REQ-AGENT-004 lets a newly discovered exact name win over an older case-folded match after rescan", async () => {
+    const definition = { description: "Registered earlier", systemPrompt: "Review." };
+    agents.register(new Map([["Feature-Reviewer", { name: "Feature-Reviewer", ...definition }]]));
+    const agentDir = join(worktree, ".pi", "agents");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(
+      join(agentDir, "feature-reviewer.md"),
+      makeAgentMd({ name: "feature-reviewer" }),
+    );
+
+    const result = await execute(
+      "tc-rescan-exact",
+      makeParams({ agent: "feature-reviewer", worktree_path: worktree }),
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(mgr.spawnCommands).toHaveLength(1);
+    expect(mgr.spawnCommands[0].type).toBe("feature-reviewer");
+  });
+
   it("throws an unknown type when discovery without a worktree finds nothing", async () => {
     await expect(
       execute(

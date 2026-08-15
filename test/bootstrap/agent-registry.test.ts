@@ -126,13 +126,13 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
       registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
-      expect(registry.resolveType("feature-reviewer")).toBeUndefined();
+      expect(registry.resolveType("feature-reviewer")).toEqual({ kind: "not-found" });
 
       const result = await registry.discoverNew(worktreeDir);
       expect(result).toMatchObject({ ok: true });
       expect(result.ok && result.added).toBeGreaterThanOrEqual(1);
 
-      expect(registry.resolveType("feature-reviewer")).toBe("feature-reviewer");
+      expect(registry.resolveType("feature-reviewer")).toEqual({ kind: "resolved", name: "feature-reviewer", matchedBy: "exact" });
       expect(registry.agentConfig("feature-reviewer")?.description).toBe("Reviews feature branches");
     } finally {
       cleanupProject();
@@ -151,7 +151,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
       registry.register(new Map());
 
       await registry.discoverNew();
-      expect(registry.resolveType("feature-reviewer")).toBeUndefined();
+      expect(registry.resolveType("feature-reviewer")).toEqual({ kind: "not-found" });
     } finally {
       cleanupProject();
       cleanupWt();
@@ -169,10 +169,10 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
       registry.register(new Map());
 
       await registry.discoverNew(worktreeDir);
-      expect(registry.resolveType("wt-agent")).toBe("wt-agent");
+      expect(registry.resolveType("wt-agent")).toEqual({ kind: "resolved", name: "wt-agent", matchedBy: "exact" });
 
       const second = await registry.discoverNew();
-      expect(registry.resolveType("wt-agent")).toBe("wt-agent");
+      expect(registry.resolveType("wt-agent")).toEqual({ kind: "resolved", name: "wt-agent", matchedBy: "exact" });
       expect(second).toEqual({ ok: true, added: 0 });
     } finally {
       cleanupProject();
@@ -194,8 +194,8 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
 
       const result = await registry.discoverNew(worktreeDir);
 
-      expect(registry.resolveType("project-agent")).toBe("project-agent");
-      expect(registry.resolveType("wt-agent")).toBe("wt-agent");
+      expect(registry.resolveType("project-agent")).toEqual({ kind: "resolved", name: "project-agent", matchedBy: "exact" });
+      expect(registry.resolveType("wt-agent")).toEqual({ kind: "resolved", name: "wt-agent", matchedBy: "exact" });
       expect(result.ok && result.added).toBeGreaterThanOrEqual(2);
     } finally {
       cleanupProject();
@@ -253,7 +253,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
       registry.register(new Map());
 
       expect(await registry.discoverNew("")).toEqual({ ok: true, added: 0 });
-      expect(registry.resolveType("wt-agent")).toBeUndefined();
+      expect(registry.resolveType("wt-agent")).toEqual({ kind: "not-found" });
     } finally {
       cleanupProject();
       cleanupWt();

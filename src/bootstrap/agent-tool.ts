@@ -132,27 +132,37 @@ async function executeAgentTool(
   }
 
   const type = (params.agent as string) || "general-purpose";
-  let resolvedType = runtime.agents.resolveType(type);
-  if (!resolvedType) {
-    // Not found in registry — try scanning filesystem for agents added during the session.
-    // The worktree agents directory is offered only when the parent session's
-    // project is trusted (REQ-CATALOGUE-003); the same-repo worktree inherits
-    // that verdict, and git validation above already ran regardless.
-    const projectTrusted = runtime.sessionCtx?.isProjectTrusted() === true;
-    const worktreeDir = projectTrusted && validatedWorktreePath
-      ? projectAgentsDirPath(validatedWorktreePath, hostInstallationPaths.projectConfigDirectoryName)
-      : undefined;
+  // The worktree agents directory is offered to rescan only when the parent
+  // session's project is trusted (REQ-CATALOGUE-003); the same-repo worktree
+  // inherits that verdict, and git validation above already ran regardless.
+  const projectTrusted = runtime.sessionCtx?.isProjectTrusted() === true;
+  const worktreeDir = projectTrusted && validatedWorktreePath
+    ? projectAgentsDirPath(validatedWorktreePath, hostInstallationPaths.projectConfigDirectoryName)
+    : undefined;
+
+  let resolution = runtime.agents.resolveType(type);
+  if (!(resolution.kind === "resolved" && resolution.matchedBy === "exact")) {
+    // Anything short of an exact canonical hit triggers one authorized rescan
+    // (REQ-AGENT-004): a type added to disk mid-session must win as an exact
+    // name over a stale case-folded or display-name match. The second
+    // resolution is final.
     const discovered = await runtime.agents.discoverNew(worktreeDir);
     // A broken scan is reported instead of being read as "no such type": the
     // parent would otherwise correct a spelling that was never wrong.
     if (!discovered.ok) {
       throw new Error(`Agent type lookup failed: ${discovered.message}`);
     }
-    resolvedType = runtime.agents.resolveType(type);
+    resolution = runtime.agents.resolveType(type);
   }
-  if (!resolvedType) {
+  if (resolution.kind === "ambiguous") {
+    // Pre-spawn refusal: name the stable-sorted candidates so the parent can
+    // self-correct in one turn instead of getting a silent first match.
+    throw new Error(`Ambiguous agent type "${type}". Matching agent types: ${resolution.candidates.join(", ")}`);
+  }
+  if (resolution.kind !== "resolved") {
     throw new Error(`Unknown agent type: ${type}`);
   }
+  const resolvedType = resolution.name;
 
   const prompt = params.prompt as string;
   const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);

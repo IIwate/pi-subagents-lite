@@ -141,3 +141,33 @@ export type ResolveAgentPolicyConfiguration = Static<typeof ResolveAgentPolicyCo
 export type ResolveAgentPolicyCommand = Static<typeof ResolveAgentPolicyCommandSchema>;
 export type ResolvedAgentLoadingPolicy = Static<typeof ResolvedAgentLoadingPolicySchema>;
 export type ResolveAgentPolicyResult = Static<typeof ResolveAgentPolicyResultSchema>;
+
+/** Deterministic outcome of resolving a queried Agent type name (REQ-AGENT-004). */
+export const AgentTypeResolutionSchema = Type.Union([
+  Type.Object({
+    kind: Type.Literal("resolved"),
+    name: Type.String({ minLength: 1 }),
+    matchedBy: Type.Union([
+      Type.Literal("exact"),
+      Type.Literal("case-folded"),
+      Type.Literal("display-name"),
+    ]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("ambiguous"),
+    /** Canonical names, deduplicated, code-unit ascending. */
+    candidates: Type.Array(Type.String({ minLength: 1 }), { minItems: 2 }),
+  }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("not-found") }, { additionalProperties: false }),
+]);
+
+export const ResolveAgentTypeNameQuerySchema = Type.Object({
+  name: Type.String(),
+  entries: Type.Array(Type.Object({
+    name: Type.String({ minLength: 1 }),
+    displayName: Type.Optional(Type.String()),
+  }, { additionalProperties: false })),
+}, { additionalProperties: false });
+
+export type AgentTypeResolution = Static<typeof AgentTypeResolutionSchema>;
+export type ResolveAgentTypeNameQuery = Static<typeof ResolveAgentTypeNameQuerySchema>;

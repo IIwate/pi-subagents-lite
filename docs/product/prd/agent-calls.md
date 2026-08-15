@@ -18,6 +18,10 @@ After authorization, a running or queued call retains its complete Accepted run 
 
 `StopAgent` stops accepted work according to the current foreground/background rules. `AgentStatus` reports the existing lifecycle and delivery information, including explicit acknowledgement behavior.
 
+### REQ-AGENT-004 — Deterministic Agent type resolution
+
+A queried Agent type resolves by exact canonical name first, then a unique case-folded canonical match, then a unique display-name match. Any collision returns an explicit tool error listing the stably sorted candidate names and does not spawn. Any outcome short of an exact canonical hit triggers one on-demand rescan of the authorized sources, after which a newly discovered exact name wins over an older case-folded or display-name match.
+
 ### REQ-WORKTREE-001 — Validate Worktree targets
 
 An optional `worktree_path` is accepted only when it resolves to the parent repository or one of its Worktrees. The Agent tool validates and resolves it once before on-demand catalogue discovery, then lifecycle consumes that validated snapshot as the Child cwd without probing Git again. Missing paths, non-directories, non-repositories, and paths from another repository return a specific failure outcome.
@@ -38,7 +42,7 @@ A session whose Pi context reports the project as not trusted loads only built-i
 
 - A new user-facing prompt inspection feature.
 - A new way for users to start a Subagent without the parent LLM's `Agent` call.
-- Changing Agent names, existing tool names, or Worktree validation semantics.
+- Changing Agent names, existing tool names, or Worktree validation semantics. REQ-AGENT-004 changes resolution determinism only; a display name remains a valid unique alias for its Agent type.
 
 ## Acceptance intent
 

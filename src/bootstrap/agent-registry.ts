@@ -18,8 +18,10 @@ import { BUILTIN_TOOL_NAMES } from "../platform/pi/agent-types.js";
 import type { SystemPromptMode } from "../modules/prompt/public.js";
 import {
   resolveAgentDefinitionPolicy,
+  resolveAgentTypeName,
   type AgentCatalogue,
   type AgentDefinitionSnapshot,
+  type AgentTypeResolution,
   type ResolvedAgentLoadingPolicy,
 } from "../modules/agent-catalogue/public.js";
 
@@ -83,8 +85,12 @@ export interface AgentRegistry {
   setDefaultAgentsDisabled(disabled: boolean): void;
   /** Scan the known roots for types not yet registered. */
   discoverNew(worktreeDir?: string): Promise<DiscoverAgentsResult>;
-  /** Resolve a type name case-insensitively, also matching displayName. */
-  resolveType(name: string): string | undefined;
+  /**
+   * Resolve a queried type name deterministically (REQ-AGENT-004). The truth
+   * table lives in the catalogue core; the registry only supplies its current
+   * entries snapshot.
+   */
+  resolveType(name: string): AgentTypeResolution;
   /** The registered definition for a type, or undefined. */
   agentConfig(name: string): AgentConfig | undefined;
   /** Visible type names, for spawning and guidance. */
@@ -135,19 +141,23 @@ export function createAgentRegistry(options: { catalogue: AgentCatalogue }): Age
   let scanRoots: AgentScanRoots = { globalDirectory: "" };
   let defaultAgentsDisabled = false;
 
-  const resolveType = (name: string): string | undefined => {
-    if (!name) return undefined;
-    if (agents.has(name)) return name;
-    const lower = name.toLowerCase();
-    for (const [key, config] of agents.entries()) {
-      if (key.toLowerCase() === lower) return key;
-      if ((config.displayName ?? "").toLowerCase() === lower) return key;
-    }
-    return undefined;
+  const resolveType = (name: string): AgentTypeResolution => resolveAgentTypeName({
+    name,
+    entries: [...agents.entries()].map(([key, config]) => ({
+      name: key,
+      ...(config.displayName !== undefined ? { displayName: config.displayName } : {}),
+    })),
+  });
+
+  // Internal reads take a value only from a resolved outcome; ambiguity is a
+  // caller-facing verdict, not a lookup result.
+  const resolvedName = (name: string): string | undefined => {
+    const resolution = resolveType(name);
+    return resolution.kind === "resolved" ? resolution.name : undefined;
   };
 
   const agentConfig = (name: string): AgentConfig | undefined => {
-    const key = resolveType(name);
+    const key = resolvedName(name);
     return key ? agents.get(key) : undefined;
   };
 
