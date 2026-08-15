@@ -135,8 +135,11 @@ async function executeAgentTool(
   let resolvedType = runtime.agents.resolveType(type);
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
-    // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
-    const worktreeDir = validatedWorktreePath
+    // The worktree agents directory is offered only when the parent session's
+    // project is trusted (REQ-CATALOGUE-003); the same-repo worktree inherits
+    // that verdict, and git validation above already ran regardless.
+    const projectTrusted = runtime.sessionCtx?.isProjectTrusted() === true;
+    const worktreeDir = projectTrusted && validatedWorktreePath
       ? projectAgentsDirPath(validatedWorktreePath, hostInstallationPaths.projectConfigDirectoryName)
       : undefined;
     const discovered = await runtime.agents.discoverNew(worktreeDir);

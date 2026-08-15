@@ -15,7 +15,7 @@ import type { AgentCatalogue } from "../../src/modules/agent-catalogue/public.js
 
 function newRegistry(catalogue: AgentCatalogue = createAgentCatalogueRuntime()): AgentRegistry {
   const registry = createAgentRegistry({ catalogue });
-  registry.setScanRoots("", "");
+  registry.setScanRoots({ globalDirectory: "/no-user-agents" });
   registry.register(new Map());
   return registry;
 }
@@ -86,7 +86,7 @@ describe("agent registry — built-in type policy (REQ-CATALOGUE-002)", () => {
     ], "project-agents");
 
     try {
-      registry.setScanRoots("", projectDir, true);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir }, true);
       registry.register(new Map(), { disableDefaultAgents: true });
 
       await registry.discoverNew();
@@ -123,7 +123,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       expect(registry.resolveType("feature-reviewer")).toBeUndefined();
@@ -147,7 +147,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       await registry.discoverNew();
@@ -165,7 +165,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       await registry.discoverNew(worktreeDir);
@@ -189,7 +189,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       const result = await registry.discoverNew(worktreeDir);
@@ -208,7 +208,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     const { dir: baseDir, cleanup: cleanupBase } = tempDirWithFiles([], "nonexistent-base");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       const result = await registry.discoverNew(`${baseDir}/.pi/agents`);
@@ -226,7 +226,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       await registry.discoverNew(worktreeDir);
@@ -249,7 +249,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       expect(await registry.discoverNew("")).toEqual({ ok: true, added: 0 });
@@ -269,7 +269,7 @@ describe("agent registry — on-demand discovery (REQ-CATALOGUE-001)", () => {
     ], "worktree-agents");
 
     try {
-      registry.setScanRoots("", projectDir);
+      registry.setScanRoots({ globalDirectory: "/no-user-agents", projectDirectory: projectDir });
       registry.register(new Map());
 
       await registry.discoverNew();

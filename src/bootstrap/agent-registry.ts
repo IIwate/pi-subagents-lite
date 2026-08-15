@@ -68,11 +68,17 @@ export type DiscoverAgentsResult =
   | { ok: true; added: number }
   | { ok: false; message: string };
 
+/** The scan roots on-demand discovery reuses; project root is absent in untrusted sessions. */
+export interface AgentScanRoots {
+  globalDirectory: string;
+  projectDirectory?: string;
+}
+
 export interface AgentRegistry {
   /** Replace the registry with a discovered catalogue. */
   register(userAgents: Map<string, AgentConfig>, options?: RegisterAgentsOptions): void;
-  /** Record the directories and default-agent policy used by on-demand discovery. */
-  setScanRoots(userDir: string, projectDir: string, disableDefaultAgents?: boolean): void;
+  /** Record the authorized roots and default-agent policy used by on-demand discovery. */
+  setScanRoots(roots: AgentScanRoots, disableDefaultAgents?: boolean): void;
   /** Apply the default-agent policy to future lookups without stopping accepted work. */
   setDefaultAgentsDisabled(disabled: boolean): void;
   /** Scan the known roots for types not yet registered. */
@@ -126,8 +132,7 @@ function loadingPolicyFor(
 
 export function createAgentRegistry(options: { catalogue: AgentCatalogue }): AgentRegistry {
   const agents = new Map<string, AgentConfig>();
-  let userAgentDir = "";
-  let projectAgentDir = "";
+  let scanRoots: AgentScanRoots = { globalDirectory: "" };
   let defaultAgentsDisabled = false;
 
   const resolveType = (name: string): string | undefined => {
@@ -164,9 +169,8 @@ export function createAgentRegistry(options: { catalogue: AgentCatalogue }): Age
       for (const [name, config] of userAgents) agents.set(name, config);
     },
 
-    setScanRoots(userDir, projectDir, disableDefaultAgents = false) {
-      userAgentDir = userDir;
-      projectAgentDir = projectDir;
+    setScanRoots(roots, disableDefaultAgents = false) {
+      scanRoots = { ...roots };
       defaultAgentsDisabled = disableDefaultAgents;
     },
 
@@ -187,8 +191,7 @@ export function createAgentRegistry(options: { catalogue: AgentCatalogue }): Age
       const result = await options.catalogue.execute({
         kind: "discover",
         roots: {
-          globalDirectory: userAgentDir,
-          projectDirectory: projectAgentDir,
+          ...scanRoots,
           ...(worktreeDir ? { worktreeDirectory: worktreeDir } : {}),
         },
         configuration: { disableDefaultAgents: defaultAgentsDisabled },

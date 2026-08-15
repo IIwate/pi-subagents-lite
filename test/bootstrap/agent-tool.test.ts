@@ -115,12 +115,15 @@ let forceBackground: boolean;
 let agents: AgentRegistry;
 
 /** Build the executor over an explicit composition-root record. */
-function buildExecutor(options: { parentCwd?: string; exec?: (...args: any[]) => any } = {}) {
+function buildExecutor(options: { parentCwd?: string; exec?: (...args: any[]) => any; trusted?: boolean } = {}) {
   mgr = stubManager();
   const pi = { sendMessage: vi.fn(), exec: options.exec ?? vi.fn() } as any;
   const runtime = fakeExtensionRuntime({
     pi,
-    sessionCtx: { cwd: options.parentCwd ?? "/home/test/project" } as any,
+    sessionCtx: {
+      cwd: options.parentCwd ?? "/home/test/project",
+      isProjectTrusted: () => options.trusted !== false,
+    } as any,
     manager: mgr.manager as any,
     agents,
     // The real probe over the scripted exec port: the executor's early check
@@ -144,7 +147,7 @@ beforeEach(() => {
   // types and must not leak them into later tests.
   agents = testAgentRegistry();
   const missingRoot = join(tmpdir(), "tool-execution-no-agents");
-  agents.setScanRoots(join(missingRoot, "user"), join(missingRoot, "project"));
+  agents.setScanRoots({ globalDirectory: join(missingRoot, "user"), projectDirectory: join(missingRoot, "project") });
   routing = disabledModelAccess();
   forceBackground = false;
 });
@@ -499,6 +502,28 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     ).rejects.toThrow("Unknown agent type: feature-reviewer");
 
     expect(discoverNew).toHaveBeenCalledWith(projectAgentsDirPath(normalized(worktree), ".pi"));
+  });
+
+  it("REQ-CATALOGUE-003 does not hand discovery a worktree root in an untrusted session", async () => {
+    execute = buildExecutor({ parentCwd: repo, exec: gitProbe(new Map([
+      [repo, join(repo, ".git")],
+      [worktree, join(repo, ".git")],
+    ])), trusted: false });
+    const discoverNew = vi.spyOn(agents, "discoverNew");
+
+    await expect(
+      execute(
+        "tc-disc-untrusted",
+        makeParams({ agent: "feature-reviewer", worktree_path: worktree }),
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Unknown agent type: feature-reviewer");
+
+    // Worktree git validation still ran (the call reached discovery), but the
+    // untrusted session must not expose the worktree agents directory.
+    expect(discoverNew).toHaveBeenCalledWith(undefined);
   });
 
   it("discovers a worktree-local agent type on demand", async () => {

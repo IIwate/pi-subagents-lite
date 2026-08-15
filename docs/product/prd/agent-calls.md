@@ -24,11 +24,15 @@ An optional `worktree_path` is accepted only when it resolves to the parent repo
 
 ### REQ-CATALOGUE-001 — Discover Agent types
 
-Built-in and custom Agent definitions are discovered from their supported sources, merged by the existing precedence rules, and exposed with their effective tool, skill, extension, prompt, model, and runtime settings.
+Built-in and custom Agent definitions are discovered from their supported sources — from authorized sources only, per REQ-CATALOGUE-003 — merged by the existing precedence rules, and exposed with their effective tool, skill, extension, prompt, model, and runtime settings.
 
 ### REQ-CATALOGUE-002 — Disable built-in Agent types safely
 
 Disabling built-in Agent types blocks new calls and on-demand discovery while preserving same-name custom definitions. Existing running and queued calls retain their Accepted run policy.
+
+### REQ-CATALOGUE-003 — Project resource trust gate
+
+A session whose Pi context reports the project as not trusted loads only built-in and global Agent definitions: project and worktree definition directories are never scanned, and their types never appear in guidance. When the context reports trusted, project definitions and same-repository worktree definitions load as before; a same-repo worktree inherits the parent session's verdict. Trust is re-read from the context at every session start. The gate does not change Worktree validation semantics or tool execution permissions, and this extension does not promise that Pi shows an explicit trust prompt for these resources — it only respects the boolean the context reports.
 
 ## Out of scope
 

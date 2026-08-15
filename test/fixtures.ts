@@ -140,7 +140,7 @@ export function fakeExtensionRuntime(
 ): ExtensionRuntime {
   return {
     pi: { sendMessage: vi.fn(), exec: vi.fn() } as any,
-    sessionCtx: { cwd: "/home/test" } as any,
+    sessionCtx: { cwd: "/home/test", isProjectTrusted: () => true } as any,
     manager: null,
     delivery: inertDelivery(),
     navigator: null,
@@ -346,6 +346,7 @@ export function tempDirWithFiles(
 export function fakeCtx(): any {
   return {
     cwd: "/home/test/project",
+    isProjectTrusted: vi.fn(() => true),
     sessionManager: {
       getBranch: () => [],
       getEntries: () => [],

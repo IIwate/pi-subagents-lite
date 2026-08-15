@@ -50,8 +50,9 @@ export const AgentCatalogueConfigurationSchema = Type.Object({
 }, { additionalProperties: false });
 
 export const AgentCatalogueRootsSchema = Type.Object({
-  globalDirectory: Type.String(),
-  projectDirectory: Type.String(),
+  globalDirectory: Type.String({ minLength: 1 }),
+  /** Absent when the session's project is not trusted; the repository then never sees a project path. */
+  projectDirectory: Type.Optional(Type.String({ minLength: 1 })),
   worktreeDirectory: Type.Optional(Type.String()),
 }, { additionalProperties: false });
 

@@ -63,12 +63,20 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
 }
 
 /**
- * Scan agent files from user and project directories, merge with defaults,
- * and register into the type registry.
+ * Scan agent files from the authorized roots, merge with defaults, and
+ * register into the type registry. Trust is read here and enters the
+ * catalogue only as the absence of a project root: an untrusted session
+ * never constructs the path, so the repository cannot receive it.
  */
 async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionContext): Promise<void> {
   const userAgentDir = userAgentsDirPath(hostInstallationPaths.agentDirectory);
-  const projectAgentDir = projectAgentsDirPath(ctx.cwd, hostInstallationPaths.projectConfigDirectoryName);
+  const projectTrusted = ctx.isProjectTrusted();
+  const roots = {
+    globalDirectory: userAgentDir,
+    ...(projectTrusted
+      ? { projectDirectory: projectAgentsDirPath(ctx.cwd, hostInstallationPaths.projectConfigDirectoryName) }
+      : {}),
+  };
 
   const configurationResult = configuration.execute({
     kind: "read-value",
@@ -82,10 +90,10 @@ async function scanAndRegisterAgents(runtime: ExtensionRuntime, ctx: ExtensionCo
     throw new TypeError("Agent catalogue configuration is invalid.");
   }
   const disableDefaults = catalogueConfiguration.disableDefaultAgents === true;
-  runtime.agents.setScanRoots(userAgentDir, projectAgentDir, disableDefaults);
+  runtime.agents.setScanRoots(roots, disableDefaults);
   const result = await runtime.catalogue.execute({
     kind: "discover",
-    roots: { globalDirectory: userAgentDir, projectDirectory: projectAgentDir },
+    roots,
     configuration: catalogueConfiguration,
   });
   if (!result.ok) throw new Error(result.error.message);

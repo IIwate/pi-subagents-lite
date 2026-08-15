@@ -147,7 +147,7 @@ import {
 // mocks.store.agent / mocks.routing live so per-test mutation keeps working.
 function buildRuntime(): ExtensionRuntime {
   const agents = testAgentRegistry();
-  agents.setScanRoots("/tmp/no-user-agents", "/tmp/no-project-agents", false);
+  agents.setScanRoots({ globalDirectory: "/tmp/no-user-agents", projectDirectory: "/tmp/no-project-agents" }, false);
   const runtime = fakeExtensionRuntime({
     pi: mocks.pi,
     sessionCtx: mocks.ctx,
@@ -238,6 +238,7 @@ describe("REQ-AGENT-002 queued invocation snapshots (session-driver / policy loc
     ];
     mocks.ctx = {
       cwd: "/tmp/project",
+      isProjectTrusted: () => true,
       model: models[0],
       modelRegistry: {
         find: vi.fn((provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id)),

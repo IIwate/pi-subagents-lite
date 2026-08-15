@@ -6,7 +6,7 @@ import {
   createBackgroundDelivery,
   type BackgroundResultRecord,
 } from "../../src/modules/background-result-delivery/public.js";
-import { createMockExtensionAPI, fakeCtx, fakePi } from "../fixtures.ts";
+import { createMockExtensionAPI, fakeCtx, fakePi, makeAgentMd } from "../fixtures.ts";
 
 // The navigator seed values flow from the persisted document through the real
 // bootstrap seams (configuration -> agent-settings -> navigator). vi.hoisted
@@ -202,5 +202,72 @@ describe("before_agent_start delivery ordering", () => {
     parentSettled();
     expect(pending).toEqual([]);
     expect(acknowledge).toHaveBeenCalledWith("parent-session", ["delivery-1"]);
+  });
+});
+
+describe("REQ-CATALOGUE-003 project resource trust gate", () => {
+  async function startSession(trusted: boolean, cwd: string) {
+    const api = createMockExtensionAPI();
+    const runtime = createExtensionRuntime(api.api as any);
+    setupEventListeners(runtime);
+    const sessionStart = api.listeners.find((listener) => listener.event === "session_start")!.handler;
+    const ctx = { ...fakeCtx(), cwd, hasUI: false, isProjectTrusted: () => trusted };
+    await sessionStart({}, ctx);
+    return runtime;
+  }
+
+  async function makeProjectDir(): Promise<string> {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const cwd = mkdtempSync(path.join(tmpdir(), "events-trust-project-"));
+    const agentsDir = path.join(cwd, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      path.join(agentsDir, "proj-agent.md"),
+      makeAgentMd({ name: "proj-agent", description: "Project agent" }),
+    );
+    return cwd;
+  }
+
+  it("loads project definitions when the session context reports project trust", async () => {
+    const cwd = await makeProjectDir();
+    const runtime = await startSession(true, cwd);
+    expect(runtime.agents.availableTypes()).toContain("proj-agent");
+  });
+
+  it("keeps project definitions unregistered and out of guidance when untrusted", async () => {
+    const cwd = await makeProjectDir();
+    const runtime = await startSession(false, cwd);
+    expect(runtime.agents.availableTypes()).not.toContain("proj-agent");
+    // Guidance derives its type list from the registry, so an unregistered
+    // type cannot leak into the parent prompt.
+    expect(runtime.agents.allTypes()).not.toContain("proj-agent");
+  });
+
+  it("re-reads trust from the session context on every session_start", async () => {
+    const cwd = await makeProjectDir();
+    const api = createMockExtensionAPI();
+    const runtime = createExtensionRuntime(api.api as any);
+    setupEventListeners(runtime);
+    const sessionStart = api.listeners.find((listener) => listener.event === "session_start")!.handler;
+    let trusted = false;
+    const ctx = { ...fakeCtx(), cwd, hasUI: false, isProjectTrusted: () => trusted };
+
+    await sessionStart({}, ctx);
+    expect(runtime.agents.availableTypes()).not.toContain("proj-agent");
+
+    trusted = true;
+    await sessionStart({}, ctx);
+    expect(runtime.agents.availableTypes()).toContain("proj-agent");
+  });
+
+  it("honors the trust boolean without assuming Pi prompted for these resources", async () => {
+    // SDK semantics note: Pi 0.84 does not probe `.pi/agents` or the project
+    // config file when deciding whether to ask for trust. The extension only
+    // respects the boolean it is handed; it must not read any trust store.
+    const cwd = await makeProjectDir();
+    const runtime = await startSession(true, cwd);
+    expect(runtime.agents.availableTypes()).toContain("proj-agent");
   });
 });

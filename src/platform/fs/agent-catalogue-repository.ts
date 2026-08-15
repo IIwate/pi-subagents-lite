@@ -41,7 +41,11 @@ export function createFileAgentCatalogueRepository(): AgentCatalogueRepository {
     async load(request) {
       const [globalDefinitions, projectDefinitions, worktreeDefinitions] = await Promise.all([
         scanAgentFilesInDir(request.globalDirectory, "user"),
-        scanAgentFilesInDir(request.projectDirectory, "project"),
+        // An absent root means bootstrap withheld it (untrusted session);
+        // scanning anyway would reintroduce the path this gate removed.
+        request.projectDirectory
+          ? scanAgentFilesInDir(request.projectDirectory, "project")
+          : Promise.resolve([]),
         request.worktreeDirectory
           ? scanAgentFilesInDir(request.worktreeDirectory, "project")
           : Promise.resolve([]),

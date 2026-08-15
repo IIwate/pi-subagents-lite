@@ -56,6 +56,12 @@ The extension's global resource root — the persisted configuration document, t
 
 Rationale: the previous self-built `<HOME>/.pi/agent` root diverged from Pi's actual root whenever HOME differed from the OS home (typical under MSYS-style shells) or Pi's agent-dir override was set, splitting the extension's config from the child session's resources. There is deliberately no old-location fallback, dual read, or automatic file relocation; custom locations are Pi's concern through its own environment entry point, whose variable name is not part of this repository's contract. HOME resolution remains only for the `~/.agents/skills` root — see the [configuration operations contract](../../src/modules/configuration/docs/operations.md).
 
+## Project resource trust
+
+Whether a session may load project-scoped extension resources — project and worktree Agent definition directories, and (once implemented) the project configuration file — is decided only in bootstrap, from the session context's `isProjectTrusted()` at each `session_start` (`/reload` therefore re-reads it). The verdict flows inward as data: an untrusted session never constructs the project or worktree roots, so the catalogue module and filesystem repository never receive those paths and own no trust vocabulary. A same-repository worktree named by `worktree_path` inherits the parent session's verdict; the Agent tool reads it from the stored session context.
+
+This is a negative gate on Pi's final boolean: `false` must block project/worktree resource loading, while `true` only means this context allows reading — Pi 0.84 does not probe `.pi/agents` or the extension's project config file when deciding to show a trust prompt, and this repository does not read any private trust store to compensate. That host gap is a recorded residual risk pending a Pi resource-declaration API. The gate does not change worktree git validation, tool execution permissions, context-file behavior, or accepted runs (their policy is locked).
+
 ## Configuration precedence
 
 Source precedence for operational settings, the HOME three-candidate call site, and the atomic fragment transaction are owned by the [configuration operations contract](../../src/modules/configuration/docs/operations.md). This file does not restate that list. Interactive product policies stay on persisted capability fragments; giving one an environment override is a separate decision.
