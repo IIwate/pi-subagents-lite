@@ -1,8 +1,9 @@
 import { Check } from "typebox/value";
 import {
   ConfigurationCommandSchema,
+  ConfigurationDocumentLoadResultSchema,
   ConfigurationResultSchema,
-  JsonObjectSchema,
+  type ConfigurationDocumentStatus,
   type ConfigurationResult,
   type JsonObject,
 } from "../contracts/configuration-contracts.js";
@@ -16,8 +17,17 @@ export interface Configuration {
   execute(command: unknown): ConfigurationResult;
 }
 
+/**
+ * Per-document commit behavior when the persisted file is malformed.
+ * `reset-on-commit` treats it as an empty document and overwrites (global
+ * status quo); `read-only` refuses with `document-malformed` and never
+ * touches disk (project layer).
+ */
+export type MalformedDocumentPolicy = "reset-on-commit" | "read-only";
+
 export interface CreateConfigurationOptions {
   repository: ConfigurationDocumentRepository;
+  malformedPolicy?: MalformedDocumentPolicy;
 }
 
 type FailureCode =
@@ -25,7 +35,8 @@ type FailureCode =
   | "repository-failure"
   | "invalid-repository-result"
   | "revision-conflict"
-  | "persistence-failure";
+  | "persistence-failure"
+  | "document-malformed";
 
 function failure(code: FailureCode, message: string): { ok: false; error: { code: FailureCode; message: string } } {
   return { ok: false, error: { code, message } };
@@ -53,30 +64,40 @@ function outbound(result: ConfigurationResult): ConfigurationResult {
  * The revision is transaction metadata and is never written to disk.
  */
 export function createConfiguration(options: CreateConfigurationOptions): Configuration {
+  const malformedPolicy = options.malformedPolicy ?? "reset-on-commit";
   let revision = 0;
   let document: JsonObject = {};
+  let status: ConfigurationDocumentStatus = "absent";
+  let malformedMessage = "";
 
   function loadFromRepository(): ConfigurationResult {
-    let loaded: JsonObject;
+    let loaded: unknown;
     try {
       loaded = options.repository.load();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown repository failure.";
       return failure("repository-failure", message);
     }
-    if (!Check(JsonObjectSchema, loaded)) {
-      return failure("invalid-repository-result", "Configuration repository returned a non-JSON document.");
+    if (!Check(ConfigurationDocumentLoadResultSchema, loaded)) {
+      return failure("invalid-repository-result", "Configuration repository returned an invalid load result.");
     }
-    document = loaded;
+    // absent and malformed both read as an empty document (current startup
+    // behavior); the status is what lets a read-only policy refuse writes.
+    status = loaded.status;
+    malformedMessage = loaded.status === "malformed" ? loaded.message : "";
+    document = loaded.status === "loaded" ? loaded.document : {};
     revision += 1;
-    return { ok: true, revision };
+    return { ok: true, revision, status };
   }
 
   const initial = loadFromRepository();
   if (!initial.ok) {
     // Startup keeps the approved current behavior: an unreadable document
-    // resolves to capability defaults rather than blocking the session.
+    // resolves to capability defaults rather than blocking the session. The
+    // status is malformed so a read-only policy still refuses writes.
     document = {};
+    status = "malformed";
+    malformedMessage = initial.error.message;
   }
 
   return {
@@ -104,7 +125,19 @@ export function createConfiguration(options: CreateConfigurationOptions): Config
             `Expected revision ${command.expectedRevision} but the current document is at ${revision}.`,
           );
         }
-        const candidate = applyFragmentAssignments(document, command.section, command.assignments);
+        const removals = command.removals ?? [];
+        if (removals.some((key) => Object.hasOwn(command.assignments, key))) {
+          return failure("invalid-command", "Commit assignments and removals overlap.");
+        }
+        if (malformedPolicy === "read-only" && status === "malformed") {
+          // The file could not be read, so a write would destroy whatever the
+          // user meant it to say. Refuse; the user fixes the file, not us.
+          return failure(
+            "document-malformed",
+            `Configuration document is malformed and this document is read-only until fixed: ${malformedMessage}`,
+          );
+        }
+        const candidate = applyFragmentAssignments(document, command.section, command.assignments, removals);
         try {
           options.repository.persist(candidate);
         } catch (error) {
@@ -114,6 +147,7 @@ export function createConfiguration(options: CreateConfigurationOptions): Config
           return failure("persistence-failure", message);
         }
         document = candidate;
+        status = "loaded";
         revision += 1;
         return { ok: true, revision };
       }

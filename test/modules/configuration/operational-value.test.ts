@@ -63,7 +63,7 @@ describe("interactive policy isolation from environment sources", () => {
     // fails only if someone wires one in, which is the revisit signal for
     // the no-implicit-override rule.
     const repository: ConfigurationDocumentRepository = {
-      load: () => ({ modelRouting: { enabled: true } }),
+      load: () => ({ status: "loaded" as const, document: { modelRouting: { enabled: true } } }),
       persist: () => {},
     };
     const configuration = createConfiguration({ repository });

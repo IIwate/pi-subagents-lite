@@ -869,7 +869,7 @@ describe("REQ-RUNTIME-007 debug page", () => {
 function persistFailingDisplayOwner(message: string) {
   const io = createConfigurationSectionIO(createConfiguration({
     repository: {
-      load: () => ({ agent: { showTools: true } }),
+      load: () => ({ status: "loaded" as const, document: { agent: { showTools: true } } }),
       persist() {
         throw new Error(message);
       },

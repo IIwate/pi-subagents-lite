@@ -21,11 +21,11 @@ The home directory is the one operational setting today and it serves exactly on
 
 The refactor preserves the current unversioned `modelRouting`, `agent`, and `concurrency` sections. A `revision` is runtime transaction metadata and is not written to disk. No dual-format reader or migration layer is introduced.
 
-The module owns the in-memory document, loaded once from the file repository at composition time. A missing or malformed file resolves to an empty document, matching the approved startup behavior.
+The module owns the in-memory document, loaded once from the file repository at composition time. The repository reports one of three states — `absent` (strictly a missing file), `loaded`, or `malformed` with a message for any other read failure. Both `absent` and `malformed` read as an empty document, matching the approved startup behavior; the status additionally governs writes under the facade's `malformedPolicy`: `reset-on-commit` (global document) overwrites a malformed file on the next commit as before, while `read-only` (project documents) refuses commits with `document-malformed` and never rewrites a file it could not read.
 
 ## Transaction boundary
 
-The owning capability validates and normalizes its proposed fragment, then submits one `commit-fragment` with the revision it last observed. The commit merges only the submitted assignments into the named section: keys it does not mention — including retired keys and keys owned by other capabilities — stay byte-identical on disk, because this build cannot distinguish junk from data a newer capability owns. A stale `expectedRevision` is rejected as `revision-conflict` before anything is written.
+The owning capability validates and normalizes its proposed fragment, then submits one `commit-fragment` with the revision it last observed. The commit merges only the submitted assignments into the named section and deletes only the named removals: keys it does not mention — including retired keys and keys owned by other capabilities — keep their JSON value, because this build cannot distinguish junk from data a newer capability owns. Removing the last key keeps an empty section object. The repository re-serializes the whole document, so JSON semantics are preserved but original whitespace or byte layout is not. A stale `expectedRevision` is rejected as `revision-conflict` before anything is written.
 
 ## Failure boundary
 

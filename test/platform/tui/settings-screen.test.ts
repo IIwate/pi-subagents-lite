@@ -39,7 +39,7 @@ import {
 function persistFailingDisplayOwner(message: string) {
   const io = createConfigurationSectionIO(createConfiguration({
     repository: {
-      load: () => ({ agent: { expandListByDefault: true, showTools: true } }),
+      load: () => ({ status: "loaded" as const, document: { agent: { expandListByDefault: true, showTools: true } } }),
       persist() {
         throw new Error(message);
       },

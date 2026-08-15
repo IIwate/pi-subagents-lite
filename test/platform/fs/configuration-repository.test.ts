@@ -2,6 +2,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { Check } from "typebox/value";
+import { ConfigurationDocumentLoadResultSchema } from "../../../src/modules/configuration/public.js";
 import { createFileConfigurationDocumentRepository } from "../../../src/platform/fs/configuration-document-repository.js";
 import {
   configFilePath,
@@ -25,12 +27,12 @@ afterEach(() => {
 });
 
 describe("file configuration document repository contract", () => {
-  it("loads an empty document for a missing file", () => {
+  it("reports a missing file as absent, distinct from malformed content", () => {
     const repository = createFileConfigurationDocumentRepository({ filePath: tempConfigFile() });
-    expect(repository.load()).toEqual({});
+    expect(repository.load()).toEqual({ status: "absent" });
   });
 
-  it("loads an empty document for malformed JSON and the JSON literal null", () => {
+  it("reports malformed JSON, the JSON literal null, and arrays as malformed with a message", () => {
     const filePath = tempConfigFile();
     mkdirSync(join(filePath, ".."), { recursive: true });
     const repository = createFileConfigurationDocumentRepository({ filePath });
@@ -42,7 +44,19 @@ describe("file configuration document repository contract", () => {
     writeFileSync(filePath, "[1,2]", "utf-8");
     const array = repository.load();
 
-    expect({ malformed, nullLiteral, array }).toEqual({ malformed: {}, nullLiteral: {}, array: {} });
+    for (const result of [malformed, nullLiteral, array]) {
+      expect(result).toMatchObject({ status: "malformed", message: expect.any(String) });
+      expect(Check(ConfigurationDocumentLoadResultSchema, JSON.parse(JSON.stringify(result)))).toBe(true);
+    }
+  });
+
+  it("reports a non-ENOENT read failure as malformed instead of absent", () => {
+    // A directory at the file path makes readFileSync fail with EISDIR.
+    const filePath = tempConfigFile();
+    mkdirSync(filePath, { recursive: true });
+    const repository = createFileConfigurationDocumentRepository({ filePath });
+
+    expect(repository.load()).toMatchObject({ status: "malformed", message: expect.any(String) });
   });
 
   it("persists the document atomically with the current two-space formatting", () => {
@@ -57,7 +71,7 @@ describe("file configuration document repository contract", () => {
     repository.persist(document);
 
     expect(readFileSync(filePath, "utf-8")).toBe(JSON.stringify(document, null, 2));
-    expect(repository.load()).toEqual(document);
+    expect(repository.load()).toEqual({ status: "loaded", document });
   });
 
   it("overwrites an existing file on a second persist", () => {
@@ -70,7 +84,7 @@ describe("file configuration document repository contract", () => {
     repository.persist(second);
 
     expect(readFileSync(filePath, "utf-8")).toBe(JSON.stringify(second, null, 2));
-    expect(repository.load()).toEqual(second);
+    expect(repository.load()).toEqual({ status: "loaded", document: second });
   });
 
   it("throws on persistence failure instead of swallowing it", () => {

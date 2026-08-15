@@ -55,7 +55,7 @@ describe("ConfigSectionIO commit", () => {
   it("forwards persistence-failure code, not only the message", () => {
     const io = createConfigurationSectionIO(createConfiguration({
       repository: {
-        load: () => ({}),
+        load: () => ({ status: "loaded" as const, document: {} }),
         persist() {
           throw new Error("EACCES: permission denied");
         },

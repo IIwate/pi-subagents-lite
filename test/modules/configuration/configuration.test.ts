@@ -3,6 +3,7 @@ import { Check } from "typebox/value";
 import {
   CommitConfigurationFragmentCommandSchema,
   CommitConfigurationFragmentResultSchema,
+  ConfigurationDocumentLoadResultSchema,
   ConfigurationResultSchema,
   ReadConfigurationValueCommandSchema,
   ReadConfigurationValueResultSchema,
@@ -29,7 +30,7 @@ function memoryRepository(initial: JsonObject = {}): MemoryRepository {
       document = structuredClone(next);
     },
     load() {
-      return structuredClone(document);
+      return { status: "loaded" as const, document: structuredClone(document) };
     },
     persist(next) {
       if (failure) {
@@ -203,7 +204,7 @@ describe("configuration public seam", () => {
 
     expect({ beforeReload, reload, afterReload }).toEqual({
       beforeReload: { ok: true, revision: 1, found: true, value: 6 },
-      reload: { ok: true, revision: 2 },
+      reload: { ok: true, revision: 2, status: "loaded" },
       afterReload: { ok: true, revision: 2, found: true, value: 9 },
     });
   });
@@ -232,5 +233,115 @@ describe("configuration public seam", () => {
     expect(Check(ConfigurationResultSchema, read)).toBe(true);
     expect(Check(ConfigurationResultSchema, commit)).toBe(true);
     expect(Check(ConfigurationResultSchema, reload)).toBe(true);
+  });
+});
+
+describe("configuration document status, removals, malformed policy", () => {
+  function loadResultRepository(loadResult: unknown): ConfigurationDocumentRepository & { persisted: JsonObject[] } {
+    const persisted: JsonObject[] = [];
+    return {
+      persisted,
+      load: () => structuredClone(loadResult) as any,
+      persist(next) {
+        persisted.push(structuredClone(next));
+      },
+    };
+  }
+
+  it("distinguishes absent, loaded, and malformed documents on reload", () => {
+    for (const [loadResult, status] of [
+      [{ status: "absent" }, "absent"],
+      [{ status: "loaded", document: { agent: { graceTurns: 6 } } }, "loaded"],
+      [{ status: "malformed", message: "bad JSON" }, "malformed"],
+    ] as const) {
+      const configuration = createConfiguration({ repository: loadResultRepository(loadResult) });
+      expect(configuration.execute({ kind: "reload" })).toEqual({ ok: true, revision: 2, status });
+    }
+  });
+
+  it("round-trips the load result schema and rejects invalid shapes", () => {
+    for (const value of [
+      { status: "absent" },
+      { status: "loaded", document: { a: 1 } },
+      { status: "malformed", message: "broken" },
+    ]) {
+      expect(Check(ConfigurationDocumentLoadResultSchema, JSON.parse(JSON.stringify(value)))).toBe(true);
+    }
+    expect(Check(ConfigurationDocumentLoadResultSchema, { status: "loaded" })).toBe(false);
+    expect(Check(ConfigurationDocumentLoadResultSchema, { status: "malformed" })).toBe(false);
+    expect(Check(ConfigurationDocumentLoadResultSchema, { status: "absent", document: {} })).toBe(false);
+    expect(Check(ConfigurationDocumentLoadResultSchema, { status: "unknown" })).toBe(false);
+  });
+
+  it("removes named keys while preserving unmentioned keys and keeping an emptied section", () => {
+    const repository = memoryRepository({
+      concurrency: { default: 4, providers: { openai: 2 }, junk: "keep" },
+    });
+    const configuration = createConfiguration({ repository });
+
+    const commit = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "concurrency",
+      assignments: {},
+      removals: ["providers"],
+    });
+    expect(commit).toEqual({ ok: true, revision: 2 });
+    expect(repository.persisted).toEqual([{ concurrency: { default: 4, junk: "keep" } }]);
+
+    const emptied = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 2,
+      section: "concurrency",
+      assignments: {},
+      removals: ["default", "junk", "not-present"],
+    });
+    expect(emptied).toEqual({ ok: true, revision: 3 });
+    expect(repository.persisted[1]).toEqual({ concurrency: {} });
+  });
+
+  it("rejects a commit whose assignments and removals overlap", () => {
+    const configuration = createConfiguration({ repository: memoryRepository({}) });
+    const result = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "concurrency",
+      assignments: { default: 2 },
+      removals: ["default"],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Commit assignments and removals overlap." },
+    });
+  });
+
+  it("refuses commits to a malformed document under the read-only policy without touching disk", () => {
+    const repository = loadResultRepository({ status: "malformed", message: "bad JSON" });
+    const configuration = createConfiguration({ repository, malformedPolicy: "read-only" });
+
+    const result = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "concurrency",
+      assignments: { default: 2 },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "document-malformed" } });
+    expect(repository.persisted).toEqual([]);
+  });
+
+  it("keeps the reset-on-commit policy overwriting a malformed document (global status quo)", () => {
+    const repository = loadResultRepository({ status: "malformed", message: "bad JSON" });
+    const configuration = createConfiguration({ repository });
+
+    const result = configuration.execute({
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "concurrency",
+      assignments: { default: 2 },
+    });
+
+    expect(result).toEqual({ ok: true, revision: 2 });
+    expect(repository.persisted).toEqual([{ concurrency: { default: 2 } }]);
   });
 });
