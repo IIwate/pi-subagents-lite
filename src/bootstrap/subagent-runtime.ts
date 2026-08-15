@@ -11,7 +11,7 @@ import {
   createNodeScheduler,
   createSystemClock,
 } from "../platform/process/runtime-services.js";
-import { configHome, customPromptPath } from "./configuration.js";
+import { customPromptPath, skillsUserHome } from "./configuration.js";
 
 export function createHostSubagentRuntime(options: {
   pi: ExtensionAPI;
@@ -27,7 +27,7 @@ export function createHostSubagentRuntime(options: {
       pi: options.pi,
       ctx: options.ctx,
       customPromptPath,
-      homeDirectory: configHome,
+      homeDirectory: skillsUserHome,
     }),
     clock: createSystemClock(),
     ids: createCryptoIdGenerator(),

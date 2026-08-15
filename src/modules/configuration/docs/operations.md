@@ -13,7 +13,9 @@ For operational settings only, the resolver uses:
 
 Interactive product policies such as Model access and Thinking access are not silently overridden by environment values: the document facade has no environment port, and only the composition root resolves operational values.
 
-The home directory is the one operational setting today. Its composition-root call site passes three candidates — environment, `.env`, and the OS home fallback — and does not pass a config-file value: the document's own location derives from this setting, so the file cannot locate itself. A set-but-empty variable counts as absent so it cannot blank out a usable lower-precedence source.
+Physical file locations are governed by REQ-CONFIG-002: they derive from the Pi agent directory and Pi's project config directory name, with no former-location fallback and no automatic migration.
+
+The home directory is the one operational setting today and it serves exactly one consumer: the user-level `.agents/skills` skill root. Its composition-root call site passes three candidates — environment, `.env`, and the OS home fallback — and does not pass a config-file value: nothing persisted derives from HOME anymore, and the resolver predates the document it once located. A set-but-empty variable counts as absent so it cannot blank out a usable lower-precedence source. Every persisted extension file location derives from the Pi agent directory instead; see [Canonical Pi host resources](../../../../docs/architecture/decisions.md).
 
 ## Physical format
 

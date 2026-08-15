@@ -9,10 +9,12 @@
  *   3. <agentDir>/skills (Pi's user default)
  *   4. <cwd>/.pi/skills (Pi's project default)
  *
- * The roots are separate inputs for separate policies. `userHome` follows this
- * extension's configuration precedence; `agentDir` is Pi's resolved resource
- * root. Folding them into one home split explicit skills from the child session
- * under PI_AGENT_DIR or MSYS-style HOME values.
+ * The roots are separate inputs for separate policies. `userHome` follows the
+ * extension's HOME resolution, which now serves only `.agents/skills` (see
+ * configuration operations doc); `agentDir` is Pi's resolved resource root and
+ * the source of every other persisted extension file. Folding them into one
+ * home split explicit skills from the child session under Pi agent-dir
+ * overrides or MSYS-style HOME values.
  *
  * Pi's loadSkills handles: .gitignore/.ignore/.fdignore, symlinks (follow +
  * canonical-path dedup), YAML frontmatter, name validation.

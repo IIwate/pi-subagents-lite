@@ -498,7 +498,7 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
       ),
     ).rejects.toThrow("Unknown agent type: feature-reviewer");
 
-    expect(discoverNew).toHaveBeenCalledWith(projectAgentsDirPath(normalized(worktree)));
+    expect(discoverNew).toHaveBeenCalledWith(projectAgentsDirPath(normalized(worktree), ".pi"));
   });
 
   it("discovers a worktree-local agent type on demand", async () => {

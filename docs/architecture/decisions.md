@@ -50,6 +50,12 @@ The Agent tool exposes `worktree_path` — the parent repository's main checkout
 
 Rejected alternatives: `cwd` (contradicts the stealth principle that the schema name is the documentation), `path_to_worktree` (no information gain, longer), `worktree_cwd` (category mismatch: "worktree" is a path concept, "cwd" a session concept). Trade-off: the name is single-purpose; if a future feature must target arbitrary directories, a separate less-restricted parameter is cheap to add later.
 
+## Canonical Pi host resources
+
+The extension's global resource root — the persisted configuration document, the custom prompt file, and global Agent definitions — is Pi's agent directory as reported by `getAgentDir()`, and every project resource directory uses Pi's `CONFIG_DIR_NAME`. Both facts are frozen at module load into one TypeBox-validated snapshot owned by `src/platform/pi/host-resources.ts`; bootstrap composes all paths from that snapshot and no other file hardcodes `.pi` or reconstructs a home-relative root. Validation fails closed: an unusable agent directory or a multi-segment config dir name refuses activation rather than persisting files to a guessed location.
+
+Rationale: the previous self-built `<HOME>/.pi/agent` root diverged from Pi's actual root whenever HOME differed from the OS home (typical under MSYS-style shells) or Pi's agent-dir override was set, splitting the extension's config from the child session's resources. There is deliberately no old-location fallback, dual read, or automatic file relocation; custom locations are Pi's concern through its own environment entry point, whose variable name is not part of this repository's contract. HOME resolution remains only for the `~/.agents/skills` root — see the [configuration operations contract](../../src/modules/configuration/docs/operations.md).
+
 ## Configuration precedence
 
 Source precedence for operational settings, the HOME three-candidate call site, and the atomic fragment transaction are owned by the [configuration operations contract](../../src/modules/configuration/docs/operations.md). This file does not restate that list. Interactive product policies stay on persisted capability fragments; giving one an environment override is a separate decision.

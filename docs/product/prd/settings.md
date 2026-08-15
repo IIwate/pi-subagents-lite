@@ -22,6 +22,10 @@ Successful settings changes apply to future Agent calls according to the existin
 
 If a setting cannot be persisted, the workflow shows an explicit failure and keeps the previous effective value. It does not partially update related settings or synchronize a manager or navigator with an unpersisted value.
 
+### REQ-CONFIG-002 — Canonical host resource locations
+
+The global configuration document, the custom prompt file, and global Agent definitions live in the Pi agent directory reported by the host. Project resource directories use Pi's project config directory name. There is no fallback to former locations and no automatic migration of files from a previous location; relocating the agent directory is done through Pi's own mechanism.
+
 ### REQ-SETTINGS-005 — Renderer-independent state
 
 Settings state and action results remain meaningful without Pi TUI. Pi input translation and rendering remain local to the host integration.

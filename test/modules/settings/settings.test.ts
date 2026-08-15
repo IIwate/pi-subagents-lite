@@ -7,6 +7,8 @@ await vi.hoisted(async () => {
   const home = mkdtempSync(path.join(tmpdir(), "settings-persist-home-"));
   mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
   process.env.HOME = home;
+  // Windows homedir() reads USERPROFILE; Pi's getAgentDir derives from it.
+  process.env.USERPROFILE = home;
 });
 
 import { describe, expect, it, vi } from "vitest";

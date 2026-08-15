@@ -55,8 +55,8 @@ Built-ins can be overridden by custom agents or disabled from `/agents`. Disabli
 
 Agent definitions are Markdown files loaded from:
 
-- `~/.pi/agent/agents/*.md` — user-wide agents.
-- `.pi/agents/*.md` — project agents.
+- `<Pi agent directory>/agents/*.md` — user-wide agents (default `~/.pi/agent/agents/`; relocating the agent directory is handled by Pi itself — see Pi's documentation).
+- `<project>/.pi/agents/*.md` — project agents (the `.pi` segment follows Pi's project config directory name).
 
 Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field.
 
@@ -189,7 +189,7 @@ Run `/agents` to configure:
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
 - one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
-Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
+Settings are stored in `<Pi agent directory>/subagents-lite.json` and custom prompt mode uses `<Pi agent directory>/subagents-lite-prompt.md`. The Pi agent directory defaults to `~/.pi/agent` and is relocated through Pi's own mechanism; the extension follows Pi and never reads former locations or migrates files automatically. If you previously relied on a custom `HOME` (for example under MSYS/Git Bash) to relocate these files, move them into the Pi agent directory — `HOME` now affects only the `~/.agents/skills` skill root.
 
 ## Upgrading on Windows
 

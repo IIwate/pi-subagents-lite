@@ -23,6 +23,8 @@ await vi.hoisted(async () => {
     JSON.stringify({ agent: { expandListByDefault: false, showTurns: false } }),
   );
   process.env.HOME = home;
+  // Windows homedir() reads USERPROFILE; Pi's getAgentDir derives from it.
+  process.env.USERPROFILE = home;
 });
 
 describe("ensureManagerAndNavigator", () => {

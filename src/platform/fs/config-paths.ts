@@ -3,31 +3,29 @@ import * as path from "node:path";
 /**
  * config-paths.ts — Physical locations of the extension's persisted files.
  *
- * Callers pass the resolved home directory explicitly so path policy stays
- * testable and no module-scope process access hides inside path building.
+ * Callers pass the resolved roots explicitly — the Pi agent directory for
+ * global files and Pi's project config directory name for project files — so
+ * path policy stays testable and no hardcoded location hides inside path
+ * building. The canonical sources of both roots live in
+ * `platform/pi/host-resources.ts`.
  */
 
-/** Root directory for all persisted extension state (`~/.pi/agent`). */
-export function resolveConfigRoot(home: string): string {
-  return path.join(home, ".pi", "agent");
-}
-
-/** The one persisted configuration document. */
-export function configFilePath(configRoot: string): string {
-  return path.join(configRoot, "subagents-lite.json");
+/** The one persisted global configuration document. */
+export function configFilePath(agentDirectory: string): string {
+  return path.join(agentDirectory, "subagents-lite.json");
 }
 
 /** Optional custom system prompt used by the "custom" prompt mode. */
-export function customPromptFilePath(configRoot: string): string {
-  return path.join(configRoot, "subagents-lite-prompt.md");
+export function customPromptFilePath(agentDirectory: string): string {
+  return path.join(agentDirectory, "subagents-lite-prompt.md");
 }
 
 /** User-level Agent definition directory scanned at session start. */
-export function userAgentsDirPath(configRoot: string): string {
-  return path.join(configRoot, "agents");
+export function userAgentsDirPath(agentDirectory: string): string {
+  return path.join(agentDirectory, "agents");
 }
 
 /** Project-level Agent definition directory under the session cwd. */
-export function projectAgentsDirPath(cwd: string): string {
-  return path.join(cwd, ".pi", "agents");
+export function projectAgentsDirPath(cwd: string, configDirName: string): string {
+  return path.join(cwd, configDirName, "agents");
 }

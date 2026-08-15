@@ -14,6 +14,8 @@ await vi.hoisted(async () => {
     JSON.stringify({ agent: { showTurns: false } }),
   );
   process.env.HOME = home;
+  // Windows homedir() reads USERPROFILE; Pi's getAgentDir derives from it.
+  process.env.USERPROFILE = home;
 });
 
 import { createExtensionRuntime } from "../../src/bootstrap/extension-runtime.js";

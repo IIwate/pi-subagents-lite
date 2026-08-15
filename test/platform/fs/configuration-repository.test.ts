@@ -6,7 +6,7 @@ import { createFileConfigurationDocumentRepository } from "../../../src/platform
 import {
   configFilePath,
   customPromptFilePath,
-  resolveConfigRoot,
+  projectAgentsDirPath,
   userAgentsDirPath,
 } from "../../../src/platform/fs/config-paths.js";
 
@@ -85,15 +85,15 @@ describe("file configuration document repository contract", () => {
 });
 
 describe("config path policy", () => {
-  it("derives all persisted locations from the resolved home directory", () => {
-    const root = resolveConfigRoot(join("H:", "users", "demo"));
-    expect(root).toBe(join("H:", "users", "demo", ".pi", "agent"));
+  it("REQ-CONFIG-002 derives all persisted global locations from the Pi agent directory", () => {
+    const root = join("H:", "users", "demo", ".pi", "agent");
     expect(configFilePath(root)).toBe(join(root, "subagents-lite.json"));
     expect(customPromptFilePath(root)).toBe(join(root, "subagents-lite-prompt.md"));
     expect(userAgentsDirPath(root)).toBe(join(root, "agents"));
   });
 
-  it("falls back to a relative root when no home source resolves", () => {
-    expect(resolveConfigRoot("")).toBe(join(".pi", "agent"));
+  it("REQ-CONFIG-002 composes the project agents root from Pi's config directory name", () => {
+    expect(projectAgentsDirPath(join("H:", "repo"), ".pi")).toBe(join("H:", "repo", ".pi", "agents"));
+    expect(projectAgentsDirPath(join("H:", "repo"), ".other")).toBe(join("H:", "repo", ".other", "agents"));
   });
 });

@@ -14,32 +14,30 @@ import { createFileConfigurationDocumentRepository } from "../platform/fs/config
 import {
   configFilePath,
   customPromptFilePath,
-  resolveConfigRoot,
 } from "../platform/fs/config-paths.js";
+import { hostInstallationPaths } from "../platform/pi/host-resources.js";
 
 const environment = createProcessEnvironmentSource({
   env: process.env,
   dotEnvFilePath: path.join(process.cwd(), ".env"),
 });
 
-// HOME is the only operational setting today. The config-file step of the
-// precedence chain cannot apply to it: the document's own location derives
-// from this value, so it cannot locate itself. Interactive product policies
-// never pass through this resolution.
+// HOME is the only operational setting today and it now serves exactly one
+// consumer: the `<home>/.agents/skills` skill root. Every persisted extension
+// file (config document, custom prompt, global Agent definitions) derives
+// from Pi's agent directory instead, so a custom HOME can no longer split
+// the extension's config root from the child session's Pi root.
 //
-// The OS home directory is the capability default rather than an empty string.
-// Windows usually leaves HOME unset and exposes the profile through
-// USERPROFILE, so an empty fallback resolved the document to a cwd-relative
-// `.pi/agent` — a different config file per working directory, and a different
-// root than skill discovery used.
-export const configHome = resolveOperationalValue({
+// The OS home directory is the capability default rather than an empty
+// string: Windows usually leaves HOME unset, and an empty fallback would
+// resolve the skill root to a cwd-relative path.
+export const skillsUserHome = resolveOperationalValue({
   environment: environment.variable("HOME"),
   dotEnv: environment.dotEnvValue("HOME"),
   fallback: homedir(),
 });
 
-export const configRoot = resolveConfigRoot(configHome);
-export const customPromptPath = customPromptFilePath(configRoot);
+export const customPromptPath = customPromptFilePath(hostInstallationPaths.agentDirectory);
 
 /**
  * The one configuration runtime for the extension process. Deliberately
@@ -49,7 +47,7 @@ export const customPromptPath = customPromptFilePath(configRoot);
  */
 export const configuration: Configuration = createConfiguration({
   repository: createFileConfigurationDocumentRepository({
-    filePath: configFilePath(configRoot),
+    filePath: configFilePath(hostInstallationPaths.agentDirectory),
   }),
 });
 
