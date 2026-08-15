@@ -5,6 +5,7 @@ import {
   PendingResultCountSchema,
   type ChildRecordSummary,
   type ChildStatus,
+  type ChildStreamView,
   type NavigatorCommand,
   type NavigatorCommandResult,
   type NavigatorKey,
@@ -68,6 +69,7 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
   let interactionRequestId = 0;
   let pendingResultCount: number | undefined;
   let records: ChildRecordSummary[] = [];
+  let streamView: { agentId: string; stream: ChildStreamView } | undefined;
   let statsVisibility: StatsVisibility = {};
   let debugPreview: ChildStatus | undefined;
   let lastColumns = 120;
@@ -119,12 +121,27 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
     if (footer) next.footerStatus = footer;
     if (withProjection && selectedAgentId) {
       next.transcriptLines = projectTranscript(
-        records.find((record) => record.id === selectedAgentId),
+        transcriptRecord(),
         lastColumns,
         layout,
       );
     }
     return next;
+  }
+
+  /**
+   * Overlay only transient stream fields. Stable history remains with the
+   * last full record; replacing it with a narrow read would turn a live
+   * transcript back into an empty starting screen. The next full sync clears
+   * this overlay before the finalized assistant message can appear twice.
+   */
+  function transcriptRecord(): ChildRecordSummary | undefined {
+    const record = records.find((item) => item.id === selectedAgentId);
+    if (!record?.session || !streamView || streamView.agentId !== record.id) return record;
+    const session = { ...record.session, streaming: streamView.stream.streaming };
+    if (streamView.stream.streamingMessage === undefined) delete session.streamingMessage;
+    else session.streamingMessage = streamView.stream.streamingMessage;
+    return { ...record, session };
   }
 
   function ok(
@@ -276,6 +293,8 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
     switch (next.kind) {
       case "replace-records":
         records = structuredClone(next.records);
+        // A complete frame supersedes any transient stream overlay.
+        streamView = undefined;
         pendingResultCount = checkedPendingCount(next.pendingResultCount);
         forgetMissing();
         if (next.highlightIndex != null) {
@@ -293,8 +312,14 @@ export function createChildScreen(options: CreateChildScreenOptions): ChildScree
         }
         selectedAgentId = next.agentId;
         highlightedAgentId = next.agentId;
+        streamView = undefined;
         interactionRequestId += 1;
         interactionNotice = undefined;
+        return ok();
+      case "refresh-stream":
+        if (next.agentId === selectedAgentId) {
+          streamView = { agentId: next.agentId, stream: structuredClone(next.stream) };
+        }
         return ok();
       case "toggle-fold":
         if (!visible()) return ok();

@@ -19,17 +19,17 @@ import {
   type SpawnCommand,
 } from "../contracts/lifecycle.js";
 import { ConcurrencyLimitsSchema } from "../contracts/scheduling.js";
-import { WorktreeInspectResultSchema } from "../contracts/worktree.js";
 import {
   SessionEventSchema,
   SessionInspectResultSchema,
   SessionSteerResultSchema,
+  SessionStreamResultSchema,
   type SessionEvent,
   type SessionInspectResult,
   type SessionSteerRequest,
+  type SessionStreamResult,
 } from "../contracts/session.js";
 import type { SessionDriver } from "../ports/session-driver.js";
-import type { WorktreeInspector } from "../ports/worktree-inspector.js";
 import type { IdGenerator, RuntimeClock, RuntimeScheduler } from "../ports/runtime-services.js";
 import {
   addUsage,
@@ -66,13 +66,21 @@ function sessionInspectView(view: unknown): SessionInspectResult {
   return Check(SessionInspectResultSchema, view) ? view : absentSessionView();
 }
 
+function absentStreamView(): SessionStreamResult {
+  return { found: false, live: false, streaming: false };
+}
+
+/** Fail closed when a driver returns an off-contract stream view. */
+function sessionStreamView(view: unknown): SessionStreamResult {
+  return Check(SessionStreamResultSchema, view) ? view : absentStreamView();
+}
+
 function canOverwriteStatus(status: AgentSnapshot["status"]): boolean {
   return status !== "stopped";
 }
 
 export interface CreateSubagentRuntimeOptions {
   sessionDriver: SessionDriver;
-  worktreeInspector: WorktreeInspector;
   clock: RuntimeClock;
   ids: IdGenerator;
   scheduler: RuntimeScheduler;
@@ -95,6 +103,11 @@ export interface SubagentRuntime {
   listSnapshots(): AgentListSnapshot[];
   waitUntilSettled(id: string): Promise<AgentSnapshot | undefined>;
   inspectSession(id: string): ReturnType<SessionDriver["inspect"]>;
+  /**
+   * Return the selected session's transient stream without copying stable
+   * history. The list can keep its signature gate while a long answer moves.
+   */
+  inspectSessionStream(id: string): SessionStreamResult;
   stop(id: string, initiator?: AgentSnapshot["stoppedBy"]): boolean;
   markResult(id: string, fields: { persisted?: boolean; consumed?: boolean; deliveryId?: string }): AgentSnapshot | undefined;
   togglePinned(id: string): boolean | undefined;
@@ -216,16 +229,27 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
   }
 
   function snapshotsInListOrder(): AgentSnapshot[] {
-    // Status rank is the list now: a finished row used to keep the seat
-    // it earned at spawn, so Done sat above work still burning.
-    // Recency-by-startedAt looked like a fix until a later queued stamp
-    // climbed over a run that had already begun. Pins still do not move
-    // rows — they only pause the grave. Revisit if pinned rows should
-    // be nailed to the visible window, or if AgentStatus should stay in
-    // acceptance order while the TUI ranks.
-    return [...snapshots.values()].sort(
-      (left, right) => listStatusRank(left.status) - listStatusRank(right.status),
-    );
+    // One order serves status, tools, shutdown, and the screen. Rank remains
+    // primary; pins rise only inside it. Terminal rows put the newest outcome
+    // first, while active rows preserve start order and queued FIFO. Spawn order
+    // breaks equal or missing timestamps without leaning on stable sort. If
+    // status and TUI ever diverge, split the projection instead of parameterizing
+    // this source of truth.
+    const rows = [...snapshots.values()];
+    const spawnOrder = new Map(rows.map((snapshot, index) => [snapshot.id, index]));
+    const seq = (snapshot: AgentSnapshot): number => spawnOrder.get(snapshot.id) ?? 0;
+    return rows.sort((left, right) => {
+      const rank = listStatusRank(left.status) - listStatusRank(right.status);
+      if (rank !== 0) return rank;
+      const pinned = (right.pinnedAt != null ? 1 : 0) - (left.pinnedAt != null ? 1 : 0);
+      if (pinned !== 0) return pinned;
+      if (isTerminalStatus(left.status)) {
+        const finished = (right.completedAt ?? right.startedAt) - (left.completedAt ?? left.startedAt);
+        return finished !== 0 ? finished : seq(right) - seq(left);
+      }
+      const started = left.startedAt - right.startedAt;
+      return started !== 0 ? started : seq(left) - seq(right);
+    });
   }
 
   function listRows(): AgentListSnapshot[] {
@@ -440,26 +464,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       );
     }
 
-    let worktreePath = command.worktreePath;
-    if (worktreePath) {
-      if (!command.parentCwd) {
-        return failure("worktree-invalid", "Worktree targeting requires a parent working directory.");
-      }
-      const inspected = await options.worktreeInspector.inspect({
-        worktreePath,
-        parentCwd: command.parentCwd,
-      });
-      // The inspector is a replaceable port. A typed-but-false payload —
-      // ok without a discriminant the schema named, an error that is not
-      // a string — would let spawn treat garbage as a path or a reason.
-      // Fail closed before reading either field. Revisit if the port
-      // itself starts returning a checked envelope.
-      if (!Check(WorktreeInspectResultSchema, inspected)) {
-        return failure("worktree-invalid", "Worktree inspect result does not match its contract.");
-      }
-      if (!inspected.ok) return failure("worktree-invalid", inspected.error);
-      worktreePath = inspected.resolvedPath;
-    }
+    const worktreePath = command.validatedWorktreePath;
 
     const id = options.ids.nextId();
     const concurrencyKey = concurrencyKeyFromPolicy(
@@ -533,7 +538,9 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     if (wasQueued) {
       snapshot.settled = true;
       if (notify) notifyComplete(snapshot);
-    } else if (snapshot.liveSession && snapshot.sessionId) {
+    } else if (snapshot.sessionId) {
+      // sessionId exists before session-ready. Waiting for liveSession left the
+      // setup window unstoppable; the driver now owns that early abort surface.
       abortSession(snapshot.sessionId);
     }
     return true;
@@ -814,6 +821,11 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       const snapshot = snapshots.get(id);
       if (!snapshot?.sessionId) return absentSessionView();
       return sessionInspectView(options.sessionDriver.inspect({ sessionId: snapshot.sessionId }));
+    },
+    inspectSessionStream(id: string): SessionStreamResult {
+      const snapshot = snapshots.get(id);
+      if (!snapshot?.sessionId) return absentStreamView();
+      return sessionStreamView(options.sessionDriver.inspectStream({ sessionId: snapshot.sessionId }));
     },
     stop(id, initiator) {
       return stop(id, initiator);

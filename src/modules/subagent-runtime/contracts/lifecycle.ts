@@ -109,8 +109,13 @@ export const SpawnCommandSchema = Type.Object({
   prompt: Type.String(),
   description: Type.String(),
   acceptedPolicy: AcceptedRunPolicySchema,
-  worktreePath: Type.Optional(Type.String()),
-  parentCwd: Type.Optional(Type.String()),
+  /**
+   * The tool's resolved worktree snapshot. Discovery needs the same trusted
+   * path before spawn, so lifecycle consumes that decision instead of probing
+   * the repository a second time. The raw path and parent cwd are deliberately
+   * absent; additionalProperties prevents that split authority from returning.
+   */
+  validatedWorktreePath: Type.Optional(Type.String()),
   invocation: Type.Optional(AgentInvocationSchema),
   resultSessionId: Type.Optional(Type.String()),
   resultOriginEntryId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -224,7 +229,6 @@ export const AgentCommandResultSchema = Type.Union([
         Type.Literal("invalid-command"),
         Type.Literal("disposed"),
         Type.Literal("not-found"),
-        Type.Literal("worktree-invalid"),
         Type.Literal("session-failure"),
       ]),
       message: Type.String(),

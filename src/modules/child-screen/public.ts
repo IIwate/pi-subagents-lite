@@ -9,6 +9,7 @@ export {
 export type {
   ChildRecordSummary,
   ChildStatus,
+  ChildStreamView,
   LinePart,
   NavigatorCommand,
   NavigatorCommandResult,

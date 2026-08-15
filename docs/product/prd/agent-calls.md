@@ -20,7 +20,7 @@ After authorization, a running or queued call retains its complete Accepted run 
 
 ### REQ-WORKTREE-001 — Validate Worktree targets
 
-An optional `worktree_path` is accepted only when it resolves to the parent repository or one of its Worktrees. Missing paths, non-directories, non-repositories, and paths from another repository return a specific failure outcome.
+An optional `worktree_path` is accepted only when it resolves to the parent repository or one of its Worktrees. The Agent tool validates and resolves it once before on-demand catalogue discovery, then lifecycle consumes that validated snapshot as the Child cwd without probing Git again. Missing paths, non-directories, non-repositories, and paths from another repository return a specific failure outcome.
 
 ### REQ-CATALOGUE-001 — Discover Agent types
 
@@ -38,4 +38,4 @@ Disabling built-in Agent types blocks new calls and on-demand discovery while pr
 
 ## Acceptance intent
 
-Acceptance examples cover valid and invalid Agent calls, queued and running policy snapshots, foreground interruption, background stopping, built-in/custom name collisions, Worktree validation, and explicit status reads.
+Acceptance examples cover valid and invalid Agent calls, queued and running policy snapshots, foreground interruption, background stopping, built-in/custom name collisions, one-pass Worktree validation and discovery, and explicit status reads.

@@ -65,7 +65,14 @@ export function createAgentStatusToolExecutor(runtime: ExtensionRuntime) {
     if (requestedId) {
       const record = manager.getSnapshot(requestedId);
       const delivery = runtime.delivery;
-      const stored = delivery?.getStoredResult(requestedId, record?.resultDeliveryId);
+      // The schema command rereads durable session entries. A volatile record
+      // may be gone while a later runtime has already written the full result.
+      const inspected = delivery?.execute({
+        kind: "inspect",
+        agentId: requestedId,
+        ...(record?.resultDeliveryId ? { deliveryId: record.resultDeliveryId } : {}),
+      });
+      const stored = inspected?.ok ? inspected.stored : undefined;
       const text = resultLookupText(requestedId, record, stored);
       if (!text) {
         return {

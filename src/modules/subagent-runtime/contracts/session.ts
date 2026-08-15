@@ -67,6 +67,19 @@ export const SessionInspectResultSchema = Type.Object({
   streamingMessage: Type.Optional(JsonValueSchema),
 }, { additionalProperties: false });
 
+/**
+ * The current streaming message, paired with inspect rather than replacing it.
+ * Rechecking full history each second is the cost the list signature avoided;
+ * this view stays independent of transcript length. Revisit if the screen ever
+ * needs incremental finalized history between complete record syncs.
+ */
+export const SessionStreamResultSchema = Type.Object({
+  found: Type.Boolean(),
+  live: Type.Boolean(),
+  streaming: Type.Boolean(),
+  streamingMessage: Type.Optional(JsonValueSchema),
+}, { additionalProperties: false });
+
 export const SessionEventSchema = Type.Union([
   Type.Object({
     type: Type.Literal("setup-started"),
@@ -121,4 +134,5 @@ export type SessionCloseRequest = Static<typeof SessionCloseRequestSchema>;
 export type SessionInspectRequest = Static<typeof SessionInspectRequestSchema>;
 export type SessionSteerResult = Static<typeof SessionSteerResultSchema>;
 export type SessionInspectResult = Static<typeof SessionInspectResultSchema>;
+export type SessionStreamResult = Static<typeof SessionStreamResultSchema>;
 export type SessionEvent = Static<typeof SessionEventSchema>;

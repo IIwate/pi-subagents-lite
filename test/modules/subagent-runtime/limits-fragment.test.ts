@@ -11,6 +11,7 @@ import {
   ConcurrencyLimitsFragmentSchema,
   ConcurrencyLimitsSchema,
   ConcurrencyLimitsUpdateSchema,
+  createConcurrencyScheduler,
   parseConcurrencyLimitsFragment,
   runtimeLimitsFromFragment,
 } from "../../../src/modules/subagent-runtime/public.js";
@@ -22,12 +23,28 @@ describe("parseConcurrencyLimitsFragment", () => {
     }
   });
 
-  it("keeps valid entries and drops hand-edited junk instead of crashing the scheduler", () => {
+  it("normalizes out-of-range finite limits instead of widening them to the default", () => {
     const parsed = parseConcurrencyLimitsFragment({
       default: 0,
-      providers: { openai: 2, google: "three", broken: 1.5 },
-      models: { "openai/gpt-5": 1, "openai/o3": -2 },
+      providers: { openai: 2, zero: 0, negative: -3, half: 0.5, oneAndAHalf: 1.5 },
+      models: { "openai/gpt-5": 1, "openai/o3": -2, "llamacpp/local": 0 },
       unknownField: true,
+    });
+    // Finite values still express a requested ceiling; dropping them would
+    // silently turn a serial configuration into four slots.
+    expect(parsed).toEqual({
+      default: 1,
+      providers: { openai: 2, zero: 1, negative: 1, half: 1, oneAndAHalf: 2 },
+      models: { "openai/gpt-5": 1, "openai/o3": 1, "llamacpp/local": 1 },
+    });
+    expect(Check(ConcurrencyLimitsFragmentSchema, parsed)).toBe(true);
+  });
+
+  it("drops values with no recoverable numeric meaning instead of inventing 1", () => {
+    const parsed = parseConcurrencyLimitsFragment({
+      default: "three",
+      providers: { openai: 2, text: "three", nan: Number.NaN, endless: Number.POSITIVE_INFINITY, missing: null },
+      models: { "openai/gpt-5": 1, bad: {} },
     });
     expect(parsed).toEqual({
       default: 4,
@@ -106,5 +123,23 @@ describe("runtimeLimitsFromFragment", () => {
 
   it("rejects an off-contract fragment instead of deriving scheduler limits", () => {
     expect(() => runtimeLimitsFromFragment({ default: 0, providers: {}, models: {} } as never)).toThrow(TypeError);
+  });
+
+  // Migrated zero and negative values remain serial rather than restoring the
+  // four-slot fallback that local single-GPU configurations were avoiding.
+  it("keeps a migrated zero limit serial through the scheduler", () => {
+    const fragment = parseConcurrencyLimitsFragment({
+      default: 0,
+      providers: {},
+      models: { "llamacpp/local": 0 },
+    });
+    const scheduler = createConcurrencyScheduler(runtimeLimitsFromFragment(fragment));
+    expect(scheduler.reserve("llamacpp/local").accepted).toBe(true);
+    expect(scheduler.reserve("llamacpp/local").accepted).toBe(false);
+    scheduler.release("llamacpp/local");
+    expect(scheduler.reserve("llamacpp/local").accepted).toBe(true);
+    // A model without an override inherits the normalized default.
+    expect(scheduler.reserve("openai/gpt-5").accepted).toBe(true);
+    expect(scheduler.reserve("openai/gpt-5").accepted).toBe(false);
   });
 });

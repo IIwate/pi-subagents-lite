@@ -12,7 +12,7 @@ Selecting a Subagent activates its Child screen without changing its lifecycle. 
 
 ### REQ-CHILD-002 — Expanded and folded presentation
 
-The persisted display preference controls the initial list state for a new runtime. `Alt+A` controls folding for the current runtime thereafter. Expanded and folded views show the existing counts, labels, footer behavior, and interaction notices.
+The persisted display preference controls the initial list state for a new runtime. `Alt+A` controls folding for the current runtime thereafter. Expanded and folded views show the existing counts, labels, footer behavior, and interaction notices. With Main active and the list unfocused, the viewport follows the first Running record; without one, it starts at the first record. Child selection and keyboard focus retain their own row-centered behavior.
 
 ### REQ-CHILD-003 — Renderer safety
 
@@ -20,7 +20,7 @@ The Child screen replaces only the intended document region, preserves extension
 
 ### REQ-CHILD-004 — Lifecycle and failure presentation
 
-Running, queued, terminal, blocked, and interaction-failure states render the existing local-only presentation. Child interaction failures do not inject notices into Main's transcript.
+Running, queued, terminal, blocked, and interaction-failure states render the existing local-only presentation. A selected Child refreshes only its current streaming message once per tick; full record synchronization owns stable transcript history and clears the stream overlay when the message finalizes. Main and unselected sessions incur no transcript inspection. Child interaction failures do not inject notices into Main's transcript.
 
 ## Out of scope
 
@@ -29,4 +29,4 @@ Running, queued, terminal, blocked, and interaction-failure states render the ex
 
 ## Acceptance intent
 
-Acceptance examples cover Main/Child transitions, expanded/folded state, regular/fullscreen switching, shrink clearing, footer preservation, ownership conflicts, disposal, reload, and blocked interaction.
+Acceptance examples cover Main/Child transitions, default Running viewport, expanded/folded state, selected-stream refresh and finalization, zero-cost Main ticks, regular/fullscreen switching, shrink clearing, footer preservation, ownership conflicts, disposal, reload, and blocked interaction.

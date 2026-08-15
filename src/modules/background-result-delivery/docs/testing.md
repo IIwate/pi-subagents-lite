@@ -10,6 +10,8 @@ Test delivery state transitions through the public application surface using ser
 - Active origin-branch eligibility and unrelated-branch hiding.
 - Coalesced wake requests, failed parent turns, later completions, reload, and `/tree` restoration.
 - Explicit AgentStatus acknowledgement only after successful parent settlement.
+- Guidance failure before preflight leaves repository state unacknowledged; the next successful handler returns result message and guidance together. A non-Agent run still injects pending results without reading the guidance catalogue.
+- An explicit inspect rereads records written after delivery construction, prefers a later durable continuation over an old memory view, and honors an exact delivery ID and durable equal-time tie break.
 - Session-keyed fallback isolation, malformed-record handling, and off-contract records dropped on the way in.
 - Outbound `execute()` results that fail `DeliveryCommandResultSchema` are refused as `invalid-command` rather than handed out.
 
@@ -17,4 +19,4 @@ Test delivery state transitions through the public application surface using ser
 
 Use in-memory result repositories and deterministic parent-lifecycle events. Mock only persistence and parent messaging ports; do not mock runtime or UI modules.
 
-The repository append/read/acknowledge/atomic-failure contract is proven against the real Pi adapter in `test/platform/result-repository.test.ts`. A suite that exercised an in-memory repository written inside the same test file was removed: it asserted on its own fake, so it passed no matter what the port or its adapter did.
+The repository append/read/find/acknowledge/atomic-failure contract is proven against the real Pi adapter in `test/platform/result-repository.test.ts`. A suite that exercised an in-memory repository written inside the same test file was removed: it asserted on its own fake, so it passed no matter what the port or its adapter did.

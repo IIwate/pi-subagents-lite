@@ -17,6 +17,10 @@ Test navigation commands and snapshots without Pi TUI. Test Pi behavior separate
 - Main/Child selection and return.
 - Expanded/folded state, default preference, and current-runtime override.
 - Running, queued, terminal, blocked, and empty states.
+- Main's unfocused viewport includes the first Running row with correct top/bottom hidden counts, while an all-terminal list starts at the head; selected/highlighted rows retain their own centering.
+- A selected stream updates on consecutive unchanged-signature ticks without `replace-records`, checks only that selected ID, and is cleared by a full finalized-message sync without duplication.
+- `refresh-stream` rejects malformed JSON, ignores stale IDs without changing selection or the current overlay, and deep-copies the streaming message.
+- Main/unselected ticks do not inspect transcript history, even with many records and long finalized histories.
 - Regular/fullscreen switches, shrink clearing, footer replacement, ownership conflict, disposal, and reload.
 - Outbound `execute()` results that fail `NavigatorCommandResultSchema` are refused as `invalid-command` rather than handed out.
 - Invalid `debugFaultKind` and `pendingResultCount` payloads are rejected at the command seam and not copied onto the current snapshot.

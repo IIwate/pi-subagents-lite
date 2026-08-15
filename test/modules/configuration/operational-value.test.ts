@@ -50,6 +50,10 @@ describe("operational source precedence", () => {
       configured: "/from-config-file",
       fallback: "/fallback",
     })).toBe("/from-config-file");
+    expect(resolveOperationalValue({
+      environment: "",
+      fallback: "/os-home",
+    })).toBe("/os-home");
   });
 });
 

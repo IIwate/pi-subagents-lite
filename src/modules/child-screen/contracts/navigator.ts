@@ -4,6 +4,7 @@ import {
   AgentStatusSchema,
   DebugFaultKindSchema,
   SessionInspectResultSchema,
+  SessionStreamResultSchema,
 } from "../../subagent-runtime/public.js";
 
 export interface TextLayout {
@@ -24,6 +25,12 @@ export const ChildStatusSchema = AgentStatusSchema;
 // the screen paint a field the driver never sends, or drop one it does.
 // Revisit if the screen needs a narrower projection than inspect.
 export const ChildSessionViewSchema = SessionInspectResultSchema;
+
+/**
+ * The selected session's current stream only. Stable history still arrives
+ * through replace-records, keeping the one-second path independent of it.
+ */
+export const ChildStreamViewSchema = SessionStreamResultSchema;
 
 export const ChildRecordSummarySchema = Type.Object({
   id: Type.String({ minLength: 1 }),
@@ -89,6 +96,16 @@ export const SelectChildCommandSchema = Type.Object({
   agentId: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
 }, { additionalProperties: false });
 
+/**
+ * A stale refresh is ignored when its ID is no longer selected. Selection
+ * belongs to navigation commands; a timer must never steal it back.
+ */
+export const RefreshStreamCommandSchema = Type.Object({
+  kind: Type.Literal("refresh-stream"),
+  agentId: Type.String({ minLength: 1 }),
+  stream: ChildStreamViewSchema,
+}, { additionalProperties: false });
+
 export const ToggleFoldCommandSchema = Type.Object({
   kind: Type.Literal("toggle-fold"),
 }, { additionalProperties: false });
@@ -133,6 +150,7 @@ export const InspectNavigatorCommandSchema = Type.Object({
 export const NavigatorCommandSchema = Type.Union([
   ReplaceRecordsCommandSchema,
   SelectChildCommandSchema,
+  RefreshStreamCommandSchema,
   ToggleFoldCommandSchema,
   KeyCommandSchema,
   SetStatsVisibilityCommandSchema,
@@ -210,6 +228,7 @@ export const NavigatorCommandResultSchema = Type.Union([
 
 export type ChildStatus = Static<typeof ChildStatusSchema>;
 export type ChildSessionView = Static<typeof ChildSessionViewSchema>;
+export type ChildStreamView = Static<typeof ChildStreamViewSchema>;
 export type ChildRecordSummary = Static<typeof ChildRecordSummarySchema>;
 export type StatsVisibility = Static<typeof StatsVisibilitySchema>;
 export type NavigatorKey = Static<typeof NavigatorKeySchema>;

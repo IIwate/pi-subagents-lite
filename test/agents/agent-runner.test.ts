@@ -8,8 +8,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { rmSync, writeFileSync } from "node:fs";
-import { fakeCtx, fakePi as makeFakePi, makeResolvablePromise } from "../fixtures.ts";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  acceptedRunPolicy,
+  fakeCtx,
+  fakePi as makeFakePi,
+  makeResolvablePromise,
+} from "../fixtures.ts";
 
 const fakePi = makeFakePi();
 
@@ -46,6 +52,7 @@ function MockDefaultResourceLoader(this: any, opts: any) {
 const mockModules = vi.hoisted(() => ({
   mockCreateAgentSession: vi.fn(),
   mockSessionManagerInMemory: vi.fn(),
+  mockSettingsManagerCreate: vi.fn(),
   mockDefaultResourceLoader: MockDefaultResourceLoader,
   mockGetAgentDir: vi.fn(),
   mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
@@ -64,7 +71,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   createAgentSession: mockModules.mockCreateAgentSession,
   DefaultResourceLoader: mockModules.mockDefaultResourceLoader,
   SessionManager: { inMemory: mockModules.mockSessionManagerInMemory },
-  SettingsManager: { create: vi.fn() },
+  SettingsManager: { create: mockModules.mockSettingsManagerCreate },
   getAgentDir: mockModules.mockGetAgentDir,
   loadProjectContextFiles: mockModules.mockLoadProjectContextFiles,
 }));
@@ -73,6 +80,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { continueAgentSession, runAgent as runAgentWithPolicy, subscribeToSessionEvents } from "../../src/platform/pi/agent-session.js";
+import { createPiSessionDriver } from "../../src/platform/pi/session-driver.js";
 
 const defaultConfig = {
   displayName: "Agent",
@@ -161,6 +169,7 @@ function resetMocks() {
   currentDefinition = { ...defaultAgentConfig };
   currentRegisteredTools = ["read", "bash", "edit"];
   mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
+  mockModules.mockSettingsManagerCreate.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
 }
 
@@ -321,6 +330,221 @@ describe("runAgent — session state inheritance", () => {
     await expect(runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi }))
       .rejects.toThrow("503 service_unavailable");
     expect(session._getListeners()).toHaveLength(0);
+  });
+});
+
+describe("Pi session driver setup cancellation", () => {
+  beforeEach(() => {
+    resetMocks();
+    fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("aborts once and never prompts when stop arrives after session-ready", async () => {
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const driver = createPiSessionDriver({
+      pi: fakePi,
+      ctx: fakeCtx(),
+      homeDirectory,
+      customPromptPath: promptHome,
+    });
+    const events: any[] = [];
+
+    await driver.start({
+      agentId: "agent-driver",
+      sessionId: "session-driver",
+      agentType: "test-agent",
+      prompt: "do something",
+      acceptedPolicy: acceptedRunPolicy(),
+    }, (event) => {
+      events.push(event);
+      if (event.type === "session-ready") {
+        void driver.abort({ sessionId: "session-driver" });
+      }
+    });
+
+    expect(session.abort).toHaveBeenCalledTimes(1);
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "completed", aborted: true });
+  });
+
+  it("cancels setup before session-ready and treats repeated aborts as one stop", async () => {
+    const bind = makeResolvablePromise<void>();
+    const session = createMockSession();
+    session.bindExtensions.mockReturnValue(bind.promise);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const driver = createPiSessionDriver({
+      pi: fakePi,
+      ctx: fakeCtx(),
+      homeDirectory,
+      customPromptPath: promptHome,
+    });
+    const start = driver.start({
+      agentId: "agent-setup",
+      sessionId: "session-setup",
+      agentType: "test-agent",
+      prompt: "do something",
+      acceptedPolicy: acceptedRunPolicy(),
+    }, () => {});
+    await vi.waitFor(() => expect(session.bindExtensions).toHaveBeenCalledTimes(1));
+
+    await driver.abort({ sessionId: "session-setup" });
+    await driver.abort({ sessionId: "session-setup" });
+    bind.resolve(undefined);
+
+    await expect(start).rejects.toThrow("Agent session setup aborted");
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(driver.inspect({ sessionId: "session-setup" }).found).toBe(false);
+  });
+
+  it("does not resurrect a setup that close cancelled", async () => {
+    const bind = makeResolvablePromise<void>();
+    const session = createMockSession();
+    session.bindExtensions.mockReturnValue(bind.promise);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const driver = createPiSessionDriver({
+      pi: fakePi,
+      ctx: fakeCtx(),
+      homeDirectory,
+      customPromptPath: promptHome,
+    });
+    const start = driver.start({
+      agentId: "agent-close",
+      sessionId: "session-close",
+      agentType: "test-agent",
+      prompt: "do something",
+      acceptedPolicy: acceptedRunPolicy(),
+    }, () => {});
+    await vi.waitFor(() => expect(session.bindExtensions).toHaveBeenCalledTimes(1));
+
+    await driver.close({ sessionId: "session-close" });
+    bind.resolve(undefined);
+
+    await expect(start).rejects.toThrow("Agent session setup aborted");
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(driver.inspect({ sessionId: "session-close" }).found).toBe(false);
+  });
+
+  it("does not reinsert a live session after close wins the prompt race", async () => {
+    const prompt = makeResolvablePromise<void>();
+    const session = createMockSession();
+    session.prompt.mockReturnValue(prompt.promise);
+    (session as any).extensionRunner = { emit: vi.fn(async () => {}) };
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const driver = createPiSessionDriver({
+      pi: fakePi,
+      ctx: fakeCtx(),
+      homeDirectory,
+      customPromptPath: promptHome,
+    });
+    const start = driver.start({
+      agentId: "agent-live-close",
+      sessionId: "session-live-close",
+      agentType: "test-agent",
+      prompt: "do something",
+      acceptedPolicy: acceptedRunPolicy(),
+    }, () => {});
+    await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
+
+    await driver.close({ sessionId: "session-live-close" });
+    prompt.resolve(undefined);
+    await start;
+
+    expect(session.abort).toHaveBeenCalledTimes(1);
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(driver.inspect({ sessionId: "session-live-close" }).found).toBe(false);
+  });
+
+  it("returns a JSON stream snapshot without finalized transcript history", async () => {
+    const session = createMockSession();
+    const streamingMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "streamed text" }],
+    };
+    (session as any).agent = { state: { streamingMessage } };
+    (session as any).isStreaming = true;
+    session.messages.push({ role: "assistant", content: [{ type: "text", text: "old history" }] });
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const driver = createPiSessionDriver({
+      pi: fakePi,
+      ctx: fakeCtx(),
+      homeDirectory,
+      customPromptPath: promptHome,
+    });
+    await driver.start({
+      agentId: "agent-stream",
+      sessionId: "session-stream",
+      agentType: "test-agent",
+      prompt: "do something",
+      acceptedPolicy: acceptedRunPolicy(),
+    }, () => {});
+
+    const view = driver.inspectStream({ sessionId: "session-stream" });
+    streamingMessage.content[0]!.text = "mutated host object";
+
+    expect(view).toEqual({
+      found: true,
+      live: true,
+      streaming: true,
+      streamingMessage: {
+        role: "assistant",
+        content: [{ type: "text", text: "streamed text" }],
+      },
+    });
+    expect(view).not.toHaveProperty("messages");
+  });
+});
+
+describe("runAgent — shared Pi agent directory", () => {
+  beforeEach(() => {
+    resetMocks();
+    fakePi.exec.mockResolvedValue({ code: 0, stdout: "true" });
+  });
+
+  it("resolves agentDir once and shares it across every setup consumer", async () => {
+    const agentDir = join(homeDirectory, "pi-agent-root");
+    const explicitDir = join(agentDir, "skills", "explicit-agent-root");
+    const preloadDir = join(agentDir, "skills", "preload-agent-root");
+    mkdirSync(explicitDir, { recursive: true });
+    mkdirSync(preloadDir, { recursive: true });
+    writeFileSync(
+      join(explicitDir, "SKILL.md"),
+      "---\nname: explicit-agent-root\ndescription: Explicit from shared root\n---\n\nEXPLICIT_BODY",
+    );
+    writeFileSync(
+      join(preloadDir, "SKILL.md"),
+      "---\nname: preload-agent-root\ndescription: Preload from shared root\n---\n\nPRELOAD_BODY",
+    );
+    mockModules.mockGetAgentDir.mockReturnValue(agentDir);
+    currentConfig = { ...defaultConfig, skills: ["explicit-agent-root"] };
+    currentDefinition = { ...defaultAgentConfig, preloadSkills: ["preload-agent-root"] };
+    const session = createMockSession();
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    const ctx = fakeCtx();
+    ctx.cwd = homeDirectory;
+
+    await runAgent(ctx, "test-agent", "do something", { pi: fakePi });
+
+    expect(mockModules.mockGetAgentDir).toHaveBeenCalledTimes(1);
+    expect(mockModules.getLoaderOpts()).toMatchObject({ cwd: homeDirectory, agentDir });
+    expect(mockModules.mockLoadProjectContextFiles).toHaveBeenCalledWith({
+      cwd: homeDirectory,
+      agentDir,
+    });
+    expect(mockModules.mockSettingsManagerCreate).toHaveBeenCalledWith(homeDirectory, agentDir);
+    expect(mockModules.mockCreateAgentSession.mock.calls[0]![0]).toMatchObject({
+      cwd: homeDirectory,
+      agentDir,
+    });
+    expect(generatedPrompt()).toContain("Explicit from shared root");
+    expect(generatedPrompt()).toContain("PRELOAD_BODY");
+    expect(generatedPrompt()).not.toContain("EXPLICIT_BODY");
   });
 });
 

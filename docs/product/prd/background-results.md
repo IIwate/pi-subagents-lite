@@ -20,7 +20,7 @@ Concurrent wake requests are coalesced. A completion persisted during a failed p
 
 ### REQ-DELIVERY-004 — Explicit reads and acknowledgement
 
-The next natural parent prompt injects eligible pending results during preflight. Explicit AgentStatus reads acknowledge results only after the parent turn settles successfully.
+The next natural parent prompt injects eligible pending results during preflight. Bootstrap prepares fallible Agent guidance before committing that preflight state, so a handler failure cannot acknowledge a result that Pi discarded with the handler return value. Explicit AgentStatus reads reread current durable parent-session entries and acknowledge results only after the parent turn settles successfully.
 
 ### REQ-DELIVERY-005 — Session isolation
 
@@ -33,4 +33,4 @@ Reloaded or forked sessions ignore copied result entries whose parent session ID
 
 ## Acceptance intent
 
-Acceptance examples cover persistence, branch changes, failed wakes, later completions, reload, `/tree`, explicit reads, acknowledgement, malformed records, and repository failure.
+Acceptance examples cover persistence, branch changes, failed wakes, later completions, reload, `/tree`, guidance failure before preflight, late durable exact reads, acknowledgement, malformed records, and repository failure.

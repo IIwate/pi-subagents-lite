@@ -4,7 +4,6 @@ import {
   DEFAULT_CONCURRENCY_LIMIT,
   type ConcurrencyLimits,
   type SubagentRuntime,
-  type WorktreeInspector,
 } from "../modules/subagent-runtime/public.js";
 import { createPiSessionDriver } from "../platform/pi/session-driver.js";
 import {
@@ -17,8 +16,6 @@ import { configHome, customPromptPath } from "./configuration.js";
 export function createHostSubagentRuntime(options: {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
-  /** The activation's worktree probe, shared with the Agent tool's early check. */
-  worktreeInspector: WorktreeInspector;
   /** Canonical scheduler limits; the runtime's fragment parser guarantees the >= 1 invariant. */
   limits?: ConcurrencyLimits;
 }): SubagentRuntime {
@@ -32,7 +29,6 @@ export function createHostSubagentRuntime(options: {
       customPromptPath,
       homeDirectory: configHome,
     }),
-    worktreeInspector: options.worktreeInspector,
     clock: createSystemClock(),
     ids: createCryptoIdGenerator(),
     scheduler: createNodeScheduler(),

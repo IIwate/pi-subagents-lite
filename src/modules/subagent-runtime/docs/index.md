@@ -10,6 +10,7 @@ Accept authorized Agent runs and own the ephemeral Subagent lifecycle from queue
 - It does not own durable background result eligibility.
 - It does not render the Child screen or settings.
 - It does not hold Pi session handles in application state.
+- Its lifecycle does not probe Git after the Agent tool has produced a validated Worktree snapshot.
 
 ## Product requirements
 

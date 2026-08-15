@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { Check } from "typebox/value";
 import {
+  NavigatorCommandResultSchema,
   createAsciiTextLayout,
   createChildScreen,
   lineText,
@@ -152,6 +154,50 @@ describe("REQ-CHILD-002 expanded list projection", () => {
     expect(lines[0]).toBe("  ○ Main (2 running · 1 queued · 8 total · Alt+A collapse · Alt+M main)");
     expect(lines).toContain("  ↑ 2 hidden");
     expect(lines.filter((line) => line.includes("Task "))).toHaveLength(6);
+  });
+
+  it("centers the Main viewport on the first running record", () => {
+    const records = [
+      ...Array.from({ length: 5 }, (_, index) => record({
+        id: `attention-${index}`,
+        status: "error",
+        description: `Attention ${index}`,
+      })),
+      ...Array.from({ length: 2 }, (_, index) => record({
+        id: `running-${index}`,
+        status: "running",
+        description: `Running ${index}`,
+      })),
+      ...Array.from({ length: 3 }, (_, index) => record({
+        id: `archive-${index}`,
+        status: "completed",
+        description: `Archive ${index}`,
+      })),
+    ];
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records });
+
+    const lines = listTexts(project(screen));
+    expect(lines[0]).toContain("● Main");
+    expect(lines).toContain("  ↑ 2 hidden");
+    expect(lines).toContain("  ↓ 2 hidden");
+    expect(lines.some((line) => line.includes("Running 0"))).toBe(true);
+    expect(lines.filter((line) => /Attention|Running|Archive/.test(line))).toHaveLength(6);
+  });
+
+  it("starts the Main viewport at the first record when none is running", () => {
+    const records = Array.from({ length: 8 }, (_, index) => record({
+      id: `archive-${index}`,
+      status: index < 3 ? "error" : "completed",
+      description: `Terminal ${index}`,
+    }));
+    const screen = openScreen();
+    screen.execute({ kind: "replace-records", records });
+
+    const lines = listTexts(project(screen));
+    expect(lines.some((line) => line.includes("Terminal 0"))).toBe(true);
+    expect(lines.some((line) => line.includes("↑"))).toBe(false);
+    expect(lines).toContain("  ↓ 2 hidden");
   });
 
   it("preserves record order without moving Main, including pinned rows", () => {
@@ -471,6 +517,145 @@ describe("REQ-CHILD-002 folded footer status", () => {
 
 describe("REQ-CHILD-004 transcript projection", () => {
   const sessionBase = { found: true, live: true, streaming: false } as const;
+
+  it("projects only the latest checked stream snapshot for the selected child", () => {
+    const screen = openScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ session: { ...sessionBase, streaming: true, messages: [] } })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-12345678" });
+    const firstMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "first streamed text" }],
+    };
+    const first = screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: {
+        found: true,
+        live: true,
+        streaming: true,
+        streamingMessage: firstMessage,
+      },
+    });
+    firstMessage.content[0]!.text = "mutated outside the module";
+
+    expect(first.ok && Check(NavigatorCommandResultSchema, JSON.parse(JSON.stringify(first)))).toBe(true);
+    expect(project(screen).transcriptLines!.map(lineText).join("\n")).toContain("first streamed text");
+    const second = screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: {
+        found: true,
+        live: true,
+        streaming: true,
+        streamingMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "second streamed text" }],
+        },
+      },
+    });
+    expect(second.ok).toBe(true);
+    const text = project(screen).transcriptLines!.map(lineText).join("\n");
+    expect(text).toContain("second streamed text");
+    expect(text).not.toContain("first streamed text");
+    expect(text).not.toContain("mutated outside the module");
+  });
+
+  it("ignores a stale stream for another id and clears streaming on the selected id", () => {
+    const screen = openScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ session: { ...sessionBase, streaming: true, messages: [] } })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-12345678" });
+    screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: {
+        found: true,
+        live: true,
+        streaming: true,
+        streamingMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "keep this stream" }],
+        },
+      },
+    });
+
+    const stale = screen.execute({
+      kind: "refresh-stream",
+      agentId: "missing-agent",
+      stream: { found: false, live: false, streaming: false },
+    });
+    expect(stale).toMatchObject({
+      ok: true,
+      snapshot: { selectedAgentId: "agent-12345678" },
+    });
+    expect(project(screen).transcriptLines!.map(lineText).join("\n")).toContain("keep this stream");
+
+    screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: { found: true, live: true, streaming: false },
+    });
+    expect(project(screen).transcriptLines!.map(lineText).join("\n")).not.toContain("keep this stream");
+  });
+
+  it("rejects an off-contract stream command without replacing the stable transcript", () => {
+    const screen = openScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({
+        session: {
+          ...sessionBase,
+          messages: [{ role: "assistant", content: [{ type: "text", text: "stable answer" }] }],
+        },
+      })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-12345678" });
+
+    expect(screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: { found: "yes", live: true, streaming: true },
+    })).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Navigator command is invalid." },
+    });
+    expect(project(screen).transcriptLines!.map(lineText).join("\n")).toContain("stable answer");
+  });
+
+  it("replaces a stream with one finalized message without duplicating it", () => {
+    const screen = openScreen();
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ session: { ...sessionBase, streaming: true, messages: [] } })],
+    });
+    screen.execute({ kind: "select", agentId: "agent-12345678" });
+    const assistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "one final answer" }],
+    };
+    screen.execute({
+      kind: "refresh-stream",
+      agentId: "agent-12345678",
+      stream: {
+        found: true,
+        live: true,
+        streaming: true,
+        streamingMessage: assistant,
+      },
+    });
+    screen.execute({
+      kind: "replace-records",
+      records: [record({ session: { ...sessionBase, messages: [assistant] } })],
+    });
+
+    const text = project(screen).transcriptLines!.map(lineText).join("\n");
+    expect(text.match(/one final answer/g)).toHaveLength(1);
+  });
 
   it("shows queue waiting text before the child session exists", () => {
     const screen = openScreen();

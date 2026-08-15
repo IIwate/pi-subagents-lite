@@ -126,46 +126,63 @@ export async function spawnAgent(
   const manager = runtime.manager;
   if (!manager) throw new Error("Subagent runtime is not initialised.");
   const { type, prompt, runInBackground, ...spawnOptions } = intent;
-  const resultSessionId = runInBackground ? spawnCtx.sessionManager.getSessionId() : undefined;
-  const resultOriginEntryId = runInBackground ? spawnCtx.sessionManager.getLeafId() : undefined;
-  if (resultOriginEntryId) {
-    // A background spawn without a delivery would name an origin the inbox
-    // can never track. Swallowing that left the result eligible on no
-    // branch. Foreground work never sets an origin, so tests that omit
-    // delivery for that path stay honest.
-    if (!runtime.delivery) {
-      throw new Error("Background result delivery is not wired.");
+  // Attach before the first spawn await. Otherwise an interrupt can pass
+  // between the copied boolean and the eventual listener, leaving foreground
+  // work waiting forever. Background work remains detached by design.
+  const parentSignal = runInBackground ? undefined : spawnOptions.signal;
+  let agentId: string | undefined;
+  let parentAborted = false;
+  let stopSent = false;
+  const requestStop = (): void => {
+    parentAborted = true;
+    if (agentId === undefined || stopSent) return;
+    stopSent = true;
+    manager.stop(agentId, "user");
+  };
+  parentSignal?.addEventListener("abort", requestStop);
+  // Read after attachment as well, covering an already-aborted signal and the
+  // narrow synchronous race around addEventListener.
+  if (parentSignal?.aborted) parentAborted = true;
+  try {
+    const resultSessionId = runInBackground ? spawnCtx.sessionManager.getSessionId() : undefined;
+    const resultOriginEntryId = runInBackground ? spawnCtx.sessionManager.getLeafId() : undefined;
+    if (resultOriginEntryId) {
+      // A background spawn without a delivery would name an origin the inbox
+      // can never track. Swallowing that left the result eligible on no
+      // branch. Foreground work never sets an origin, so tests that omit
+      // delivery for that path stay honest.
+      if (!runtime.delivery) {
+        throw new Error("Background result delivery is not wired.");
+      }
+      runtime.delivery.execute({ kind: "track-origin", originEntryId: resultOriginEntryId });
     }
-    runtime.delivery.execute({ kind: "track-origin", originEntryId: resultOriginEntryId });
+    const spawned = await manager.execute({
+      kind: "spawn",
+      type,
+      prompt,
+      description: spawnOptions.description,
+      acceptedPolicy: spawnOptions.acceptedPolicy,
+      validatedWorktreePath: spawnOptions.worktreePath,
+      invocation: spawnOptions.invocation,
+      resultSessionId,
+      resultOriginEntryId,
+      parentAborted,
+    });
+    if (!spawned.ok || !spawned.snapshot) {
+      throw new Error(spawned.ok ? "Spawn did not return a snapshot." : spawned.error.message);
+    }
+    agentId = spawned.snapshot.id;
+    // An interrupt observed before the ID is paid here, once.
+    if (parentAborted) requestStop();
+    runtime.navigator?.ensureTimer();
+    if (!runInBackground) {
+      await manager.waitUntilSettled(agentId);
+      manager.markResult(agentId, { consumed: true });
+    }
+    return { agentId, snapshot: manager.getSnapshot(agentId) ?? spawned.snapshot };
+  } finally {
+    parentSignal?.removeEventListener("abort", requestStop);
   }
-  const spawned = await manager.execute({
-    kind: "spawn",
-    type,
-    prompt,
-    description: spawnOptions.description,
-    acceptedPolicy: spawnOptions.acceptedPolicy,
-    worktreePath: spawnOptions.worktreePath,
-    parentCwd: spawnOptions.worktreePath ? spawnCtx.cwd : undefined,
-    invocation: spawnOptions.invocation,
-    resultSessionId,
-    resultOriginEntryId,
-    parentAborted: spawnOptions.signal?.aborted === true,
-  });
-  if (!spawned.ok || !spawned.snapshot) {
-    throw new Error(spawned.ok ? "Spawn did not return a snapshot." : spawned.error.message);
-  }
-  const agentId = spawned.snapshot.id;
-  if (spawnOptions.signal && !spawnOptions.signal.aborted) {
-    spawnOptions.signal.addEventListener("abort", () => {
-      manager.stop(agentId, "user");
-    }, { once: true });
-  }
-  runtime.navigator?.ensureTimer();
-  if (!runInBackground) {
-    await manager.waitUntilSettled(agentId);
-    manager.markResult(agentId, { consumed: true });
-  }
-  return { agentId, snapshot: manager.getSnapshot(agentId) ?? spawned.snapshot };
 }
 
 export async function interactAgent(

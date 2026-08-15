@@ -185,7 +185,14 @@ describe("session host delivery", () => {
       restorePending: () => { run({ kind: "restore" }); },
       onSessionTree: () => { run({ kind: "session-tree" }); },
       pendingResultCount: () => delivery.pendingResultCount(),
-      getStoredResult: (agentId: string, deliveryId?: string) => delivery.getStoredResult(agentId, deliveryId),
+      getStoredResult: (agentId: string, deliveryId?: string) => {
+        const inspected = delivery.execute({
+          kind: "inspect",
+          agentId,
+          ...(deliveryId ? { deliveryId } : {}),
+        });
+        return inspected.ok ? inspected.stored : undefined;
+      },
       markResultPresented: (deliveryId: string) => { run({ kind: "mark-presented", deliveryId }); },
       dispose: () => { run({ kind: "dispose" }); },
     };
@@ -424,7 +431,7 @@ describe("session host delivery", () => {
     expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(2);
   });
 
-  it("restores the session inbox once and maintains pending state in memory", async () => {
+  it("restores pending state once and rereads durable state for an exact lookup", async () => {
     const coordinator = createHost(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.snapshot, "completed", "cached result");
@@ -434,7 +441,7 @@ describe("session host delivery", () => {
     coordinator.pendingResultCount();
     coordinator.getStoredResult(result.agentId);
 
-    expect(mockGetEntries).toHaveBeenCalledTimes(1);
+    expect(mockGetEntries).toHaveBeenCalledTimes(2);
   });
 
   it("waits off-branch and wakes when navigation returns to the origin subtree", async () => {

@@ -23,9 +23,18 @@ import { createSkillDir, createFlatSkill } from "../../fixtures.ts";
 
 let tmpDir: string;
 
+/**
+ * The two roots discovery reads from. Kept separate on purpose: the user-level
+ * `.agents/skills` root follows this extension's config home, while the Pi
+ * default root is whatever Pi's getAgentDir() resolved for the child session.
+ */
+function roots(userHome: string = tmpDir, agentDir: string = join(tmpDir, ".pi", "agent")) {
+  return { userHome, agentDir };
+}
+
 /** Skills live under the fixture root; home is pinned there so nothing outside leaks in. */
 function skills(cwd: string = tmpDir) {
-  return loadAllSkills(cwd, tmpDir);
+  return loadAllSkills(cwd, roots());
 }
 
 /** Write a skill into `<home>/.agents/skills/<name>/SKILL.md` (the highest-precedence source). */
@@ -90,6 +99,29 @@ describe("loadAllSkills", () => {
     expect(matches).toHaveLength(1);
     expect(matches[0].description).toBe("Agents TDD");
   });
+
+  // PI_AGENT_DIR, or a HOME that differs from the OS home (Git Bash / MSYS),
+  // makes these two roots different directories. Reading both from one `home`
+  // is how explicit skills came from a different tree than the child session's
+  // own resources.
+  it("reads the Pi default root from agentDir and .agents/skills from userHome", () => {
+    const piAgentDir = join(tmpDir, "elsewhere", "agent");
+    const defaultSkill = join(piAgentDir, "skills", "from-agent-dir");
+    mkdirSync(defaultSkill, { recursive: true });
+    writeFileSync(
+      join(defaultSkill, "SKILL.md"),
+      "---\nname: from-agent-dir\ndescription: From agentDir\n---\n\nBody",
+    );
+    createAgentsSkill(tmpDir, "from-user-home", "From userHome", "Body");
+    // The old single-root layout: nothing may be discovered from here.
+    createSkillDir(join(tmpDir, ".pi", "agent"), "from-legacy-root", "Legacy", "Body");
+
+    const names = loadAllSkills(tmpDir, roots(tmpDir, piAgentDir)).map((skill) => skill.name);
+
+    expect(names).toContain("from-agent-dir");
+    expect(names).toContain("from-user-home");
+    expect(names).not.toContain("from-legacy-root");
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -100,7 +132,7 @@ describe("preloadSkills", () => {
   it("loads full content and description from a skill directory", () => {
     createSkillDir(tmpDir, "tdd", "Test-driven development workflow", "## TDD Steps\n1. Red\n2. Green\n3. Refactor");
 
-    const result = preloadSkills(["tdd"], tmpDir, tmpDir);
+    const result = preloadSkills(["tdd"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("tdd");
@@ -112,7 +144,7 @@ describe("preloadSkills", () => {
   it("loads full content and description from a flat skill file", () => {
     createFlatSkill(tmpDir, "debug", "Debugging workflow", "## Debug Steps\n1. Reproduce");
 
-    const result = preloadSkills(["debug"], tmpDir, tmpDir);
+    const result = preloadSkills(["debug"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("debug");
@@ -121,7 +153,7 @@ describe("preloadSkills", () => {
   });
 
   it("reports a missing skill in place of its content", () => {
-    const result = preloadSkills(["nonexistent"], tmpDir, tmpDir);
+    const result = preloadSkills(["nonexistent"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("nonexistent");
@@ -133,7 +165,7 @@ describe("preloadSkills", () => {
     createSkillDir(tmpDir, "gone", "Was here", "Body");
     rmSync(join(tmpDir, ".pi", "skills", "gone", "SKILL.md"));
 
-    const result = preloadSkills(["gone"], tmpDir, tmpDir);
+    const result = preloadSkills(["gone"], tmpDir, roots());
 
     expect(result[0].content).toContain("not found");
     expect(result[0].description).toBe("");
@@ -144,7 +176,7 @@ describe("preloadSkills", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), "Just body text, no frontmatter.");
 
-    const result = preloadSkills(["plain"], tmpDir, tmpDir);
+    const result = preloadSkills(["plain"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].description).toBe("");
@@ -159,7 +191,7 @@ describe("loadSkillMeta", () => {
   it("returns metadata without the body from a skill directory", () => {
     createSkillDir(tmpDir, "tdd", "Test-driven development workflow", "## TDD Steps\n1. Red");
 
-    const result = loadSkillMeta(["tdd"], tmpDir, tmpDir);
+    const result = loadSkillMeta(["tdd"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("tdd");
@@ -171,7 +203,7 @@ describe("loadSkillMeta", () => {
   it("returns metadata from a flat skill file", () => {
     createFlatSkill(tmpDir, "debug", "Debugging workflow", "## Debug Steps");
 
-    const result = loadSkillMeta(["debug"], tmpDir, tmpDir);
+    const result = loadSkillMeta(["debug"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].description).toBe("Debugging workflow");
@@ -179,7 +211,7 @@ describe("loadSkillMeta", () => {
   });
 
   it("reports a missing skill without a location", () => {
-    const result = loadSkillMeta(["nonexistent"], tmpDir, tmpDir);
+    const result = loadSkillMeta(["nonexistent"], tmpDir, roots());
 
     expect(result).toHaveLength(1);
     expect(result[0].description).toContain("not found");
@@ -191,7 +223,7 @@ describe("loadSkillMeta", () => {
     createSkillDir(tmpDir, "tdd", "TDD workflow", "Body");
     createSkillDir(tmpDir, "debug", "Debug workflow", "Body");
 
-    const result = loadSkillMeta(["tdd", "debug"], tmpDir, tmpDir);
+    const result = loadSkillMeta(["tdd", "debug"], tmpDir, roots());
 
     expect(result.map((meta) => meta.name)).toEqual(["tdd", "debug"]);
     expect(result.map((meta) => meta.description)).toEqual(["TDD workflow", "Debug workflow"]);
@@ -205,7 +237,7 @@ describe("loadSkillMeta", () => {
       "---\nname: internal\ndescription: Internal tool\ndisable-model-invocation: true\n---\n\nBody",
     );
 
-    const result = loadSkillMeta(["internal"], tmpDir, tmpDir);
+    const result = loadSkillMeta(["internal"], tmpDir, roots());
 
     expect(result[0].disableModelInvocation).toBe(true);
   });
@@ -241,7 +273,7 @@ describe("Prompt integration: whitelist excludes body", () => {
   it("available_skills has metadata but NOT secret token", () => {
     createProofSkill();
 
-    const metas = loadSkillMeta(["proof-skill"], tmpDir, tmpDir);
+    const metas = loadSkillMeta(["proof-skill"], tmpDir, roots());
     const prompt = buildAgentPrompt(baseConfig, tmpDir, env, {
       skillElements: formatSkillMetaElements(metas),
     });
@@ -258,7 +290,7 @@ describe("Prompt integration: whitelist excludes body", () => {
   it("escapes XML special characters through Pi's formatter", () => {
     createSkillDir(tmpDir, "xml-skill", 'Use <code> & "quotes"', "Body");
 
-    const elements = formatSkillMetaElements(loadSkillMeta(["xml-skill"], tmpDir, tmpDir)).join("\n");
+    const elements = formatSkillMetaElements(loadSkillMeta(["xml-skill"], tmpDir, roots())).join("\n");
 
     expect(elements).toContain("&lt;code&gt;");
     expect(elements).toContain("&amp;");
@@ -273,7 +305,7 @@ describe("Prompt integration: whitelist excludes body", () => {
       "---\nname: internal\ndescription: Internal tool\ndisable-model-invocation: true\n---\n\nBody",
     );
 
-    const elements = formatSkillMetaElements(loadSkillMeta(["internal"], tmpDir, tmpDir));
+    const elements = formatSkillMetaElements(loadSkillMeta(["internal"], tmpDir, roots()));
 
     expect(elements).toEqual([]);
   });
@@ -283,7 +315,7 @@ describe("Prompt integration: preload in available_skills with content tag", () 
   it("Preloaded skill appears in available_skills with content tag", () => {
     createProofSkill();
 
-    const blocks = preloadSkills(["proof-skill"], tmpDir, tmpDir);
+    const blocks = preloadSkills(["proof-skill"], tmpDir, roots());
     const prompt = buildAgentPrompt(baseConfig, tmpDir, env, { skillBlocks: blocks });
 
     expect(prompt).toContain("<available_skills>");
@@ -300,8 +332,8 @@ describe("Prompt integration: both together", () => {
     createProofSkill();
     createSkillDir(tmpDir, "other-skill", "Another skill", "OTHER_SECRET_123");
 
-    const metas = loadSkillMeta(["proof-skill"], tmpDir, tmpDir);
-    const blocks = preloadSkills(["other-skill"], tmpDir, tmpDir);
+    const metas = loadSkillMeta(["proof-skill"], tmpDir, roots());
+    const blocks = preloadSkills(["other-skill"], tmpDir, roots());
     const prompt = buildAgentPrompt(baseConfig, tmpDir, env, {
       skillElements: formatSkillMetaElements(metas),
       skillBlocks: blocks,

@@ -62,6 +62,18 @@ export function makeManager(records: any[]): SubagentRuntime {
       if (!record?._session) return { found: false, live: false, streaming: false, messages: [] };
       return record._session;
     },
+    inspectSessionStream: (id: string) => {
+      const record = records.find(candidate => candidate.id === id);
+      if (!record?._session) return { found: false, live: false, streaming: false };
+      return {
+        found: record._session.found,
+        live: record._session.live,
+        streaming: record._session.streaming,
+        ...(record._session.streamingMessage !== undefined
+          ? { streamingMessage: record._session.streamingMessage }
+          : {}),
+      };
+    },
     togglePinned: vi.fn((id: string) => {
       const record = records.find(candidate => candidate.id === id);
       if (!record) return undefined;

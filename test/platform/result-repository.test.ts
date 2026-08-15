@@ -50,6 +50,7 @@ describe("Pi ResultRepository contract", () => {
       result: "A",
       error: null,
     });
+    expect(repository.find({ agentId: "a" })?.result).toBe("A");
 
     const failing = createPiResultRepository(createPi(entries, true), context(entries));
     expect(failing.append(record("c", "C"))).toBe(false);
@@ -97,6 +98,14 @@ describe("Pi ResultRepository contract", () => {
     const read = repository.read();
     expect(read.latest).toMatchObject([{ deliveryId: "a-2", result: "newer" }]);
     expect(read.pending.map((item) => item.deliveryId)).toEqual(["a-2", "a-1"]);
+    expect(repository.find({ agentId: "a" })).toMatchObject({
+      deliveryId: "a-2",
+      result: "newer",
+    });
+    expect(repository.find({ agentId: "a", deliveryId: "a-1" })).toMatchObject({
+      deliveryId: "a-1",
+      result: "older",
+    });
   });
 
   it("ignores pending results and acknowledgements copied from another session", () => {

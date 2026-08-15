@@ -37,7 +37,6 @@ export function ensureManagerAndNavigator(runtime: ExtensionRuntime, ctx: Extens
     const manager = createHostSubagentRuntime({
       pi: runtime.pi,
       ctx,
-      worktreeInspector: runtime.worktree,
       limits: concurrencyRuntimeLimits(),
     });
     runtime.manager = manager;
@@ -113,19 +112,26 @@ export function setupEventListeners(runtime: ExtensionRuntime): void {
   const parentGuidance = createParentGuidanceRuntime(runtime.agents);
 
   pi.on("before_agent_start", (event, ctx) => {
+    // Pi discards an entire handler result when guidance throws. Committing
+    // preflight first would later acknowledge a message the parent never saw;
+    // prepare every fallible, side-effect-free part before changing delivery.
+    let guidance: string | undefined;
+    if (event.systemPromptOptions.selectedTools?.includes("Agent")) {
+      const assembled = parentGuidance.assembleFromSession(ctx);
+      if (!assembled.ok) throw new TypeError(assembled.error.message);
+      guidance = assembled.guidance;
+    }
     const { manager, delivery } = runtime;
     const prepared = manager && delivery
       ? applyDeliveryCommand(manager, delivery, { kind: "parent-preflight" })
       : undefined;
     const resultMessage = prepared?.ok ? prepared.injection : undefined;
-    if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
+    if (guidance === undefined) {
       return resultMessage ? { message: resultMessage } : undefined;
     }
-    const assembled = parentGuidance.assembleFromSession(ctx);
-    if (!assembled.ok) throw new TypeError(assembled.error.message);
     return {
       message: resultMessage,
-      systemPrompt: `${event.systemPrompt}\n\n${assembled.guidance}`,
+      systemPrompt: `${event.systemPrompt}\n\n${guidance}`,
     };
   });
 

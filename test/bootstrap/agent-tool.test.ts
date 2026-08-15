@@ -29,6 +29,7 @@ import {
   fakeCtx,
   fakeExtensionRuntime,
   inertAgentSettings,
+  makeResolvablePromise,
   makeAgentMd,
   testAgentRegistry,
 } from "../fixtures.ts";
@@ -206,8 +207,8 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     expect(probedCwds).toEqual([repo, worktree]);
 
     expect(mgr.spawnCommands).toHaveLength(1);
-    expect(mgr.spawnCommands[0].worktreePath).toBe(normalized(worktree));
-    expect(mgr.spawnCommands[0].parentCwd).toBe(ctx.cwd);
+    expect(mgr.spawnCommands[0].validatedWorktreePath).toBe(normalized(worktree));
+    expect(mgr.spawnCommands[0]).not.toHaveProperty("parentCwd");
   });
 
   it("throws the validator error and does not spawn for a foreign worktree", async () => {
@@ -274,14 +275,62 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
 
     expect(exec).not.toHaveBeenCalled();
     expect(mgr.spawnCommands).toHaveLength(1);
-    expect(mgr.spawnCommands[0].worktreePath).toBeUndefined();
+    expect(mgr.spawnCommands[0].validatedWorktreePath).toBeUndefined();
   });
 
-  it("wires the parent AbortSignal to a manager stop only for foreground agents", async () => {
-    let controller = new AbortController();
-    await execute("tc-fg-signal", makeParams(), controller.signal, undefined, ctx);
+  it("does not lose a foreground abort while spawn is awaiting its snapshot", async () => {
+    const controller = new AbortController();
+    const spawned = makeResolvablePromise<any>();
+    mgr.manager.execute.mockImplementation(async (command: any) => {
+      mgr.spawnCommands.push(command);
+      return spawned.promise;
+    });
+
+    const pending = execute("tc-fg-signal", makeParams(), controller.signal, undefined, ctx);
     controller.abort();
+    expect(mgr.stops).toEqual([]);
+    spawned.resolve({ ok: true, snapshot: { ...mgr.snapshot } });
+    await pending;
+
     expect(mgr.stops).toEqual([{ id: "agent-id-123", initiator: "user" }]);
+    expect(mgr.spawnCommands[0].parentAborted).toBe(false);
+  });
+
+  it("stops after the agent ID exists while foreground settlement is pending", async () => {
+    const controller = new AbortController();
+    const settled = makeResolvablePromise<void>();
+    mgr.manager.waitUntilSettled.mockReturnValue(settled.promise);
+
+    const pending = execute("tc-fg-running-signal", makeParams(), controller.signal, undefined, ctx);
+    await vi.waitFor(() => expect(mgr.manager.waitUntilSettled).toHaveBeenCalledWith("agent-id-123"));
+    controller.abort();
+
+    expect(mgr.stops).toEqual([{ id: "agent-id-123", initiator: "user" }]);
+    settled.resolve(undefined);
+    await pending;
+  });
+
+  it("removes the foreground abort listener when spawn rejects", async () => {
+    const controller = new AbortController();
+    mgr.manager.execute.mockRejectedValue(new Error("spawn rejected"));
+
+    await expect(execute(
+      "tc-fg-rejected",
+      makeParams(),
+      controller.signal,
+      undefined,
+      ctx,
+    )).rejects.toThrow("spawn rejected");
+    controller.abort();
+
+    expect(mgr.stops).toEqual([]);
+  });
+
+  it("removes the foreground abort listener after settlement and never links background work", async () => {
+    let controller = new AbortController();
+    await execute("tc-fg-settled", makeParams(), controller.signal, undefined, ctx);
+    controller.abort();
+    expect(mgr.stops).toEqual([]);
 
     controller = new AbortController();
     execute = buildExecutor();
@@ -295,6 +344,16 @@ describe("REQ-WORKTREE-001 executeAgentTool — worktree_path validation", () =>
     await execute("tc-forced-bg-signal", makeParams(), controller.signal, undefined, ctx);
     controller.abort();
     expect(mgr.stops).toEqual([]);
+  });
+
+  it("stops an already-aborted foreground call after the snapshot acquires an ID", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await execute("tc-fg-already-aborted", makeParams(), controller.signal, undefined, ctx);
+
+    expect(mgr.spawnCommands[0].parentAborted).toBe(true);
+    expect(mgr.stops).toEqual([{ id: "agent-id-123", initiator: "user" }]);
   });
 
 });
@@ -384,7 +443,7 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     );
 
     expect(mgr.spawnCommands).toHaveLength(1);
-    expect(mgr.spawnCommands[0].worktreePath).toBe(normalized(worktree));
+    expect(mgr.spawnCommands[0].validatedWorktreePath).toBe(normalized(worktree));
     // Background spawns anchor delivery to the parent session; nothing else
     // (no model key, no delivery handle) may ride along in the command.
     expect(mgr.spawnCommands[0].resultSessionId).toBe("parent-session");

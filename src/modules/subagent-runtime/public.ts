@@ -72,6 +72,7 @@ export {
   SessionStartRequestSchema,
   SessionSteerRequestSchema,
   SessionSteerResultSchema,
+  SessionStreamResultSchema,
 } from "./contracts/session.js";
 export type {
   SessionAbortRequest,
@@ -83,6 +84,7 @@ export type {
   SessionStartRequest,
   SessionSteerRequest,
   SessionSteerResult,
+  SessionStreamResult,
 } from "./contracts/session.js";
 export {
   WorktreeInspectRequestSchema,

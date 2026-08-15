@@ -27,7 +27,7 @@ import type { LifetimeUsage } from "./usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../../utils.js";
 import { missingSubagentModelError } from "../../modules/model-access/public.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
-import { formatSkillMetaElements, loadSkillMeta, preloadSkills } from "./skill-loader.js";
+import { formatSkillMetaElements, loadSkillMeta, preloadSkills, type SkillRoots } from "./skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, SHORT_ID_LENGTH } from "../../types.js";
 import { DEFAULT_GRACE_TURNS } from "../../modules/subagent-runtime/public.js";
 import type { SubagentType } from "./agent-types.js";
@@ -309,7 +309,7 @@ function resolveSystemPromptSources(
   ctx: ExtensionContext,
   cwd: string,
   policy: AcceptedRunPolicy,
-  customPromptPath: string,
+  customPromptPath: string, agentDir: string,
   notify: (msg: string) => void,
 ): Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> {
   const extras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {};
@@ -337,7 +337,7 @@ function resolveSystemPromptSources(
   if (policy.includeContextFiles) {
     extras.contextFiles = readProjectContextFiles({
       cwd,
-      agentDir: getAgentDir(),
+      agentDir,
       load: loadProjectContextFiles,
     });
   }
@@ -353,17 +353,17 @@ function resolveSystemPromptSources(
 function buildPrompt(
   policy: AcceptedRunPolicy,
   cwd: string,
-  home: string,
+  skillRoots: SkillRoots,
   env: EnvInfo,
   resolverExtras: Pick<PromptExtras, "parentSystemPrompt" | "customSystemPrompt" | "contextFiles"> = {},
 ): string {
   const agentConfig = policy.definition;
   const extras: PromptExtras = { ...resolverExtras };
   if (Array.isArray(agentConfig.preloadSkills)) {
-    extras.skillBlocks = preloadSkills(agentConfig.preloadSkills, cwd, home);
+    extras.skillBlocks = preloadSkills(agentConfig.preloadSkills, cwd, skillRoots);
   }
   if (Array.isArray(policy.skills)) {
-    extras.skillElements = formatSkillMetaElements(loadSkillMeta(policy.skills, cwd, home));
+    extras.skillElements = formatSkillMetaElements(loadSkillMeta(policy.skills, cwd, skillRoots));
   }
   return buildAgentPrompt(agentConfig, cwd, env, extras, policy.systemPromptMode);
 }
@@ -415,13 +415,12 @@ function buildExtOverride(
 function createResourceLoader(
   policy: AcceptedRunPolicy,
   cwd: string,
-  systemPrompt: string,
+  systemPrompt: string, agentDir: string,
 ) {
   const agentConfig = policy.definition;
   const noSkills = policy.skills === false
     || Array.isArray(policy.skills)
     || Array.isArray(agentConfig.preloadSkills);
-  const agentDir = getAgentDir();
   const loaderOpts: ConstructorParameters<typeof DefaultResourceLoader>[0] = {
     cwd, agentDir,
     noExtensions: policy.extensions === false, noSkills,
@@ -469,7 +468,7 @@ async function initSession(
   ctx: ExtensionContext,
   options: RunOptions,
   cwd: string,
-  loader: DefaultResourceLoader,
+  loader: DefaultResourceLoader, agentDir: string,
 ) {
   const policy = options.acceptedPolicy;
   const sourceModel = policy.model as Model<any>;
@@ -478,7 +477,6 @@ async function initSession(
 
   const scopedModels = policy.scopedModels as NonNullable<Parameters<typeof createAgentSession>[0]>["scopedModels"];
   const thinkingLevel = policy.thinkingLevel ?? undefined;
-  const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
@@ -512,12 +510,12 @@ async function createAndConfigureSession(
   options: RunOptions,
   type: SubagentType,
   cwd: string,
-  loader: DefaultResourceLoader,
+  loader: DefaultResourceLoader, agentDir: string,
   notify: (msg: string) => void,
 ): Promise<AgentSession> {
   const policy = options.acceptedPolicy;
   const agentConfig = policy.definition;
-  const { session } = await initSession(ctx, options, cwd, loader);
+  const { session } = await initSession(ctx, options, cwd, loader, agentDir);
   const baseName = agentConfig.name ?? type;
   session.setSessionName(
     options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
@@ -704,6 +702,8 @@ async function runAgentImpl(
   }
 
   const effectiveCwd = options.cwd ?? ctx.cwd;
+  // Resolve Pi's root once; session resources and explicit skills must agree.
+  const agentDir = getAgentDir();
   options.onSessionSetupStarted?.();
   let session: AgentSession;
   try {
@@ -713,21 +713,21 @@ async function runAgentImpl(
       ctx,
       effectiveCwd,
       policy,
-      options.customPromptPath,
+      options.customPromptPath, agentDir,
       bufferNotify,
     );
 
     const systemPrompt = buildPrompt(
       policy,
       effectiveCwd,
-      options.homeDirectory,
+      { userHome: options.homeDirectory, agentDir },
       env,
       promptExtras,
     );
-    const { loader, reload } = createResourceLoader(policy, effectiveCwd, systemPrompt);
+    const { loader, reload } = createResourceLoader(policy, effectiveCwd, systemPrompt, agentDir);
     await reload();
     session = await createAndConfigureSession(
-      ctx, options, type, effectiveCwd, loader, bufferNotify,
+      ctx, options, type, effectiveCwd, loader, agentDir, bufferNotify,
     );
   } finally {
     options.onSessionSetupFinished?.();

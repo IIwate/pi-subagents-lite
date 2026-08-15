@@ -44,6 +44,15 @@ function createMemory(options?: {
   const fallbackRecords: BackgroundResultRecord[] = [];
   const repository: ResultRepository = {
     read: () => ({ pending: [...pending], latest: [...latest] }),
+    find(query) {
+      return latest
+        .filter((item) => item.agentId === query.agentId)
+        .filter((item) => !query.deliveryId || item.deliveryId === query.deliveryId)
+        .reduce<BackgroundResultRecord | undefined>(
+          (newest, item) => !newest || item.createdAt >= newest.createdAt ? item : newest,
+          undefined,
+        );
+    },
     append(next) {
       if (options?.appendFails) return false;
       pending.push(next);
@@ -77,7 +86,7 @@ function createMemory(options?: {
       save(_id, records) { fallbackRecords.splice(0, fallbackRecords.length, ...records); },
     },
   });
-  return { delivery, sent, pending, fallbackRecords };
+  return { delivery, sent, pending, latest, fallbackRecords };
 }
 
 describe("REQ-DELIVERY-001 persist before wake", () => {
@@ -345,7 +354,8 @@ describe("REQ-DELIVERY-004 preflight injection", () => {
 
     expect(recorded.ok && recorded.snapshot.pending[0]?.result).toBe(body);
     expect(memory.pending[0]?.result).toBe(body);
-    expect(memory.delivery.getStoredResult("agent-1")?.result).toBe(body);
+    const inspected = memory.delivery.execute({ kind: "inspect", agentId: "agent-1" });
+    expect(inspected.ok && inspected.stored?.result).toBe(body);
     expect(memory.sent[0]?.content).toContain("w".repeat(4000));
     expect(memory.sent[0]?.content).not.toContain(body);
     expect(memory.sent[0]?.content).toContain('AgentStatus({ agent_id: "agent-1" })');
@@ -382,6 +392,7 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
     const delivery = createBackgroundDelivery({
       repository: {
         read: () => ({ pending: [], latest: [] }),
+        find: () => undefined,
         append(next) { pending.push(next); return true; },
         acknowledge: () => true,
       },
@@ -482,6 +493,11 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
     const delivery = createBackgroundDelivery({
       repository: {
         read: () => ({ pending: [], latest: [] }),
+        find(query) {
+          return query.agentId === "agent-1"
+            ? record({ deliveryId: "new", result: "current result", createdAt: 1 })
+            : undefined;
+        },
         append(next) {
           return next.result !== "older fallback";
         },
@@ -505,7 +521,8 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
       record: record({ deliveryId: "new", result: "current result", createdAt: 1 }),
       stillPresent: true,
     });
-    expect(delivery.getStoredResult("agent-1")).toMatchObject({
+    const inspected = delivery.execute({ kind: "inspect", agentId: "agent-1" });
+    expect(inspected.ok && inspected.stored).toMatchObject({
       deliveryId: "new",
       result: "current result",
     });
@@ -523,6 +540,7 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
     const delivery = createBackgroundDelivery({
       repository: {
         read: () => ({ pending: [], latest: [] }),
+        find: () => undefined,
         append: () => true,
         acknowledge: () => true,
       },
@@ -540,6 +558,42 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
       error: { code: "invalid-command", message: "Delivery result does not match its contract." },
     });
     expect(Check(DeliveryCommandResultSchema, result)).toBe(true);
+  });
+
+  it("rereads a durable result written after delivery construction", () => {
+    const memory = createMemory();
+    memory.latest.push(record({
+      deliveryId: "late",
+      result: "written by another runtime",
+      createdAt: 2,
+    }));
+
+    const inspected = memory.delivery.execute({ kind: "inspect", agentId: "agent-1" });
+
+    expect(inspected.ok && inspected.stored).toMatchObject({
+      deliveryId: "late",
+      result: "written by another runtime",
+    });
+  });
+
+  it("prefers a later durable continuation over the construction snapshot", () => {
+    const old = record({ deliveryId: "old", result: "old result", createdAt: 1 });
+    const memory = createMemory({ latest: [old] });
+    memory.latest.push(record({
+      deliveryId: "new",
+      result: "new result",
+      createdAt: 2,
+    }));
+
+    const latest = memory.delivery.execute({ kind: "inspect", agentId: "agent-1" });
+    const exact = memory.delivery.execute({
+      kind: "inspect",
+      agentId: "agent-1",
+      deliveryId: "old",
+    });
+
+    expect(latest.ok && latest.stored).toMatchObject({ deliveryId: "new", result: "new result" });
+    expect(exact.ok && exact.stored).toMatchObject({ deliveryId: "old", result: "old result" });
   });
 
   it("drops off-contract records read from the repository and the fallback inbox", () => {

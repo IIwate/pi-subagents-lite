@@ -16,6 +16,7 @@
 - Model-related guidance comes from the effective Model access snapshot.
 - Custom prompt content and context files are read by `platform/fs` and passed as strings.
 - Pi parent prompt text is supplied by the host callback and never stored in prompt state.
+- Child setup resolves Pi's `agentDir` once and shares it with context loading, the resource loader, settings/session creation, and Pi-default explicit/preloaded skill discovery. User `.agents/skills` receives the extension's separately resolved configuration home; prompt core receives only serialized skill strings and knows neither path policy.
 
 ## Ordering and determinism
 
@@ -63,6 +64,7 @@ A prompt source that fails to resolve is not silently replaced by a different mo
 | Replace mode ignores host header | `assemble-subagent-prompt.ts` | replace ignores header |
 | Subagent malformed command | `assemble-subagent-prompt.ts` | invalid-command |
 | Custom file and context I/O | `platform/fs/prompt-files.ts` | `test/platform/fs/prompt-files.test.ts` |
+| Pi agentDir and user skill-root separation | `platform/pi/agent-session.ts`, `platform/pi/skill-loader.ts` | `test/agents/agent-runner.test.ts`, `test/platform/pi/skill-loader.test.ts` |
 
 ## Safety boundary
 

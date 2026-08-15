@@ -43,7 +43,6 @@ export function inertDelivery(): BackgroundDelivery {
       events: [],
     }),
     pendingResultCount: () => undefined,
-    getStoredResult: () => undefined,
   };
 }
 

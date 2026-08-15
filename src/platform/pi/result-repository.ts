@@ -70,6 +70,33 @@ function readResultEntries(
   return { pending: [...pending.values()], latest: [...latest.values()] };
 }
 
+/**
+ * Scan the current parent session for one durable result. Acknowledgement means
+ * delivered, not erased, so exact reads include acknowledged entries. Foreign
+ * sessions and malformed records fail closed rather than being repaired here.
+ */
+function findResultEntry(
+  ctx: ExtensionContext,
+  query: { agentId: string; deliveryId?: string },
+): BackgroundResultRecord | undefined {
+  const parentSessionId = ctx.sessionManager.getSessionId();
+  let found: BackgroundResultRecord | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (!isRecord(entry) || entry.type !== "custom") continue;
+    if (entry.customType !== PENDING_RESULT_ENTRY) continue;
+    const result = parsePendingResult(entry.data);
+    if (!result || result.parentSessionId !== parentSessionId) continue;
+    if (result.agentId !== query.agentId) continue;
+    if (query.deliveryId) {
+      if (result.deliveryId === query.deliveryId) found = result;
+      continue;
+    }
+    // Match readResultEntries: later entry order wins an equal timestamp.
+    if (!found || result.createdAt >= found.createdAt) found = result;
+  }
+  return found;
+}
+
 export function createPiResultRepository(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -77,6 +104,9 @@ export function createPiResultRepository(
   return {
     read() {
       return readResultEntries(ctx);
+    },
+    find(query) {
+      return findResultEntry(ctx, query);
     },
     append(record) {
       try {

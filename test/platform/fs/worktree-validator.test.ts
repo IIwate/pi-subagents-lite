@@ -452,11 +452,7 @@ describe("worktree deletion mid-run", () => {
         async abort() {},
         async close() {},
         inspect() { return { found: false, live: false, streaming: false, messages: [] }; },
-      },
-      worktreeInspector: {
-        async inspect(request) {
-          return { ok: true, resolvedPath: request.worktreePath };
-        },
+        inspectStream() { return { found: false, live: false, streaming: false }; },
       },
       clock: { now: () => 1 },
       ids: { nextId: () => "agent-deleted" },
@@ -469,8 +465,7 @@ describe("worktree deletion mid-run", () => {
       prompt: "test prompt",
       description: "test",
       acceptedPolicy: acceptedRunPolicy(),
-      worktreePath: "/deleted/worktree",
-      parentCwd: "/tmp",
+      validatedWorktreePath: "/deleted/worktree",
     });
     expect(spawned.ok).toBe(true);
     const record = await runtime.waitUntilSettled("agent-deleted");

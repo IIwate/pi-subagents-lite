@@ -1015,6 +1015,101 @@ describe("ChildScreenHost", () => {
       expect(kinds.filter((kind) => kind === "project"), "unchanged sig must not project").toEqual([]);
     });
 
+    it("refreshes only the selected streaming message without replacing the record table", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const first = makeRecord("agent-11111111");
+      const second = makeRecord("agent-22222222");
+      first.startedAt = Date.now() - 5_000;
+      second.startedAt = Date.now() - 5_000;
+      first._session.messages = [];
+      first._session.streaming = true;
+      const manager = makeManager([first, second]);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      const inspectStream = vi.fn(manager.inspectSessionStream.bind(manager));
+      manager.inspectSession = inspect;
+      manager.inspectSessionStream = inspectStream;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      const { tui } = mountSelector(ui);
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\x1b[B");
+      host.handleTerminalInput("\r");
+      const screen = (host as unknown as { screen: { execute: (command: unknown) => unknown } }).screen;
+      const execute = vi.spyOn(screen, "execute");
+      inspect.mockClear();
+      inspectStream.mockClear();
+      execute.mockClear();
+
+      first._session.streamingMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: "first streamed text" }],
+      };
+      vi.advanceTimersByTime(1_000);
+      let transcript = stripAnsi(tui.document.children[tui.chatIndex].render(120).join("\n"));
+      expect(transcript).toContain("first streamed text");
+      expect(inspect).not.toHaveBeenCalled();
+      expect(inspectStream.mock.calls.map((call) => call[0])).toEqual([first.id]);
+      let kinds = execute.mock.calls.map((call) => (call[0] as { kind?: string }).kind);
+      expect(kinds.filter((kind) => kind === "refresh-stream")).toHaveLength(1);
+      expect(kinds.filter((kind) => kind === "replace-records")).toEqual([]);
+
+      execute.mockClear();
+      inspectStream.mockClear();
+      first._session.streamingMessage.content[0].text = "second streamed text";
+      vi.advanceTimersByTime(1_000);
+      transcript = stripAnsi(tui.document.children[tui.chatIndex].render(120).join("\n"));
+      expect(transcript).toContain("second streamed text");
+      expect(transcript).not.toContain("first streamed text");
+      expect(inspectStream.mock.calls.map((call) => call[0])).toEqual([first.id]);
+
+      first._session.messages.push(structuredClone(first._session.streamingMessage));
+      delete first._session.streamingMessage;
+      first._session.streaming = false;
+      first.stats.lifetimeUsage.output += 1;
+      inspect.mockClear();
+      inspectStream.mockClear();
+      execute.mockClear();
+      vi.advanceTimersByTime(1_000);
+      transcript = stripAnsi(tui.document.children[tui.chatIndex].render(120).join("\n"));
+      expect(transcript.match(/second streamed text/g)).toHaveLength(1);
+      expect(inspect.mock.calls.map((call) => call[0])).toEqual([first.id]);
+      expect(inspectStream).not.toHaveBeenCalled();
+      kinds = execute.mock.calls.map((call) => (call[0] as { kind?: string }).kind);
+      expect(kinds.filter((kind) => kind === "replace-records")).toHaveLength(1);
+    });
+
+    it("keeps an unchanged Main tick free of all transcript inspection", () => {
+      vi.useFakeTimers();
+      const records = Array.from({ length: 8 }, (_, index) => {
+        const item = makeRecord(`agent-${String(index + 1).padStart(8, "0")}`);
+        item._session.messages = Array.from({ length: 200 }, () => ({
+          role: "assistant",
+          content: [{ type: "text", text: "finalized history" }],
+        }));
+        return item;
+      });
+      const manager = makeManager(records);
+      const inspect = vi.fn(manager.inspectSession.bind(manager));
+      const inspectStream = vi.fn(manager.inspectSessionStream.bind(manager));
+      manager.inspectSession = inspect;
+      manager.inspectSessionStream = inspectStream;
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager);
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      inspect.mockClear();
+      inspectStream.mockClear();
+
+      vi.advanceTimersByTime(1_000);
+
+      expect(inspect).not.toHaveBeenCalled();
+      expect(inspectStream).not.toHaveBeenCalled();
+    });
+
     it("refreshes the elapsed time column once per second", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));

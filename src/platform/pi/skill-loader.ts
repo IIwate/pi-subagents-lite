@@ -5,9 +5,14 @@
  *
  * Roots, in precedence order (first match wins by name):
  *   1. Ancestor .agents/skills (cwd → git root, root .md files filtered out)
- *   2. ~/.agents/skills (root .md files filtered out)
- *   3. ~/.pi/agent/skills (Pi's user default)
+ *   2. <userHome>/.agents/skills (root .md files filtered out)
+ *   3. <agentDir>/skills (Pi's user default)
  *   4. <cwd>/.pi/skills (Pi's project default)
+ *
+ * The roots are separate inputs for separate policies. `userHome` follows this
+ * extension's configuration precedence; `agentDir` is Pi's resolved resource
+ * root. Folding them into one home split explicit skills from the child session
+ * under PI_AGENT_DIR or MSYS-style HOME values.
  *
  * Pi's loadSkills handles: .gitignore/.ignore/.fdignore, symlinks (follow +
  * canonical-path dedup), YAML frontmatter, name validation.
@@ -25,8 +30,15 @@ import {
   loadSkillsFromDir,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
-import { resolveConfigRoot } from "../fs/config-paths.js";
 import { isUnsafeName } from "../../utils.js";
+
+/** The two independent roots skill discovery reads from. */
+export interface SkillRoots {
+  /** User-level `.agents/skills` root — this extension's resolved config home. */
+  userHome: string;
+  /** Pi's agent directory — the Pi-default skill root, shared with the child session. */
+  agentDir: string;
+}
 
 export interface PreloadedSkill {
   name: string;
@@ -49,31 +61,30 @@ export interface SkillMeta {
  *
  * Precedence (first match wins by name):
  *   1. Ancestor .agents/skills directories (cwd → git root)
- *   2. ~/.agents/skills
- *   3. Pi defaults: ~/.pi/agent/skills, <cwd>/.pi/skills
+ *   2. <userHome>/.agents/skills
+ *   3. Pi defaults: <agentDir>/skills, <cwd>/.pi/skills
  *
  * Deduplication: by canonical path (symlink dedup) and by name (first match wins).
  */
-export function loadAllSkills(cwd: string, home: string): Skill[] {
+export function loadAllSkills(cwd: string, roots: SkillRoots): Skill[] {
   const resolvedCwd = resolve(cwd);
 
   // Ancestor .agents/skills (highest precedence)
   const ancestorsSkills = loadAncestorAgentsSkills(resolvedCwd);
 
-  // ~/.agents/skills
-  const homeAgentsDir = join(home, ".agents", "skills");
+  // <userHome>/.agents/skills
+  const homeAgentsDir = join(roots.userHome, ".agents", "skills");
   const homeAgentsResult = loadSkillsFromDir({
     dir: homeAgentsDir,
     source: "agents",
   });
   const homeAgentsSkills = filterRootMdFiles(homeAgentsResult.skills, homeAgentsDir);
 
-  // Skill defaults share the persisted-config root. A second join() of
-  // ".pi/agent" would survive a path-policy change and load from the old
-  // tree while the document moved.
+  // The caller resolves Pi's root once; every child resource then sees the
+  // same directory rather than a locally reconstructed approximation.
   const defaultsResult = loadSkills({
     cwd: resolvedCwd,
-    agentDir: resolveConfigRoot(home),
+    agentDir: roots.agentDir,
     skillPaths: [],
     includeDefaults: true,
   });
@@ -155,8 +166,8 @@ function canonicalizePath(filePath: string): string {
   try { return realpathSync(filePath); } catch { return filePath; }
 }
 
-export function preloadSkills(skillNames: string[], cwd: string, home: string): PreloadedSkill[] {
-  const skills = loadAllSkills(cwd, home);
+export function preloadSkills(skillNames: string[], cwd: string, roots: SkillRoots): PreloadedSkill[] {
+  const skills = loadAllSkills(cwd, roots);
   return skillNames.map((name) => {
     if (isUnsafeName(name)) {
       return { name, description: "", content: `(Skill "${name}" skipped: name contains path traversal characters)` };
@@ -177,8 +188,8 @@ export function preloadSkills(skillNames: string[], cwd: string, home: string): 
  * Load skill metadata only (name, description, location) without full content.
  * Used for the skills whitelist — agent can read full content on-demand.
  */
-export function loadSkillMeta(skillNames: string[], cwd: string, home: string): SkillMeta[] {
-  const skills = loadAllSkills(cwd, home);
+export function loadSkillMeta(skillNames: string[], cwd: string, roots: SkillRoots): SkillMeta[] {
+  const skills = loadAllSkills(cwd, roots);
   return skillNames.map((name) => {
     const match = skills.find((s) => s.name === name);
     if (!match) {

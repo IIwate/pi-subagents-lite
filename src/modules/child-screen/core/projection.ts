@@ -204,9 +204,15 @@ export function projectList(options: {
 
   const mainActive = selectedAgentId === null;
   const mainHighlighted = listFocused && highlightedAgentId === null;
-  const focusIndex = Math.max(0, records.findIndex((record) =>
-    record.id === (listFocused ? highlightedAgentId : selectedAgentId),
-  ));
+  // Main has no child row to follow. Centering the first running record keeps
+  // current work above old failures; hidden counters preserve the rest. The
+  // runtime still owns order, and an all-terminal list starts at its head.
+  const followRunning = selectedAgentId === null && !listFocused;
+  const focusIndex = Math.max(0, followRunning
+    ? records.findIndex((record) => record.status === "running")
+    : records.findIndex((record) =>
+      record.id === (listFocused ? highlightedAgentId : selectedAgentId),
+    ));
   const { start, end } = computeListWindow(records.length, Math.max(0, focusIndex), rows);
   const summary = joinDim(summaryParts(records, pending, interactionNotice, true, selectedAgentId != null));
   const mainLine: LinePart[] = [

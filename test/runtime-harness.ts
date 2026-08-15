@@ -93,6 +93,11 @@ export function createScriptedSessionDriver(script: ScriptedSessionDriverOptions
         ? { found: true, live: true, streaming: false, messages: [] }
         : { found: false, live: false, streaming: false, messages: [] };
     },
+    inspectStream(request) {
+      return live.has(request.sessionId)
+        ? { found: true, live: true, streaming: false }
+        : { found: false, live: false, streaming: false };
+    },
   };
 }
 
@@ -129,11 +134,6 @@ export function createTestSubagentRuntime(options: {
         customPromptPath: options.customPromptPath
           ?? join(homeDirectory, ".pi", "agent", "subagents-lite-prompt.md"),
       }),
-    worktreeInspector: {
-      async inspect(request) {
-        return { ok: true, resolvedPath: request.worktreePath };
-      },
-    },
     clock: options.clock ?? { now: () => Date.now() },
     ids: createCryptoIdGenerator(),
     scheduler: {

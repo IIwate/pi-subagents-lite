@@ -222,6 +222,15 @@ export class ChildScreenHost {
     return inspected.ok ? inspected.snapshot : undefined;
   }
 
+  /** Refresh the selected stream without rebuilding records or stable history. */
+  private refreshSelectedStream(agentId: string): void {
+    this.runScreen({
+      kind: "refresh-stream",
+      agentId,
+      stream: this.manager.inspectSessionStream(agentId),
+    });
+  }
+
   private invalidatePaint(): void {
     this.paintInvalidated = true;
     this.lastElapsedSig = "";
@@ -617,8 +626,8 @@ export class ChildScreenHost {
     // listSnapshots still walks the outbound gate. Everything after that
     // used to rebuild the screen to learn the cheap fields had not moved.
     // elapsedSec is a paint lie: the clock advances, the records do not.
-    // A selected transcript therefore sleeps until a listed field changes.
-    // Revisit when the list is allowed to show live messages.
+    // The signature still covers listed fields only. Full transcript copies
+    // remain expensive; the selected stream now travels by its narrower path.
     const records = this.manager.listSnapshots();
     const pending = this.pendingResultState();
     const recordsSig = this.listDataSignature(records, pending);
@@ -647,6 +656,10 @@ export class ChildScreenHost {
       if (wasSelected && !this.cachedSelectedId) {
         if (restoreMain(this.screenSwap)) this.clearScrollbackAndRender();
       }
+    } else if (this.cachedSelectedId) {
+      // A long answer can leave the list signature unchanged until message_end.
+      // Read one selected stream here; Main and unselected sessions pay nothing.
+      this.refreshSelectedStream(this.cachedSelectedId);
     }
     if (recordsChanged || this.paintInvalidated) {
       this.updateFooterStatus();

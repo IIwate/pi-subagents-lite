@@ -16,12 +16,12 @@ import { fakeExtensionRuntime } from "../fixtures.ts";
 const {
   mockListAgents,
   mockGetRecord,
-  mockGetStoredResult,
+  mockStoredResult,
   mockMarkResultPresented,
 } = vi.hoisted(() => ({
   mockListAgents: vi.fn(),
   mockGetRecord: vi.fn(),
-  mockGetStoredResult: vi.fn(),
+  mockStoredResult: vi.fn(),
   mockMarkResultPresented: vi.fn(),
 }));
 
@@ -39,8 +39,10 @@ const executeAgentStatusTool = createAgentStatusToolExecutor(fakeExtensionRuntim
     getSnapshot: mockGetRecord,
   } as any,
   delivery: {
-    getStoredResult: mockGetStoredResult,
     execute: (command: { kind?: string; deliveryId?: string }) => {
+      if (command.kind === "inspect") {
+        return { ok: true, stored: mockStoredResult() };
+      }
       if (command.kind === "mark-presented" && command.deliveryId) {
         mockMarkResultPresented(command.deliveryId);
       }
@@ -57,7 +59,7 @@ describe("REQ-AGENT-003 AgentStatus tool execute behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetRecord.mockReturnValue(undefined);
-    mockGetStoredResult.mockReturnValue(undefined);
+    mockStoredResult.mockReturnValue(undefined);
   });
 
   it("looks up one exact result without polling", async () => {
@@ -107,6 +109,7 @@ describe("REQ-AGENT-003 AgentStatus tool execute behavior", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Unknown agent: agent-1234");
+    expect(mockMarkResultPresented).not.toHaveBeenCalled();
   });
 
   it("uses the durable result when a live record has no result text", async () => {
@@ -118,7 +121,7 @@ describe("REQ-AGENT-003 AgentStatus tool execute behavior", () => {
       result: undefined,
       error: "temporary failure",
     });
-    mockGetStoredResult.mockReturnValue({
+    mockStoredResult.mockReturnValue({
       agentId: "agent-12345678",
       type: "reviewer",
       status: "error",

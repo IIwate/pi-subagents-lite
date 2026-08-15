@@ -28,7 +28,6 @@ export interface CreateBackgroundDeliveryOptions {
 export interface BackgroundDelivery {
   execute(command: unknown): DeliveryCommandResult;
   pendingResultCount(): number | undefined;
-  getStoredResult(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined;
 }
 
 function failure(
@@ -253,9 +252,6 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     pendingResultCount() {
       return snapshot().visiblePendingCount;
     },
-    getStoredResult(agentId, deliveryId) {
-      return getStored(agentId, deliveryId);
-    },
   };
 
   function run(command: unknown): DeliveryCommandResult {
@@ -351,24 +347,37 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   }
 
   function lookupStored(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined {
+    // Every explicit lookup pays for a durable read. Reading only on a miss
+    // lets an old in-memory continuation conceal a newer persisted one.
+    const durable = options.repository.find(
+      deliveryId ? { agentId, deliveryId } : { agentId },
+    );
     if (deliveryId) {
       const latest = latestResults.get(agentId);
       return fallbackResults.get(deliveryId)
         ?? pendingResults.get(deliveryId)
-        ?? (latest?.deliveryId === deliveryId ? latest : undefined);
+        ?? (latest?.deliveryId === deliveryId ? latest : undefined)
+        ?? durable;
     }
-    const latest = latestResults.get(agentId);
+    const memoryLatest = latestResults.get(agentId);
+    // On equal timestamps the durable record wins; memory is only the view
+    // that happened to exist when this delivery instance was constructed.
+    const persisted = !memoryLatest
+      ? durable
+      : !durable || memoryLatest.createdAt > durable.createdAt
+        ? memoryLatest
+        : durable;
     const fallback = [...fallbackResults.values()]
       .filter((result) => result.agentId === agentId)
       .reduce<BackgroundResultRecord | undefined>(
         (newest, result) => !newest || result.createdAt >= newest.createdAt ? result : newest,
         undefined,
       );
-    if (!fallback) return latest;
+    if (!fallback) return persisted;
     // Same-millisecond continuations share createdAt. Treating equality as
     // "fallback is newer" would resurrect the failed persist over the
-    // completion that just landed. Prefer the persisted latest on a tie.
-    if (!latest || fallback.createdAt > latest.createdAt) return fallback;
-    return latest;
+    // completion that just landed. Prefer the persisted record on a tie.
+    if (!persisted || fallback.createdAt > persisted.createdAt) return fallback;
+    return persisted;
   }
 }

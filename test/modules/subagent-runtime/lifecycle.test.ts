@@ -14,7 +14,6 @@ import {
   type SessionEvent,
   type SessionInspectResult,
   type SessionStartRequest,
-  type WorktreeInspector,
 } from "../../../src/modules/subagent-runtime/public.js";
 
 interface MemoryRun {
@@ -37,6 +36,7 @@ function createMemoryDriver() {
     provider?: string;
     thinkingLevel?: SessionInspectResult["thinkingLevel"];
     messages: unknown[];
+    streamingMessage?: unknown;
   }>();
 
   const driver: SessionDriver = {
@@ -117,6 +117,18 @@ function createMemoryDriver() {
         messages: session.messages,
       };
     },
+    inspectStream(request) {
+      const session = sessions.get(request.sessionId);
+      if (!session) return { found: false, live: false, streaming: false };
+      return {
+        found: true,
+        live: session.live,
+        streaming: session.streaming,
+        ...(session.streamingMessage !== undefined
+          ? { streamingMessage: session.streamingMessage }
+          : {}),
+      };
+    },
   };
 
   return { driver, runs, continues, steers, aborts, closes, sessions };
@@ -139,12 +151,6 @@ function createIds(prefix = "agent") {
     },
   };
 }
-
-const acceptingWorktree: WorktreeInspector = {
-  async inspect(request) {
-    return { ok: true, resolvedPath: `/resolved${request.worktreePath}` };
-  },
-};
 
 /** Timer port double whose registered callbacks the test fires by hand. */
 function createTimers() {
@@ -173,7 +179,6 @@ function createRuntime(
   overrides?: {
     clock?: { now(): number };
     limits?: { defaultModelLimit: number; modelLimits: Record<string, number>; providerLimits: Record<string, number> };
-    worktree?: WorktreeInspector;
     concurrency?: ConcurrencyScheduler;
     timers?: ReturnType<typeof createTimers>["port"];
     cleanupIntervalMs?: number;
@@ -181,7 +186,6 @@ function createRuntime(
 ) {
   return createSubagentRuntime({
     sessionDriver: driver,
-    worktreeInspector: overrides?.worktree ?? acceptingWorktree,
     clock: overrides?.clock ?? { now: () => 1_000 },
     ids: createIds(),
     scheduler: overrides?.timers ?? {
@@ -337,7 +341,7 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     ]);
   });
 
-  it("listSnapshots ranks attention above running, running above queued, queued above done, and keeps acceptance order inside a rank", async () => {
+  it("orders each rank by pin first, then terminal recency and active start order", async () => {
     let now = 1_000;
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver, {
@@ -382,41 +386,207 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
     const listed = runtime.listSnapshots();
     expect(
       listed.map((snapshot) => `${snapshot.id}:${snapshot.status}`),
-      "error/aborted/turn_limited, then running, then queued, then archive in acceptance order; pin must not lift the first done row",
+      "attention (newest failure first), running, queued, archive; pin lifts inside its own rank only",
     ).toEqual([
-      "agent-00000002:error",
-      "agent-00000003:aborted",
       "agent-00000004:turn_limited",
+      "agent-00000003:aborted",
+      "agent-00000002:error",
       "agent-00000006:running",
       "agent-00000008:queued",
       "agent-00000001:completed",
-      "agent-00000005:completed",
       "agent-00000007:stopped",
+      "agent-00000005:completed",
     ]);
-    const queued = listed.find((snapshot) => snapshot.status === "queued");
-    const firstDone = listed.find((snapshot) => snapshot.id === "agent-00000001");
-    const secondDone = listed.find((snapshot) => snapshot.id === "agent-00000005");
-    expect(secondDone?.startedAt).toBeGreaterThan(queued?.startedAt ?? 0);
-    expect(secondDone?.startedAt).toBeGreaterThan(firstDone?.startedAt ?? 0);
-    expect(firstDone?.pinnedAt).toEqual(expect.any(Number));
+    const attention = listed.slice(0, 3).map((snapshot) => snapshot.completedAt ?? 0);
+    expect(attention[0]).toBeGreaterThan(attention[1]!);
+    expect(attention[1]).toBeGreaterThan(attention[2]!);
+    expect(listed[5]!.pinnedAt).toEqual(expect.any(Number));
+    // Pinning lifts only within the archive rank.
+    expect(listed.findIndex((snapshot) => snapshot.id === "agent-00000001"))
+      .toBeGreaterThan(listed.findIndex((snapshot) => snapshot.status === "queued"));
 
     const inspected = await runtime.execute({ kind: "inspect" });
     expect(inspected.ok && inspected.snapshots?.map((snapshot) => snapshot.id)).toEqual(
       listed.map((snapshot) => snapshot.id),
     );
+
+    // Unpinning immediately restores completion-time order.
+    expect(await runtime.execute({ kind: "pin", id: "agent-00000001" })).toMatchObject({
+      ok: true,
+      pinned: false,
+    });
+    expect(runtime.listSnapshots().slice(5).map((snapshot) => snapshot.id)).toEqual([
+      "agent-00000007",
+      "agent-00000005",
+      "agent-00000001",
+    ]);
   });
 
-  it("rejects a worktree target through the inspector port", async () => {
+  it("lifts a pinned record only within each of the four status ranks", async () => {
+    let now = 1_000;
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver, {
-      worktree: {
-        async inspect() {
-          return { ok: false, error: "worktree_path is not a worktree of the parent's repository" };
-        },
+      clock: { now: () => { now += 1; return now; } },
+      limits: {
+        defaultModelLimit: 10,
+        modelLimits: { "queue/model": 1 },
+        providerLimits: {},
       },
     });
+    const spawn = async (description: string, modelKey: string) => runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: description,
+      description,
+      acceptedPolicy: acceptedRunPolicy(modelKey),
+    });
 
-    const result = await runtime.execute({
+    await spawn("attention older", "attention/model");
+    await spawn("attention newer", "attention/model");
+    await failRun(memory, "agent-00000001");
+    await failRun(memory, "agent-00000002");
+    await spawn("archive older", "archive/model");
+    await spawn("archive newer", "archive/model");
+    await completeRun(memory, "agent-00000003");
+    await completeRun(memory, "agent-00000004");
+    await spawn("running older", "running/older");
+    await spawn("running newer", "running/newer");
+    await spawn("queue blocker", "queue/model");
+    await spawn("queued older", "queue/model");
+    await spawn("queued newer", "queue/model");
+
+    for (const id of [
+      "agent-00000001",
+      "agent-00000006",
+      "agent-00000009",
+      "agent-00000003",
+    ]) {
+      await runtime.execute({ kind: "pin", id });
+    }
+
+    expect(runtime.listSnapshots().map((snapshot) => snapshot.description)).toEqual([
+      "attention older",
+      "attention newer",
+      "running newer",
+      "running older",
+      "queue blocker",
+      "queued newer",
+      "queued older",
+      "archive older",
+      "archive newer",
+    ]);
+  });
+
+  it("keeps queued rows in scheduling order when every stamp lands in one millisecond", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      clock: { now: () => 1_000 },
+      limits: { defaultModelLimit: 1, modelLimits: {}, providerLimits: {} },
+    });
+
+    for (const description of ["first", "second", "third", "fourth"]) {
+      await runtime.execute({
+        kind: "spawn",
+        type: "general-purpose",
+        prompt: description,
+        description,
+        acceptedPolicy: acceptedRunPolicy("test/model"),
+      });
+    }
+
+    // Equal timestamps force the explicit spawn-order tie break.
+    expect(
+      runtime.listSnapshots().filter((snapshot) => snapshot.status === "queued")
+        .map((snapshot) => snapshot.description),
+    ).toEqual(["second", "third", "fourth"]);
+
+    // Display order must match drainQueue order.
+    await completeRun(memory, "agent-00000001");
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(runtime.getSnapshot("agent-00000003")?.status).toBe("queued");
+  });
+
+  it("moves a re-woken record to its new place instead of the seat it earned at spawn", async () => {
+    const clock = createClock();
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, { clock });
+
+    for (const description of ["old", "other"]) {
+      await runtime.execute({
+        kind: "spawn",
+        type: "general-purpose",
+        prompt: description,
+        description,
+        acceptedPolicy: acceptedRunPolicy("test/model"),
+      });
+    }
+    clock.advance(10);
+    await completeRun(memory, "agent-00000001");
+    clock.advance(10);
+    await completeRun(memory, "agent-00000002");
+
+    clock.advance(10);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "fresh",
+      description: "fresh",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    clock.advance(10);
+    expect(await runtime.execute({
+      kind: "interact",
+      id: "agent-00000001",
+      message: "continue",
+    })).toMatchObject({ ok: true, interaction: { accepted: true } });
+
+    // Continuation refreshes startedAt, so the older fresh run stays first.
+    expect(runtime.listSnapshots().map((snapshot) => snapshot.id)).toEqual([
+      "agent-00000003",
+      "agent-00000001",
+      "agent-00000002",
+    ]);
+
+    clock.advance(10);
+    const continued = memory.continues.get("agent-00000001");
+    continued?.emit({
+      type: "completed",
+      agentId: "agent-00000001",
+      sessionId: "agent-00000001",
+      responseText: "again",
+      aborted: false,
+      turnLimited: false,
+    });
+    continued?.resolve();
+    await Promise.resolve();
+
+    // The newly completed continuation precedes the older completion.
+    expect(runtime.listSnapshots().filter((snapshot) => snapshot.status === "completed")
+      .map((snapshot) => snapshot.id)).toEqual(["agent-00000001", "agent-00000002"]);
+  });
+
+  it("takes only a validated worktree path and refuses the raw pre-validation shape", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+
+    const accepted = await runtime.execute({
+      kind: "spawn",
+      type: "Explore",
+      prompt: "look",
+      description: "look",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+      validatedWorktreePath: "/repo/../other/worktree",
+    });
+    // Lifecycle locks the already validated path into the snapshot and request.
+    expect(accepted).toMatchObject({
+      ok: true,
+      snapshot: { worktreePath: "/repo/../other/worktree" },
+    });
+    expect(memory.runs.get("agent-00000001")?.request.worktreePath)
+      .toBe("/repo/../other/worktree");
+
+    // additionalProperties rejects the retired, unvalidated raw-path shape.
+    const raw = await runtime.execute({
       kind: "spawn",
       type: "Explore",
       prompt: "look",
@@ -425,45 +595,11 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
       worktreePath: "../other-repo",
       parentCwd: "/repo",
     });
-
-    expect(result).toEqual({
+    expect(raw).toEqual({
       ok: false,
-      error: {
-        code: "worktree-invalid",
-        message: "worktree_path is not a worktree of the parent's repository",
-      },
+      error: { code: "invalid-command", message: "Lifecycle command is invalid." },
     });
-    expect(runtime.listSnapshots()).toEqual([]);
-  });
-
-  it("rejects an off-contract worktree inspect result before using .ok or .resolvedPath", async () => {
-    const memory = createMemoryDriver();
-    const runtime = createRuntime(memory.driver, {
-      worktree: {
-        async inspect() {
-          return { ok: false } as never;
-        },
-      },
-    });
-
-    const result = await runtime.execute({
-      kind: "spawn",
-      type: "Explore",
-      prompt: "look",
-      description: "look",
-      acceptedPolicy: acceptedRunPolicy("test/model"),
-      worktreePath: "../other-repo",
-      parentCwd: "/repo",
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      error: {
-        code: "worktree-invalid",
-        message: "Worktree inspect result does not match its contract.",
-      },
-    });
-    expect(runtime.listSnapshots()).toEqual([]);
+    expect(runtime.listSnapshots().map((snapshot) => snapshot.id)).toEqual(["agent-00000001"]);
   });
 });
 
@@ -648,8 +784,9 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
     expect(memory.runs.size).toBe(0);
   });
 
-  it("aborts a session that becomes ready after stop", async () => {
+  it("aborts a session that is still in setup and rejects the late ready", async () => {
     const aborts: string[] = [];
+    const closes: string[] = [];
     const steers: string[] = [];
     let emitReady: ((event: SessionEvent) => void) | undefined;
     let resolveStart: (() => void) | undefined;
@@ -666,8 +803,9 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
         return { accepted: true };
       },
       async abort(request) { aborts.push(request.sessionId); },
-      async close() {},
+      async close(request) { closes.push(request.sessionId); },
       inspect() { return { found: false, live: false, streaming: false, messages: [] }; },
+      inspectStream() { return { found: false, live: false, streaming: false }; },
     };
     const runtime = createRuntime(driver);
 
@@ -685,6 +823,9 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
       snapshot: { status: "stopped" },
     });
 
+    // sessionId exists from startAgent, so setup can be aborted before ready.
+    expect(aborts).toEqual(["agent-00000001"]);
+
     emitReady?.({
       type: "session-ready",
       agentId: "agent-00000001",
@@ -695,7 +836,9 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
     resolveStart?.();
     await Promise.resolve();
 
-    expect(aborts).toEqual(["agent-00000001"]);
+    // A late ready is rejected again and cannot flush the pending steer.
+    expect(aborts).toEqual(["agent-00000001", "agent-00000001"]);
+    expect(closes).toEqual(["agent-00000001"]);
     expect(steers).toEqual([]);
     expect(runtime.getSnapshot("agent-00000001")?.status).toBe("stopped");
   });
@@ -982,6 +1125,55 @@ describe("REQ-RUNTIME-002 close", () => {
     expect(memory.aborts).toEqual(["agent-00000001"]);
     expect(memory.closes).toEqual(["agent-00000001"]);
   });
+
+  it("aborts setup before closing and ignores a late session-ready event", async () => {
+    const aborts: string[] = [];
+    const closes: string[] = [];
+    let emitSetup: ((event: SessionEvent) => void) | undefined;
+    let resolveSetup: (() => void) | undefined;
+    const driver: SessionDriver = {
+      start(request, emit) {
+        emit({ type: "setup-started", agentId: request.agentId, sessionId: request.sessionId });
+        emitSetup = emit;
+        return new Promise<void>((resolve) => { resolveSetup = resolve; });
+      },
+      async continueRun() {},
+      async steer() { return { accepted: false }; },
+      async abort(request) { aborts.push(request.sessionId); },
+      async close(request) { closes.push(request.sessionId); },
+      inspect() { return { found: false, live: false, streaming: false, messages: [] }; },
+      inspectStream() { return { found: false, live: false, streaming: false }; },
+    };
+    const runtime = createRuntime(driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    expect(await runtime.execute({
+      kind: "close",
+      id: "agent-00000001",
+      initiator: "user",
+    })).toEqual({ ok: true, closed: true });
+    expect(aborts).toEqual(["agent-00000001"]);
+    expect(closes).toEqual(["agent-00000001"]);
+    emitSetup?.({
+      type: "session-ready",
+      agentId: "agent-00000001",
+      sessionId: "agent-00000001",
+      modelId: "model",
+      provider: "test",
+    });
+    resolveSetup?.();
+    await Promise.resolve();
+
+    expect(runtime.getSnapshot("agent-00000001")).toBeUndefined();
+    expect(aborts).toEqual(["agent-00000001", "agent-00000001"]);
+    expect(closes).toEqual(["agent-00000001", "agent-00000001"]);
+  });
 });
 
 describe("REQ-RUNTIME-006 shutdown", () => {
@@ -1115,6 +1307,8 @@ describe("REQ-RUNTIME-006 shutdown", () => {
     expect(teardown).toBeDefined();
     teardown!.run();
     await disposing;
+    expect(memory.aborts).toEqual(["agent-00000001"]);
+    expect(memory.closes).toEqual(["agent-00000001"]);
     expect(runtime.listSnapshots()).toEqual([]);
   });
 });
