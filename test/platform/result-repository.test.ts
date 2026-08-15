@@ -118,6 +118,7 @@ describe("Pi ResultRepository contract", () => {
     const read = repository.read();
     expect(read.pending.map((item) => item.deliveryId)).toEqual(["new"]);
     expect(read.latest.map((item) => item.agentId)).toEqual(["new"]);
+    expect(repository.find({ agentId: "old" })).toBeUndefined();
   });
 
   it("reports atomic acknowledge failure without writing an ack entry", () => {

@@ -8,6 +8,7 @@ import {
   createSubagentRuntime,
   DEFAULT_RETENTION_MS,
   DEFAULT_TEARDOWN_TIMEOUT_MS,
+  SessionStartRequestSchema,
   type AgentSnapshot,
   type ConcurrencyScheduler,
   type SessionDriver,
@@ -842,6 +843,32 @@ describe("REQ-RUNTIME-003 foreground interruption", () => {
     expect(steers).toEqual([]);
     expect(runtime.getSnapshot("agent-00000001")?.status).toBe("stopped");
   });
+
+  it("keeps a user-stopped setup free of an abort error", async () => {
+    const memory = createMemoryDriver();
+    let rejectStart: ((error: Error) => void) | undefined;
+    memory.driver.start = (request, emit) => {
+      emit({ type: "setup-started", agentId: request.agentId, sessionId: request.sessionId });
+      return new Promise<void>((_resolve, reject) => { rejectStart = reject; });
+    };
+    memory.driver.abort = async () => {
+      rejectStart?.(new Error("Agent session setup aborted"));
+    };
+    const runtime = createRuntime(memory.driver);
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.execute({ kind: "stop", id: "agent-00000001", initiator: "user" });
+
+    const stopped = await runtime.waitUntilSettled("agent-00000001");
+    expect(stopped).toMatchObject({ status: "stopped", settled: true, stoppedBy: "user" });
+    expect(stopped?.error).toBeUndefined();
+  });
 });
 
 describe("REQ-RUNTIME-004 retention and pinning", () => {
@@ -1346,6 +1373,22 @@ describe("REQ-RUNTIME-007 debug provenance", () => {
 });
 
 describe("session-driver contract", () => {
+  it("keeps SessionStartRequest schema-valid across a JSON round trip", () => {
+    const request: SessionStartRequest = {
+      agentId: "agent-00000001",
+      sessionId: "session-00000001",
+      agentType: "general-purpose",
+      prompt: "review the contract",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+      worktreePath: "C:/repo/worktree",
+      debugFault: "provider_error",
+    };
+    const roundTripped = JSON.parse(JSON.stringify(request));
+
+    expect(roundTripped).toEqual(request);
+    expect(Check(SessionStartRequestSchema, roundTripped)).toBe(true);
+  });
+
   it("covers setup, progress, completion, error, abort, continuation, and close", async () => {
     const events: SessionEvent[] = [];
     const memory = createMemoryDriver();

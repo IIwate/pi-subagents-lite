@@ -407,8 +407,10 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     } catch (error) {
       markSetupFinished();
       if (disposing || !snapshots.has(snapshot.id)) return;
-      if (canOverwriteStatus(snapshot.status)) snapshot.status = "error";
-      snapshot.error = error instanceof Error ? error.message : String(error);
+      if (canOverwriteStatus(snapshot.status)) {
+        snapshot.status = "error";
+        snapshot.error = error instanceof Error ? error.message : String(error);
+      }
       snapshot.result = undefined;
       snapshot.completedAt ??= options.clock.now();
     } finally {

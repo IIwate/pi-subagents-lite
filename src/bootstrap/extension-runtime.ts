@@ -42,9 +42,9 @@ export interface ExtensionRuntime {
   /** Fresh model-routing policy read; injected so executors never reach the document directly. */
   readonly modelAccess: () => ModelAccessFragment;
   /**
-   * The single worktree probe. Both the accepted-spawn path and the Agent tool's
-   * early parameter check resolve paths through it, so the two can never
-   * disagree about what counts as a linked worktree.
+   * The Agent tool owns the only worktree probe. Discovery and lifecycle consume
+   * the validated path from that verdict; probing again could let the filesystem
+   * change between answers and leave one accepted spawn with two versions of truth.
    */
   readonly worktree: WorktreeInspector;
   /** The activation's live Agent type registry, backed by the catalogue module. */
