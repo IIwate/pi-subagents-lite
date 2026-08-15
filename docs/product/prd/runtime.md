@@ -34,6 +34,10 @@ Shutdown is bounded and idempotent. Abort rejection, reentrant disposal, late us
 
 The existing session-local one-shot debug fault remains UI-only, is consumed only by the next Agent that starts, and is not persisted or exposed as lifecycle control to the parent LLM.
 
+### REQ-RUNTIME-008 — Project concurrency override
+
+Effective admission limits are layered as capability defaults <- global settings <- trusted project settings; a project value overrides only the keys it names, and absence means inheritance. A successful commit to either layer affects only subsequent scheduler reserve and queue-drain decisions; running and queued calls keep their Accepted run policy (REQ-AGENT-002) — limits are live scheduler policy, not part of that policy. The merged effective limits are never written back to any file.
+
 ## Out of scope
 
 - A new scheduler product setting beyond the existing settings workflow.

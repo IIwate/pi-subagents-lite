@@ -16,21 +16,44 @@ export {
 } from "./application/validate-accepted-run-policy.js";
 export {
   ConcurrencyDecisionSchema,
+  ConcurrencyLayerFragmentSchema,
+  ConcurrencyLayerParseResultSchema,
+  ConcurrencyLayerPresenceSchema,
+  ConcurrencyLayerUpdatePlanSchema,
   ConcurrencyLimitsFragmentSchema,
   ConcurrencyLimitsSchema,
   ConcurrencyLimitsUpdateSchema,
+  ConcurrencyProjectFragmentSchema,
+  ConcurrencyProvenanceSchema,
+  ConcurrencyTargetSchema,
+  ConcurrencyValueSourceSchema,
+  MergedConcurrencyLimitsSchema,
 } from "./contracts/scheduling.js";
 export type {
   ConcurrencyDecision,
+  ConcurrencyLayerFragment,
+  ConcurrencyLayerParseResult,
+  ConcurrencyLayerPresence,
+  ConcurrencyLayerUpdatePlan,
   ConcurrencyLimits,
   ConcurrencyLimitsFragment,
   ConcurrencyLimitsUpdate,
+  ConcurrencyProjectFragment,
+  ConcurrencyProvenance,
+  ConcurrencyTarget,
+  ConcurrencyValueSource,
+  MergedConcurrencyLimits,
 } from "./contracts/scheduling.js";
 export {
   applyConcurrencyLimitsUpdate,
   parseConcurrencyLimitsFragment,
   runtimeLimitsFromFragment,
 } from "./core/limits-fragment.js";
+export {
+  applyConcurrencyLayerUpdate,
+  mergeConcurrencyLayers,
+  parseConcurrencyLayer,
+} from "./core/concurrency-layers.js";
 export {
   createConcurrencyScheduler,
   type ConcurrencyScheduler,
