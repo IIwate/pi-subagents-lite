@@ -128,7 +128,6 @@ For local validation, "all tests" in the S.U.P.E.R. checklist means every test s
 - Follow KISS: no unrequested compatibility layer, migration shim, duplicate implementation, speculative fallback, or scope expansion. Because releases exist, any persisted-format or public-contract break requires an explicit migration/version decision.
 - Match surrounding naming, comment density, and idiom.
 - Commits use English Conventional Commits. Non-trivial commits add concise `- ` bullets and never include AI attribution.
-- After review fixes and required checks pass, add `Review-Result: PASS` to the commit message. That commit is the inclusive review checkpoint.
 
 ## Release
 

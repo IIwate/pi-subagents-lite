@@ -40,7 +40,3 @@ Relevant local commands and outcomes:
 -
 
 Full-suite CI: pending
-
-Formal phase review result is recorded in the checkpoint commit as:
-
-`Review-Result: PASS`
