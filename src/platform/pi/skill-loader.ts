@@ -36,7 +36,7 @@ import { isUnsafeName } from "../../utils.js";
 
 /** The two independent roots skill discovery reads from. */
 export interface SkillRoots {
-  /** User-level `.agents/skills` root — this extension's resolved config home. */
+  /** User-level `.agents/skills` root — follows the extension's HOME resolution. */
   userHome: string;
   /** Pi's agent directory — the Pi-default skill root, shared with the child session. */
   agentDir: string;
@@ -176,12 +176,12 @@ export function preloadSkills(skillNames: string[], cwd: string, roots: SkillRoo
     }
     const match = skills.find((s) => s.name === name);
     if (!match) {
-      return { name, description: "", content: `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)` };
+      return { name, description: "", content: `(Skill "${name}" not found in project skills, .agents/skills/, or global skill locations)` };
     }
     try {
       return { name, description: match.description, content: readFileSync(match.filePath, "utf-8").trim() };
     } catch {
-      return { name, description: "", content: `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)` };
+      return { name, description: "", content: `(Skill "${name}" not found in project skills, .agents/skills/, or global skill locations)` };
     }
   });
 }

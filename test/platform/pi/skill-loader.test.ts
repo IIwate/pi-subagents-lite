@@ -100,10 +100,10 @@ describe("loadAllSkills", () => {
     expect(matches[0].description).toBe("Agents TDD");
   });
 
-  // PI_AGENT_DIR, or a HOME that differs from the OS home (Git Bash / MSYS),
-  // makes these two roots different directories. Reading both from one `home`
-  // is how explicit skills came from a different tree than the child session's
-  // own resources.
+  // A relocated Pi agent directory, or a HOME that differs from the OS home
+  // (Git Bash / MSYS), makes these two roots different directories. Reading
+  // both from one `home` is how explicit skills came from a different tree
+  // than the child session's own resources.
   it("reads the Pi default root from agentDir and .agents/skills from userHome", () => {
     const piAgentDir = join(tmpDir, "elsewhere", "agent");
     const defaultSkill = join(piAgentDir, "skills", "from-agent-dir");

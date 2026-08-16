@@ -90,7 +90,7 @@ A `thinking` frontmatter field is retired and ignored with a warning; thinking i
 
 Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. A positive `max_tokens` is applied to a child-only copy of the selected model through Pi's native `model.maxTokens`; Pi remains responsible for provider-specific request fields, thinking budgets, and context-window clamping. Omitting `max_tokens` or setting it to a non-positive value preserves the model's configured limit, and the parent model and Pi's `onPayload` chain are not modified. Subagents cannot spawn further subagents.
 
-Explicit and preloaded skills keep the existing discovery precedence, but Pi-default skills always come from the same `agentDir` Pi resolved for the Child session, including a custom `PI_AGENT_DIR`. User `.agents/skills` continues to follow this extension's resolved configuration home; these roots are intentionally independent.
+Explicit and preloaded skills keep the existing discovery precedence, but Pi-default skills always come from the same Pi agent directory resolved for the Child session, including one relocated through Pi's own mechanism. User `.agents/skills` continues to follow the resolved home directory; these roots are intentionally independent.
 
 ## Agent Options
 

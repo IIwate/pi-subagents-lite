@@ -10,8 +10,8 @@
  *   - Optional model selection is resolved inside Agent execution
  *
  * Config:
- *   - One persisted document (~/.pi/agent/subagents-lite.json), owned by the
- *     configuration module and reloaded at session_start
+ *   - One persisted document (subagents-lite.json in the Pi agent directory),
+ *     owned by the configuration module and reloaded at session_start
  *   - Capabilities own their fragments; commits are atomic with explicit
  *     failure (bootstrap/agent-settings, bootstrap/model-access,
  *     bootstrap/concurrency)

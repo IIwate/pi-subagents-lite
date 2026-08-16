@@ -52,7 +52,7 @@ export function buildSystemPromptRows(view: PromptSettingsView): SettingsRow[] {
       id: "includeContextFiles",
       kind: "toggle",
       label: "Include AGENTS.md",
-      detail: "Load project and ~/.pi/agent AGENTS.md as shared <project_context>.",
+      detail: "Load project and Pi agent directory AGENTS.md as shared <project_context>.",
       value: view.includeContextFiles ? "ON" : "OFF",
       choices: ["ON", "OFF"],
     },
