@@ -44,65 +44,154 @@ Keep one authoritative home for each fact. Other documents link to that authorit
 - Configuration paths, precedence, loading, or persistence: read the [configuration operations contract](src/modules/configuration/docs/operations.md) before changing code.
 - Any cross-boundary change must define or update its TypeBox schema first and prove both a valid round trip and an invalid case at an approved public seam.
 
-## S.U.P.E.R Architecture — Mandatory Coding Standard
+# S.U.P.E.R Architecture Philosophy
 
 > Write code like building with LEGO — each brick has a single job, a standard interface, a clear direction, runs anywhere, and can be swapped at will.
 
-All code produced in this project MUST conform to these five principles. Violations are treated as bugs.
+This document defines the architectural principles that guide all code written during the development phases of a Spec-Driven Develop workflow. Every agent executing tasks should internalize these principles.
 
-### S — Single Purpose
+---
+
+## S — Single Purpose
+
+From Unix philosophy.
 
 - Each module, file, and function solves exactly one problem
 - Prefer decomposition; power comes from composition
-- **Litmus test**: Can you describe this module's responsibility in a single sentence? If not, split it.
+- One skill does one thing, one worker does one thing, one script does one thing
 
-### U — Unidirectional Flow
+**Litmus test:** if you cannot describe a module's responsibility in a single sentence, it needs to be split.
 
-- Data flows in one direction: input → processing → output
-- Dependencies point inward: outer layers depend on inner, inner layers know nothing about outer
-- No circular imports, no reverse dependencies
-- **Litmus test**: Can the core logic run unit tests with zero external services?
+**Anti-pattern:** a script that fetches data, computes metrics, renders charts, and sends notifications.
 
-### P — Ports over Implementation
+**Correct approach:**
+```
+fetch_data.py  -> data retrieval only, outputs JSON
+compute.py     -> computation only, reads JSON writes JSON
+render.py      -> rendering only, reads JSON generates HTML
+notify.py      -> notification only, reads JSON calls webhook
+```
 
-- Define interface contracts (JSON Schema, types, data structures) BEFORE writing implementation
-- All cross-module I/O must be serializable
-- Swapping a data source, render layer, or notification channel requires zero changes to core logic
-- **Practice**: Every module boundary communicates via explicit, schema-defined contracts
+---
 
-### E — Environment-Agnostic
+## U — Unidirectional Flow
 
-- Configuration via environment variables or config files, never hardcoded
-- All dependencies explicitly declared (requirements.txt / package.json / Cargo.toml)
-- Processes are stateless; persistence delegated to external storage
-- Logs to stdout. Same codebase runs locally, in Docker, on cloud
-- **Config precedence**: Environment variables > .env > config file > in-code defaults
+From Clean Architecture.
 
-### R — Replaceable Parts
+- Data always flows in one direction: input -> processing -> output
+- Dependencies always point inward: outer layers depend on inner layers, inner layers know nothing about outer layers
+- No reverse dependencies, no circular calls
+
+**Layered model:**
+```
++-------------------------------+
+|  Infrastructure (API, DB, UI) |  <- outermost, replaceable at will
++-------------------------------+
+|  Adapters (transform, format) |
++-------------------------------+
+|  Core business (pure logic)   |  <- innermost, zero external deps
++-------------------------------+
+```
+
+**Litmus test:** can the core logic run unit tests with zero external services? If not, the dependency direction is wrong.
+
+---
+
+## P — Ports over Implementation
+
+From Hexagonal Architecture.
+
+- Define interface contracts (data structures, JSON Schema) before writing implementation
+- Use intermediate formats (JSON files, standard data structures) to isolate upstream from downstream
+- Swapping a data source, a rendering layer, or a notification channel requires zero changes to core logic
+
+**Practices:**
+1. Every module's input and output must be a serializable data structure
+2. Module boundaries communicate via JSON files or standard data structures; in-process typed objects are fine, but cross-module interfaces must be serializable
+3. Define explicit schemas — not "just read the code to figure out the format"
+
+---
+
+## E — Environment-Agnostic
+
+From 12-Factor App.
+
+- Configuration injected via environment variables or config files, never hardcoded
+- All dependencies explicitly declared (requirements.txt / package.json), no implicit reliance on global system packages
+- Processes are stateless; all persistence delegated to external storage
+- Logs go to stdout, not to files
+- Same codebase runs on local machine, Cloudflare Workers, VPS, Docker
+
+**Configuration precedence (high to low):**
+```
+Environment variables > .env file > config.json > in-code defaults
+```
+
+**Checklist:**
+- All API keys and webhook URLs read from environment variables?
+- All dependencies explicitly declared in a dependency file?
+- No hardcoded file path assumptions?
+- Can a different machine run this code with zero modifications?
+
+---
+
+## R — Replaceable Parts
+
+The natural consequence and ultimate goal of S + U + P + E.
 
 - Any layer can be replaced without affecting others
-- Replacement cost is THE core metric of architecture quality
-- If replacing one component triggers cascading changes, the architecture is broken
-- **Validation**: For each module, ask "Can I swap this with a different implementation by only touching this module's directory?"
+- Replacement cost is the core metric of architecture quality
+- If replacing one component triggers cascading changes in unrelated modules, the architecture is broken
 
-### S.U.P.E.R Code Review — Run After Every Task
+**Replacement matrix:**
+| Replacing          | Impact scope       | Correct approach                          |
+|:-------------------|:-------------------|:------------------------------------------|
+| Data source API    | Adapter layer only | Write new fetcher, output same JSON       |
+| Frontend renderer  | Render layer only  | Read same JSON, swap render implementation|
+| Notification channel| Notification layer | Swap webhook adapter                      |
+| Deployment platform| Deploy config only | Change wrangler.toml or Dockerfile        |
+| Programming language| Implementation only| JSON contracts unchanged, rewrite in any language |
 
-Before marking any task as complete, verify ALL of the following:
+---
 
-| # | Check | Principle |
-|:--|:------|:----------|
-| 1 | Every new module/file has exactly one responsibility | S |
-| 2 | No function does more than one conceptual thing | S |
-| 3 | Data flows input → processing → output, no reverse deps | U |
-| 4 | No circular imports introduced | U |
-| 5 | Cross-module interfaces are schema-defined (types/contracts) | P |
-| 6 | Module I/O is serializable | P |
-| 7 | No hardcoded paths, URLs, keys, or config values | E |
-| 8 | All new dependencies explicitly declared in dependency file | E |
-| 9 | New modules can be replaced without changes to other modules | R |
-| 10 | All tests pass after the change | — |
+## Quick Check Card
 
-**Scoring**: All pass = proceed. 1-2 fail = fix before marking complete. 3+ fail = stop and refactor.
+```
++------------------------------------------+
+|         S.U.P.E.R Quick Check            |
+|                                          |
+|  S  Does this module do only one thing?  |
+|  U  Is the data flow unidirectional?     |
+|  P  Are inputs/outputs schema-defined?   |
+|  E  Can it run in a different env?       |
+|  R  Can you replace it without ripple?   |
+|                                          |
+|  All Yes -> Architecture healthy         |
+|  1-2 No  -> Refactoring needed           |
+|  3+ No   -> Technical debt alert         |
++------------------------------------------+
+```
+
+---
+
+## S.U.P.E.R Code Review Checklist (10 checks)
+
+Run this checklist after every task before marking it complete. This is the agent-canonical copy of the checklist also shown in the user-facing README; keep the two in sync.
+
+| Check | Principle |
+|:------|:----------|
+| Every new module/file has exactly one responsibility | S |
+| No function does more than one conceptual thing | S |
+| Data flows input → processing → output, no reverse deps | U |
+| No circular imports introduced | U |
+| Cross-module interfaces are schema-defined | P |
+| Module I/O is serializable | P |
+| No hardcoded paths, URLs, keys, or config values | E |
+| All new dependencies explicitly declared | E |
+| New modules can be replaced without changes to others | R |
+| All tests pass after the change | — |
+
+**Scoring rule:** All pass = proceed. 1-2 fail = fix before marking complete. 3+ fail = stop and refactor.
 
 ## Development and verification
 

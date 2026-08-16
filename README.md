@@ -201,6 +201,25 @@ Manual migration is needed only if all of these are true: the configuration was 
 
 Before upgrading, back up both locations. Copy the old `<launch-directory>/.pi/agent/subagents-lite.json` to the current `~/.pi/agent/subagents-lite.json`; if used, copy `<launch-directory>/.pi/agent/subagents-lite-prompt.md` to `~/.pi/agent/subagents-lite-prompt.md` as well. Here `~` is the current resolved OS home when neither environment nor `.env` supplies a non-empty `HOME`. If the destination already contains either file, do not overwrite it blindly: compare the files and choose or merge the settings you intend to keep. The extension deliberately does not read both locations or copy legacy files automatically.
 
+## S.U.P.E.R Code Review Checklist
+
+Run this checklist after every task before marking it complete. This is the user-facing copy of the checklist also shown in the repository's AGENTS.md; keep the two in sync.
+
+| Check | Principle |
+|:------|:----------|
+| Every new module/file has exactly one responsibility | S |
+| No function does more than one conceptual thing | S |
+| Data flows input → processing → output, no reverse deps | U |
+| No circular imports introduced | U |
+| Cross-module interfaces are schema-defined | P |
+| Module I/O is serializable | P |
+| No hardcoded paths, URLs, keys, or config values | E |
+| All new dependencies explicitly declared | E |
+| New modules can be replaced without changes to others | R |
+| All tests pass after the change | — |
+
+**Scoring rule:** All pass = proceed. 1-2 fail = fix before marking complete. 3+ fail = stop and refactor.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
