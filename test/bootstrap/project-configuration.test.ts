@@ -139,6 +139,11 @@ describe("normalizeConfigPathKey", () => {
   it("keeps POSIX paths case-sensitive", () => {
     expect(normalizeConfigPathKey("/Repo/Project")).toBe("/Repo/Project");
   });
+
+  it("keys a relative path to its host-resolved absolute form", () => {
+    const relative = path.join("Config", "Sub.JSON");
+    expect(normalizeConfigPathKey(relative)).toBe(normalizeConfigPathKey(path.resolve(relative)));
+  });
 });
 
 describe("REQ-RUNTIME-008 layered concurrency owner routing", () => {

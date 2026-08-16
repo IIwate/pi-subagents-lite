@@ -36,7 +36,7 @@ The existing session-local one-shot debug fault remains UI-only, is consumed onl
 
 ### REQ-RUNTIME-008 — Project concurrency override
 
-Effective admission limits are layered as capability defaults <- global settings <- trusted project settings; a project value overrides only the keys it names, and absence means inheritance. A successful commit to either layer affects only subsequent scheduler reserve and queue-drain decisions; running and queued calls keep their Accepted run policy (REQ-AGENT-002) — limits are live scheduler policy, not part of that policy. The merged effective limits are never written back to any file.
+Effective admission limits are layered as capability defaults <- global settings <- trusted project settings; a project value overrides only the keys it names, and absence means inheritance. The fallback default is removed per layer the same way as any keyed override — a project removal restores inheritance, a global removal the factory default — without touching any other key. A successful commit to either layer affects only subsequent scheduler reserve and queue-drain decisions; running and queued calls keep their Accepted run policy (REQ-AGENT-002) — limits are live scheduler policy, not part of that policy. The merged effective limits are never written back to any file.
 
 ## Out of scope
 
@@ -45,4 +45,4 @@ Effective admission limits are layered as capability defaults <- global settings
 
 ## Acceptance intent
 
-Acceptance examples cover concurrency normalization and ceilings, queueing/FIFO order, interruption throughout setup, setup failures, terminal recency, continuation repositioning, rank-local pinning, retention, shutdown races, late usage, and debug provenance.
+Acceptance examples cover concurrency normalization and ceilings, queueing/FIFO order, interruption throughout setup, setup failures, terminal recency, continuation repositioning, rank-local pinning, retention, shutdown races, late usage, debug provenance, and layered global/project limits with per-key provenance.

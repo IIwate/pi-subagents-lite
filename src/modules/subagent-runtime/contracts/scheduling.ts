@@ -22,7 +22,9 @@ export const ConcurrencyLimitsFragmentSchema = Type.Object({
 export const ConcurrencyLimitsUpdateSchema = Type.Union([
   Type.Object({
     scope: Type.Literal("default"),
-    limit: Type.Integer({ minimum: 1 }),
+    // null removes the explicit default: the project layer falls back to
+    // inheritance, the global layer to the factory default.
+    limit: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
   }, { additionalProperties: false }),
   Type.Object({
     scope: Type.Union([Type.Literal("provider"), Type.Literal("model")]),

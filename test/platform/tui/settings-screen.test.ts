@@ -146,7 +146,8 @@ function createRealSettings(options: {
     update({ update }) {
       if (options.failUpdatesWith) return { ok: false, message: options.failUpdatesWith };
       if (update.scope === "default") {
-        globalFragment.default = update.limit;
+        if (update.limit === null) delete globalFragment.default;
+        else globalFragment.default = update.limit;
       } else if (update.scope === "reset") {
         globalFragment.default = 4;
         globalFragment.providers = {};
@@ -481,6 +482,25 @@ describe("settings screen renderer contract", () => {
     await runSettingsScreen(ctx, createRealSettings());
 
     expect(notifications).toHaveBeenCalledWith("Removed Provider limit for anthropic (Global)", "info");
+  });
+
+  it("removes the explicit fallback default through the same remove gesture", async () => {
+    const { ctx, notifications } = createScriptedCtx([
+      (component) => {
+        component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      },
+      (component) => {
+        component.handleInput("\r");     // first row: "Fallback model limit" opens edit-or-remove
+        component.handleInput("\x1b[B"); // move to "Remove limit"
+        component.handleInput("\r");
+        component.handleInput("\x1b");
+      },
+      (component) => component.handleInput("\x1b"),
+    ]);
+    await runSettingsScreen(ctx, createRealSettings());
+
+    expect(notifications).toHaveBeenCalledWith("Removed fallback model limit (Global)", "info");
   });
 
   it("adds a model limit through the picker followed by the numeric step", async () => {

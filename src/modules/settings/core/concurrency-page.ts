@@ -92,17 +92,31 @@ export function buildConcurrencyRows(view: ConcurrencySettingsView, target: Conc
     });
   }
 
-  rows.push({
-    id: "defaultConcurrency",
-    kind: "numeric",
-    label: "Fallback model limit",
-    detail: "Per-model ceiling used when no Model override exists.",
-    value: `${limitLabel(view.effective.default)} · ${SOURCE_TAGS[view.provenance.default]}`,
-    input: String(layer.default ?? view.factoryDefaultLimit),
-    min: CONCURRENCY_LIMIT_MINIMUM,
-    // Clearing the input restores the factory default instead of erroring.
-    fallback: view.factoryDefaultLimit,
-  });
+  // An explicit default is managed like a keyed override (edit or remove;
+  // removal restores inheritance on the project layer and the factory
+  // default on the global layer). Without one, the row stays a plain
+  // numeric input whose cleared field falls back to the factory value.
+  rows.push(layer.default !== undefined
+    ? {
+      id: "defaultConcurrency",
+      kind: "limit",
+      label: "Fallback model limit",
+      detail: "Per-model ceiling used when no Model override exists.",
+      value: `${limitLabel(view.effective.default)} · ${SOURCE_TAGS[view.provenance.default]}`,
+      input: String(layer.default),
+      min: CONCURRENCY_LIMIT_MINIMUM,
+    }
+    : {
+      id: "defaultConcurrency",
+      kind: "numeric",
+      label: "Fallback model limit",
+      detail: "Per-model ceiling used when no Model override exists.",
+      value: `${limitLabel(view.effective.default)} · ${SOURCE_TAGS[view.provenance.default]}`,
+      input: String(view.factoryDefaultLimit),
+      min: CONCURRENCY_LIMIT_MINIMUM,
+      // Clearing the input restores the factory default instead of erroring.
+      fallback: view.factoryDefaultLimit,
+    });
 
   const providerEntries = Object.entries(layerProviders).sort(([a], [b]) => a.localeCompare(b));
   const modelEntries = Object.entries(layerModels).sort(([a], [b]) => a.localeCompare(b));

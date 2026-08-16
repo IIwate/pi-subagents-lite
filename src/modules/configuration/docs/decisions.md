@@ -8,6 +8,7 @@
 - Generic path reads return opaque JSON values; the consuming capability validates and interprets them.
 - The HOME resolver serves only the user-level `.agents/skills` skill root; every persisted file path derives from the Pi agent directory instead. The candidate list and the no-config-file rationale live in [operations.md](./operations.md).
 - `bootstrap/configuration.ts` is the composition-root owner of the one in-memory document, observed revision, and write path.
+- Of the result schemas, the public surface exports only the top-level unions; inner union members (`ReloadConfigurationSuccessSchema`, `ConfigurationFailureSchema`) stay internal even when [contracts.md](./contracts.md) describes their behavior.
 
 ## Superseded
 

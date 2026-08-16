@@ -309,5 +309,3 @@ describe("scanAgentFilesInDir", () => {
     }
   });
 });
-
-

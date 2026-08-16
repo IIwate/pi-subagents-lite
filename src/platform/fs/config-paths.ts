@@ -38,13 +38,20 @@ export function projectConfigFilePath(cwd: string, configDirName: string): strin
 /**
  * Lexical identity key for one configuration file path: forward slashes,
  * Windows-style paths lowercased (same comparison stance as the worktree
- * validator). Deliberately no realpath — symlink/junction aliases may map to
- * different keys, which is the accepted boundary for absent files.
+ * validator). A relative input is resolved by the host first, so it keys to
+ * its absolute twin. Deliberately no realpath — symlink/junction aliases may
+ * map to different keys, which is the accepted boundary for absent files.
  */
 export function normalizeConfigPathKey(filePath: string): string {
-  const isWindowsStyle = /^[A-Za-z]:[\\/]/.test(filePath) || /^\\\\/.test(filePath);
-  const pathApi = isWindowsStyle ? path.win32 : path.posix;
-  const absolute = pathApi.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+  const isWindowsStyle = (value: string) => /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value);
+  let pathApi = isWindowsStyle(filePath) ? path.win32 : path.posix;
+  let absolute = filePath;
+  if (!pathApi.isAbsolute(absolute)) {
+    absolute = path.resolve(absolute);
+    // Host resolution can change the style verdict; re-read it so the
+    // lowercasing stance matches the resolved form, not the relative input.
+    pathApi = isWindowsStyle(absolute) ? path.win32 : path.posix;
+  }
   const normalized = pathApi.normalize(absolute).replace(/\\/g, "/");
-  return isWindowsStyle ? normalized.toLowerCase() : normalized;
+  return pathApi === path.win32 ? normalized.toLowerCase() : normalized;
 }

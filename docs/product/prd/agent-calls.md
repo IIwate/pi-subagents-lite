@@ -46,4 +46,4 @@ A session whose Pi context reports the project as not trusted loads only built-i
 
 ## Acceptance intent
 
-Acceptance examples cover valid and invalid Agent calls, queued and running policy snapshots, foreground interruption, background stopping, built-in/custom name collisions, one-pass Worktree validation and discovery, and explicit status reads.
+Acceptance examples cover valid and invalid Agent calls, queued and running policy snapshots, foreground interruption, background stopping, built-in/custom name collisions, one-pass Worktree validation and discovery, explicit status reads, untrusted-project resource gating, and deterministic type resolution with ambiguity refusals.

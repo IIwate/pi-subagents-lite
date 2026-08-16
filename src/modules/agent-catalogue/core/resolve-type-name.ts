@@ -7,8 +7,9 @@
  * matching completes before display names are consulted, so an alias can
  * never shadow a later-registered canonical name.
  *
- * Candidate ordering is plain code-unit sort, not locale collation: guidance
- * and tool errors must be byte-stable across platforms.
+ * Candidate ordering is plain code-unit sort, not locale collation, so the
+ * ambiguity tool error lists identical candidates on every platform;
+ * guidance assembles its own ordering and does not consume candidates.
  */
 
 import { Check } from "typebox/value";
@@ -54,7 +55,7 @@ function resolve(
   }
 
   const displayHits = entries
-    .filter((entry) => (entry.displayName ?? "").toLowerCase() === folded && folded !== "")
+    .filter((entry) => (entry.displayName ?? "").toLowerCase() === folded)
     .map((entry) => entry.name);
   const uniqueTargets = sortedUnique(displayHits);
   if (uniqueTargets.length === 1) {

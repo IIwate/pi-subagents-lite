@@ -10,7 +10,7 @@ The application facade accepts a schema-valid command and returns a schema-valid
 
 ## Host seam
 
-The registered Agent, StopAgent, and AgentStatus callbacks are exercised through a Pi adapter harness. Registration and callback behavior are the contract. Agent pre-spawn refusals — unknown type, model or Thinking denial, invalid worktree — throw so Pi records a tool error; foreground snapshot errors after spawn still return.
+The registered Agent, StopAgent, and AgentStatus callbacks are exercised through a Pi adapter harness. Registration and callback behavior are the contract. Agent pre-spawn refusals — an unknown or ambiguous type, model or Thinking denial, invalid worktree — throw so Pi records a tool error; foreground snapshot errors after spawn still return.
 
 ## UI seam
 

@@ -105,6 +105,20 @@ describe("REQ-RUNTIME-008 applyConcurrencyLayerUpdate", () => {
     expect(Check(ConcurrencyLayerUpdatePlanSchema, JSON.parse(JSON.stringify(plan)))).toBe(true);
   });
 
+  it("removes an explicit default with a null limit", () => {
+    const plan = applyConcurrencyLayerUpdate({ default: 6 }, { scope: "default", limit: null }, "project");
+    expect(plan).toEqual({ assignments: {}, removals: ["default"] });
+    expect(Check(ConcurrencyLayerUpdatePlanSchema, JSON.parse(JSON.stringify(plan)))).toBe(true);
+  });
+
+  it("returns an empty plan when clearing a default the layer never had", () => {
+    expect(applyConcurrencyLayerUpdate(
+      { providers: { openai: 2 } },
+      { scope: "default", limit: null },
+      "project",
+    )).toEqual({ assignments: {}, removals: [] });
+  });
+
   it("preserves unrecognized container entries when rewriting a container", () => {
     const plan = applyConcurrencyLayerUpdate(
       { providers: { openai: 2, junk: "keep-me" } },

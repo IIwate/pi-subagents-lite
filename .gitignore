@@ -32,6 +32,9 @@ Thumbs.db
 *.swo
 *~
 
+# Local agent session artifacts
+.zcode/
+
 # Tasks
 tasks/
 

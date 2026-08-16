@@ -53,7 +53,7 @@ export function parseConcurrencyLayer(raw: unknown): ConcurrencyLayerParseResult
         result.ignoredEntryCount += 1;
       }
     }
-    if ("default" in raw) {
+    if (Object.hasOwn(raw, "default")) {
       const limit = normalizeLimit(raw.default);
       if (limit === undefined) result.ignoredEntryCount += 1;
       else {
@@ -141,9 +141,18 @@ export function applyConcurrencyLayerUpdate(
   }
   const plan: ConcurrencyLayerUpdatePlan = { assignments: {}, removals: [] };
   switch (update.scope) {
-    case "default":
-      plan.assignments.default = update.limit;
+    case "default": {
+      if (update.limit === null) {
+        // Clearing a default the raw section never had is a no-op that
+        // creates no file, the same promise keyed clears make.
+        if (isPlainObject(rawSection) && Object.hasOwn(rawSection, "default")) {
+          plan.removals = ["default"];
+        }
+      } else {
+        plan.assignments.default = update.limit;
+      }
       break;
+    }
     case "reset":
       if (layer === "global") {
         // Global reset writes the factory fragment (status quo); project

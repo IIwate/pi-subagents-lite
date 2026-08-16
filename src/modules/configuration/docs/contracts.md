@@ -11,7 +11,7 @@
 - `ConfigurationDocumentStatusSchema` (`absent | loaded | malformed`) is runtime document metadata, never persisted. `ConfigurationDocumentLoadResultSchema` is the repository load contract: `absent` is strictly a missing file, and every other read failure is `malformed` with a presentable message.
 - `CommitConfigurationFragmentCommandSchema` submits one section's assignments — and optionally `removals`, which delete named section keys (an emptied section object is kept) — together with the `expectedRevision` the caller last observed. A key in both assignments and removals is `invalid-command`. `CommitConfigurationFragmentResultSchema` returns the next revision or an explicit refusal. `ConfigurationCommitFailureCodeSchema` names the save-refusal codes `persistence-failure`, `revision-conflict`, and `document-malformed`; settings embeds it rather than restating the literals.
 - `ReloadConfigurationCommandSchema` re-reads the persisted document; `ReloadConfigurationSuccessSchema` reports the next revision and the document status.
-- The facade takes a per-document `malformedPolicy` chosen by the composition root: `reset-on-commit` (global status quo — a malformed document reads as empty and is overwritten by the next commit) or `read-only` (commits return `document-malformed` and never touch disk).
+- The facade takes a per-document `malformedPolicy` chosen by the composition root; the two policies and their write behavior are owned by [operations.md](./operations.md).
 - `ConfigurationResultSchema` is the aggregate outbound contract for `execute()`; every success and failure is checked against it before callers see the result.
 
 The persisted JSON remains in its current unversioned shape; the revision is runtime transaction metadata only.

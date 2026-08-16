@@ -549,6 +549,24 @@ export function createSettings(options: CreateSettingsOptions): Settings {
         `${command.key} concurrency set to ${command.limit} (${targetLabel(page.target)})${shadowSuffix(scope, command.key)}`,
       );
     }
+    if (command.id === "defaultConcurrency") {
+      // The page only emits the limit-row variant when the selected layer
+      // names an explicit default; a stale view keeps the keyed failure shape.
+      if (layer.default === undefined) {
+        return failure("unknown-row", `No saved default limit in the ${targetLabel(page.target)} layer.`);
+      }
+      const shadowed = page.target === "global" && view.provenance.default === "project";
+      const defaultShadowSuffix = shadowed ? " (shadowed by a project override; effective value unchanged)" : "";
+      return updated(
+        options.concurrency.update({
+          target: page.target,
+          update: { scope: "default", limit: command.limit },
+        }),
+        command.limit === null
+          ? `Removed fallback model limit (${targetLabel(page.target)})${defaultShadowSuffix}`
+          : `Fallback model limit set to ${command.limit} (${targetLabel(page.target)})${defaultShadowSuffix}`,
+      );
+    }
     const target = parseLimitRowId(command.id);
     if (!target) return failure("unknown-row", `Page concurrency has no limit row ${command.id}.`);
     const saved = (target.scope === "provider" ? layer.providers : layer.models) ?? {};

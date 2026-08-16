@@ -196,8 +196,10 @@ function harness(options: HarnessOptions = {}) {
       concurrencyUpdates.push(limitUpdate);
       const { target, update } = limitUpdate;
       const layer = target === "global" ? concurrencyLayers.global : concurrencyLayers.project;
-      if (update.scope === "default") layer.default = update.limit;
-      else if (update.scope === "reset") {
+      if (update.scope === "default") {
+        if (update.limit === null) delete layer.default;
+        else layer.default = update.limit;
+      } else if (update.scope === "reset") {
         if (target === "global") {
           concurrencyLayers.global = { default: 4, providers: {}, models: {} };
         } else {
@@ -646,7 +648,7 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
       "resetAll",
     ]);
     const byId = new Map(result.snapshot.rows.map((row) => [row.id, row]));
-    expect(byId.get("defaultConcurrency")).toMatchObject({ kind: "numeric", value: "4 slots · Global", input: "4", min: 1 });
+    expect(byId.get("defaultConcurrency")).toMatchObject({ kind: "limit", value: "4 slots · Global", input: "4" });
     expect(byId.get("provider:anthropic")).toMatchObject({ kind: "limit", value: "2 slots · Global", input: "2" });
     // Only un-limited inventory entries stay addable.
     expect(byId.get("addProviderLimit")!.choices).toEqual(["openai"]);
@@ -709,6 +711,83 @@ describe("REQ-SETTINGS-002 concurrency page", () => {
       { target: "global", update: { scope: "provider", key: "anthropic", limit: 5 } },
       { target: "global", update: { scope: "provider", key: "anthropic", limit: null } },
     ]);
+  });
+
+  it("removes an explicit fallback default through update-limit and falls back", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: { global: { default: 6 } },
+    });
+    settings.execute({ kind: "open" });
+    const opened = expectOk(settings.execute({ kind: "select", id: "concurrency" }));
+    // An explicit default is managed like a keyed override: edit or remove.
+    expect(opened.snapshot.rows.find((row) => row.id === "defaultConcurrency"))
+      .toMatchObject({ kind: "limit", value: "6 slots · Global", input: "6" });
+
+    const removed = expectOk(settings.execute({ kind: "update-limit", id: "defaultConcurrency", limit: null }));
+    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed fallback model limit (Global)" });
+    expect(concurrencyUpdates).toEqual([{ target: "global", update: { scope: "default", limit: null } }]);
+    // Without an explicit default the row returns to the numeric creation
+    // path over the factory value.
+    expect(removed.snapshot.rows.find((row) => row.id === "defaultConcurrency"))
+      .toMatchObject({ kind: "numeric", value: "4 slots · Default", input: "4", fallback: 4 });
+  });
+
+  it("rejects a fallback-default removal when the layer names no explicit default", () => {
+    const { settings, concurrencyUpdates } = harness();
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const rejected = settings.execute({ kind: "update-limit", id: "defaultConcurrency", limit: null });
+    expect(rejected).toMatchObject({ ok: false, error: { code: "unknown-row" } });
+    expect(concurrencyUpdates).toEqual([]);
+  });
+
+  it("edits an explicit fallback default through update-limit and reports a shadowed global write", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: {
+        projectLayer: {
+          state: "loaded" as const,
+          filePath: "H:/repo/.pi/subagents-lite.json",
+          writable: true,
+          ignoredEntryCount: 0,
+        },
+        global: { default: 6 },
+        project: { default: 2 },
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const edited = expectOk(settings.execute({ kind: "update-limit", id: "defaultConcurrency", limit: 9 }));
+    expect(edited.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Fallback model limit set to 9 (Global) (shadowed by a project override; effective value unchanged)",
+    });
+    expect(concurrencyUpdates).toEqual([{ target: "global", update: { scope: "default", limit: 9 } }]);
+    // The visible row still shows the effective project value.
+    expect(edited.snapshot.rows.find((row) => row.id === "defaultConcurrency")!.value).toBe("2 slots · Project");
+  });
+
+  it("removes an explicit fallback default through update-limit and reports a shadowed global write", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: {
+        projectLayer: {
+          state: "loaded" as const,
+          filePath: "H:/repo/.pi/subagents-lite.json",
+          writable: true,
+          ignoredEntryCount: 0,
+        },
+        global: { default: 6 },
+        project: { default: 2 },
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    const removed = expectOk(settings.execute({ kind: "update-limit", id: "defaultConcurrency", limit: null }));
+    expect(removed.snapshot.notice).toEqual({
+      severity: "info",
+      message: "Removed fallback model limit (Global) (shadowed by a project override; effective value unchanged)",
+    });
+    expect(concurrencyUpdates).toEqual([{ target: "global", update: { scope: "default", limit: null } }]);
+    expect(removed.snapshot.rows.find((row) => row.id === "defaultConcurrency")!.value).toBe("2 slots · Project");
   });
 
   it("adds a limit for an inventory key and rejects keys outside the inventory", () => {
@@ -836,6 +915,28 @@ describe("REQ-CONFIG-003 project write target", () => {
     // The project layer no longer offers that row; the global override still
     // exists but belongs to the Global target's row set.
     expect(removed.snapshot.rows.find((r) => r.id === "provider:anthropic")).toBeUndefined();
+  });
+
+  it("REQ-CONFIG-003 removes the project fallback default and restores inheritance", () => {
+    const { settings, concurrencyUpdates } = harness({
+      concurrency: {
+        ...trustedProject(),
+        global: { default: 6 },
+        project: { default: 2 },
+      },
+    });
+    settings.execute({ kind: "open" });
+    settings.execute({ kind: "select", id: "concurrency" });
+    settings.execute({ kind: "set-value", id: "writeTarget", value: "Project" });
+
+    const removed = expectOk(settings.execute({ kind: "update-limit", id: "defaultConcurrency", limit: null }));
+    expect(removed.snapshot.notice).toEqual({ severity: "info", message: "Removed fallback model limit (Project)" });
+    expect(concurrencyUpdates).toEqual([
+      { target: "project", update: { scope: "default", limit: null } },
+    ]);
+    // Inheritance restored: the row shows the global value with its tag.
+    expect(removed.snapshot.rows.find((row) => row.id === "defaultConcurrency"))
+      .toMatchObject({ kind: "numeric", value: "6 slots · Global" });
   });
 
   it("REQ-RUNTIME-008 reports a shadowed global write without changing the effective value", () => {
