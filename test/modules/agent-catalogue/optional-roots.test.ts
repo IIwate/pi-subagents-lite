@@ -21,7 +21,7 @@ describe("REQ-CATALOGUE-003 optional project root", () => {
     const requests: unknown[] = [];
     const repository: AgentCatalogueRepository = {
       async load(request) {
-        requests.push(JSON.parse(JSON.stringify(request)));
+        requests.push(request);
         return {
           definitions: [{
             name: "reviewer",
@@ -44,7 +44,12 @@ describe("REQ-CATALOGUE-003 optional project root", () => {
     expect(Check(DiscoverAgentCatalogueCommandSchema, command)).toBe(true);
     expect(Check(AgentCatalogueResultSchema, JSON.parse(JSON.stringify(result)))).toBe(true);
     expect(result).toMatchObject({ ok: true });
-    expect(requests).toEqual([{ globalDirectory: "C:/agents/global" }]);
+    expect(requests).toHaveLength(1);
+    const loadRequest = requests[0] as Record<string, unknown>;
+    // Asserted on the in-memory object: a JSON round trip would strip a
+    // `projectDirectory: undefined` key and hide a leaked project path slot.
+    expect(Object.hasOwn(loadRequest, "projectDirectory")).toBe(false);
+    expect(loadRequest).toEqual({ globalDirectory: "C:/agents/global" });
   });
 
   it("round-trips roots without a project directory", () => {

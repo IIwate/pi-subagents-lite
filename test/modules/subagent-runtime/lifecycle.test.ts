@@ -765,6 +765,92 @@ describe("REQ-RUNTIME-001 queue release", () => {
   });
 });
 
+describe("REQ-RUNTIME-008 live limit replacement", () => {
+  it("drains the queue and admits later spawns immediately after limits are replaced", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      limits: { defaultModelLimit: 1, modelLimits: {}, providerLimits: {} },
+    });
+
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "one",
+      description: "one",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "two",
+      description: "two",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("queued");
+
+    runtime.replaceLimits({ defaultModelLimit: 3, modelLimits: {}, providerLimits: {} });
+    await Promise.resolve();
+
+    // No slot was released: replacement alone re-drained the queue.
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(memory.runs.has("agent-00000002")).toBe(true);
+
+    const third = await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "three",
+      description: "three",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+    expect(third).toMatchObject({ ok: true, snapshot: { status: "running" } });
+  });
+
+  it("keeps running and queued calls on their accepted policy across a limit replacement", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      limits: { defaultModelLimit: 1, modelLimits: {}, providerLimits: {} },
+    });
+    for (const description of ["running occupant", "queued first", "queued second"]) {
+      await runtime.execute({
+        kind: "spawn",
+        type: "general-purpose",
+        prompt: description,
+        description,
+        acceptedPolicy: acceptedRunPolicy("test/model"),
+      });
+    }
+    const runningPolicyBefore = runtime.getSnapshot("agent-00000001")?.acceptedPolicy;
+    const queuedPolicyBefore = runtime.getSnapshot("agent-00000002")?.acceptedPolicy;
+
+    runtime.replaceLimits({
+      defaultModelLimit: 1,
+      modelLimits: { "test/model": 1 },
+      providerLimits: { test: 1 },
+    });
+    await Promise.resolve();
+
+    // Limits are live scheduler policy, not Accepted run policy: the running
+    // occupant saturates the new ceiling yet is not aborted, the queue keeps
+    // its FIFO order, and both policies stay the ones accepted at spawn.
+    expect(memory.aborts).toEqual([]);
+    expect(runtime.getSnapshot("agent-00000001")?.status).toBe("running");
+    expect(
+      runtime.listSnapshots().filter((snapshot) => snapshot.status === "queued")
+        .map((snapshot) => snapshot.id),
+    ).toEqual(["agent-00000002", "agent-00000003"]);
+    expect(runtime.getSnapshot("agent-00000001")?.acceptedPolicy).toEqual(runningPolicyBefore);
+    expect(runtime.getSnapshot("agent-00000002")?.acceptedPolicy).toEqual(queuedPolicyBefore);
+
+    await completeRun(memory, "agent-00000001");
+    await Promise.resolve();
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(runtime.getSnapshot("agent-00000003")?.status).toBe("queued");
+    // The drained run starts with the policy accepted at spawn, not a re-derived one.
+    expect(memory.runs.get("agent-00000002")?.request.acceptedPolicy)
+      .toEqual(acceptedRunPolicy("test/model"));
+  });
+});
+
 describe("REQ-RUNTIME-003 foreground interruption", () => {
   it("stops an already-aborted spawn before the session driver starts", async () => {
     const memory = createMemoryDriver();

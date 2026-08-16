@@ -35,3 +35,34 @@ describe("REQ-RUNTIME-001 hierarchical concurrency public seam", () => {
     });
   });
 });
+
+describe("REQ-RUNTIME-008 live limit replacement", () => {
+  it("applies replaced limits to the very next reserve without evicting current reservations", () => {
+    const scheduler = createConcurrencyScheduler({
+      defaultModelLimit: 1,
+      modelLimits: {},
+      providerLimits: {},
+    });
+
+    const first = scheduler.reserve("openai/gpt-5");
+    const blockedBefore = scheduler.reserve("openai/gpt-5");
+    scheduler.replaceLimits({ defaultModelLimit: 2, modelLimits: {}, providerLimits: {} });
+    const admittedAfterRaise = scheduler.reserve("openai/gpt-5");
+    scheduler.replaceLimits({ defaultModelLimit: 1, modelLimits: {}, providerLimits: {} });
+    const blockedAfterLower = scheduler.reserve("openai/gpt-5");
+    scheduler.release("openai/gpt-5");
+    scheduler.release("openai/gpt-5");
+    const admittedAfterDrain = scheduler.reserve("openai/gpt-5");
+
+    // Replacement changes admission for subsequent reserves only: the raise
+    // admits without any release, the lowering blocks immediately, and the
+    // two reservations taken under older limits stay held until released.
+    expect({ first, blockedBefore, admittedAfterRaise, blockedAfterLower, admittedAfterDrain }).toEqual({
+      first: { accepted: true, concurrencyKey: "openai/gpt-5" },
+      blockedBefore: { accepted: false, reason: "concurrency", concurrencyKey: "openai/gpt-5" },
+      admittedAfterRaise: { accepted: true, concurrencyKey: "openai/gpt-5" },
+      blockedAfterLower: { accepted: false, reason: "concurrency", concurrencyKey: "openai/gpt-5" },
+      admittedAfterDrain: { accepted: true, concurrencyKey: "openai/gpt-5" },
+    });
+  });
+});

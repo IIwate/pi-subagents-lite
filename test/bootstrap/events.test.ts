@@ -271,3 +271,49 @@ describe("REQ-CATALOGUE-003 project resource trust gate", () => {
     expect(runtime.agents.availableTypes()).toContain("proj-agent");
   });
 });
+
+describe("REQ-RUNTIME-008 session start scheduler limits", () => {
+  it("republishes the merged global and project limits into the scheduler on session_start", async () => {
+    const { mkdirSync, mkdtempSync, readFileSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { hostInstallationPaths } = await import("../../src/platform/pi/host-resources.js");
+    const { projectConfigFilePath } = await import("../../src/platform/fs/config-paths.js");
+
+    const globalDocPath = path.join(process.env.HOME!, ".pi", "agent", "subagents-lite.json");
+    const originalDoc = readFileSync(globalDocPath, "utf-8");
+    writeFileSync(globalDocPath, JSON.stringify({
+      ...JSON.parse(originalDoc),
+      concurrency: { default: 6, providers: { openai: 3 } },
+    }));
+    const cwd = mkdtempSync(path.join(tmpdir(), "events-merge-project-"));
+    const projectFile = projectConfigFilePath(cwd, hostInstallationPaths.projectConfigDirectoryName);
+    mkdirSync(path.dirname(projectFile), { recursive: true });
+    writeFileSync(projectFile, JSON.stringify({ concurrency: { providers: { openai: 1 } } }));
+
+    const api = createMockExtensionAPI();
+    const runtime = createExtensionRuntime(api.api as any);
+    const replaced: unknown[] = [];
+    runtime.manager = {
+      replaceLimits: (limits: unknown) => { replaced.push(limits); },
+      setOnRemove: () => {},
+    } as any;
+    runtime.navigator = { setStatsVisibility: () => {}, update: () => {} } as any;
+    setupEventListeners(runtime);
+    const sessionStart = api.listeners.find((listener) => listener.event === "session_start")!.handler;
+
+    try {
+      await sessionStart({}, { ...fakeCtx(), cwd, hasUI: false, isProjectTrusted: () => true });
+    } finally {
+      writeFileSync(globalDocPath, originalDoc);
+    }
+
+    // Merged, not layer-local: the default survives from the global layer
+    // while the project override wins the provider key.
+    expect(replaced).toEqual([{
+      defaultModelLimit: 6,
+      modelLimits: {},
+      providerLimits: { openai: 1 },
+    }]);
+  });
+});

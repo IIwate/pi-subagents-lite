@@ -54,7 +54,7 @@ describe("REQ-AGENT-004 resolveAgentTypeName truth table", () => {
     })).toEqual({ kind: "resolved", name: "reviewer", matchedBy: "display-name" });
   });
 
-  it("reports ambiguity for duplicated display names, deduplicating same canonical targets", () => {
+  it("reports ambiguity for duplicated display names across distinct canonical targets", () => {
     expect(resolveAgentTypeName({
       name: "helper",
       entries: entries(
@@ -62,6 +62,19 @@ describe("REQ-AGENT-004 resolveAgentTypeName truth table", () => {
         { name: "a-agent", displayName: "helper" },
       ),
     })).toEqual({ kind: "ambiguous", candidates: ["a-agent", "b-agent"] });
+  });
+
+  it("resolves duplicated display-name hits that deduplicate to one canonical target", () => {
+    // Registry entries are keyed by canonical name, so a duplicated canonical
+    // name cannot reach this function through the registry; only a direct
+    // call can pin the dedup-then-resolve branch.
+    expect(resolveAgentTypeName({
+      name: "helper",
+      entries: entries(
+        { name: "worker", displayName: "Helper" },
+        { name: "worker", displayName: "helper" },
+      ),
+    })).toEqual({ kind: "resolved", name: "worker", matchedBy: "display-name" });
   });
 
   it("lets a canonical match win over a display-name collision", () => {

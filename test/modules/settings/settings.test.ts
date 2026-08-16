@@ -25,9 +25,12 @@ import {
 } from "../../../src/modules/subagent-runtime/public.js";
 import {
   ConcurrencyLimitUpdateSchema,
+  ConcurrencyProjectLayerViewSchema,
+  ConcurrencySettingsViewSchema,
   createSettings,
   DebugFaultSchema,
   DebugStatusPreviewSchema,
+  ProjectLayerStateSchema,
   RootSummariesSchema,
   SettingsResultSchema,
   SettingsUpdateResultSchema,
@@ -1496,5 +1499,70 @@ describe("embedded owner schemas", () => {
       expect(Check(SystemPromptModeSchema, mode)).toBe(true);
     }
     expect(Check(SystemPromptModeSchema, "yolo")).toBe(false);
+  });
+});
+
+describe("REQ-CONFIG-003 project layer and concurrency view contracts", () => {
+  it("accepts the four project layer states and rejects unknown ones", () => {
+    for (const state of ["untrusted", "absent", "loaded", "malformed"]) {
+      expect(Check(ProjectLayerStateSchema, state)).toBe(true);
+    }
+    for (const state of ["trusted", "", 1]) {
+      expect(Check(ProjectLayerStateSchema, state)).toBe(false);
+    }
+  });
+
+  it("validates the project layer view and rejects malformed field values", () => {
+    const loaded = {
+      state: "loaded",
+      filePath: "C:/repo/.pi/subagents-lite.json",
+      writable: true,
+      ignoredEntryCount: 2,
+    };
+    expect(Check(ConcurrencyProjectLayerViewSchema, JSON.parse(JSON.stringify(loaded)))).toBe(true);
+    // filePath is absent while untrusted; the page then never names the file.
+    expect(Check(ConcurrencyProjectLayerViewSchema, {
+      state: "untrusted",
+      writable: false,
+      ignoredEntryCount: 0,
+    })).toBe(true);
+
+    expect(Check(ConcurrencyProjectLayerViewSchema, { ...loaded, filePath: "" })).toBe(false);
+    expect(Check(ConcurrencyProjectLayerViewSchema, { ...loaded, ignoredEntryCount: -1 })).toBe(false);
+    expect(Check(ConcurrencyProjectLayerViewSchema, { ...loaded, ignoredEntryCount: 1.5 })).toBe(false);
+    expect(Check(ConcurrencyProjectLayerViewSchema, { ...loaded, state: "trusted" })).toBe(false);
+    expect(Check(ConcurrencyProjectLayerViewSchema, { ...loaded, extra: true })).toBe(false);
+    const { writable: _writable, ...withoutWritable } = loaded;
+    expect(Check(ConcurrencyProjectLayerViewSchema, withoutWritable)).toBe(false);
+  });
+
+  it("REQ-RUNTIME-008 validates the v2 concurrency view and rejects off-contract provenance", () => {
+    const view = {
+      effective: { default: 6, providers: { openai: 1 }, models: { "openai/gpt-5": 2 } },
+      provenance: { default: "global", providers: { openai: "project" }, models: { "openai/gpt-5": "global" } },
+      global: { default: 6, models: { "openai/gpt-5": 2 } },
+      project: { providers: { openai: 1 } },
+      projectLayer: {
+        state: "loaded",
+        filePath: "C:/repo/.pi/subagents-lite.json",
+        writable: true,
+        ignoredEntryCount: 1,
+      },
+      factoryDefaultLimit: 4,
+      activeProviders: ["openai"],
+      activeModels: ["openai/gpt-5"],
+    };
+    expect(Check(ConcurrencySettingsViewSchema, JSON.parse(JSON.stringify(view)))).toBe(true);
+
+    // Per-key provenance names an override source only; "default" belongs to
+    // the default limit, absence to an un-overridden key.
+    expect(Check(ConcurrencySettingsViewSchema, {
+      ...view,
+      provenance: { ...view.provenance, providers: { openai: "default" } },
+    })).toBe(false);
+    const { projectLayer: _projectLayer, ...withoutProjectLayer } = view;
+    expect(Check(ConcurrencySettingsViewSchema, withoutProjectLayer)).toBe(false);
+    expect(Check(ConcurrencySettingsViewSchema, { ...view, project: { default: 0 } })).toBe(false);
+    expect(Check(ConcurrencySettingsViewSchema, { ...view, factoryDefaultLimit: 0 })).toBe(false);
   });
 });

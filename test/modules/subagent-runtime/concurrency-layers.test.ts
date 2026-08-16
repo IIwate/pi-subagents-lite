@@ -139,6 +139,21 @@ describe("REQ-RUNTIME-008 applyConcurrencyLayerUpdate", () => {
     )).toEqual({ assignments: {}, removals: [] });
   });
 
+  it("treats a wholly non-object raw section as empty for both set and clear", () => {
+    for (const raw of [null, "junk", [1]]) {
+      expect(applyConcurrencyLayerUpdate(
+        raw,
+        { scope: "provider", key: "openai", limit: 2 },
+        "global",
+      )).toEqual({ assignments: { providers: { openai: 2 } }, removals: [] });
+      expect(applyConcurrencyLayerUpdate(
+        raw,
+        { scope: "provider", key: "openai", limit: null },
+        "project",
+      )).toEqual({ assignments: {}, removals: [] });
+    }
+  });
+
   it("resets global to the factory fragment and project to full removals", () => {
     expect(applyConcurrencyLayerUpdate({ default: 9 }, { scope: "reset" }, "global"))
       .toEqual({ assignments: { default: 4, providers: {}, models: {} }, removals: [] });

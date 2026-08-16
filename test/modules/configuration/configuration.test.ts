@@ -279,13 +279,15 @@ describe("configuration document status, removals, malformed policy", () => {
     });
     const configuration = createConfiguration({ repository });
 
-    const commit = configuration.execute({
+    const command = JSON.parse(JSON.stringify({
       kind: "commit-fragment",
       expectedRevision: 1,
       section: "concurrency",
       assignments: {},
       removals: ["providers"],
-    });
+    }));
+    expect(Check(CommitConfigurationFragmentCommandSchema, command)).toBe(true);
+    const commit = configuration.execute(command);
     expect(commit).toEqual({ ok: true, revision: 2 });
     expect(repository.persisted).toEqual([{ concurrency: { default: 4, junk: "keep" } }]);
 
@@ -298,6 +300,27 @@ describe("configuration document status, removals, malformed policy", () => {
     });
     expect(emptied).toEqual({ ok: true, revision: 3 });
     expect(repository.persisted[1]).toEqual({ concurrency: {} });
+  });
+
+  it("REQ-CONFIG-003 rejects schema-invalid removals before any commit is attempted", () => {
+    const base = {
+      kind: "commit-fragment",
+      expectedRevision: 1,
+      section: "concurrency",
+      assignments: {},
+    };
+    expect(Check(CommitConfigurationFragmentCommandSchema, { ...base, removals: [""] })).toBe(false);
+    expect(Check(CommitConfigurationFragmentCommandSchema, { ...base, removals: "providers" })).toBe(false);
+
+    const repository = memoryRepository({ concurrency: { default: 4 } });
+    const configuration = createConfiguration({ repository });
+    for (const removals of [[""], "providers"]) {
+      expect(configuration.execute({ ...base, removals })).toEqual({
+        ok: false,
+        error: { code: "invalid-command", message: "Configuration command is invalid." },
+      });
+    }
+    expect(repository.persisted).toEqual([]);
   });
 
   it("rejects a commit whose assignments and removals overlap", () => {

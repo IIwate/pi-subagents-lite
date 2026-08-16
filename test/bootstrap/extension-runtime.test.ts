@@ -39,6 +39,7 @@ describe("ExtensionRuntime isolation", () => {
     a.manager = { listSnapshots: () => [] } as any;
     a.delivery = { pendingResultCount: () => 0 } as any;
     a.navigator = statsNavigator() as any;
+    a.projectConfig = { getState: () => "loaded" as const } as any;
 
     expect(a.pi).toBe(piA);
     expect(b.pi).toBe(piB);
@@ -46,6 +47,7 @@ describe("ExtensionRuntime isolation", () => {
     expect(b.manager).toBeNull();
     expect(b.delivery).toBeNull();
     expect(b.navigator).toBeNull();
+    expect(b.projectConfig).toBeNull();
   });
 
   it("routes settings stats sync only to the owning runtime's navigator", () => {
