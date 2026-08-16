@@ -101,6 +101,21 @@ describe("bindProjectConfiguration", () => {
     expect(JSON.parse(readFileSync(configFileOf(cwd), "utf-8"))).toEqual({ concurrency: { default: 5 } });
   });
 
+  it("shows a commit made through one binding in another binding's state immediately", () => {
+    const cwd = tempProject();
+    const first = bindProjectConfiguration(true, cwd);
+    const second = bindProjectConfiguration(true, cwd);
+    expect(second.getState()).toBe("absent");
+
+    first.sectionIO!.read("concurrency");
+    expect(first.sectionIO!.commit("concurrency", { default: 2 })).toEqual({ ok: true });
+
+    // The document state lives on the shared owner entry, not per binding: the
+    // second binding already reads the committed value through the shared
+    // facade, so its reported state must not lag behind as "absent".
+    expect(second.getState()).toBe("loaded");
+  });
+
   it("keeps different projects in different owners with no shared state", () => {
     const cwdA = tempProject();
     const cwdB = tempProject();
@@ -167,6 +182,29 @@ describe("REQ-RUNTIME-008 layered concurrency owner routing", () => {
     expect(existsSync(configFileOf(cwd))).toBe(false);
     expect(replaced).toEqual([]);
     expect(binding.getState()).toBe("absent");
+  });
+
+  it("REQ-CONFIG-003 refuses a keyed clear on a malformed project document instead of an ok no-op", async () => {
+    const { updateConcurrencyLimits } = await import("../../src/bootstrap/concurrency.js");
+    const cwd = tempProject();
+    const filePath = configFileOf(cwd);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "{ not json");
+    const binding = bindProjectConfiguration(true, cwd);
+    const { replaced, manager } = fakeManager();
+
+    // A keyed clear against the empty in-memory view of a malformed document
+    // produces an empty plan; the malformed refusal must still win over the
+    // empty-plan no-op so every write to a malformed layer is refused alike.
+    const result = updateConcurrencyLimits(
+      { target: "project", update: { scope: "provider", key: "openai", limit: null } },
+      manager,
+      binding,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "document-malformed" });
+    expect(replaced).toEqual([]);
+    expect(readFileSync(filePath, "utf-8")).toBe("{ not json");
   });
 
   it("REQ-RUNTIME-008 does not replace scheduler limits when the commit fails", async () => {

@@ -64,6 +64,17 @@ export function updateConcurrencyLimits(
   if (!io) {
     return { ok: false, message: "Project configuration is not writable in this session." };
   }
+  if (target === "project" && binding?.getState() === "malformed") {
+    // Every write to a malformed project layer is refused (REQ-CONFIG-003),
+    // decided ahead of the empty-plan short circuit: a keyed clear computes
+    // an empty plan against the empty in-memory view of the unreadable file
+    // and would otherwise slip through as an ok no-op.
+    return {
+      ok: false,
+      code: "document-malformed",
+      message: "Project configuration document is malformed; fix or remove the file before changing project limits.",
+    };
+  }
   const raw = io.read("concurrency");
   const plan = applyConcurrencyLayerUpdate(raw, update, target);
   const planIsEmpty = Object.keys(plan.assignments).length === 0 && plan.removals.length === 0;

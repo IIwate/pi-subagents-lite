@@ -149,8 +149,19 @@ export interface ProjectConfigurationBinding {
  * commit into a spurious conflict. Symlink/junction aliases may produce
  * different keys; that is the accepted boundary (no realpath for possibly
  * absent files).
+ *
+ * `state` lives on the owner entry, not on a binding: every binding reads the
+ * committed document through the shared facade, so a per-binding state copy
+ * would lag behind commits made through a sibling binding (absent shown while
+ * the shared document is already loaded).
  */
-const projectDocumentOwners = new Map<string, { configuration: Configuration; sectionIO: ConfigSectionIO }>();
+interface ProjectDocumentOwner {
+  configuration: Configuration;
+  sectionIO: ConfigSectionIO;
+  state: ConfigurationDocumentStatus;
+}
+
+const projectDocumentOwners = new Map<string, ProjectDocumentOwner>();
 
 export function bindProjectConfiguration(trusted: boolean, cwd: string): ProjectConfigurationBinding {
   if (!trusted) {
@@ -169,32 +180,42 @@ export function bindProjectConfiguration(trusted: boolean, cwd: string): Project
     owner = {
       configuration: projectConfiguration,
       sectionIO: createConfigurationSectionIO(projectConfiguration),
+      // Placeholder until the reload below observes the disk state.
+      state: "absent",
     };
     projectDocumentOwners.set(key, owner);
   }
+  const entry = owner;
   // Session-start reload observes the current disk state; the state then
-  // changes only when a commit through this binding succeeds (absent→loaded).
-  // Mid-session external edits become visible at the next reload, matching
-  // the global document's behavior.
-  let state: ProjectLayerDocumentState = owner.sectionIO.reload() ?? "malformed";
-  const ownerIO = owner.sectionIO;
+  // changes only when a reload or a commit through any binding of this path
+  // succeeds (absent→loaded). Mid-session external edits become visible at
+  // the next reload, matching the global document's behavior.
+  //
+  // Trust boundary: this wrapper mirrors, not enforces, the facade's
+  // malformed handling — the write refusal itself is owned by the facade's
+  // read-only malformedPolicy. The two can only diverge if a repository
+  // violates its load port behavior (throws or returns a non-contract
+  // shape); the file repository composed above catches every load failure,
+  // so a "malformed" shown here while the facade still commits is not
+  // reachable in this composition and gets no second guard.
+  entry.state = entry.sectionIO.reload() ?? "malformed";
   const sectionIO: ConfigSectionIO = {
     reload() {
-      const status = ownerIO.reload();
-      state = status ?? "malformed";
+      const status = entry.sectionIO.reload();
+      entry.state = status ?? "malformed";
       return status;
     },
     read(section) {
-      return ownerIO.read(section);
+      return entry.sectionIO.read(section);
     },
     commit(section, assignments, removals) {
-      const result = ownerIO.commit(section, assignments, removals);
-      if (result.ok) state = "loaded";
+      const result = entry.sectionIO.commit(section, assignments, removals);
+      if (result.ok) entry.state = "loaded";
       return result;
     },
   };
   return {
-    getState: () => state,
+    getState: () => entry.state,
     filePath,
     sectionIO,
   };
