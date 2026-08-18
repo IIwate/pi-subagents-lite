@@ -10,8 +10,13 @@ function thinkingSummary(policy: ThinkingAccessPolicy): string {
   return `allowed: ${policy.allowed.join(", ")}; default: ${policy.default}`;
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
 export function assembleGuidanceText(request: AgentGuidanceRequest): string {
-  const agents = [...request.agents].sort((a, b) => a.name.localeCompare(b.name));
+  const agents = [...request.agents].sort((a, b) => compareCodeUnits(a.name, b.name));
   const availableByKey = new Map(request.availableModels.map((model) => [model.key, model]));
   const callable: string[] = [];
   const unavailable: string[] = [];

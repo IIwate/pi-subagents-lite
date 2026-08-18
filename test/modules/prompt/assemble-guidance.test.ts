@@ -103,6 +103,32 @@ describe("REQ-MODEL-006 Agent guidance public seam", () => {
     }
   });
 
+  it("keeps non-ASCII Agent ordering locale-independent", () => {
+    const result = assembleAgentGuidance({
+      kind: "assemble-guidance",
+      agents: [
+        { name: "äther", description: "Umlaut" },
+        { name: "zeta", description: "Latin" },
+      ],
+      parentModelKey: "",
+      parentThinkingLevel: "medium",
+      parentSupportedLevels: ["off", "medium", "high"],
+      parentFallbackLevel: "high",
+      parentScopedThinkingLevel: null,
+      routing: { enabled: false, enabledProviders: [], agentAccess: {} },
+      availableModels: [],
+      scopedKeys: null,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.guidance.split("\n").filter((line) => /^- (?:zeta|äther):/.test(line))).toEqual([
+        "- zeta: no authorized model",
+        "- äther: no authorized model",
+      ]);
+    }
+  });
+
   it("rejects a malformed guidance command", () => {
     const result = assembleAgentGuidance({ kind: "assemble-guidance" });
     expect(Check(AgentGuidanceResultSchema, result)).toBe(true);

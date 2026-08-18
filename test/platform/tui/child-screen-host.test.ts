@@ -1015,6 +1015,30 @@ describe("ChildScreenHost", () => {
       expect(kinds.filter((kind) => kind === "project"), "unchanged sig must not project").toEqual([]);
     });
 
+    it("syncs a second delimiter-bearing record snapshot", () => {
+      const record = makeRecord("agent-12345678", "completed");
+      record.type = "b:c";
+      record.description = "d";
+      const records = [record];
+      const manager = makeManager(records);
+      const ui = makeUI({ value: "" });
+      host = new ChildScreenHost(manager, undefined, undefined, true, () => "same");
+      host.setUICtx(ui.ctx as any);
+      host.ensureTimer();
+      mountSelector(ui);
+      const screen = (host as unknown as { screen: { execute: (command: unknown) => unknown } }).screen;
+      const execute = vi.spyOn(screen, "execute");
+      host.update();
+      execute.mockClear();
+
+      record.type = "b";
+      record.description = "c:d";
+      host.update();
+
+      const kinds = execute.mock.calls.map((call) => (call[0] as { kind?: string }).kind);
+      expect(kinds.filter((kind) => kind === "replace-records")).toHaveLength(1);
+    });
+
     it("refreshes only the selected streaming message without replacing the record table", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));

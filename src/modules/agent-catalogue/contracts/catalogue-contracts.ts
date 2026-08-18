@@ -53,7 +53,7 @@ export const AgentCatalogueRootsSchema = Type.Object({
   globalDirectory: Type.String({ minLength: 1 }),
   /** Omitted when the session's project is not trusted (the repository then never sees a project path) or when the caller has no project scope at all. */
   projectDirectory: Type.Optional(Type.String({ minLength: 1 })),
-  worktreeDirectory: Type.Optional(Type.String()),
+  worktreeDirectory: Type.Optional(Type.String({ minLength: 1 })),
 }, { additionalProperties: false });
 
 export const AgentSourceLoadRequestSchema = AgentCatalogueRootsSchema;

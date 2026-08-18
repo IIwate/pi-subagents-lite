@@ -12,6 +12,7 @@ Test delivery state transitions through the public application surface using ser
 - Explicit AgentStatus acknowledgement only after successful parent settlement.
 - Guidance failure before preflight leaves repository state unacknowledged; the next successful handler returns result message and guidance together. A non-Agent run still injects pending results without reading the guidance catalogue.
 - An explicit inspect rereads records written after delivery construction, prefers a later durable continuation over an old memory view, and honors an exact delivery ID and durable equal-time tie break.
+- A durable-only exact inspect hydrates presentation tracking so successful settlement acknowledges it; foreign-session exact inspect is absent and cannot be acknowledged; `record-terminal` rejects queued/running statuses.
 - Session-keyed fallback isolation, malformed-record handling, and off-contract records dropped on the way in.
 - Outbound `execute()` results that fail `DeliveryCommandResultSchema` are refused as `invalid-command` rather than handed out.
 

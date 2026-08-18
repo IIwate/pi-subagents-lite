@@ -63,6 +63,28 @@ describe("Subagent system prompt public seam", () => {
     }
   });
 
+  it("encodes XML attributes for context paths and active Agent names", () => {
+    const result = assembleSubagentPrompt({
+      kind: "assemble-subagent-prompt",
+      mode: "replace",
+      agentName: "name&<>\"",
+      agentInstructions: "Review the diff.",
+      cwd: "C:/project",
+      env: { isGitRepo: false, branch: null, platform: "win32" },
+      header: null,
+      contextFiles: [{ path: "C:/a&b<\"q\">", content: "Context." }],
+      skillElements: [],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prompt).toContain(
+        '<project_instructions path="C:/a&amp;b&lt;&quot;q&quot;&gt;">',
+      );
+      expect(result.prompt).toContain('<active_agent name="name&amp;&lt;&gt;&quot;"/>');
+    }
+  });
+
   it("uses the custom header and strips leftover project and skill scaffolding", () => {
     const result = assembleSubagentPrompt({
       kind: "assemble-subagent-prompt",

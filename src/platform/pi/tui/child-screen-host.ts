@@ -744,34 +744,36 @@ export class ChildScreenHost {
   }
 
   private listDataSignature(records: AgentListSnapshot[], pending: number | undefined): string {
-    const parts = records.map((record) => {
-      const invocation = record.invocation;
-      const usage = record.stats.lifetimeUsage;
-      return [
-        record.id,
-        record.type,
-        record.description,
-        this.displayNameFor(record.type),
-        record.status,
-        record.completedAt ?? "",
-        record.pinnedAt ?? "",
-        record.settled ? "1" : "0",
-        record.debugFaultKind ?? "",
-        record.error ?? "",
-        invocation?.modelName ?? "",
-        invocation?.providerName ?? "",
-        invocation?.thinkingLevel ?? "",
-        record.stats.toolUses,
-        record.stats.turnCount,
-        record.stats.maxTurns ?? "",
-        usage.input,
-        usage.output,
-        usage.cost,
-        record.stats.contextPercent ?? "",
-        record.stats.compactionCount,
-      ].join(":");
+    return JSON.stringify({
+      records: records.map((record) => {
+        const invocation = record.invocation;
+        const usage = record.stats.lifetimeUsage;
+        return {
+          id: record.id,
+          type: record.type,
+          description: record.description,
+          displayName: this.displayNameFor(record.type),
+          status: record.status,
+          completedAt: record.completedAt ?? null,
+          pinnedAt: record.pinnedAt ?? null,
+          settled: record.settled,
+          debugFaultKind: record.debugFaultKind ?? null,
+          error: record.error ?? null,
+          modelName: invocation?.modelName ?? null,
+          providerName: invocation?.providerName ?? null,
+          thinkingLevel: invocation?.thinkingLevel ?? null,
+          toolUses: record.stats.toolUses,
+          turnCount: record.stats.turnCount ?? null,
+          maxTurns: record.stats.maxTurns ?? null,
+          input: usage.input,
+          output: usage.output,
+          cost: usage.cost,
+          contextPercent: record.stats.contextPercent ?? null,
+          compactionCount: record.stats.compactionCount,
+        };
+      }),
+      pending: pending ?? null,
     });
-    return [parts.join("|"), pending ? String(pending) : ""].join("#");
   }
 
   private listElapsedSignature(records: AgentListSnapshot[]): string {

@@ -61,6 +61,7 @@ describe("REQ-CATALOGUE-003 optional project root", () => {
   it("rejects empty-string roots", async () => {
     expect(Check(AgentCatalogueRootsSchema, { globalDirectory: "" })).toBe(false);
     expect(Check(AgentCatalogueRootsSchema, { globalDirectory: "C:/g", projectDirectory: "" })).toBe(false);
+    expect(Check(AgentCatalogueRootsSchema, { globalDirectory: "C:/g", worktreeDirectory: "" })).toBe(false);
 
     const catalogue = createAgentCatalogue({
       repository: { async load() { throw new Error("must not be called"); } },
@@ -68,7 +69,7 @@ describe("REQ-CATALOGUE-003 optional project root", () => {
     });
     const result = await catalogue.execute({
       kind: "discover",
-      roots: { globalDirectory: "C:/g", projectDirectory: "" },
+      roots: { globalDirectory: "C:/g", worktreeDirectory: "" },
       configuration: {},
     });
     expect(result).toMatchObject({ ok: false, error: { code: "invalid-command" } });

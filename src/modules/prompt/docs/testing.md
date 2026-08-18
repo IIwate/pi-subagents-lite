@@ -7,6 +7,7 @@ Test guidance and system-prompt assembly through `prompt/public.ts` with literal
 ## Required scenarios
 
 - Stable fragment ordering and deterministic output.
+- Non-ASCII custom Agent names retain locale-independent exact ordering, and XML-significant context/name attribute values remain encoded inside their documented fragments.
 - Parent guidance exact callable model keys, required `model` behavior, and the continue-re-delivers tool rule.
 - Subagent system prompt modes, Agent instructions, skills, context files, and runtime environment.
 - Missing optional source, malformed source, and unavailable policy inputs.

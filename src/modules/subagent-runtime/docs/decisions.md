@@ -4,6 +4,7 @@
 
 - The application owns serializable lifecycle state; the Pi session driver owns live session handles and teardown.
 - Running and queued work uses an immutable Accepted run policy.
+- Session events are accepted only when their session ID matches the lifecycle snapshot; the `SessionDriver` receives a JSON copy of the Accepted policy so replacement adapters cannot mutate stored work through the port.
 - `AcceptedRunPolicySchema` is the complete boundary contract. The receiving parser Checks a contract object and returns a validated JSON copy; it does not drop unknown Model fields. Pi vendor leftovers (`source`, undefined own keys) are projected only at bootstrap packaging. Model, scope, Thinking, output, turn, and grace limits have no parallel runtime source.
 - List rows omit `acceptedPolicy`. The list never read that catalog; checking it on every refresh hitched the parent TUI, and stubbing the Check then hanging the live object back let callers write through to the record.
 - List order has one explicit comparator shared by every consumer: status rank (attention, running, queued, archive), pinned first inside the same rank, terminal completion recency descending, and active start order ascending. Spawn order is the deterministic tie break and therefore keeps queued display aligned with scheduler FIFO. Pinning never crosses a status rank; unpinning immediately restores the rank's time order.

@@ -25,6 +25,15 @@ export const AgentStatusSchema = Type.Union([
   Type.Literal("error"),
 ]);
 
+/** Statuses allowed at the background-result persistence boundary. */
+export const TerminalAgentStatusSchema = Type.Union([
+  Type.Literal("completed"),
+  Type.Literal("turn_limited"),
+  Type.Literal("aborted"),
+  Type.Literal("stopped"),
+  Type.Literal("error"),
+]);
+
 export const StopInitiatorSchema = Type.Union([
   Type.Literal("user"),
   Type.Literal("agent"),
@@ -256,6 +265,7 @@ export const DebugDiagnosticsSchema = Type.Object({
 }, { additionalProperties: false });
 
 export type AgentStatus = Static<typeof AgentStatusSchema>;
+export type TerminalAgentStatus = Static<typeof TerminalAgentStatusSchema>;
 export type StopInitiator = Static<typeof StopInitiatorSchema>;
 export type DebugFaultKind = Static<typeof DebugFaultKindSchema>;
 export type LifetimeUsage = Static<typeof LifetimeUsageSchema>;

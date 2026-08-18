@@ -11,6 +11,7 @@ The first tracer example is linked to `REQ-CATALOGUE-002`: disabling built-in de
 - Built-in and custom source precedence.
 - Same-name custom definition preserved when a built-in definition is disabled.
 - Worktree-only names are added; a worktree file does not replace a global or project definition of the same name.
+- Empty present source roots are rejected at the public TypeBox seam; omission remains the missing-root representation.
 - Malformed frontmatter rejected without hiding valid definitions.
 - Tool, skill, and extension loading is resolved through the public policy command, including implicit defaults and a host-supplied fallback tool list.
 - A Subagent's resolved tool policy never includes the Agent tool, including when a definition or host fallback names it.

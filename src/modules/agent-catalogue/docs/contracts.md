@@ -8,7 +8,7 @@ The module exposes one `public.ts` surface. Cross-module values are JSON-seriali
 
 - `AgentDefinitionSnapshotSchema` defines one effective Agent type definition and its source.
 - `AgentCatalogueSnapshotSchema` defines the ordered effective definitions.
-- `DiscoverAgentCatalogueCommandSchema` defines source roots and the catalogue-owned configuration fragment for discovery. `projectDirectory` and `worktreeDirectory` are optional: an untrusted session's bootstrap simply does not construct them (REQ-CATALOGUE-003), so the module and its repository never receive the paths and hold no trust concept of their own. The repository returns empty sources for absent roots.
+- `DiscoverAgentCatalogueCommandSchema` defines source roots and the catalogue-owned configuration fragment for discovery. `projectDirectory` and `worktreeDirectory` are optional, and each present root is a non-empty string: an untrusted session's bootstrap simply does not construct them (REQ-CATALOGUE-003), so the module and its repository never receive the paths and hold no trust concept of their own. The repository returns empty sources for absent roots.
 - `AgentCatalogueResultSchema` defines success and serializable validation or repository failures.
 - `AgentSourceLoadRequestSchema` and `AgentSourceLoadResultSchema` define the filesystem repository boundary. Worktree files arrive in `worktreeDefinitions` so merge can keep them additive.
 - `ResolveAgentPolicyCommandSchema` and `ResolvedAgentLoadingPolicySchema` resolve tool, skill, and extension loading for one definition. Implicit defaults and the host's fallback registered-tool list arrive as command configuration.

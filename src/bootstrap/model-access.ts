@@ -197,11 +197,11 @@ export function createModelAccessSettingsOwner(
     fragment: ModelAccessFragment,
     type: string,
     key: string,
-  ): { supported: ThinkingLevel[]; allowed: Set<ThinkingLevel>; defaultLevel: ThinkingLevel } => {
+  ): { supported: ThinkingLevel[]; allowed: Set<ThinkingLevel>; defaultLevel: ThinkingLevel | undefined } => {
     const model = findModel(key);
     const supported = getSupportedThinkingLevels(model as any) as ThinkingLevel[];
     const fallbackLevel = clampThinkingLevel(model as any, "high") as ThinkingLevel;
-    const baseline = resolveThinkingAccess({
+    const policy = resolveThinkingAccess({
       routing: fragment,
       agentType: type,
       modelKey: key,
@@ -213,14 +213,11 @@ export function createModelAccessSettingsOwner(
       supportedLevels: supported,
       fallbackLevel,
     });
-    const saved = fragment.agentAccess[type]?.thinking?.[key];
-    const allowed = new Set<ThinkingLevel>(
-      saved?.allowed.filter((level) => supported.includes(level)) ?? baseline?.allowed ?? supported,
-    );
-    const defaultLevel = saved?.default && allowed.has(saved.default)
-      ? saved.default
-      : baseline?.default ?? replacementThinkingDefault([...allowed], fallbackLevel);
-    return { supported, allowed, defaultLevel };
+    return {
+      supported,
+      allowed: new Set<ThinkingLevel>(policy?.allowed ?? []),
+      defaultLevel: policy?.default,
+    };
   };
 
   const thinkingTargets = (type: string): ModelAccessThinkingTarget[] => {
@@ -376,7 +373,7 @@ export function createModelAccessSettingsOwner(
         return { ok: false, message: `${key} does not support thinking level ${level}.` };
       }
       const allowed = new Set(state.allowed);
-      let defaultLevel = state.defaultLevel;
+      let defaultLevel = state.defaultLevel ?? target;
       if (allowed.has(target)) {
         if (allowed.size === 1) return { ok: true };
         allowed.delete(target);

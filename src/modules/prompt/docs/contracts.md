@@ -9,6 +9,8 @@
 - `AgentGuidanceRequestSchema` and `AgentGuidanceResultSchema` assemble Parent Agent guidance from serializable catalogue and Model access inputs.
 - `SubagentPromptRequestSchema` and `SubagentPromptResultSchema` assemble the Subagent system prompt from serializable fragments.
 
+Context paths and active Agent names are serialized as XML attribute values by the prompt renderer, including `&`, `<`, `>`, and `"` encoding; the schemas intentionally continue to accept arbitrary non-empty strings.
+
 ## Planned schemas
 - `PromptSourceSnapshot` for deterministic source provenance inside tests, not persisted runtime state.
 

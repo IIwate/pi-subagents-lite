@@ -18,6 +18,7 @@
 - Write effects: any write lands in exactly one layer and the merged effective fragment is never persisted. The scheduler is re-published (`replaceLimits`) only after a successful commit, affecting future reserve and queue drain while running/queued Accepted run policies stay locked (REQ-AGENT-002).
 - `AgentCommandSchema`, `AgentCommandResultSchema`, `AgentSnapshotSchema`, and `AgentListSnapshotSchema` define the serializable lifecycle seam for spawn, stop, interact, inspect, pin, expire, close, and list. Spawn accepts only `validatedWorktreePath`, the resolved snapshot produced by the pre-spawn inspector; raw `worktreePath`/`parentCwd` fields are rejected.
 - `SessionStartRequestSchema`, `SessionEventSchema`, `SessionInspectResultSchema`, and `SessionStreamResultSchema` define session-driver traffic. The stream result contains only current streaming state/message; full inspect owns stable history.
+- `TerminalAgentStatusSchema` is the runtime-owned subset accepted by background-result persistence; `queued` and `running` are never terminal delivery inputs.
 
 Exact fields are owned by TypeBox schemas introduced one vertical slice at a time.
 

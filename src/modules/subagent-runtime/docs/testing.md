@@ -11,6 +11,7 @@ Lifecycle commands are exercised through `createSubagentRuntime` with in-memory 
 ## Required scenarios
 
 - Authorization acceptance locks the complete run policy.
+- A stale session event for an existing Agent is ignored, a blocked FIFO queue head cannot be bypassed, and a mutating SessionDriver cannot change the stored Accepted policy.
 - Concurrency accounting derives its model bucket only from the accepted model snapshot, even when an untyped caller supplies a conflicting extra field.
 - Model and Provider ceilings queue and release work hierarchically.
 - Closing a reserved running snapshot releases its slot and starts the next queued snapshot.

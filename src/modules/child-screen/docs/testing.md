@@ -19,6 +19,7 @@ Test navigation commands and snapshots without Pi TUI. Test Pi behavior separate
 - Running, queued, terminal, blocked, and empty states.
 - Main's unfocused viewport includes the first Running row with correct top/bottom hidden counts, while an all-terminal list starts at the head; selected/highlighted rows retain their own centering.
 - A selected stream updates on consecutive unchanged-signature ticks without `replace-records`, checks only that selected ID, and is cleared by a full finalized-message sync without duplication.
+- Delimiter-bearing record fields trigger a second full sync rather than colliding in the refresh signature.
 - `refresh-stream` rejects malformed JSON, ignores stale IDs without changing selection or the current overlay, and deep-copies the streaming message.
 - Main/unselected ticks do not inspect transcript history, even with many records and long finalized histories.
 - Regular/fullscreen switches, shrink clearing, footer replacement, ownership conflict, disposal, and reload.

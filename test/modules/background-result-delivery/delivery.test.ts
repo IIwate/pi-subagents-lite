@@ -41,6 +41,7 @@ function createMemory(options?: {
   const pending: BackgroundResultRecord[] = [...(options?.pending ?? [])];
   const latest: BackgroundResultRecord[] = [...(options?.latest ?? [])];
   const sent: Array<{ mode: "turn" | "follow-up"; content: string }> = [];
+  const acknowledged: string[][] = [];
   const fallbackRecords: BackgroundResultRecord[] = [];
   const repository: ResultRepository = {
     read: () => ({ pending: [...pending], latest: [...latest] }),
@@ -60,6 +61,7 @@ function createMemory(options?: {
       return true;
     },
     acknowledge(_sessionId, ids) {
+      acknowledged.push([...ids]);
       for (const id of ids) {
         const index = pending.findIndex((item) => item.deliveryId === id);
         if (index >= 0) pending.splice(index, 1);
@@ -86,10 +88,26 @@ function createMemory(options?: {
       save(_id, records) { fallbackRecords.splice(0, fallbackRecords.length, ...records); },
     },
   });
-  return { delivery, sent, pending, latest, fallbackRecords };
+  return { delivery, sent, pending, latest, fallbackRecords, acknowledged };
 }
 
 describe("REQ-DELIVERY-001 persist before wake", () => {
+  it.each(["queued", "running"])("rejects a nonterminal %s record before persistence", (status) => {
+    const memory = createMemory();
+    const result = memory.delivery.execute({
+      kind: "record-terminal",
+      record: record({ status: status as BackgroundResultRecord["status"] }),
+      stillPresent: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid-command", message: "Delivery record must have a terminal status." },
+    });
+    expect(memory.pending).toEqual([]);
+    expect(memory.sent).toEqual([]);
+  });
+
   it("appends a terminal result then requests one parent wake", () => {
     const memory = createMemory();
     const result = memory.delivery.execute({
@@ -574,6 +592,44 @@ describe("REQ-DELIVERY-005 restore and tree navigation", () => {
       deliveryId: "late",
       result: "written by another runtime",
     });
+  });
+
+  it("hydrates a durable-only exact inspect before successful settlement acknowledgement", () => {
+    const durable = record({ deliveryId: "reload-only" });
+    const memory = createMemory({ latest: [durable] });
+    const inspected = memory.delivery.execute({
+      kind: "inspect",
+      agentId: durable.agentId,
+      deliveryId: durable.deliveryId,
+    });
+    expect(inspected.ok && inspected.stored?.deliveryId).toBe("reload-only");
+
+    memory.delivery.execute({ kind: "mark-presented", deliveryId: durable.deliveryId });
+    memory.delivery.execute({ kind: "parent-end", succeeded: true });
+    const settled = memory.delivery.execute({ kind: "parent-settled" });
+
+    expect(settled).toMatchObject({
+      ok: true,
+      events: [{ type: "acknowledged", deliveryIds: ["reload-only"] }],
+    });
+    expect(memory.acknowledged).toEqual([["reload-only"]]);
+  });
+
+  it("does not inspect or acknowledge a foreign-session durable result", () => {
+    const memory = createMemory();
+    memory.latest.push(record({ deliveryId: "foreign", parentSessionId: "session-b" }));
+
+    const inspected = memory.delivery.execute({
+      kind: "inspect",
+      agentId: "agent-1",
+      deliveryId: "foreign",
+    });
+    expect(inspected.ok && inspected.stored).toBeUndefined();
+
+    memory.delivery.execute({ kind: "mark-presented", deliveryId: "foreign" });
+    memory.delivery.execute({ kind: "parent-end", succeeded: true });
+    memory.delivery.execute({ kind: "parent-settled" });
+    expect(memory.acknowledged).toEqual([]);
   });
 
   it("prefers a later durable continuation over the construction snapshot", () => {

@@ -1,7 +1,11 @@
 import type { SubagentPromptRequest } from "../contracts/prompt-contracts.js";
 
 function escapeXml(value: string): string {
-  return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function stripScaffolding(prompt: string): string {
@@ -84,5 +88,5 @@ export function assembleSubagentPromptText(request: SubagentPromptRequest): stri
   const basePrompt = customHeader
     ? `${customHeader}\n\n${envBlock}`
     : `You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously.\n\n${envBlock}`;
-  return `${basePrompt}${contextSuffix}\n<active_agent name="${request.agentName}"/>\n${agentInstructions}${extrasSuffix}`;
+  return `${basePrompt}${contextSuffix}\n<active_agent name="${escapeXml(request.agentName)}"/>\n${agentInstructions}${extrasSuffix}`;
 }

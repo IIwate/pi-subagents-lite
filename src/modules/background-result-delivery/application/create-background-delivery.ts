@@ -1,4 +1,5 @@
 import { Check } from "typebox/value";
+import { TerminalAgentStatusSchema } from "../../subagent-runtime/public.js";
 import {
   BackgroundResultRecordSchema,
   DeliveryCommandResultSchema,
@@ -73,12 +74,18 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   let parentRunSucceeded = true;
   let lastWakeFailed = false;
   const failedResultIds = new Set<string>();
+  const inspectedResults = new Map<string, BackgroundResultRecord>();
+  const currentSessionId = () => options.context.parentSessionId();
+  const belongsToCurrentSession = (result: BackgroundResultRecord): boolean =>
+    result.parentSessionId === currentSessionId();
+  const currentSessionRecords = (records: readonly BackgroundResultRecord[]) =>
+    inbound(records).filter(belongsToCurrentSession);
   const entries = options.repository.read();
-  const pendingResults = new Map(inbound(entries.pending).map((result) => [result.deliveryId, result]));
-  const latestResults = new Map(inbound(entries.latest).map((result) => [result.agentId, result]));
+  const pendingResults = new Map(currentSessionRecords(entries.pending).map((result) => [result.deliveryId, result]));
+  const latestResults = new Map(currentSessionRecords(entries.latest).map((result) => [result.agentId, result]));
   let activeBranchIds = new Set(options.context.activeBranchIds());
   const fallbackResults = new Map(
-    inbound(options.fallback.take(options.context.parentSessionId()))
+    currentSessionRecords(options.fallback.take(currentSessionId()))
       .map((result) => [result.deliveryId, result]),
   );
   let disposed = false;
@@ -98,8 +105,8 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       parentRunPhase,
       parentWakeActive,
       lastWakeFailed,
-      pending: [...pendingResults.values()],
-      fallback: [...fallbackResults.values()],
+      pending: [...pendingResults.values()].filter(belongsToCurrentSession),
+      fallback: [...fallbackResults.values()].filter(belongsToCurrentSession),
       visiblePendingCount: visible.length > 0 && hasFailed ? visible.length : undefined,
     };
   }
@@ -110,12 +117,14 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
 
   function pendingState(): BackgroundResultRecord[] {
     return [...pendingResults.values(), ...fallbackResults.values()]
-      .filter((result) => belongsToActiveBranch(result, options.context.parentSessionId(), activeBranchIds));
+      .filter((result) => belongsToCurrentSession(result))
+      .filter((result) => belongsToActiveBranch(result, currentSessionId(), activeBranchIds));
   }
 
   function eligiblePendingResults(): BackgroundResultRecord[] {
     return [...pendingResults.values()]
-      .filter((result) => belongsToActiveBranch(result, options.context.parentSessionId(), activeBranchIds));
+      .filter((result) => belongsToCurrentSession(result))
+      .filter((result) => belongsToActiveBranch(result, currentSessionId(), activeBranchIds));
   }
 
   /**
@@ -133,6 +142,10 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
 
   function flushFallbackResults(): void {
     for (const [deliveryId, result] of fallbackResults) {
+      if (!belongsToCurrentSession(result)) {
+        fallbackResults.delete(deliveryId);
+        continue;
+      }
       if (!options.repository.append(result)) {
         failedResultIds.add(deliveryId);
         continue;
@@ -182,7 +195,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   }
 
   function acknowledge(ids: readonly string[]): boolean {
-    if (!options.repository.acknowledge(options.context.parentSessionId(), ids)) {
+    if (!options.repository.acknowledge(currentSessionId(), ids)) {
       for (const deliveryId of ids) failedResultIds.add(deliveryId);
       lastWakeFailed = true;
       return false;
@@ -196,7 +209,10 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
   }
 
   function recordTerminal(record: BackgroundResultRecord, stillPresent: boolean): DeliveryCommandResult {
-    if (!stillPresent || disposed) return ok();
+    if (!Check(TerminalAgentStatusSchema, record.status)) {
+      return failure("invalid-command", "Delivery record must have a terminal status.");
+    }
+    if (!stillPresent || disposed || !belongsToCurrentSession(record)) return ok();
     fallbackResults.set(record.deliveryId, record);
     const version = completionVersion;
     flushFallbackResults();
@@ -207,7 +223,7 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
       return ok();
     }
     lastWakeFailed = false;
-    if (!belongsToActiveBranch(record, options.context.parentSessionId(), activeBranchIds)) {
+    if (!belongsToActiveBranch(record, currentSessionId(), activeBranchIds)) {
       emit({ type: "hidden", deliveryId: record.deliveryId });
       return ok();
     }
@@ -324,6 +340,11 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
         return ok();
       case "mark-presented":
         flushFallbackResults();
+        const inspected = inspectedResults.get(next.deliveryId);
+        if (inspected && belongsToCurrentSession(inspected)) {
+          pendingResults.set(inspected.deliveryId, inspected);
+          latestResults.set(inspected.agentId, inspected);
+        }
         if (pendingResults.has(next.deliveryId)) parentTurnResultIds.add(next.deliveryId);
         return ok();
       case "inspect":
@@ -343,7 +364,11 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     // mutated in place. Handing that out would let wake and inspect treat
     // a broken view as a parent message. Drop it; the caller sees absence.
     const stored = lookupStored(agentId, deliveryId);
-    return stored && Check(BackgroundResultRecordSchema, stored) ? stored : undefined;
+    if (!stored || !belongsToCurrentSession(stored) || !Check(BackgroundResultRecordSchema, stored)) {
+      return undefined;
+    }
+    inspectedResults.set(stored.deliveryId, stored);
+    return stored;
   }
 
   function lookupStored(agentId: string, deliveryId?: string): BackgroundResultRecord | undefined {
@@ -352,21 +377,22 @@ export function createBackgroundDelivery(options: CreateBackgroundDeliveryOption
     const durable = options.repository.find(
       deliveryId ? { agentId, deliveryId } : { agentId },
     );
+    const currentDurable = durable && belongsToCurrentSession(durable) ? durable : undefined;
     if (deliveryId) {
       const latest = latestResults.get(agentId);
       return fallbackResults.get(deliveryId)
         ?? pendingResults.get(deliveryId)
         ?? (latest?.deliveryId === deliveryId ? latest : undefined)
-        ?? durable;
+        ?? currentDurable;
     }
     const memoryLatest = latestResults.get(agentId);
     // On equal timestamps the durable record wins; memory is only the view
     // that happened to exist when this delivery instance was constructed.
     const persisted = !memoryLatest
-      ? durable
-      : !durable || memoryLatest.createdAt > durable.createdAt
+      ? currentDurable
+      : !currentDurable || memoryLatest.createdAt > currentDurable.createdAt
         ? memoryLatest
-        : durable;
+        : currentDurable;
     const fallback = [...fallbackResults.values()]
       .filter((result) => result.agentId === agentId)
       .reduce<BackgroundResultRecord | undefined>(

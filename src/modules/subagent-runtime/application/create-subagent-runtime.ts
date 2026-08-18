@@ -315,6 +315,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
       if (event.type === "session-ready") rejectLateSession(event.sessionId);
       return;
     }
+    if (snapshot.sessionId !== event.sessionId) return;
     if (event.type === "setup-started" || event.type === "setup-finished") return;
     if (event.type === "session-ready") {
       snapshot.sessionId = event.sessionId;
@@ -400,7 +401,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
         sessionId: snapshot.id,
         agentType: command.type,
         prompt: command.prompt,
-        acceptedPolicy: snapshot.acceptedPolicy,
+        acceptedPolicy: copyJson(snapshot.acceptedPolicy),
         worktreePath: snapshot.worktreePath,
         debugFault,
       }, emit);
@@ -439,7 +440,7 @@ export function createSubagentRuntime(options: CreateSubagentRuntimeOptions): Su
     for (const entry of queue) {
       const snapshot = snapshots.get(entry.id);
       if (!snapshot || snapshot.status !== "queued") continue;
-      if (!scheduler.reserve(entry.concurrencyKey).accepted) continue;
+      if (!scheduler.reserve(entry.concurrencyKey).accepted) break;
       reservedKeys.set(entry.id, entry.concurrencyKey);
       started.add(entry.id);
       void startAgent(entry.command, snapshot).catch((error) => {

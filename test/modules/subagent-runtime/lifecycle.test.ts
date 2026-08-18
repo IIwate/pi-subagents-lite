@@ -605,6 +605,42 @@ describe("REQ-RUNTIME-002 lifecycle public seam", () => {
 });
 
 describe("REQ-RUNTIME-001 queue release", () => {
+  it("keeps a blocked FIFO head ahead of a later entry with an open ceiling", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver, {
+      limits: {
+        defaultModelLimit: 4,
+        modelLimits: { "provider-a/model-a": 1, "provider-b/model-b": 1 },
+        providerLimits: {},
+      },
+    });
+
+    for (const [description, modelKey] of [
+      ["A running", "provider-a/model-a"],
+      ["A blocked head", "provider-a/model-a"],
+      ["B running", "provider-b/model-b"],
+      ["B later", "provider-b/model-b"],
+    ] as const) {
+      await runtime.execute({
+        kind: "spawn",
+        type: "general-purpose",
+        prompt: description,
+        description,
+        acceptedPolicy: acceptedRunPolicy(modelKey),
+      });
+    }
+
+    await completeRun(memory, "agent-00000003");
+    await Promise.resolve();
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("queued");
+    expect(runtime.getSnapshot("agent-00000004")?.status).toBe("queued");
+
+    await completeRun(memory, "agent-00000001");
+    await Promise.resolve();
+    expect(runtime.getSnapshot("agent-00000002")?.status).toBe("running");
+    expect(runtime.getSnapshot("agent-00000004")?.status).toBe("running");
+  });
+
   it("starts the queued snapshot only after the reserved run settles", async () => {
     const memory = createMemoryDriver();
     const runtime = createRuntime(memory.driver, {
@@ -1399,6 +1435,30 @@ describe("REQ-RUNTIME-006 shutdown", () => {
     expect(memory.closes).toContain("session-ghost");
   });
 
+  it("ignores a schema-valid event from an obsolete session for the current agent", async () => {
+    const memory = createMemoryDriver();
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    const before = runtime.getSnapshot("agent-00000001") as AgentSnapshot;
+    memory.runs.get("agent-00000001")?.emit({
+      type: "completed",
+      agentId: "agent-00000001",
+      sessionId: "obsolete-session",
+      responseText: "foreign result",
+      aborted: false,
+      turnLimited: false,
+    });
+
+    expect(runtime.getSnapshot("agent-00000001")).toEqual(before);
+  });
+
   it("bounds a hung setup wait to the teardown timeout", async () => {
     const memory = createMemoryDriver();
     memory.driver.start = (request, emit) => {
@@ -1459,6 +1519,31 @@ describe("REQ-RUNTIME-007 debug provenance", () => {
 });
 
 describe("session-driver contract", () => {
+  it("isolates the accepted policy from a mutating SessionDriver", async () => {
+    const memory = createMemoryDriver();
+    memory.driver.start = async (request, emit) => {
+      request.acceptedPolicy.model.id = "mutated";
+      request.acceptedPolicy.definition.systemPrompt = "mutated";
+      emit({
+        type: "session-ready",
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+      });
+    };
+    const runtime = createRuntime(memory.driver);
+    await runtime.execute({
+      kind: "spawn",
+      type: "general-purpose",
+      prompt: "task",
+      description: "task",
+      acceptedPolicy: acceptedRunPolicy("test/model"),
+    });
+
+    const snapshot = runtime.getSnapshot("agent-00000001");
+    expect(snapshot?.acceptedPolicy.model.id).toBe("model");
+    expect(snapshot?.acceptedPolicy.definition.systemPrompt).toBe("Complete the test task.");
+  });
+
   it("keeps SessionStartRequest schema-valid across a JSON round trip", () => {
     const request: SessionStartRequest = {
       agentId: "agent-00000001",
