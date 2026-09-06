@@ -123,6 +123,8 @@ function collectFinalAssistantMessage(session: AgentSession) {
   return { getMessage: () => message, unsubscribe };
 }
 
+const PSEUDO_TOOL_CALL_PATTERN = /^call:[^\s{}]+\s*\{[\s\S]*\}\s*$/;
+
 function resolveAssistantOutcome(
   message: AssistantMessage | undefined,
   aborted: boolean,
@@ -136,6 +138,10 @@ function resolveAssistantOutcome(
   const wasAborted = aborted || message?.stopReason === "aborted";
   if (!responseText && !wasAborted && !turnLimited) {
     throw new Error("Subagent completed without final assistant text");
+  }
+  // Providers can emit tool-call syntax as text while reporting a successful stop.
+  if (!wasAborted && !turnLimited && PSEUDO_TOOL_CALL_PATTERN.test(responseText)) {
+    throw new Error(`Subagent emitted unexecuted tool call text: ${responseText}`);
   }
 
   return { responseText, aborted: wasAborted };

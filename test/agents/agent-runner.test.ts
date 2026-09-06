@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { fakeCtx, fakePi as makeFakePi, makeResolvablePromise } from "../fixtures.ts";
 
 const fakePi = makeFakePi();
@@ -31,7 +32,6 @@ const mockModules = vi.hoisted(() => ({
   mockGetAgentConfig: vi.fn(),
   mockGetToolNamesForType: vi.fn(),
   mockBuildAgentPrompt: vi.fn(),
-  mockExtractText: vi.fn(),
   mockPreloadSkills: vi.fn().mockReturnValue([]),
   mockLoadSkillMeta: vi.fn().mockReturnValue([]),
   mockCreateAgentSession: vi.fn(),
@@ -61,10 +61,6 @@ vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
 
 vi.mock("../../src/prompt/prompts.js", () => ({
   buildAgentPrompt: mockModules.mockBuildAgentPrompt,
-}));
-
-vi.mock("../../src/prompt/context.js", () => ({
-  extractText: mockModules.mockExtractText,
 }));
 
 vi.mock("../../src/prompt/skill-loader.js", () => ({
@@ -151,14 +147,6 @@ function resetMocks() {
   mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig });
   mockModules.mockGetToolNamesForType.mockReturnValue(["read", "bash", "edit"]);
   mockModules.mockBuildAgentPrompt.mockReturnValue("system prompt");
-  mockModules.mockExtractText.mockImplementation((content: any) => {
-    if (typeof content === "string") return content;
-    if (!Array.isArray(content)) return "";
-    return content
-      .filter((item: any) => item?.type === "text")
-      .map((item: any) => item.text)
-      .join("");
-  });
   mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
   mockModules.mockPreloadSkills.mockReturnValue([]);
@@ -167,7 +155,7 @@ function resetMocks() {
 /**
  * Create a mock session with default stubs.
  */
-function createMockSession() {
+function createMockSession(content: AssistantMessage["content"] = [{ type: "text", text: "done" }]) {
   const listeners: Array<(event: any) => void> = [];
   return {
     setSessionName: vi.fn(),
@@ -191,7 +179,7 @@ function createMockSession() {
           type: "message_end",
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "done" }],
+            content,
             stopReason: "stop",
           },
         });
@@ -320,6 +308,23 @@ describe("runAgent — session state inheritance", () => {
 
     await expect(runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi }))
       .rejects.toThrow("503 service_unavailable");
+    expect(session._getListeners()).toHaveLength(0);
+  });
+
+  it.each([
+    ["namespaced call", 'call:sample_namespace:sample_tool{"value":"example"}'],
+    ["call with unquoted arguments", "call:other_scope:other-tool_2{value:example}"],
+    ["nested namespace call", "call:sample_scope:nested_scope:tool.v2{}"],
+    ["multiline call", ' \ncall:sample_tool {\n  "value": "example"\n}\n '],
+  ])("rejects terminal text containing only a %s followed by thinking", async (_name, responseText) => {
+    const session = createMockSession([
+      { type: "text", text: responseText },
+      { type: "thinking", thinking: "Waiting for the tool result." },
+    ]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    await expect(runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi }))
+      .rejects.toThrow(`Subagent emitted unexecuted tool call text: ${responseText.trim()}`);
     expect(session._getListeners()).toHaveLength(0);
   });
 });
@@ -839,7 +844,32 @@ describe("continueAgentSession", () => {
       .rejects.toThrow("Subagent completed without final assistant text");
   });
 
-  it("classifies an empty terminal abort without treating it as completion", async () => {
+  it("rejects terminal tool-call text when continuing a session", async () => {
+    const responseText = "call:sample_namespace:sample_tool{value:example}";
+    const session = createMockSession([{ type: "text", text: responseText }]);
+
+    await expect(continueAgentSession(session as any, "continue"))
+      .rejects.toThrow(`Subagent emitted unexecuted tool call text: ${responseText}`);
+    expect(session._getListeners()).toHaveLength(0);
+  });
+
+  it.each([
+    "The model emitted `call:sample_namespace:sample_tool{value:example}` as text.",
+    "```text\ncall:sample_namespace:sample_tool{value:example}\n```",
+  ])("accepts final text quoting a tool call: %s", async (responseText) => {
+    const session = createMockSession([
+      { type: "thinking", thinking: "call:sample_namespace:sample_tool{value:example}" },
+      { type: "text", text: responseText },
+    ]);
+
+    await expect(continueAgentSession(session as any, "continue")).resolves.toEqual({
+      responseText,
+      aborted: false,
+      turnLimited: false,
+    });
+  });
+
+  it.each(["", "call:sample_namespace:sample_tool{value:example}"])("preserves an aborted terminal message: %j", async (responseText) => {
     const session = createMockSession();
     session.prompt.mockImplementation(async () => {
       for (const listener of [...session._getListeners()]) {
@@ -847,7 +877,7 @@ describe("continueAgentSession", () => {
           type: "message_end",
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "" }],
+            content: [{ type: "text", text: responseText }],
             stopReason: "aborted",
           },
         });
@@ -855,20 +885,26 @@ describe("continueAgentSession", () => {
     });
 
     await expect(continueAgentSession(session as any, "continue")).resolves.toEqual({
-      responseText: "",
+      responseText,
       aborted: true,
       turnLimited: false,
     });
   });
 
-  it("enforces max turns and grace turns on continuation prompts", async () => {
-    const session = createMockSession();
+  it.each([
+    { turns: 2, responseText: "", aborted: true },
+    { turns: 1, responseText: "call:sample_tool{value:example}", aborted: false },
+    { turns: 2, responseText: "call:sample_tool{value:example}", aborted: true },
+  ])("preserves turn limits after $turns turns with terminal text '$responseText'", async ({ turns, responseText, aborted }) => {
+    const session = createMockSession([{ type: "text", text: responseText }]);
+    const finishPrompt = session.prompt.getMockImplementation()!;
     session.prompt.mockImplementation(async () => {
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < turns; i++) {
         for (const listener of [...session._getListeners()]) {
           listener({ type: "turn_end" });
         }
       }
+      await finishPrompt();
     });
 
     const result = await continueAgentSession(session as any, "continue", {
@@ -882,9 +918,8 @@ describe("continueAgentSession", () => {
     const steerMessage = session.steer.mock.calls[0][0] as string;
     expect(steerMessage).toContain("turn limit of 1");
     expect(steerMessage).toContain("1 turn(s) left");
-    expect(session.abort).toHaveBeenCalled();
-    expect(result.aborted).toBe(true);
-    expect(result.turnLimited).toBe(true);
+    expect(session.abort).toHaveBeenCalledTimes(aborted ? 1 : 0);
+    expect(result).toEqual({ responseText, aborted, turnLimited: true });
   });
 });
 
