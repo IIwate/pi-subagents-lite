@@ -116,10 +116,21 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const rawDescription = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt);
   const description = (rawDescription.split("\n")[0] || "").trim().slice(0, 40);
-  const requestedBackground = params.run_in_background as boolean | undefined;
+  const requestedBackground = typeof params.run_in_background === "boolean"
+    ? params.run_in_background
+    : undefined;
   const store = getStore();
-  const scopedModels = structuredClone(ctx.scopedModels);
+
+  if (requestedBackground === false && store.agent.forceBackground) {
+    return errorResult(
+      "Foreground execution is disabled: the user has enabled 'forceBackground' in subagent settings. "
+      + "You must either set 'run_in_background: true' to run this task asynchronously, "
+      + "or inform the user that their current configuration prevents foreground execution.",
+    );
+  }
+
   const runInBackground = requestedBackground === true || store.agent.forceBackground;
+  const scopedModels = structuredClone(ctx.scopedModels);
   const routing = store.routing;
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());

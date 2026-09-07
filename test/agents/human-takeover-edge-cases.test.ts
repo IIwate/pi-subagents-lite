@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeResolvablePromise } from "../fixtures.ts";
 import { DeliverySelectorComponent } from "../../src/ui/delivery-selector.js";
 import {
   extractDeliverableMessages,
@@ -289,6 +290,54 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
       expect(delivered).toBeDefined();
       expect(delivered?.result).toContain("### Delivered Output");
       expect(delivered?.result).toContain("Final output summary text from completed run.");
+    });
+
+    it("notifies navigator.update() immediately when subsequent continuations complete", async () => {
+      const updateSpy = vi.spyOn(state.navigator, "update");
+
+      // Foreground spawn
+      const initialRun = makeResolvablePromise();
+      state.runAgent.mockReturnValue(initialRun.promise);
+
+      const spawnPromise = state.coordinator.spawn(state.pi, state.ctx, {
+        type: "general-purpose",
+        prompt: "foreground task",
+        description: "Task",
+        graceTurns: 5,
+        runInBackground: false,
+        acceptedPolicy: {} as any,
+      });
+
+      const record = state.manager.listAgents()[0];
+      // User presses Esc in child view to stop the subagent
+      state.manager.abort(record.id, "user");
+      initialRun.resolve({ responseText: "", session: state.session, aborted: true, turnLimited: false });
+      await spawnPromise;
+      expect(record.lifecycle.status).toBe("stopped");
+
+      // 1st continuation
+      const cont1 = makeResolvablePromise();
+      state.continueAgentSession.mockReturnValue(cont1.promise);
+      await state.coordinator.interact(record.id, "1st continuation");
+      expect(record.lifecycle.takenOver).toBe(true);
+
+      cont1.resolve({ responseText: "1st output", aborted: false, turnLimited: false });
+      await record.execution.promise;
+      expect(record.lifecycle.status).toBe("completed");
+
+      // 2nd continuation
+      const cont2 = makeResolvablePromise();
+      state.continueAgentSession.mockReturnValue(cont2.promise);
+      await state.coordinator.interact(record.id, "2nd continuation");
+      expect(record.lifecycle.status).toBe("running");
+
+      updateSpy.mockClear();
+      cont2.resolve({ responseText: "123", aborted: false, turnLimited: false });
+      await record.execution.promise;
+      expect(record.lifecycle.status).toBe("completed");
+
+      // Must be called immediately on 2nd continuation completion
+      expect(updateSpy).toHaveBeenCalled();
     });
   });
 

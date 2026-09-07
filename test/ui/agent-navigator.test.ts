@@ -1449,6 +1449,28 @@ describe("AgentNavigator", () => {
     expect(parentEscape).toHaveBeenCalledOnce();
   });
 
+  it("stops a running subagent when Escape is pressed while viewing it with list focused", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "running";
+    const manager = makeManager([record]);
+    (manager as any).abort = vi.fn().mockReturnValue(true);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+    expect(navigator.isListFocused()).toBe(true);
+
+    // Escape in list-focused child view immediately aborts the active running subagent
+    const res = navigator.handleTerminalInput("\x1b");
+    expect(res?.consume).toBe(true);
+    expect((manager as any).abort).toHaveBeenCalledWith(record.id, "user");
+  });
+
   it("renders interaction blocks on Main and restores counts after a successful retry", async () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

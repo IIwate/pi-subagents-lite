@@ -269,7 +269,10 @@ export class SpawnCoordinator {
     // settles. Those completions are intentionally discarded, not re-enqueued.
     if (!record.execution.resultSessionId || this.disposed || !this.manager.getRecord(record.id)) return;
 
-    if (record.lifecycle.takenOver) return;
+    if (record.lifecycle.takenOver) {
+      getNavigator()?.update();
+      return;
+    }
 
     const result = storedResult(record);
     if (!result) return;

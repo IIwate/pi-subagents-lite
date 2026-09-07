@@ -679,6 +679,10 @@ export class AgentNavigator {
     }
 
     if (matchesKey(data, Key.escape)) {
+      if (this.selectedAgentId && this.abortActiveSubagent()) {
+        this.update();
+        return { consume: true };
+      }
       this.listFocused = false;
       this.highlightedAgentId = this.selectedAgentId;
       this.update();
