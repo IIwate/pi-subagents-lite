@@ -1382,8 +1382,67 @@ describe("AgentManager", () => {
 
       expect(shutdownEvents(session)).toEqual([{ type: "session_shutdown", reason: "quit" }]);
       expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(session.abort.mock.invocationCallOrder[0])
+        .toBeLessThan(session.extensionRunner.emit.mock.invocationCallOrder[0]);
       expect(session.extensionRunner.emit.mock.invocationCallOrder[0])
         .toBeLessThan(session.dispose.mock.invocationCallOrder[0]);
+    });
+
+    it("aborts in-flight session and settles before disposing a cleared running agent", async () => {
+      manager = new AgentManager(onComplete);
+      let streamSettled = false;
+      let disposedWhileActive = false;
+
+      const runResolvable = makeResolvablePromise<any>();
+      const session = mockAgentSession();
+      session.isStreaming = true;
+      session.abort = vi.fn().mockImplementation(async () => {
+        // Simulate abort settling the run
+        runResolvable.resolve({ responseText: "done", session, aborted: true, turnLimited: false });
+      });
+      session.dispose = vi.fn().mockImplementation(() => {
+        if (!streamSettled) disposedWhileActive = true;
+      });
+
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        await options.onSessionCreated(session);
+        const res = await runResolvable.promise;
+        streamSettled = true;
+        return res;
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await Promise.resolve();
+
+      expect(manager.getRecord(id)?.lifecycle.status).toBe("running");
+
+      manager.clear(id);
+      await manager.dispose();
+
+      expect(session.abort).toHaveBeenCalledTimes(1);
+      expect(session.extensionRunner.emit).toHaveBeenCalledTimes(1);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(session.abort.mock.invocationCallOrder[0])
+        .toBeLessThan(session.extensionRunner.emit.mock.invocationCallOrder[0]);
+      expect(session.extensionRunner.emit.mock.invocationCallOrder[0])
+        .toBeLessThan(session.dispose.mock.invocationCallOrder[0]);
+      expect(disposedWhileActive).toBe(false);
+    });
+
+    it("still completes teardown and disposes session when abort throws", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession();
+      session.abort = vi.fn().mockRejectedValue(new Error("abort failed"));
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      await manager.getRecord(id)!.execution.promise;
+
+      manager.clear(id);
+      await expect(manager.dispose()).resolves.toBeUndefined();
+
+      expect(session.abort).toHaveBeenCalledTimes(1);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
     });
 
     it("emits session_shutdown when a stale record is evicted by cleanup", async () => {

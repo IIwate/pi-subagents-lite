@@ -193,7 +193,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
   });
 
   // session_shutdown — abort all, dispose manager
-  pi.on("session_shutdown", async (_event: unknown, ctx: ExtensionContext) => {
+  pi.on("session_shutdown", async (event: unknown, ctx: ExtensionContext) => {
     const failures: unknown[] = [];
     const cleanup = async (action: () => void | Promise<void>): Promise<void> => {
       try {
@@ -209,7 +209,11 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       const records = currentManager.listAgents();
       const active = records.filter(r => r.lifecycle.status === "running" || r.lifecycle.status === "queued");
       if (active.length > 0 && ctx.hasUI) {
-        ctx.ui.notify(`${active.length} agent(s) killed by reload`, "warning");
+        const reason = (event as { reason?: string } | undefined)?.reason;
+        const message = reason === "reload"
+          ? `${active.length} agent(s) killed by reload`
+          : `${active.length} agent(s) stopped on session close`;
+        ctx.ui.notify(message, "warning");
       }
     });
 

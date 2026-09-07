@@ -716,17 +716,18 @@ export class AgentManager {
   }
 
   /**
-   * Emit session_shutdown to a child session's extensions, then dispose it.
+   * Abort in-flight runs, emit session_shutdown to child extensions, then dispose the session.
    *
-   * AgentSession.dispose() does not emit session_shutdown, so extensions holding
-   * session-scoped resources (processes, sockets, watchers) never release them
-   * when a subagent is cleared, evicted, or killed with the parent. Subagents run
-   * their own extension instances, so the parent's shutdown does not cover them.
+   * Premature session.dispose() synchronously invalidates the child ExtensionRunner
+   * while an in-flight stream or turn may still be running. Subsequent context/provider
+   * hooks would throw stale assertActive errors. Awaiting session.abort() first allows
+   * running operations to settle idle before child extensions receive session_shutdown
+   * and before session.dispose() tears down runtime state.
    *
-   * emit() awaits handlers serially without a timeout. A hung child extension handler would
-   * permanently block parent shutdown (events.ts session_shutdown -> dispose() -> host
-   * process.exit). Bound only the emit phase, then still call session.dispose() to release
-   * local resources.
+   * emit() awaits handlers serially without a timeout. A hung child extension handler or
+   * aborted run would permanently block parent shutdown (events.ts session_shutdown ->
+   * dispose() -> host process.exit). Bound the teardown phase with SESSION_TEARDOWN_TIMEOUT_MS,
+   * then still call session.dispose() to release local resources.
    *
    * This relies on the isInsideSubagentSpawn() early return in index.ts: extension instances
    * inside child sessions do not register session_shutdown, so this emit cannot recurse into dispose().
@@ -738,7 +739,12 @@ export class AgentManager {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }),
+          (async () => {
+            if (typeof session.abort === "function") {
+              await session.abort().catch(() => {});
+            }
+            await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+          })(),
           new Promise<void>(resolve => {
             timer = setTimeout(resolve, SESSION_TEARDOWN_TIMEOUT_MS);
             timer.unref?.();
