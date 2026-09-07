@@ -227,6 +227,12 @@ export async function executeAgentTool(
 
   const { agentId, record } = result;
 
+  if (result.detached) {
+    return successResult(
+      "[Subagent detached to background: User took over this session interactively in the child view. Wait for user delivery or explicit status lookup.]",
+    );
+  }
+
   if (runInBackground) {
     const suffix = `The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";

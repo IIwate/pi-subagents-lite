@@ -30,6 +30,7 @@ const {
   mockRouting,
   mockForceBackground,
   mockSpawnIntents,
+  mockCoordinatorSpawn,
 } = vi.hoisted(() => ({
   mockValidateWorktreePath: vi.fn(),
   mockSpawn: vi.fn().mockReturnValue("agent-id-123"),
@@ -43,6 +44,7 @@ const {
   },
   mockForceBackground: { value: false },
   mockSpawnIntents: [] as any[],
+  mockCoordinatorSpawn: vi.fn(),
 }));
 
 vi.mock("../../src/spawn/worktree-validator.js", () => ({
@@ -120,32 +122,7 @@ vi.mock("../../src/shell.js", () => ({
     abort: vi.fn(() => false),
   }),
   getCoordinator: () => ({
-    spawn: vi.fn(async (_pi: any, _ctx: any, intent: any) => {
-      mockSpawnIntents.push(intent);
-      // Delegate to the mocked manager.spawn
-      const manager = {
-        spawn: mockSpawn,
-        getRecord: mockGetRecord,
-      };
-      const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
-        description: intent.description,
-        signal: intent.signal,
-        model: intent.model,
-        scopedModels: intent.scopedModels,
-        maxTurns: intent.maxTurns,
-        thinkingLevel: intent.thinkingLevel,
-        thinkingResolved: intent.thinkingResolved,
-        modelKey: intent.modelKey,
-        graceTurns: intent.graceTurns,
-        worktreePath: intent.worktreePath,
-        invocation: intent.invocation,
-      });
-      const record = mockGetRecord(id);
-      if (!intent.runInBackground && record?.execution?.promise) {
-        await record.execution.promise;
-      }
-      return { agentId: id, record };
-    }),
+    spawn: mockCoordinatorSpawn,
     onAgentComplete: vi.fn(),
     dispose: vi.fn(),
   }),
@@ -161,6 +138,27 @@ beforeEach(() => {
   mockRouting.agentAccess = {};
   mockForceBackground.value = false;
   mockSpawnIntents.length = 0;
+  mockCoordinatorSpawn.mockImplementation(async (_pi: any, _ctx: any, intent: any) => {
+    mockSpawnIntents.push(intent);
+    const id = mockSpawn(_pi, _ctx, intent.type, intent.prompt, {
+      description: intent.description,
+      signal: intent.signal,
+      model: intent.model,
+      scopedModels: intent.scopedModels,
+      maxTurns: intent.maxTurns,
+      thinkingLevel: intent.thinkingLevel,
+      thinkingResolved: intent.thinkingResolved,
+      modelKey: intent.modelKey,
+      graceTurns: intent.graceTurns,
+      worktreePath: intent.worktreePath,
+      invocation: intent.invocation,
+    });
+    const record = mockGetRecord(id);
+    if (!intent.runInBackground && record?.execution?.promise) {
+      await record.execution.promise;
+    }
+    return { agentId: id, record };
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -397,6 +395,26 @@ describe("executeAgentTool — worktree_path validation", () => {
 
     // Should return an error result, not throw
     expect(result.isError).toBe(true);
+  });
+
+  it("returns detachment notice when subagent is detached to background", async () => {
+    mockCoordinatorSpawn.mockResolvedValueOnce({
+      agentId: "agent-id-detached",
+      record: {
+        id: "agent-id-detached",
+        display: { type: "general-purpose", description: "Test agent" },
+        lifecycle: { status: "running", startedAt: Date.now(), takenOver: true },
+        execution: {},
+        stats: { compactionCount: 0, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, toolUses: 0 },
+      },
+      detached: true,
+    });
+
+    const result = await executeAgentTool("tc-detached", makeParams(), undefined, undefined, ctx);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe(
+      "[Subagent detached to background: User took over this session interactively in the child view. Wait for user delivery or explicit status lookup.]",
+    );
   });
 });
 

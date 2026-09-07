@@ -574,6 +574,13 @@ export class AgentManager {
   ): Promise<InteractionResult> {
     const record = this.agents.get(id);
     if (!record) return { accepted: false, reason: "unavailable" };
+
+    if (record.lifecycle.pinnedAt == null) {
+      record.lifecycle.pinnedAt = Date.now();
+    }
+    record.lifecycle.takenOver = true;
+    record.execution.detach?.();
+
     if (record.lifecycle.status === "queued") return { accepted: false, reason: "queued" };
 
     if (record.lifecycle.status === "running") {

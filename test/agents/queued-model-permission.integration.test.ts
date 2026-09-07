@@ -430,7 +430,9 @@ describe("queued invocation snapshots", () => {
     expect(readResultEntries(mocks.ctx).pending.get(firstDeliveryId)?.error).toBe("content_filter");
     await expect(mocks.coordinator.interact(record.id, "continue")).resolves.toEqual({ accepted: true });
     await record.execution.promise;
-    const secondDeliveryId = record.execution.resultDeliveryId;
+    const delivered = mocks.coordinator.deliverSelectedMessages(record.id, [0]);
+    expect(delivered).toBeDefined();
+    const secondDeliveryId = delivered!.deliveryId;
 
     expect(secondDeliveryId).not.toBe(firstDeliveryId);
     expect(record.lifecycle.status).toBe("completed");

@@ -10,6 +10,11 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord, SpawnConfig } from "../types.js";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
+import {
+  formatSubagentDelivery,
+  extractDeliverableMessages,
+  type DeliverableMessage,
+} from "../prompt/subagent-delivery.js";
 import { formatResultContent } from "../agents/tool-execution.js";
 import {
   appendPendingResult,
@@ -33,6 +38,7 @@ export interface SpawnIntent extends SpawnConfig {
 export interface SpawnResult {
   agentId: string;
   record: AgentRecord;
+  detached?: boolean;
 }
 
 function isParentRunSuccessful(
@@ -141,8 +147,35 @@ export class SpawnCoordinator {
 
     const record = this.manager.getRecord(agentId)!;
     if (!runInBackground) {
-      await record.execution.promise;
-      record.lifecycle.resultConsumed = true;
+      let resolveDetach: (() => void) | undefined;
+      const detachPromise = new Promise<"detached">(resolve => {
+        resolveDetach = () => resolve("detached");
+      });
+      record.execution.detach = resolveDetach;
+
+      try {
+        const outcome = await Promise.race([
+          record.execution.promise
+            ? record.execution.promise.then(() => "completed" as const).catch(() => "completed" as const)
+            : Promise.resolve("completed" as const),
+          detachPromise,
+        ]);
+
+        if (outcome === "detached") {
+          if (!record.execution.resultSessionId) {
+            record.execution.resultSessionId = ctx.sessionManager.getSessionId();
+            record.execution.resultOriginEntryId = ctx.sessionManager.getLeafId();
+            if (record.execution.resultOriginEntryId) {
+              this.activeBranchIds.add(record.execution.resultOriginEntryId);
+            }
+          }
+          return { agentId, record, detached: true };
+        }
+
+        record.lifecycle.resultConsumed = true;
+      } finally {
+        delete record.execution.detach;
+      }
     }
 
     return { agentId, record };
@@ -167,11 +200,79 @@ export class SpawnCoordinator {
     return result;
   }
 
+  getDeliverableMessages(agentId: string): DeliverableMessage[] {
+    const record = this.manager.getRecord(agentId);
+    if (!record) return [];
+    const sessionMessages = record.execution.session?.messages;
+    if (sessionMessages && sessionMessages.length > 0) {
+      const extracted = extractDeliverableMessages(sessionMessages);
+      if (extracted.length > 0) return extracted;
+    }
+    if (record.result && record.result.trim()) {
+      return [{ role: "assistant", content: record.result.trim() }];
+    }
+    return [];
+  }
+
+  deliverSelectedMessages(agentId: string, messageIndices: number[]): PendingResult | undefined {
+    const record = this.manager.getRecord(agentId);
+    if (!record || this.disposed) return undefined;
+
+    if (!record.execution.resultSessionId) {
+      const ctx = getSessionCtx();
+      record.execution.resultSessionId = ctx.sessionManager.getSessionId();
+      record.execution.resultOriginEntryId = ctx.sessionManager.getLeafId();
+      if (record.execution.resultOriginEntryId) {
+        this.activeBranchIds.add(record.execution.resultOriginEntryId);
+      }
+    }
+
+    const deliverable = this.getDeliverableMessages(agentId);
+    const selected = messageIndices.map(i => deliverable[i]).filter((m): m is DeliverableMessage => Boolean(m));
+    if (selected.length === 0) return undefined;
+
+    const formatted = formatSubagentDelivery({
+      taskOrigin: record.display.description,
+      type: record.display.type,
+      messages: selected,
+    });
+
+    const deliveryId = randomUUID();
+    const result: PendingResult = {
+      deliveryId,
+      parentSessionId: record.execution.resultSessionId,
+      originEntryId: record.execution.resultOriginEntryId ?? null,
+      agentId: record.id,
+      type: record.display.type,
+      status: record.lifecycle.status,
+      result: formatted,
+      error: null,
+      provider: record.display.invocation?.providerName,
+      model: record.display.invocation?.modelName,
+      createdAt: Date.now(),
+    };
+
+    this.fallbackResults.set(result.deliveryId, result);
+    const pi = getPiInstance();
+    if (!pi || !appendPendingResult(pi, result)) {
+      getNavigator()?.update();
+      return undefined;
+    }
+    this.latestResults.set(record.id, result);
+    this.pendingResults.set(result.deliveryId, result);
+    record.lifecycle.resultPersisted = true;
+    this.completionVersion++;
+    this.requestParentWake();
+    return result;
+  }
+
   /** Persist a background completion and let that completion request a wake-up. */
   onAgentComplete(record: AgentRecord): void {
     // Manual clear and manager shutdown remove the record before the async run
     // settles. Those completions are intentionally discarded, not re-enqueued.
     if (!record.execution.resultSessionId || this.disposed || !this.manager.getRecord(record.id)) return;
+
+    if (record.lifecycle.takenOver) return;
 
     const result = storedResult(record);
     if (!result) return;

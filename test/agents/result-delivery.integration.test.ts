@@ -160,15 +160,17 @@ describe("durable result delivery integration", () => {
     });
     await expect(state.coordinator.interact(id, "continue")).resolves.toEqual({ accepted: true });
     await record.execution.promise;
+    const delivered = state.coordinator.deliverSelectedMessages(id, [0]);
+    expect(delivered).toBeDefined();
 
     expect(record.execution).toMatchObject({
       resultSessionId: "parent-session",
       resultOriginEntryId: "origin-a",
     });
     expect(record.execution).not.toHaveProperty("backgroundDelivery");
-    expect(record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
-    expect(readResultEntries(state.ctx).pending.get(record.execution.resultDeliveryId)?.result)
-      .toBe("continued result");
+    expect(delivered!.deliveryId).not.toBe(firstDeliveryId);
+    expect(readResultEntries(state.ctx).pending.get(delivered!.deliveryId)?.result)
+      .toContain("continued result");
   });
 
   it("delivers foreground continuation results to the inbox and parent session", async () => {
@@ -188,11 +190,13 @@ describe("durable result delivery integration", () => {
     await expect(state.coordinator.interact(spawned.agentId, "continue"))
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
+    const delivered = state.coordinator.deliverSelectedMessages(spawned.agentId, [0]);
+    expect(delivered).toBeDefined();
 
     expect(spawned.record.execution.resultSessionId).toBe("parent-session");
     expect(spawned.record.execution.resultOriginEntryId).toBe("origin-a");
     expect(readResultEntries(state.ctx).pending.size).toBe(1);
-    expect([...readResultEntries(state.ctx).pending.values()][0].result).toBe("foreground continuation");
+    expect([...readResultEntries(state.ctx).pending.values()][0].result).toContain("foreground continuation");
     expect(state.pi.sendMessage).toHaveBeenCalled();
   });
 
@@ -224,11 +228,13 @@ describe("durable result delivery integration", () => {
     await expect(state.coordinator.interact(spawned.agentId, "resume"))
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
+    const delivered = state.coordinator.deliverSelectedMessages(spawned.agentId, [0]);
+    expect(delivered).toBeDefined();
 
     expect(spawned.record.lifecycle.status).toBe("completed");
     expect(spawned.record.execution.resultSessionId).toBe("parent-session");
     expect(readResultEntries(state.ctx).pending.size).toBe(1);
-    expect([...readResultEntries(state.ctx).pending.values()][0].result).toBe("completed after esc");
+    expect([...readResultEntries(state.ctx).pending.values()][0].result).toContain("completed after esc");
     expect(state.pi.sendMessage).toHaveBeenCalled();
   });
 });

@@ -226,6 +226,28 @@ describe("SpawnCoordinator", () => {
     expect(result.record.lifecycle.resultConsumed).toBe(true);
   });
 
+  it("detaches immediately from foreground when user interacts in child view", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const pending = coordinator.spawn(mockPi, ctx, {
+      type: "builder",
+      prompt: "long running foreground task",
+      description: "Test foreground detach",
+      graceTurns: 6,
+      runInBackground: false,
+    });
+    const record = manager.listAgents()[0];
+    expect(record.execution.detach).toBeDefined();
+
+    // Trigger detach via interact
+    record.execution.detach!();
+
+    const spawnResult = await pending;
+    expect(spawnResult.detached).toBe(true);
+    expect(record.execution.resultSessionId).toBe("test-session");
+    expect(record.execution.resultOriginEntryId).toBe("origin-a");
+    expect(record.lifecycle.resultConsumed).toBeUndefined();
+  });
+
   it("persists a background result and requests one parent wake immediately", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
@@ -250,6 +272,55 @@ describe("SpawnCoordinator", () => {
     expect(result.record.lifecycle.resultPersisted).toBe(true);
     expect(result.record.lifecycle.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBeUndefined();
+  });
+
+  it("keeps parent session completely silent when a takenOver agent completes", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    result.record.lifecycle.takenOver = true;
+    complete(result.record, "completed", "background message");
+
+    coordinator.onAgentComplete(result.record);
+
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    expect(result.record.lifecycle.resultPersisted).toBeUndefined();
+  });
+
+  it("delivers selected messages from a takenOver agent and wakes parent", async () => {
+    const coordinator = new SpawnCoordinator(manager as any);
+    const result = await spawnBackground(coordinator);
+    result.record.lifecycle.takenOver = true;
+    result.record.execution.session = {
+      messages: [
+        { role: "user", content: "Analyze the database schema." },
+        { role: "assistant", content: "The schema has 5 tables." },
+        { role: "assistant", content: "All foreign keys have indexes." },
+      ],
+    } as any;
+
+    const delivered = coordinator.deliverSelectedMessages(result.agentId, [1, 2]);
+    expect(delivered).toBeDefined();
+    expect(delivered?.status).toBe("running");
+    expect(delivered?.result).toContain("### Delivered Output");
+    expect(delivered?.result).toContain("The schema has 5 tables.\n\n---\n\nAll foreign keys have indexes.");
+    expect(result.record.lifecycle.resultPersisted).toBe(true);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "subagents-lite:pending-result",
+      expect.objectContaining({
+        deliveryId: delivered?.deliveryId,
+        agentId: result.agentId,
+      }),
+    );
+    expect(mockPi.sendMessage).toHaveBeenCalled();
+
+    // Stage 2 delivery generates a new deliveryId
+    const stage2 = coordinator.deliverSelectedMessages(result.agentId, [0, 1]);
+    expect(stage2).toBeDefined();
+    expect(stage2?.deliveryId).not.toBe(delivered?.deliveryId);
+    expect(stage2?.result).toContain("### Delivered Transcript");
+    expect(stage2?.result).toContain("**User:**\nAnalyze the database schema.");
   });
 
   it("persists an empty background completion as a terminal event", async () => {

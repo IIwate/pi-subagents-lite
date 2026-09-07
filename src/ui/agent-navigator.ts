@@ -25,6 +25,9 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AgentManager, InteractionResult } from "../agents/agent-manager.js";
 import type { AgentRecord } from "../types.js";
+import { extractDeliverableMessages } from "../prompt/subagent-delivery.js";
+import { getCoordinator, getSessionCtx } from "../shell.js";
+import { DeliverySelectorComponent } from "./delivery-selector.js";
 import { getSessionContextPercent } from "../agents/usage.js";
 import {
   buildStatsParts,
@@ -458,6 +461,7 @@ export class AgentNavigator {
   private listExpanded: boolean;
   private listFocused = false;
   private footerStatus: string | undefined;
+  private isDeliverySelectorOpen = false;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   /** Skip requestRender when list content is unchanged between timer ticks. */
   private lastRenderSig = "";
@@ -684,6 +688,14 @@ export class AgentNavigator {
     if (matchesKey(data, Key.ctrl("d"))) {
       this.beginClearConfirmation();
       return { consume: true };
+    }
+
+    if (data === "\x1bs" || matchesKey(data, Key.alt("s"))) {
+      const highlighted = entries.find(e => e.id === this.highlightedAgentId)?.record;
+      if (this.canDeliverRecord(highlighted)) {
+        void this.openDeliverySelector();
+        return { consume: true };
+      }
     }
 
     if (data === " ") {
@@ -1039,6 +1051,56 @@ export class AgentNavigator {
     this.requestRender(true);
   }
 
+  isListFocused(): boolean {
+    return this.listFocused;
+  }
+
+  async openDeliverySelector(customUICtx?: ExtensionUIContext): Promise<void> {
+    if (this.isDeliverySelectorOpen) return;
+    const entries = this.navigationEntries();
+    const highlighted = entries.find(e => e.id === this.highlightedAgentId)?.record;
+    if (!highlighted || !this.canDeliverRecord(highlighted)) return;
+
+    const uiCtx = (customUICtx ?? this.uiCtx ?? getSessionCtx()?.ui) as ExtensionUIContext | undefined;
+    if (!uiCtx?.custom) return;
+
+    const coordinator = getCoordinator();
+    if (!coordinator) return;
+
+    const messages = coordinator.getDeliverableMessages(highlighted.id);
+    if (messages.length === 0) return;
+
+    this.isDeliverySelectorOpen = true;
+    try {
+      await uiCtx.custom<boolean>((tui, theme, _kb, done) => {
+        return new DeliverySelectorComponent({
+          record: highlighted,
+          messages,
+          theme,
+          tui,
+          onConfirm: (selectedIndices) => {
+            coordinator.deliverSelectedMessages(highlighted.id, selectedIndices);
+            done(true);
+          },
+          onCancel: () => done(false),
+        });
+      });
+    } finally {
+      this.isDeliverySelectorOpen = false;
+      this.listFocused = true;
+      this.update();
+    }
+  }
+
+  canDeliverRecord(record: AgentRecord | undefined): boolean {
+    if (!record || !record.lifecycle.takenOver) return false;
+    const sessionMessages = record.execution.session?.messages;
+    if (sessionMessages && sessionMessages.length > 0) {
+      return extractDeliverableMessages(sessionMessages).length > 0;
+    }
+    return Boolean(record.result && record.result.trim());
+  }
+
   private renderSelector(tui: TUI, theme: Theme): string[] {
     // Keep the registered component stable across idle periods. Removing and re-adding the
     // whole below-editor widget corrupts Pi's differential row cache when the next editor
@@ -1071,11 +1133,17 @@ export class AgentNavigator {
         ].join("");
         lines.push(` ${truncateToWidth(confirmation, commandWidth)}`);
       } else {
-        const pinHint = highlightedRecord
-          ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
-          : "";
+        let commandText: string;
+        if (this.canDeliverRecord(highlightedRecord)) {
+          commandText = "↑↓ Move · Enter Open · Space Unpin · Alt+S Deliver · Ctrl+D Remove · Esc Editor";
+        } else {
+          const pinHint = highlightedRecord
+            ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
+            : "";
+          commandText = `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`;
+        }
         lines.push(` ${truncateToWidth(
-          theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
+          theme.fg("dim", commandText),
           commandWidth,
         )}`);
       }

@@ -725,6 +725,38 @@ describe("AgentManager", () => {
       deferred.resolve(mockRunResult({ session }));
     });
 
+    it("marks takenOver, sets pinnedAt, and invokes detach callback when interacting", async () => {
+      manager = new AgentManager(onComplete);
+      const deferred = makeResolvablePromise();
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockReturnValue(deferred.promise);
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", {
+        description: "task",
+        modelKey: "test/model",
+      });
+      const record = manager.getRecord(id)!;
+      record.execution.session = session;
+      const detachSpy = vi.fn();
+      record.execution.detach = detachSpy;
+
+      expect(record.lifecycle.pinnedAt).toBeUndefined();
+      expect(record.lifecycle.takenOver).toBeUndefined();
+
+      await manager.interact(id, "steer input");
+
+      expect(record.lifecycle.takenOver).toBe(true);
+      expect(typeof record.lifecycle.pinnedAt).toBe("number");
+      expect(detachSpy).toHaveBeenCalledOnce();
+
+      const pinnedAt = record.lifecycle.pinnedAt;
+      // Subsequent interact preserves pinnedAt
+      await manager.interact(id, "second steer");
+      expect(record.lifecycle.pinnedAt).toBe(pinnedAt);
+
+      deferred.resolve(mockRunResult({ session }));
+    });
+
     it("forwards images when steering a running agent", async () => {
       manager = new AgentManager(onComplete);
       const deferred = makeResolvablePromise();
@@ -1322,6 +1354,7 @@ describe("AgentManager", () => {
       expect(record.error).toBe("provider internal error");
       expect(onComplete).toHaveBeenCalledTimes(2);
 
+      record.lifecycle.pinnedAt = undefined;
       record.lifecycle.resultPersisted = true;
       record.lifecycle.completedAt = Date.now() - 11 * 60_000;
       (manager as any).cleanup();

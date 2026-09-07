@@ -852,6 +852,118 @@ describe("AgentNavigator", () => {
     expect(command).not.toContain("provider");
   });
 
+  describe("command bar Alt+S delivery hint", () => {
+    it("shows Alt+S Deliver when focusing takenOver agent with deliverable messages", () => {
+      const record = makeRecord("agent-taken", "completed");
+      record.lifecycle.takenOver = true;
+      record.lifecycle.pinnedAt = Date.now();
+      record.execution.session = {
+        messages: [{ role: "assistant", content: "Result text" }],
+      } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const { selector } = mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+
+      const command = stripAnsi(selector.render(120)[0]);
+      expect(command).toBe(" ↑↓ Move · Enter Open · Space Unpin · Alt+S Deliver · Ctrl+D Remove · Esc Editor");
+    });
+
+    it("keeps normal command bar without Alt+S when agent is not taken over", () => {
+      const record = makeRecord("agent-normal", "completed");
+      record.execution.session = {
+        messages: [{ role: "assistant", content: "Result text" }],
+      } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const { selector } = mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+
+      const command = stripAnsi(selector.render(120)[0]);
+      expect(command).not.toContain("Alt+S");
+      expect(command).toContain("Space Pin");
+    });
+
+    it("keeps normal command bar without Alt+S when takenOver agent has no messages", () => {
+      const record = makeRecord("agent-empty", "completed");
+      record.lifecycle.takenOver = true;
+      record.lifecycle.pinnedAt = Date.now();
+      record.execution.session = { messages: [] } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const { selector } = mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+
+      const command = stripAnsi(selector.render(120)[0]);
+      expect(command).not.toContain("Alt+S");
+      expect(command).toContain("Space Unpin");
+    });
+
+    it("does not show Alt+S on Sticky Main or when focusing Main", () => {
+      const record = makeRecord("agent-taken", "completed");
+      record.lifecycle.takenOver = true;
+      record.lifecycle.pinnedAt = Date.now();
+      record.execution.session = {
+        messages: [{ role: "assistant", content: "Result text" }],
+      } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const { selector } = mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B");
+
+      const command = stripAnsi(selector.render(120)[0]);
+      expect(command).not.toContain("Alt+S");
+      expect(command).toBe(" ↑↓ Move · Enter Open · Ctrl+D Remove · Esc Editor");
+
+      const lines = selector.render(120).map(stripAnsi);
+      const stickyMain = lines.find(l => l.includes("Main"));
+      expect(stickyMain).not.toContain("Alt+S");
+    });
+
+    it("handles Alt+S terminal input by triggering openDeliverySelector", async () => {
+      const record = makeRecord("agent-taken", "completed");
+      record.lifecycle.takenOver = true;
+      record.lifecycle.pinnedAt = Date.now();
+      record.execution.session = {
+        messages: [{ role: "assistant", content: "Result text" }],
+      } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B"); // focus Main
+      navigator.handleTerminalInput("\x1b[B"); // focus agent-taken
+
+      const openSpy = vi.spyOn(navigator, "openDeliverySelector").mockImplementation(async () => {});
+
+      const res = navigator.handleTerminalInput("\x1bs");
+      expect(res?.consume).toBe(true);
+      expect(openSpy).toHaveBeenCalled();
+    });
+  });
+
   it("shows non-continuable setup failures as errors", () => {
     const record = makeRecord("agent-error", "error");
     record.execution = { settled: true };

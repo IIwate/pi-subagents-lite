@@ -122,6 +122,8 @@ export interface AgentLifecycle {
    * Cleanup preserves terminal records until this is set or the result is persisted.
    */
   resultConsumed?: boolean;
+  /** True if user took over this session interactively in child view. */
+  takenOver?: boolean;
 }
 
 /**
@@ -158,6 +160,8 @@ interface AgentExecutionState {
   debugFaultKind?: DebugFaultKind;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
+  /** Callback to immediately detach foreground execution into background. */
+  detach?: () => void;
 }
 
 /**

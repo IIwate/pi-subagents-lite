@@ -305,18 +305,29 @@ describe("shortcut registration", () => {
         shortcut: "alt+m",
         description: "Return to Main agent",
       }),
+      expect.objectContaining({
+        shortcut: "alt+s",
+        description: "Deliver selected subagent messages",
+      }),
     ]);
   });
 
   it("routes shortcuts to the current navigator", async () => {
     const shell = await import("../src/shell.js");
-    const navigator = { toggleList: vi.fn(), activateMain: vi.fn() };
+    const navigator = {
+      toggleList: vi.fn(),
+      activateMain: vi.fn(),
+      isListFocused: vi.fn(() => true),
+      openDeliverySelector: vi.fn(),
+    };
     shell.setNavigator(navigator as any);
     try {
       await api.shortcuts[0]!.handler({});
       await api.shortcuts[1]!.handler({});
+      await api.shortcuts[2]!.handler({});
       expect(navigator.toggleList).toHaveBeenCalledOnce();
       expect(navigator.activateMain).toHaveBeenCalledOnce();
+      expect(navigator.openDeliverySelector).toHaveBeenCalledOnce();
     } finally {
       shell.setNavigator(null);
     }
