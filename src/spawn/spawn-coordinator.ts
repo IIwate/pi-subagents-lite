@@ -253,15 +253,12 @@ export class SpawnCoordinator {
     };
 
     this.fallbackResults.set(result.deliveryId, result);
-    const pi = getPiInstance();
-    if (!pi || !appendPendingResult(pi, result)) {
+    record.execution.resultDeliveryId = result.deliveryId;
+    this.flushFallbackResults();
+    if (this.fallbackResults.has(result.deliveryId)) {
       getNavigator()?.update();
       return undefined;
     }
-    this.latestResults.set(record.id, result);
-    this.pendingResults.set(result.deliveryId, result);
-    record.lifecycle.resultPersisted = true;
-    this.completionVersion++;
     this.requestParentWake();
     return result;
   }
