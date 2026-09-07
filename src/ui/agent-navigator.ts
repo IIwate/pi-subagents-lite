@@ -28,6 +28,7 @@ import type { AgentRecord } from "../types.js";
 import { getSessionContextPercent } from "../agents/usage.js";
 import {
   buildStatsParts,
+  formatModelIdentity,
   getDisplayName,
   STATS_SEP,
   summarizeToolArgs,
@@ -46,6 +47,7 @@ const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 const STATUS_COLUMN_GAP = 2;
 const MIN_LEFT_COLUMN_WIDTH = 18;
 const MIN_STATS_COLUMN_WIDTH = 12;
+const DESIRED_DESCRIPTION_WIDTH = 40;
 
 type NavigatorUICtx = Pick<
   ExtensionUIContext,
@@ -483,6 +485,7 @@ export class AgentNavigator {
     private manager: AgentManager,
     private routeInput?: (agentId: string, text: string) => Promise<InteractionResult>,
     private getPendingResultCount?: () => number | undefined,
+    private getParentModelInfo?: () => { providerName?: string; modelName?: string; thinkingLevel?: string } | undefined,
   ) {}
 
   private pendingResultState(): number | undefined {
@@ -1029,7 +1032,7 @@ export class AgentNavigator {
     // The two-column prefix aligns it with the row circles, not the focus marker.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
-    const commandWidth = Math.max(1, cols);
+    const commandWidth = Math.max(1, cols - 1);
     if (this.listFocused) {
       if (this.confirmingClearId !== null) {
         const record = this.manager.getRecord(this.confirmingClearId);
@@ -1039,15 +1042,15 @@ export class AgentNavigator {
           theme.fg("error", "Remove"),
           theme.fg("dim", " · Esc Cancel"),
         ].join("");
-        lines.push(truncateToWidth(confirmation, commandWidth));
+        lines.push(` ${truncateToWidth(confirmation, commandWidth)}`);
       } else {
         const pinHint = highlightedRecord
           ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
           : "";
-        lines.push(truncateToWidth(
+        lines.push(` ${truncateToWidth(
           theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
           commandWidth,
-        ));
+        )}`);
       }
     }
     const mainActive = this.selectedAgentId === null;
@@ -1068,7 +1071,7 @@ export class AgentNavigator {
     summaryParts.push(theme.fg("dim", "Alt+A collapse"));
     if (this.selectedAgentId) summaryParts.push(theme.fg("dim", "Alt+M main"));
     const summary = summaryParts.join(theme.fg("dim", " · "));
-    const mainText = `${mainIndicator} ${mainLabel}${theme.fg("dim", " (")}${summary}${theme.fg("dim", ")")}`;
+    const mainText = ` ${mainIndicator} ${mainLabel}${theme.fg("dim", " (")}${summary}${theme.fg("dim", ")")}`;
     let mainLine = truncateToWidth(mainText, tui.terminal.columns);
     if (mainHighlighted) {
       mainLine = applySelectedBackground(mainLine, tui.terminal.columns, theme);
@@ -1076,7 +1079,7 @@ export class AgentNavigator {
     lines.push(mainLine);
 
     if (start > 0) {
-      lines.push(theme.fg("dim", `↑ ${start} hidden`));
+      lines.push(theme.fg("dim", ` ↑ ${start} hidden`));
     }
 
     for (const entry of visibleEntries) {
@@ -1094,34 +1097,24 @@ export class AgentNavigator {
       const invocation = record.display.invocation;
       const modelName = sessionModel?.id ?? invocation?.modelName;
       const providerName = sessionModel?.provider ?? invocation?.providerName;
-      const statsParts = buildStatsParts({
-        modelName,
-        providerName,
-        thinkingLevel: record.execution.session?.thinkingLevel ?? invocation?.thinkingLevel,
-        toolUses: record.stats.toolUses,
-        turnCount: record.stats.turnCount != null && record.stats.turnCount > 0
-          ? record.stats.turnCount
-          : undefined,
-        maxTurns: record.stats.maxTurns,
-        input: record.stats.lifetimeUsage.input,
-        output: record.stats.lifetimeUsage.output,
-        contextPercent: record.execution.session
-          ? getSessionContextPercent(record.execution.session)
-          : record.stats.contextPercent ?? null,
-        compactions: record.stats.compactionCount,
-        cost: record.stats.lifetimeUsage.cost,
-        durationMs,
-      }, theme, this.statsVisibility);
+      const thinkingLevel = record.execution.session?.thinkingLevel ?? invocation?.thinkingLevel;
+      const parentModel = this.getParentModelInfo?.();
       const plainStatus = plainAgentStatus(record, this.debugStatusPreview);
       const status = renderAgentStatus(record, theme, this.debugStatusPreview);
       const debugBadge = renderDebugBadge(record, theme);
-      const fixedPrefix = `${indicator} `;
+      const fixedPrefix = ` ${indicator} `;
       const pinBadge = pinned ? ` ${theme.fg("accent", "◆")}` : "";
       const plainPinBadge = pinned ? " ◆" : "";
       const statusSuffix = `${debugBadge ? ` ${debugBadge}` : ""} (${status})${pinBadge}`;
       const plainStatusSuffix = `${debugBadge ? " [DEBUG]" : ""} (${plainStatus})${plainPinBadge}`;
-      const identityStats = [providerName, modelName].filter(Boolean).join(STATS_SEP);
-      const reservedStatsWidth = Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStats));
+      const identityStr = formatModelIdentity({
+        providerName,
+        modelName,
+        thinkingLevel,
+      }, parentModel);
+      const reservedStatsWidth = identityStr
+        ? Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStr))
+        : 0;
       const maxNameWidth = Math.max(
         1,
         tui.terminal.columns
@@ -1136,7 +1129,61 @@ export class AgentNavigator {
       const prefixWidth = visibleWidth(fixedPrefix)
         + visibleWidth(visibleNameText)
         + visibleWidth(plainStatusSuffix);
-      const stats = statsParts.length > 0 ? theme.fg("dim", statsParts.join(STATS_SEP)) : "";
+
+      const buildStats = (vis: StatsVisibility): string => {
+        const parts = buildStatsParts({
+          modelName,
+          providerName,
+          thinkingLevel,
+          parent: parentModel,
+          toolUses: record.stats.toolUses,
+          turnCount: record.stats.turnCount != null && record.stats.turnCount > 0
+            ? record.stats.turnCount
+            : undefined,
+          maxTurns: record.stats.maxTurns,
+          input: record.stats.lifetimeUsage.input,
+          output: record.stats.lifetimeUsage.output,
+          contextPercent: record.execution.session
+            ? getSessionContextPercent(record.execution.session)
+            : record.stats.contextPercent ?? null,
+          compactions: record.stats.compactionCount,
+          cost: record.stats.lifetimeUsage.cost,
+          durationMs,
+        }, theme, vis);
+        return parts.length > 0 ? theme.fg("dim", parts.join(STATS_SEP)) : "";
+      };
+
+      let stats = buildStats(this.statsVisibility);
+      const targetDescWidth = description
+        ? Math.min(DESIRED_DESCRIPTION_WIDTH, visibleWidth(description))
+        : 0;
+      const getAvailableDescWidth = (statsStr: string) => {
+        const statsW = visibleWidth(statsStr);
+        return tui.terminal.columns - prefixWidth - (statsW > 0 ? statsW + STATUS_COLUMN_GAP * 2 : 0);
+      };
+
+      if (targetDescWidth > 0 && getAvailableDescWidth(stats) < targetDescWidth) {
+        // Level 1 degradation: drop token counts and cost
+        stats = buildStats({
+          ...this.statsVisibility,
+          showInput: false,
+          showOutput: false,
+          showCost: false,
+        });
+
+        // Level 2 degradation: drop context percentage and turn counts if still tight
+        if (getAvailableDescWidth(stats) < targetDescWidth) {
+          stats = buildStats({
+            ...this.statsVisibility,
+            showInput: false,
+            showOutput: false,
+            showCost: false,
+            showContext: false,
+            showTurns: false,
+          });
+        }
+      }
+
       let agentLine = renderAgentRow(
         leftPrefix,
         description,
@@ -1152,7 +1199,7 @@ export class AgentNavigator {
     }
 
     if (end < agentEntries.length) {
-      lines.push(theme.fg("dim", `↓ ${agentEntries.length - end} hidden`));
+      lines.push(theme.fg("dim", ` ↓ ${agentEntries.length - end} hidden`));
     }
 
     return lines;
@@ -1490,8 +1537,15 @@ export class AgentNavigator {
       ].join(":");
     });
     const pending = this.pendingResultState();
+    const parent = this.getParentModelInfo?.();
+    const parentSig = parent
+      ? `${parent.providerName ?? ""}:${parent.modelName ?? ""}:${parent.thinkingLevel ?? ""}`
+      : "";
+    const cols = this.selectorTui?.terminal.columns ?? 0;
     return [
       parts.join("|"),
+      parentSig,
+      String(cols),
       this.selectedAgentId ?? "",
       this.highlightedAgentId ?? "",
       this.listFocused ? "1" : "0",

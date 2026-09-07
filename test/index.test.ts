@@ -443,6 +443,8 @@ describe("subagent spawn guard", () => {
     expect(api.tools.length).toBeGreaterThan(0);
     expect(api.listeners.some((l) => l.event === "session_start")).toBe(true);
     expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(true);
+    expect(api.listeners.some((l) => l.event === "model_select")).toBe(true);
+    expect(api.listeners.some((l) => l.event === "thinking_level_select")).toBe(true);
   });
 
   it("stays inert when loaded inside a subagent spawn", async () => {

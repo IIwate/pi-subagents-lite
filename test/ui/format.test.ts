@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildStatsParts, formatMs } from "../../src/ui/format.js";
+import { buildStatsParts, formatModelIdentity, formatMs } from "../../src/ui/format.js";
 
 const mockTheme = {
   fg: (_color: string, text: string) => text,
@@ -29,27 +29,30 @@ const allStats = {
 describe("buildStatsParts — visible flag: showTools", () => {
   it("excludes toolUses when showTools is false", () => {
     const parts = buildStatsParts(allStats, mockTheme, { showTools: false });
-    expect(parts.some(p => p.includes("calls"))).toBe(false);
+    expect(parts.some(p => p.includes("call"))).toBe(false);
   });
 
   it("includes toolUses when showTools is true (default)", () => {
     const parts = buildStatsParts(allStats, mockTheme);
-    expect(parts.some(p => p.includes("calls"))).toBe(true);
+    expect(parts.some(p => p.includes("5 calls"))).toBe(true);
+  });
+
+  it("renders singular call when toolUses is 1", () => {
+    const parts = buildStatsParts({ ...allStats, toolUses: 1 }, mockTheme);
+    expect(parts.some(p => p === "1 call")).toBe(true);
   });
 });
 
-describe("buildStatsParts — provider · model · thinking", () => {
-  it("shows provider, model, and thinking as separate parts before calls", () => {
+describe("buildStatsParts — provider / model(thinking) identity", () => {
+  it("formats full provider/model(thinking) as a single part when no parent is set", () => {
     const parts = buildStatsParts({
       ...allStats,
       modelName: "grok-4.5",
       providerName: "cpa-responses",
       thinkingLevel: "high",
     }, mockTheme);
-    expect(parts[0]).toBe("cpa-responses");
-    expect(parts[1]).toBe("grok-4.5");
-    expect(parts[2]).toBe("high");
-    expect(parts[3]).toBe("5 calls");
+    expect(parts[0]).toBe("cpa-responses/grok-4.5(high)");
+    expect(parts[1]).toBe("5 calls");
   });
 
   it("shows model only when thinking is missing", () => {
@@ -66,13 +69,76 @@ describe("buildStatsParts — provider · model · thinking", () => {
       ...allStats,
       thinkingLevel: "high",
     }, mockTheme);
-    expect(parts[0]).toBe("high");
+    expect(parts[0]).toBe("(high)");
     expect(parts[1]).toBe("5 calls");
   });
 
   it("omits model/thinking when neither is set", () => {
     const parts = buildStatsParts(allStats, mockTheme);
     expect(parts[0]).toBe("5 calls");
+  });
+
+  it("omits model identity entirely when child matches parent completely", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      providerName: "cpa",
+      modelName: "gemini-3.8-flash-high",
+      thinkingLevel: "high",
+      parent: {
+        providerName: "cpa",
+        modelName: "gemini-3.8-flash-high",
+        thinkingLevel: "high",
+      },
+    }, mockTheme);
+    expect(parts[0]).toBe("5 calls");
+  });
+
+  it("shows full provider/model(thinking) when provider differs from parent", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      providerName: "openai",
+      modelName: "gpt-4o",
+      thinkingLevel: "high",
+      parent: {
+        providerName: "cpa",
+        modelName: "gpt-4o",
+        thinkingLevel: "high",
+      },
+    }, mockTheme);
+    expect(parts[0]).toBe("openai/gpt-4o(high)");
+    expect(parts[1]).toBe("5 calls");
+  });
+
+  it("omits provider and shows model(thinking) when only model differs from parent", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      providerName: "cpa",
+      modelName: "gpt-4o",
+      thinkingLevel: "high",
+      parent: {
+        providerName: "cpa",
+        modelName: "gemini-3.8-flash-high",
+        thinkingLevel: "high",
+      },
+    }, mockTheme);
+    expect(parts[0]).toBe("gpt-4o(high)");
+    expect(parts[1]).toBe("5 calls");
+  });
+
+  it("omits provider and shows model(thinking) when only thinking level differs from parent", () => {
+    const parts = buildStatsParts({
+      ...allStats,
+      providerName: "cpa",
+      modelName: "gemini-3.8-flash-high",
+      thinkingLevel: "low",
+      parent: {
+        providerName: "cpa",
+        modelName: "gemini-3.8-flash-high",
+        thinkingLevel: "high",
+      },
+    }, mockTheme);
+    expect(parts[0]).toBe("gemini-3.8-flash-high(low)");
+    expect(parts[1]).toBe("5 calls");
   });
 
   it("formats tokens with space before ↓ and · before context %", () => {
@@ -82,6 +148,24 @@ describe("buildStatsParts — provider · model · thinking", () => {
     expect(tokenPart).toContain("↑1k ↓500");
     expect(tokenPart).toContain(" · 50%");
     expect(tokenPart).toContain(" · ↻ 2");
+  });
+});
+
+describe("formatModelIdentity — direct unit tests", () => {
+  it("returns undefined when child has no identity fields", () => {
+    expect(formatModelIdentity({})).toBeUndefined();
+  });
+
+  it("returns formatted provider only when model is missing", () => {
+    expect(formatModelIdentity({ providerName: "custom-provider" })).toBe("custom-provider");
+  });
+
+  it("returns thinking only when model and provider are missing", () => {
+    expect(formatModelIdentity({ thinkingLevel: "high" })).toBe("(high)");
+  });
+
+  it("returns undefined when matching empty parent properties", () => {
+    expect(formatModelIdentity({ modelName: "gpt-4" }, { modelName: "gpt-4" })).toBeUndefined();
   });
 });
 

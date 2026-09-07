@@ -97,7 +97,74 @@ export interface StatsVisibility {
 }
 
 /**
- * Build common stats parts: provider · model · thinking · calls · turns · tokens · cost · time.
+ * Format model identity according to parent session context:
+ * - When child matches parent completely: omitted (returns undefined).
+ * - When provider differs: full display `provider/model(thinking)` (or `provider/model`).
+ * - When provider matches but model differs: `model(thinking)` (or `model`).
+ * - When provider and model match but thinking differs: `model(thinking)` (or `model`).
+ * - When no parent context is available: returns available identity in `provider/model(thinking)` form.
+ */
+export function formatModelIdentity(
+  child: {
+    providerName?: string;
+    modelName?: string;
+    thinkingLevel?: string;
+  },
+  parent?: {
+    providerName?: string;
+    modelName?: string;
+    thinkingLevel?: string;
+  },
+): string | undefined {
+  if (!child.modelName && !child.providerName && !child.thinkingLevel) {
+    return undefined;
+  }
+
+  if (parent) {
+    const childProvider = child.providerName ?? "";
+    const parentProvider = parent.providerName ?? "";
+    const sameProvider = childProvider === parentProvider;
+
+    const childModel = child.modelName ?? "";
+    const parentModel = parent.modelName ?? "";
+    const sameModel = childModel === parentModel;
+
+    const childThinking = child.thinkingLevel ?? "";
+    const parentThinking = parent.thinkingLevel ?? "";
+    const sameThinking = childThinking === parentThinking;
+
+    if (sameProvider && sameModel && sameThinking) {
+      return undefined;
+    }
+
+    const thinkingSuffix = child.thinkingLevel ? `(${child.thinkingLevel})` : "";
+    const baseModel = child.modelName ?? "";
+    const modelWithThinking = baseModel ? `${baseModel}${thinkingSuffix}` : thinkingSuffix;
+
+    if (!sameProvider && child.providerName) {
+      return modelWithThinking ? `${child.providerName}/${modelWithThinking}` : child.providerName;
+    }
+    return modelWithThinking || undefined;
+  }
+
+  const thinkingSuffix = child.thinkingLevel ? `(${child.thinkingLevel})` : "";
+  if (child.providerName && child.modelName) {
+    return `${child.providerName}/${child.modelName}${thinkingSuffix}`;
+  }
+  if (child.modelName) {
+    return `${child.modelName}${thinkingSuffix}`;
+  }
+  if (child.providerName) {
+    return `${child.providerName}${thinkingSuffix}`;
+  }
+  if (child.thinkingLevel) {
+    return `(${child.thinkingLevel})`;
+  }
+  return undefined;
+}
+
+/**
+ * Build common stats parts: identity(provider/model(thinking)) · calls · turns · tokens · cost · time.
  * Shared by list rendering and display tests for consistent stats output.
  *
  * @param visible - Optional visibility flags. All default to true for backward compatibility.
@@ -114,21 +181,35 @@ export function buildStatsParts(
     compactions: number;
     cost?: number;
     durationMs?: number;
-    /** Model id, e.g. "grok-4.5". Shown immediately after provider. */
+    /** Model id, e.g. "grok-4.5". */
     modelName?: string;
-    /** Provider id, e.g. "cpa-responses". Shown before model. */
+    /** Provider id, e.g. "cpa-responses". */
     providerName?: string;
-    /** Thinking level, e.g. "high". Shown after model. */
+    /** Thinking level, e.g. "high". */
     thinkingLevel?: string;
+    /** Parent session model info for comparison. When matching, model identity is omitted. */
+    parent?: {
+      providerName?: string;
+      modelName?: string;
+      thinkingLevel?: string;
+    };
   },
   theme: Theme,
   visible?: StatsVisibility,
 ): string[] {
   const parts: string[] = [];
-  if (args.providerName) parts.push(theme.fg("dim", args.providerName));
-  if (args.modelName) parts.push(theme.fg("dim", args.modelName));
-  if (args.thinkingLevel) parts.push(theme.fg("dim", args.thinkingLevel));
-  if (visible?.showTools !== false && args.toolUses > 0) parts.push(`${args.toolUses} calls`);
+  const identity = formatModelIdentity(
+    {
+      providerName: args.providerName,
+      modelName: args.modelName,
+      thinkingLevel: args.thinkingLevel,
+    },
+    args.parent,
+  );
+  if (identity) parts.push(theme.fg("dim", identity));
+  if (visible?.showTools !== false && args.toolUses > 0) {
+    parts.push(`${args.toolUses} ${args.toolUses === 1 ? "call" : "calls"}`);
+  }
   if (visible?.showTurns !== false && args.turnCount != null) parts.push(formatTurns(args.turnCount, args.maxTurns, theme));
   if (visible?.showInput !== false || visible?.showOutput !== false) {
     const showIn = visible?.showInput !== false;

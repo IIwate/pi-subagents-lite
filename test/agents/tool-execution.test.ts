@@ -741,3 +741,43 @@ describe("executeAgentTool — model access", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
+
+describe("executeAgentTool — description truncation", () => {
+  let ctx: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = fakeCtx();
+    ctx.model = { provider: "test", id: "parent-model" };
+    mockGetRecord.mockReturnValue({
+      id: "agent-id-123",
+      display: { type: "general-purpose", description: "Test agent" },
+      lifecycle: { status: "running", startedAt: Date.now() },
+      execution: { promise: Promise.resolve("done") },
+      stats: { toolUses: 0, turnCount: 1, lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 }, compactionCount: 0 },
+    });
+  });
+
+  it("truncates explicit description to 40 characters", async () => {
+    const longDesc = "This is a very long description that definitely exceeds forty characters limit";
+    await executeAgentTool("desc", makeParams({ description: longDesc }), undefined, undefined, ctx);
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.description).toBe(longDesc.slice(0, 40));
+    expect(options.description.length).toBe(40);
+  });
+
+  it("strips trailing lines and limits explicit multiline description to first line", async () => {
+    const multilineDesc = "First line action\nSecond line details that should be stripped";
+    await executeAgentTool("desc-multiline", makeParams({ description: multilineDesc }), undefined, undefined, ctx);
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.description).toBe("First line action");
+  });
+
+  it("truncates fallback prompt first line to 40 characters when description is omitted", async () => {
+    const longPrompt = "Very long prompt first line that exceeds forty characters\nSecond line";
+    await executeAgentTool("desc-fallback", makeParams({ description: undefined, prompt: longPrompt }), undefined, undefined, ctx);
+    const options = mockSpawn.mock.calls[0][4];
+    expect(options.description).toBe(longPrompt.split("\n")[0].slice(0, 40));
+    expect(options.description.length).toBe(40);
+  });
+});

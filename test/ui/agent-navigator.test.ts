@@ -495,7 +495,7 @@ describe("AgentNavigator", () => {
     // Claude-style rows use a filled active circle and no spinner column.
     expect(text).toContain("● Main");
     expect(text).toMatch(/○ \S+ \(Running\)  Inspect the project/);
-    expect(text).toContain("openai-test · gpt-test · high");
+    expect(text).toContain("openai-test/gpt-test(high)");
     expect(text).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(ui.ctx.setWidget).toHaveBeenCalledWith(
       "agent-navigator-selector",
@@ -565,7 +565,7 @@ describe("AgentNavigator", () => {
     const blockedRow = stripAnsi(lines.find((line: string) => line.includes("Blocked task"))!);
     expect(runningRow).toMatch(/Explore \(Running\) {2}Active task/);
     expect(blockedRow).toMatch(/Explore \(Error\) {2}Blocked task/);
-    expect(runningRow).toMatch(/openai-test · gpt-test · high/);
+    expect(runningRow).toMatch(/openai-test\/gpt-test\(high\)/);
   });
 
   it("preserves manager order without moving Main", () => {
@@ -693,6 +693,129 @@ describe("AgentNavigator", () => {
     expect(rows.join("\n")).toContain("gpt-tes");
   });
 
+  it("omits provider and model stats when subagent matches the parent session model completely", () => {
+    const record = makeRecord("agent-matched", "running");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(
+      makeManager([record]),
+      undefined,
+      undefined,
+      () => ({ providerName: "openai-test", modelName: "gpt-test", thinkingLevel: "high" }),
+    );
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const rendered = selector.render(120).join("\n");
+    expect(rendered).not.toContain("openai-test");
+    expect(rendered).not.toContain("gpt-test");
+    expect(rendered).not.toContain("high");
+    expect(rendered).toContain("1 call");
+  });
+
+  it("shows only model and thinking when only model or thinking level differs from parent", () => {
+    const diffModel = makeRecord("agent-diff-model", "running");
+    diffModel.execution.session!.model = { id: "gpt-other", provider: "openai-test" } as any;
+    const diffThinking = makeRecord("agent-diff-thinking", "running");
+    diffThinking.execution.session!.thinkingLevel = "low";
+
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(
+      makeManager([diffModel, diffThinking]),
+      undefined,
+      undefined,
+      () => ({ providerName: "openai-test", modelName: "gpt-test", thinkingLevel: "high" }),
+    );
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const rendered = selector.render(120).join("\n");
+    expect(rendered).toContain("gpt-other(high)");
+    expect(rendered).toContain("gpt-test(low)");
+    expect(rendered).not.toContain("openai-test");
+  });
+
+  it("shows full provider/model(thinking) when provider differs from parent", () => {
+    const diffProvider = makeRecord("agent-diff-provider", "running");
+    diffProvider.execution.session!.model = { id: "claude-sonnet", provider: "anthropic-test" } as any;
+
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(
+      makeManager([diffProvider]),
+      undefined,
+      undefined,
+      () => ({ providerName: "openai-test", modelName: "gpt-test", thinkingLevel: "high" }),
+    );
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    const rendered = selector.render(120).join("\n");
+    expect(rendered).toContain("anthropic-test/claude-sonnet(high)");
+  });
+
+  it("drops tokens and cost first when width is constrained, preserving tools, duration, and identity", () => {
+    const record = makeRecord("agent-long-stats", "running");
+    record.display.description = "A".repeat(40);
+    record.stats.toolUses = 15;
+    record.stats.turnCount = 10;
+    record.stats.lifetimeUsage.input = 15000;
+    record.stats.lifetimeUsage.output = 3000;
+    record.stats.lifetimeUsage.cost = 0.45;
+    record.execution.session!.model = { id: "custom-model", provider: "custom-provider" } as any;
+
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    // Columns = 95: enough for tools/duration/identity/context, but tight with tokens+cost
+    tui.terminal.columns = 95;
+    const line = selector.render(95).find((l: string) => l.includes("custom-model"))!;
+
+    // Level 1 dropped tokens (↑/↓) and cost ($)
+    expect(line).not.toContain("↑");
+    expect(line).not.toContain("↓");
+    expect(line).not.toContain("$");
+    // Preserved tools, duration, and identity
+    expect(line).toContain("custom-provider/custom-model");
+    expect(line).toContain("15 calls");
+    expect(line).toContain("<1s");
+  });
+
+  it("drops context and turns in level 2 degradation under extreme width pressure", () => {
+    const record = makeRecord("agent-tight", "running");
+    record.display.description = "B".repeat(40);
+    record.stats.toolUses = 5;
+    record.stats.turnCount = 8;
+    record.stats.lifetimeUsage.input = 10000;
+    record.stats.lifetimeUsage.output = 2000;
+    record.stats.lifetimeUsage.cost = 0.25;
+    record.stats.contextPercent = 65;
+    record.execution.session!.model = { id: "m", provider: "p" } as any;
+
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    // Columns = 75: extreme pressure where context % and turns must drop to keep 40 chars
+    tui.terminal.columns = 75;
+    const line = selector.render(75).find((l: string) => l.includes("p/m"))!;
+
+    expect(line).not.toContain("↑");
+    expect(line).not.toContain("$");
+    expect(line).not.toContain("65%");
+    expect(line).not.toContain("8⟳");
+    // Bottom line preserved: identity, tools, and duration
+    expect(line).toContain("p/m");
+    expect(line).toContain("5 calls");
+    expect(line).toContain("<1s");
+  });
+
   it("shows ordinary navigation controls for highlighted errors", () => {
     const record = makeRecord("agent-error", "error");
     record.execution.settled = true;
@@ -805,13 +928,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
     navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
     navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
-    expect(selector.render(120)[0]).toBe('Remove “Inspect the project”? · Enter Remove · Esc Cancel');
+    expect(selector.render(120)[0]).toBe(' Remove “Inspect the project”? · Enter Remove · Esc Cancel');
 
     navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const lines = selector.render(120);
     expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
-    expect(lines[0]).toMatch(/^↑↓ Move/);
+    expect(lines[0]).toMatch(/^ ↑↓ Move/);
   });
 
   it("requests a redraw when the displayed model changes", () => {

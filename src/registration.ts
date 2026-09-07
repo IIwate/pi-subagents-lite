@@ -27,7 +27,9 @@ export function registerAgentTool(pi: ExtensionAPI): void {
     label: "Agent",
     parameters: Type.Object({
       prompt: Type.String(),
-      description: Type.Optional(Type.String()),
+      description: Type.Optional(Type.String({
+        description: "Short action phrase for the subagent list row (max 40 characters).",
+      })),
       agent: agentParam,
       // Optional explicit alternate: "id", "provider/id", or "id:thinking".
       model: Type.Optional(Type.String()),

@@ -10,6 +10,7 @@ import {
   getManager,
   getNavigator,
   getCoordinator,
+  getSessionCtx,
   getStore,
   setSessionCtx,
   setManager,
@@ -54,6 +55,15 @@ export function ensureManagerAndNavigator(): void {
       async (agentId, text) => getCoordinator()?.interact(agentId, text)
         ?? { accepted: false, reason: "unavailable" },
       () => getCoordinator()?.pendingResultCount(),
+      () => {
+        const session = getSessionCtx();
+        if (!session) return undefined;
+        return {
+          providerName: session.model?.provider,
+          modelName: session.model?.id,
+          thinkingLevel: session.thinkingLevel,
+        };
+      },
     );
     setNavigator(newNavigator);
     // ConfigStore synchronizes list stats visibility through dependency injection.
@@ -158,6 +168,16 @@ export function setupEventListeners(pi: ExtensionAPI): void {
 
   pi.on("session_tree", () => {
     getCoordinator()?.onSessionTree();
+  });
+
+  pi.on("model_select", (_event, ctx) => {
+    setSessionCtx(ctx);
+    getNavigator()?.update();
+  });
+
+  pi.on("thinking_level_select", (_event, ctx) => {
+    setSessionCtx(ctx);
+    getNavigator()?.update();
   });
 
   // session_start — load config and refresh the Agent catalogue used by guidance.

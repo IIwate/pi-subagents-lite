@@ -114,7 +114,8 @@ export async function executeAgentTool(
   }
 
   const prompt = params.prompt as string;
-  const description = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt).slice(0, 80);
+  const rawDescription = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt);
+  const description = (rawDescription.split("\n")[0] || "").trim().slice(0, 40);
   const requestedBackground = params.run_in_background as boolean | undefined;
   const store = getStore();
   const scopedModels = structuredClone(ctx.scopedModels);
