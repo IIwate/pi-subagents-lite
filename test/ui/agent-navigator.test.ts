@@ -1798,6 +1798,39 @@ describe("AgentNavigator", () => {
     expect((navigator as any).refreshTimer).toBeUndefined();
   });
 
+  it("keeps refresh timer running while any agent is unsettled even if status is not running or queued", () => {
+    const record = makeRecord("agent-unsettled", "error");
+    record.execution.settled = false;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+
+    expect((navigator as any).refreshTimer).toBeDefined();
+
+    record.execution.settled = true;
+    navigator.update();
+
+    expect((navigator as any).refreshTimer).toBeUndefined();
+  });
+
+  it("starts refresh timer in setUICtx when active agents are present and skips when absent", () => {
+    const activeRecord = makeRecord("agent-active", "running");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([activeRecord]));
+    navigator.setUICtx(ui.ctx as any);
+
+    expect((navigator as any).refreshTimer).toBeDefined();
+
+    navigator.dispose();
+
+    const completedRecord = makeRecord("agent-completed", "completed");
+    completedRecord.execution.settled = true;
+    navigator = new AgentNavigator(makeManager([completedRecord]));
+    navigator.setUICtx(ui.ctx as any);
+
+    expect((navigator as any).refreshTimer).toBeUndefined();
+  });
+
   it("removes the Main shortcut hint when the active record disappears", () => {
     const active = makeRecord("agent-active");
     const remaining = makeRecord("agent-remaining", "completed");

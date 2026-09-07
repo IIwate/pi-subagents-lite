@@ -1524,6 +1524,77 @@ describe("AgentManager", () => {
       expect(shutdownEvents(session)).toHaveLength(1);
       expect(session.dispose).toHaveBeenCalledTimes(1);
     });
+
+    it("notifies stats update listener on tool use, usage, compaction, and turn end", async () => {
+      manager = new AgentManager(onComplete);
+      const onStatsUpdate = vi.fn();
+      manager.setOnStatsUpdate(onStatsUpdate);
+
+      let capturedOptions: any;
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        capturedOptions = options;
+        return mockRunResult();
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const record = manager.getRecord(id)!;
+
+      capturedOptions.onToolUse();
+      expect(record.stats.toolUses).toBe(1);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(1);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      capturedOptions.onAssistantUsage({ input: 100, output: 50, cacheWrite: 0, cost: 0.01 });
+      expect(record.stats.lifetimeUsage.input).toBe(100);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(2);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      capturedOptions.onCompaction();
+      expect(record.stats.compactionCount).toBe(1);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(3);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      capturedOptions.onTurnEnd(3);
+      expect(record.stats.turnCount).toBe(3);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(4);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      await record.execution.promise;
+    });
+
+    it("notifies stats update listener during interact continuation", async () => {
+      manager = new AgentManager(onComplete);
+      const onStatsUpdate = vi.fn();
+      manager.setOnStatsUpdate(onStatsUpdate);
+
+      const session = mockAgentSession();
+      mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
+
+      let continueOptions: any;
+      mockModules.mockContinueAgentSession.mockImplementation(async (_session, _prompt, options) => {
+        continueOptions = options;
+        return { responseText: "cont", aborted: false, turnLimited: false };
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
+      const record = manager.getRecord(id)!;
+      await record.execution.promise;
+
+      onStatsUpdate.mockClear();
+
+      await manager.interact(id, "continue");
+      continueOptions.onToolUse();
+      expect(record.stats.toolUses).toBe(1);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(1);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      continueOptions.onTurnEnd(2);
+      expect(record.stats.turnCount).toBe(3);
+      expect(onStatsUpdate).toHaveBeenCalledTimes(2);
+      expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+
+      await record.execution.promise;
+    });
   });
 
 }); // end describe AgentManager

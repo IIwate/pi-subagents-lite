@@ -74,6 +74,7 @@ export interface DebugDiagnostics {
 
 type OnAgentComplete = (record: AgentRecord) => void;
 type OnAgentRemove = (record: AgentRecord) => void;
+type OnStatsUpdate = (record: AgentRecord) => void;
 
 export type InteractionResult =
   | { accepted: true }
@@ -101,6 +102,7 @@ export class AgentManager {
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
   private onRemove?: OnAgentRemove;
+  private onStatsUpdate?: OnStatsUpdate;
 
   /** Explicit per-model ceilings keyed by "provider/modelId". */
   private modelLimits = new Map<string, number>();
@@ -386,6 +388,7 @@ export class AgentManager {
       ...this.createRecordCallbacks(record),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
+        this.notifyStatsUpdate(record);
       },
       onSessionCreated: async (session) => {
         if (this.disposing || this.agents.get(id) !== record) {
@@ -480,17 +483,28 @@ export class AgentManager {
     this.onRemove = cb;
   }
 
+  setOnStatsUpdate(cb: OnStatsUpdate): void {
+    this.onStatsUpdate = cb;
+  }
+
+  private notifyStatsUpdate(record: AgentRecord): void {
+    try { this.onStatsUpdate?.(record); } catch { /* ignore */ }
+  }
+
   /** Build runner callbacks that update the record's tool, usage, and compaction stats. */
   private createRecordCallbacks(record: AgentRecord): Required<Pick<RunCallbacks, "onToolUse" | "onAssistantUsage" | "onCompaction">> {
     return {
       onToolUse: () => {
         record.stats.toolUses++;
+        this.notifyStatsUpdate(record);
       },
       onAssistantUsage: (usage) => {
         addUsage(record.stats.lifetimeUsage, usage);
+        this.notifyStatsUpdate(record);
       },
       onCompaction: () => {
         record.stats.compactionCount++;
+        this.notifyStatsUpdate(record);
       },
     };
   }
@@ -606,6 +620,7 @@ export class AgentManager {
       graceTurns: record.execution.graceTurns,
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = previousTurns + turnCount;
+        this.notifyStatsUpdate(record);
       },
     })
       .then(({ responseText, aborted, turnLimited }) => {

@@ -523,7 +523,15 @@ export class AgentNavigator {
       ctx.setEditorComponent(previousEditor);
       this.navigationEditor = undefined;
     };
-    this.update();
+    if (this.manager.listAgents().some(record =>
+      record.lifecycle.status === "running"
+      || record.lifecycle.status === "queued"
+      || record.execution.settled === false
+    )) {
+      this.ensureTimer();
+    } else {
+      this.update();
+    }
   }
 
   toggleList(): void {
@@ -1456,7 +1464,9 @@ export class AgentNavigator {
     }
 
     if (!this.selectedAgentId && !records.some(record =>
-      record.lifecycle.status === "running" || record.lifecycle.status === "queued"
+      record.lifecycle.status === "running"
+      || record.lifecycle.status === "queued"
+      || record.execution.settled === false
     )) {
       this.stopRefreshTimer();
     }
