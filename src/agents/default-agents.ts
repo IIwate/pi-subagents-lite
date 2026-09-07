@@ -6,8 +6,13 @@
  */
 
 import type { AgentConfig } from "./types.js";
+import { isBashAvailable } from "./agent-types.js";
 
-const READ_ONLY_TOOLS = ["read", "bash", "grep", "find"];
+const READ_ONLY_TOOLS = process.platform === "win32" && !isBashAvailable()
+  ? ["read", "powershell", "grep", "find"]
+  : process.platform === "win32"
+    ? ["read", "bash", "powershell", "grep", "find"]
+    : ["read", "bash", "grep", "find"];
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
   [
@@ -42,13 +47,15 @@ You are STRICTLY PROHIBITED from:
 - Using redirect operators (>, >>, |) or heredocs to write to files
 - Running ANY commands that change system state
 
-Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find, cat, head, tail.
+Use Bash or PowerShell ONLY for read-only operations:
+- Bash: ls, git status, git log, git diff, find, cat, head, tail
+- PowerShell: Get-ChildItem, dir, git status, git log, git diff, Get-Content, Select-String
 
 # Tool Usage
 - Use the find tool for file pattern matching (NOT the bash find command)
 - Use the grep tool for content search (NOT bash grep/rg command)
 - Use the read tool for reading files (NOT bash cat/head/tail)
-- Use Bash ONLY for read-only operations
+- Use Bash or PowerShell ONLY for read-only operations (e.g. Get-ChildItem, Select-String, git status)
 - Make independent tool calls in parallel for efficiency
 - Adapt search approach based on thoroughness level specified
 

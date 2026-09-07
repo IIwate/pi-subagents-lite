@@ -5,20 +5,111 @@
  * User agents override defaults with the same name. Disabled agents are kept but excluded from spawning.
  */
 
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AcceptedRunPolicy } from "../types.js";
 import type { AgentConfig, SystemPromptMode } from "./types.js";
 
 /**
+ * Check if bash is available on the current host.
+ * Always true on non-Windows platforms. On Windows, verifies standard Git Bash paths and PATH.
+ */
+export function isBashAvailable(): boolean {
+  if (process.platform !== "win32") return true;
+
+  const candidates = [
+    process.env.ProgramFiles ? `${process.env.ProgramFiles}\\Git\\bin\\bash.exe` : "",
+    process.env["ProgramFiles(x86)"] ? `${process.env["ProgramFiles(x86)"]}\\Git\\bin\\bash.exe` : "",
+    process.env.LOCALAPPDATA ? `${process.env.LOCALAPPDATA}\\Programs\\Git\\bin\\bash.exe` : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return true;
+    } catch {
+      // Ignore filesystem access errors
+    }
+  }
+
+  try {
+    const res = spawnSync("where", ["bash.exe"], {
+      timeout: 1000,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * All tool names that Pi can provide to a session.
  *
- * Note: only `read`, `bash`, `edit`, `write` are active by default.
+ * Note: only `read`, `bash` (or `powershell`), `edit`, `write` are active by default.
  * `find` and `grep` must be explicitly activated via setActiveToolsByName().
  * `ls` was removed — it's a thin wrapper over bash that adds ~180 tokens/turn
  * with no real benefit.
  */
-export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "grep", "find"];
+export const BUILTIN_TOOL_NAMES: string[] = [
+  "read",
+  "bash",
+  "powershell",
+  "edit",
+  "write",
+  "grep",
+  "find",
+];
+
+/** Default 6-tool fallback matching legacy behavior on Linux/macOS. */
+export const DEFAULT_FALLBACK_TOOLS: string[] = [
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "grep",
+  "find",
+];
+
+/** Names of tools that subagents must NOT inherit (no sub-subagent policy, ADR 0001). */
+export const EXCLUDED_TOOL_NAMES = ["Agent"];
+
+/**
+ * Resolve default registered tools when an agent definition does not declare registeredTools.
+ *
+ * 1. If explicit defaultTools is provided and non-empty, inherit it directly.
+ * 2. If no defaultTools and running on Windows without bash, substitute bash with powershell.
+ * 3. Otherwise fall back to the standard 6 tools (read, bash, edit, write, grep, find).
+ */
+export function resolveDefaultRegisteredTools(defaultTools?: string[]): string[] {
+  if (defaultTools && defaultTools.length > 0) {
+    const sanitized = Array.from(new Set(defaultTools.filter(t => !EXCLUDED_TOOL_NAMES.includes(t))));
+    if (sanitized.length > 0) return sanitized;
+  }
+  if (process.platform === "win32" && !isBashAvailable()) {
+    return ["read", "powershell", "edit", "write", "grep", "find"];
+  }
+  return [...DEFAULT_FALLBACK_TOOLS];
+}
+
+/**
+ * Adapt registered tools for default built-in Explore agent on Windows or when PowerShell is preferred.
+ */
+export function adaptExploreRegisteredTools(tools: string[], defaultTools?: string[]): string[] {
+  const prefersPwsh = Boolean(
+    (defaultTools?.includes("powershell") && !defaultTools?.includes("bash")) ||
+    (process.platform === "win32" && !isBashAvailable())
+  );
+  if (prefersPwsh) {
+    return ["read", "powershell", ...tools.filter(t => t !== "read" && t !== "bash" && t !== "powershell")];
+  }
+  if (process.platform === "win32" && !tools.includes("powershell")) {
+    return [...tools, "powershell"];
+  }
+  return tools;
+}
 
 /** Unified runtime registry of all agents (defaults + user-defined). */
 const agents = new Map<string, AgentConfig>();
@@ -164,6 +255,7 @@ export function resolveAcceptedRunPolicy(
     systemPromptMode: SystemPromptMode;
     includeContextFiles: boolean;
     parentModelKey: string;
+    defaultTools?: string[];
   },
 ): AcceptedRunPolicy | undefined {
   const key = resolveType(type);
@@ -177,11 +269,18 @@ export function resolveAcceptedRunPolicy(
     defaults.loadSkillsImplicitly,
     defaults.loadExtensionsImplicitly,
   );
+
+  let registeredTools = definition.registeredTools?.length
+    ? [...definition.registeredTools]
+    : resolveDefaultRegisteredTools(defaults.defaultTools);
+
+  if (key === "Explore" && definition.source === undefined) {
+    registeredTools = adaptExploreRegisteredTools(registeredTools, defaults.defaultTools);
+  }
+
   return {
     definition,
-    registeredTools: definition.registeredTools?.length
-      ? [...definition.registeredTools]
-      : [...BUILTIN_TOOL_NAMES],
+    registeredTools,
     restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
     tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
     extensions: Array.isArray(resolved.extensions) ? [...resolved.extensions] : resolved.extensions,
@@ -203,9 +302,6 @@ export function getAvailableTypes(): string[] {
 export function getAllTypes(): string[] {
   return [...agents.keys()];
 }
-
-/** Names of tools that subagents must NOT inherit (no sub-subagent policy, ADR 0001). */
-export const EXCLUDED_TOOL_NAMES = ["Agent"];
 
 /**
  * Resolve tool entries (with ext/* syntax) into concrete tool names.
@@ -299,10 +395,11 @@ export function resolveVisibleTools(opts: {
       }
     }
 
+    const activeSet = new Set(activeTools);
     const visibleSet = new Set<string>();
-    for (const t of activeTools) {
+    for (const t of allowedTools) {
       if (EXCLUDED_TOOL_NAMES.includes(t)) continue;
-      if (allowedTools.has(t)) {
+      if (activeSet.has(t)) {
         visibleSet.add(t);
       }
     }
@@ -356,11 +453,17 @@ export function resolveSessionAllowedTools(opts: {
 }
 
 /** Get built-in tool names for a type (case-insensitive). */
-export function getToolNamesForType(type: string): string[] {
+export function getToolNamesForType(type: string, defaultTools?: string[]): string[] {
   const config = getAgentConfig(type);
-  return config?.registeredTools?.length
+  let tools = config?.registeredTools?.length
     ? config.registeredTools
-    : [...BUILTIN_TOOL_NAMES];
+    : resolveDefaultRegisteredTools(defaultTools);
+
+  const key = resolveType(type);
+  if (key === "Explore" && config?.source === undefined) {
+    tools = adaptExploreRegisteredTools(tools, defaultTools);
+  }
+  return tools;
 }
 
 /** Resolved config shape returned by getConfig. */
@@ -404,15 +507,25 @@ export function getConfig(
   type: string,
   loadSkillsImplicitly: boolean = true,
   loadExtensionsImplicitly: boolean = true,
+  defaultTools?: string[],
 ): ResolvedAgentConfig {
   const config = findActiveConfig(type);
   if (config) {
     const { skills, extensions, ...rest } = config;
     const defaults = applyGlobalDefaults(skills, extensions, loadSkillsImplicitly, loadExtensionsImplicitly);
+    let registeredTools = rest.registeredTools?.length
+      ? rest.registeredTools
+      : resolveDefaultRegisteredTools(defaultTools);
+
+    const key = resolveType(type);
+    if (key === "Explore" && config.source === undefined) {
+      registeredTools = adaptExploreRegisteredTools(registeredTools, defaultTools);
+    }
+
     return {
       displayName: rest.displayName ?? rest.name,
       description: rest.description,
-      registeredTools: rest.registeredTools ?? BUILTIN_TOOL_NAMES,
+      registeredTools,
       tools: rest.tools,
       ...defaults,
     };
@@ -424,7 +537,7 @@ export function getConfig(
   return {
     displayName: generalPurpose.displayName ?? generalPurpose.name,
     description: generalPurpose.description,
-    registeredTools: BUILTIN_TOOL_NAMES,
+    registeredTools: resolveDefaultRegisteredTools(defaultTools),
     ...defaults,
   };
 }

@@ -14,10 +14,14 @@ import {
   resolveVisibleTools,
   EXCLUDED_TOOL_NAMES,
   BUILTIN_TOOL_NAMES,
+  DEFAULT_FALLBACK_TOOLS,
+  resolveDefaultRegisteredTools,
+  adaptExploreRegisteredTools,
   getConfig,
   registerAgents,
   resolveAcceptedRunPolicy,
 } from "../../src/agents/agent-types.js";
+import { DEFAULT_AGENTS } from "../../src/agents/default-agents.js";
 import type { AgentConfig } from "../../src/agents/types.ts";
 
 /* ------------------------------------------------------------------ */
@@ -554,5 +558,117 @@ describe("getConfig — global implicit defaults", () => {
     const result = getConfig("nonexistent", true, true);
     expect(result.skills).toBe(true);
     expect(result.extensions).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  PowerShell and defaultTools inheritance (AC-1 ~ AC-5)             */
+/* ------------------------------------------------------------------ */
+
+describe("PowerShell tool whitelist and exclusion (AC-1 ~ AC-3)", () => {
+  it("AC-1: resolves tools with powershell without unknown extension warning", () => {
+    const notify = vi.fn();
+    const result = resolveVisibleTools({
+      activeTools: ["read", "powershell", "bash", "edit"],
+      tools: ["powershell", "read"],
+      notify,
+    });
+    expect(result).toEqual(["powershell", "read"]);
+    expect(notify).not.toHaveBeenCalledWith(
+      expect.stringContaining('tool "powershell" not found in any loaded extension'),
+    );
+  });
+
+  it("AC-2: correctly excludes powershell when excludeTools specifies it", () => {
+    const result = resolveVisibleTools({
+      activeTools: ["read", "powershell", "edit"],
+      excludeTools: ["powershell"],
+    });
+    expect(result).toEqual(["read", "edit"]);
+    expect(result).not.toContain("powershell");
+  });
+
+  it("AC-3: strictly excludes Agent even when powershell is present in active and allowed tools", () => {
+    const visibleResult = resolveVisibleTools({
+      activeTools: ["powershell", "Agent", "read"],
+      tools: ["powershell", "Agent", "read"],
+    });
+    expect(visibleResult).not.toContain("Agent");
+    expect(visibleResult).toContain("powershell");
+    expect(visibleResult).toContain("read");
+
+    const sessionAllowed = resolveSessionAllowedTools({
+      registeredTools: ["powershell", "Agent", "read"],
+      restrictToRegisteredTools: true,
+    });
+    expect(sessionAllowed).not.toContain("Agent");
+    expect(sessionAllowed).toContain("powershell");
+    expect(sessionAllowed).toContain("read");
+  });
+});
+
+describe("defaultTools dynamic inheritance (AC-4 ~ AC-5)", () => {
+  beforeEach(() => {
+    // Re-register default agents
+    registerAgents(new Map(), { disableDefaultAgents: false });
+  });
+
+  it("AC-4: general-purpose inherits defaultTools containing powershell without bash", () => {
+    const customDefaultTools = ["read", "powershell", "edit", "write"];
+    const policy = resolveAcceptedRunPolicy("general-purpose", {
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: true,
+      systemPromptMode: "replace",
+      includeContextFiles: true,
+      parentModelKey: "parent/model",
+      defaultTools: customDefaultTools,
+    })!;
+
+    expect(policy).toBeDefined();
+    expect(policy.registeredTools).toEqual(["read", "powershell", "edit", "write"]);
+    expect(policy.registeredTools).toContain("powershell");
+    expect(policy.registeredTools).not.toContain("bash");
+  });
+
+  it("AC-5: general-purpose falls back to standard 6 tools when defaultTools is undefined", () => {
+    const policy = resolveAcceptedRunPolicy("general-purpose", {
+      loadSkillsImplicitly: true,
+      loadExtensionsImplicitly: true,
+      systemPromptMode: "replace",
+      includeContextFiles: true,
+      parentModelKey: "parent/model",
+      defaultTools: undefined,
+    })!;
+
+    expect(policy).toBeDefined();
+    if (process.platform !== "win32") {
+      expect(policy.registeredTools).toEqual(["read", "bash", "edit", "write", "grep", "find"]);
+      expect(policy.registeredTools).not.toContain("powershell");
+    }
+  });
+
+  it("resolveDefaultRegisteredTools respects custom list and fallback", () => {
+    expect(resolveDefaultRegisteredTools(["powershell", "read"])).toEqual(["powershell", "read"]);
+    if (process.platform !== "win32") {
+      expect(resolveDefaultRegisteredTools(undefined)).toEqual(DEFAULT_FALLBACK_TOOLS);
+      expect(resolveDefaultRegisteredTools([])).toEqual(DEFAULT_FALLBACK_TOOLS);
+    }
+  });
+});
+
+describe("Explore read-only agent Windows powershell fallback", () => {
+  it("Explore system prompt includes read-only guidance for PowerShell", () => {
+    const exploreConfig = DEFAULT_AGENTS.get("Explore");
+    expect(exploreConfig).toBeDefined();
+    expect(exploreConfig!.systemPrompt).toContain("PowerShell");
+    expect(exploreConfig!.systemPrompt).toContain("Get-ChildItem");
+    expect(exploreConfig!.systemPrompt).toContain("Select-String");
+  });
+
+  it("adaptExploreRegisteredTools adapts to PowerShell preference", () => {
+    const baseTools = ["read", "bash", "grep", "find"];
+    const adapted = adaptExploreRegisteredTools(baseTools, ["read", "powershell"]);
+    expect(adapted).toContain("powershell");
+    expect(adapted).not.toContain("bash");
   });
 });

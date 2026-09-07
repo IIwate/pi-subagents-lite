@@ -47,6 +47,7 @@ const mockModules = vi.hoisted(() => ({
   setLoaderExtensions: (exts: any) => { _loaderGetExtensionsResult.extensions = exts; },
   clearLoaderExtensions: () => { _loaderGetExtensionsResult.extensions = []; },
   mockWithSubagentSpawn: vi.fn((operation: () => Promise<unknown>) => operation()),
+  mockIsBashAvailable: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
@@ -56,6 +57,7 @@ vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
     getConfig: mockModules.mockGetConfig,
     getAgentConfig: mockModules.mockGetAgentConfig,
     getToolNamesForType: mockModules.mockGetToolNamesForType,
+    isBashAvailable: () => mockModules.mockIsBashAvailable(),
   };
 });
 
@@ -150,6 +152,7 @@ function resetMocks() {
   mockModules.mockSessionManagerInMemory.mockReturnValue(undefined);
   mockModules.mockGetAgentDir.mockReturnValue("/home/test/.pi/agent");
   mockModules.mockPreloadSkills.mockReturnValue([]);
+  mockModules.mockIsBashAvailable.mockReturnValue(true);
 }
 
 /**
@@ -415,6 +418,91 @@ describe("runAgent — tool visibility wiring", () => {
     const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
     expect(sessionOptions.tools).toEqual(["read", "bash"]);
     expect(sessionOptions.tools).not.toContain("web_search");
+  });
+
+  it("inherits defaultTools containing powershell without bash when child agent does not constrain tools", async () => {
+    const session = createMockSession();
+    const defaultTools = ["read", "powershell", "edit", "write"];
+    session.getActiveToolNames.mockReturnValue([...defaultTools]);
+    session.getAllTools.mockReturnValue([
+      "read", "bash", "powershell", "edit", "write", "grep", "find",
+    ].map(name => ({ name })));
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      registeredTools: undefined,
+      tools: undefined,
+    });
+    mockModules.mockGetConfig.mockReturnValue({
+      ...defaultConfig,
+      registeredTools: defaultTools,
+      tools: undefined,
+    });
+
+    await runAgent(fakeCtx(), "general-purpose", "do something", {
+      pi: fakePi,
+      acceptedPolicy: {
+        definition: { name: "general-purpose" } as any,
+        registeredTools: defaultTools,
+        restrictToRegisteredTools: false,
+        tools: undefined,
+        extensions: true,
+        skills: true,
+        systemPromptMode: "replace",
+        includeContextFiles: true,
+        parentModelKey: "parent/model",
+      },
+    });
+
+    const sessionOptions = mockModules.mockCreateAgentSession.mock.calls[0][0];
+    expect(sessionOptions.tools).toBeUndefined();
+    expect(session.setActiveToolsByName).not.toHaveBeenCalled();
+    expect(session.getActiveToolNames()).toEqual(["read", "powershell", "edit", "write"]);
+    expect(session.getActiveToolNames()).not.toContain("bash");
+  });
+
+  it("does not activate powershell on Windows without bash when excludeTools excludes powershell", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    mockModules.mockIsBashAvailable.mockReturnValue(false);
+    const session = createMockSession();
+    let currentActive = ["read", "bash", "edit", "write"];
+    session.getActiveToolNames.mockImplementation(() => [...currentActive]);
+    session.getAllTools.mockReturnValue([
+      "read", "bash", "powershell", "edit", "write", "grep", "find",
+    ].map(name => ({ name })));
+    session.setActiveToolsByName.mockImplementation((tools: string[]) => {
+      currentActive = [...tools];
+    });
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({
+      ...defaultAgentConfig,
+      excludeTools: ["powershell"],
+      registeredTools: undefined,
+      tools: undefined,
+    });
+    mockModules.mockGetConfig.mockReturnValue({
+      ...defaultConfig,
+      registeredTools: ["read", "bash", "edit", "write"],
+      tools: undefined,
+    });
+
+    await runAgent(fakeCtx(), "general-purpose", "do something", {
+      pi: fakePi,
+      acceptedPolicy: {
+        definition: { name: "general-purpose", excludeTools: ["powershell"] } as any,
+        registeredTools: ["read", "bash", "edit", "write"],
+        restrictToRegisteredTools: false,
+        tools: undefined,
+        extensions: true,
+        skills: true,
+        systemPromptMode: "replace",
+        includeContextFiles: true,
+        parentModelKey: "parent/model",
+      },
+    });
+
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith(["read", "edit", "write"]);
+    expect(currentActive).not.toContain("powershell");
   });
 
   it("uses an accepted alternate model without rechecking current routing policy", async () => {

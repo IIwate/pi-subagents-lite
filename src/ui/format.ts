@@ -264,8 +264,9 @@ export function summarizeToolArgs(name: string, rawArgs: Record<string, unknown>
       const editCount = Array.isArray(edits) ? edits.length : 0;
       return `(${JSON.stringify(path)}, ${editCount} edits)`;
     }
-    case "bash": {
-      // bash("command") — just the command, strip heredoc, truncate long
+    case "bash":
+    case "powershell": {
+      // bash("command") / powershell("command") — just the command, strip heredoc, truncate long
       const cmd = typeof rawArgs.command === "string" ? rawArgs.command : "";
       // Strip heredoc: truncate at << followed by delimiter
       const heredocIdx = cmd.search(/<<\s*['"]?\w+['"]?/);

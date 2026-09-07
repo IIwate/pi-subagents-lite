@@ -6,7 +6,7 @@ import { getStatusNote } from "../status-note.js";
  * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
  */
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
@@ -191,12 +191,20 @@ export async function executeAgentTool(
   }
   if (!model) return errorResult(unknownModelError(modelRef!));
 
+  let defaultTools: string[] | undefined;
+  try {
+    defaultTools = (ctx as any).settingsManager?.getDefaultTools?.()
+      ?? SettingsManager.create?.(ctx.cwd, getAgentDir())?.getDefaultTools?.();
+  } catch {
+    // Ignore settings resolution errors in environments where settings cannot be read
+  }
   const acceptedPolicy = resolveAcceptedRunPolicy(resolvedType, {
     loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
     loadExtensionsImplicitly: store.agent.loadExtensionsImplicitly,
     systemPromptMode: store.agent.systemPromptMode,
     includeContextFiles: store.agent.includeContextFiles,
     parentModelKey: parentModelRef,
+    defaultTools,
   });
   if (!acceptedPolicy) return errorResult(`Unknown agent type: ${type}`);
   const maxTurns = acceptedPolicy.definition.maxTurns;

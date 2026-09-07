@@ -20,6 +20,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  isBashAvailable,
   resolveSessionAllowedTools,
   resolveVisibleTools,
 } from "./agent-types.js";
@@ -545,14 +546,32 @@ async function createAndConfigureSession(
     throw new Error("Agent session setup aborted");
   }
   const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
+  const rawActive = typeof (session as any).getActiveToolNames === "function"
+    ? (session as any).getActiveToolNames()
+    : undefined;
+  const currentActiveTools = Array.isArray(rawActive)
+    ? rawActive
+    : session.getAllTools().map(tool => tool.name);
   const filteredTools = resolveVisibleTools({
-    activeTools: session.getAllTools().map(tool => tool.name),
+    activeTools: Array.isArray(policy.tools) ? session.getAllTools().map(tool => tool.name) : currentActiveTools,
     tools: policy.tools,
     excludeTools: agentConfig.excludeTools,
     extToolMap,
     notify,
   });
   if (filteredTools) session.setActiveToolsByName(filteredTools);
+
+  if (!Array.isArray(policy.tools) && process.platform === "win32" && !isBashAvailable()) {
+    const active = typeof (session as any).getActiveToolNames === "function"
+      ? (session as any).getActiveToolNames()
+      : undefined;
+    if (Array.isArray(active) && active.includes("bash") && !active.includes("powershell")) {
+      const substituted = active
+        .map((name: string) => name === "bash" ? "powershell" : name)
+        .filter((name: string) => !agentConfig.excludeTools?.includes(name));
+      session.setActiveToolsByName(substituted);
+    }
+  }
   await options.onSessionCreated?.(session);
   return session;
 }
