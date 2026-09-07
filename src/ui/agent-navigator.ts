@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   Key,
+  CURSOR_MARKER,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -30,6 +31,7 @@ import { getCoordinator, getSessionCtx } from "../shell.js";
 import { DeliverySelectorComponent } from "./delivery-selector.js";
 import {
   buildStatsParts,
+  displayText,
   formatModelIdentity,
   getDisplayName,
   STATS_SEP,
@@ -100,9 +102,9 @@ interface ScreenSwapState {
 }
 
 function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return displayText(content);
   if (!Array.isArray(content)) return "";
-  return content
+  return displayText(content
     .filter((item): item is { type: string; text: string } =>
       typeof item === "object"
       && item !== null
@@ -110,7 +112,7 @@ function textFromContent(content: unknown): string {
       && typeof (item as { text?: unknown }).text === "string",
     )
     .map(item => item.text)
-    .join("");
+    .join(""));
 }
 
 function imageCount(content: unknown): number {
@@ -395,7 +397,10 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
   }
 
   render(width: number): string[] {
-    return this.base.render(width);
+    const lines = this.base.render(width);
+    return this.navigator.isListFocused()
+      ? lines.map(line => line.replaceAll(CURSOR_MARKER, ""))
+      : lines;
   }
 
   handleInput(data: string): void {
@@ -1045,7 +1050,7 @@ export class AgentNavigator {
     const separator = ctx.theme.fg("dim", " · ");
     const parts: string[] = [];
     if (this.interactionNotice) {
-      parts.push(ctx.theme.bold(ctx.theme.fg("warning", this.interactionNotice)));
+      parts.push(ctx.theme.bold(ctx.theme.fg("warning", displayText(this.interactionNotice))));
     } else {
       if (running > 0) parts.push(ctx.theme.fg("dim", `${running} running`));
       if (queued > 0) parts.push(ctx.theme.fg("dim", `${queued} queued`));
@@ -1143,7 +1148,7 @@ export class AgentNavigator {
     if (this.listFocused) {
       if (this.confirmingClearId !== null) {
         const record = this.manager.getRecord(this.confirmingClearId);
-        const target = truncateToWidth(record?.display.description ?? "agent", 32);
+        const target = truncateToWidth(displayText(record?.display.description ?? "agent"), 32);
         const confirmation = [
           theme.fg("dim", `Remove “${target}”? · Enter `),
           theme.fg("error", "Remove"),
@@ -1174,7 +1179,7 @@ export class AgentNavigator {
     const queued = records.filter(record => record.lifecycle.status === "queued").length;
     const summaryParts: string[] = [];
     if (this.interactionNotice) {
-      summaryParts.push(theme.bold(theme.fg("warning", this.interactionNotice)));
+      summaryParts.push(theme.bold(theme.fg("warning", displayText(this.interactionNotice))));
     } else {
       if (running > 0) summaryParts.push(theme.fg("dim", `${running} running`));
       if (queued > 0) summaryParts.push(theme.fg("dim", `${queued} queued`));
@@ -1204,7 +1209,7 @@ export class AgentNavigator {
         ? theme.fg("accent", "●")
         : theme.fg("dim", "○");
       const name = getDisplayName(record.display.type);
-      const description = record.display.description;
+      const description = displayText(record.display.description).replace(/\n/g, " ");
       const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
       const sessionModel = record.execution.session?.model;
       const invocation = record.display.invocation;
@@ -1358,7 +1363,7 @@ export class AgentNavigator {
     if (!session) {
       this.clearTranscriptCache();
       if (record.error) {
-        lines.push(truncateToWidth(theme.fg("error", `Error: ${record.error}`), width));
+        lines.push(truncateToWidth(theme.fg("error", `Error: ${displayText(record.error)}`), width));
       } else {
         lines.push(truncateToWidth(
           theme.fg("dim", record.lifecycle.status === "queued" ? "Waiting in queue…" : "Starting agent session…"),
@@ -1399,7 +1404,7 @@ export class AgentNavigator {
     }
 
     if (record.error) {
-      lines.push(truncateToWidth(theme.fg("error", `Error: ${record.error}`), width));
+      lines.push(truncateToWidth(theme.fg("error", `Error: ${displayText(record.error)}`), width));
     }
 
     return lines;
@@ -1439,15 +1444,15 @@ export class AgentNavigator {
         const assistantLines: string[] = [];
         for (const item of message.content as Array<Record<string, unknown>>) {
           if (item.type === "text" && typeof item.text === "string" && item.text) {
-            appendWrapped(assistantLines, item.text, width);
+            appendWrapped(assistantLines, displayText(item.text), width);
           } else if (item.type === "thinking" && typeof item.thinking === "string") {
-            const thinking = item.thinking.trim();
+            const thinking = displayText(item.thinking).trim();
             if (thinking) {
               assistantLines.push(theme.fg("dim", "  Thinking"));
               appendWrapped(assistantLines, theme.fg("dim", thinking), width);
             }
           } else if (item.type === "toolCall") {
-            const name = typeof item.name === "string" ? item.name : "tool";
+            const name = typeof item.name === "string" ? displayText(item.name) : "tool";
             const args = item.arguments && typeof item.arguments === "object"
               ? item.arguments as Record<string, unknown>
               : undefined;
@@ -1466,21 +1471,21 @@ export class AgentNavigator {
           ? `${text.slice(0, TOOL_RESULT_CHAR_LIMIT)}\n… (tool result truncated)`
           : text;
         const icon = message.isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        lines.push(`${icon} ${theme.fg("dim", message.toolName ?? "tool")}`);
+        lines.push(`${icon} ${theme.fg("dim", displayText(message.toolName ?? "tool"))}`);
         if (clipped) appendWrapped(lines, theme.fg("dim", clipped), width);
         return;
       }
       case "bashExecution": {
         lines.push("");
-        lines.push(theme.fg("accent", `$ ${message.command ?? ""}`));
-        if (message.output) appendWrapped(lines, message.output, width);
+        lines.push(theme.fg("accent", `$ ${displayText(message.command ?? "")}`));
+        if (message.output) appendWrapped(lines, displayText(message.output), width);
         return;
       }
       case "compactionSummary":
       case "branchSummary": {
         lines.push("");
         lines.push(theme.fg("dim", message.role === "compactionSummary" ? "Compaction summary" : "Branch summary"));
-        if (message.summary) appendWrapped(lines, message.summary, width);
+        if (message.summary) appendWrapped(lines, displayText(message.summary), width);
         return;
       }
     }

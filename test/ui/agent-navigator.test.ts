@@ -2597,5 +2597,39 @@ describe("AgentNavigator", () => {
       expect(ansiResult).toBeUndefined();
       expect(navigator.isListFocused()).toBe(true);
     });
+
+    it("sanitizes BEL (\\x07) and control characters from transcript rendering", () => {
+      const record = makeRecord("agent-bell");
+      record.execution.session = {
+        messages: [
+          { role: "user", content: "run test\x07" },
+          { role: "assistant", content: [{ type: "text", text: "warning\x07 beep" }, { type: "thinking", thinking: "internal\x07thought" }] },
+          { role: "toolResult", toolName: "bash\x07", content: "done\x07output" },
+          { role: "bashExecution", command: "echo -e '\\a'\x07", output: "ring bell\x07 now" },
+        ],
+        agent: { state: {} },
+        subscribe: () => () => {},
+      } as any;
+
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      const { tui } = mountSelector(ui);
+
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\r");
+
+      expect(navigator.selectedId()).toBe(record.id);
+      const transcriptComponent = tui.document.children[tui.chatIndex];
+      const lines = transcriptComponent.render(100);
+
+      // Must not contain raw ASCII 0x07 (BEL) anywhere in the rendered transcript
+      const hasBell = lines.some((line: string) => line.includes("\x07"));
+      expect(hasBell).toBe(false);
+      expect(lines.join("\n")).toContain("warning beep");
+      expect(lines.join("\n")).toContain("ring bell now");
+    });
   });
 });

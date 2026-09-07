@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildStatsParts, formatModelIdentity, formatMs } from "../../src/ui/format.js";
+import { buildStatsParts, displayText, formatModelIdentity, formatMs } from "../../src/ui/format.js";
 
 const mockTheme = {
   fg: (_color: string, text: string) => text,
@@ -338,5 +338,13 @@ describe("formatMs", () => {
 
   it("formatMs(1000) is exactly 1s, not <1s", () => {
     expect(formatMs(1000)).toBe("1s");
+  });
+});
+
+describe("displayText", () => {
+  it("removes BEL (\\x07) and ASCII control characters while preserving newlines", () => {
+    expect(displayText("hello\x07world")).toBe("helloworld");
+    expect(displayText("line 1\r\nline 2\x07")).toBe("line 1\nline 2");
+    expect(displayText("\x1b[31mred\x1b[0m\x07")).toBe("red");
   });
 });

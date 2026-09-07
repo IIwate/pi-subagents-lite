@@ -6,6 +6,7 @@
  * Pure functions — no module-level state, no side effects.
  */
 
+import { stripVTControlCharacters } from "node:util";
 import { getConfig } from "../agents/agent-types.js";
 import type { SubagentType } from "../agents/types.js";
 import type { Theme } from "./types.js";
@@ -21,6 +22,13 @@ const MAX_DEFAULT_STRING_DISPLAY_LENGTH = 200;
 
 /** Stats line separator with spaces on both sides for readability. */
 export const STATS_SEP = " · ";
+
+/** Sanitize source text before adding UI-owned ANSI styles or truncating sequences. */
+export function displayText(text: string): string {
+  return stripVTControlCharacters(text)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+}
 
 /**
  * Token count with optional context-fill % and compaction-count annotations.
@@ -206,7 +214,7 @@ export function buildStatsParts(
     },
     args.parent,
   );
-  if (identity) parts.push(theme.fg("dim", identity));
+  if (identity) parts.push(theme.fg("dim", displayText(identity).replace(/\n/g, " ")));
   if (visible?.showTools !== false && args.toolUses > 0) {
     parts.push(`${args.toolUses} ${args.toolUses === 1 ? "call" : "calls"}`);
   }
@@ -232,7 +240,7 @@ export function buildStatsParts(
 
 /** Get display name for any agent type (built-in or custom). */
 export function getDisplayName(type: SubagentType): string {
-  return getConfig(type).displayName;
+  return displayText(getConfig(type).displayName).replace(/\n/g, " ");
 }
 
 /**
