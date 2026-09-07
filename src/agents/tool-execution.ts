@@ -121,15 +121,15 @@ export async function executeAgentTool(
     : undefined;
   const store = getStore();
 
-  if (requestedBackground === false && store.agent.forceBackground) {
+  if (requestedBackground !== true && store.agent.forceBackground) {
     return errorResult(
       "Foreground execution is disabled: the user has enabled 'forceBackground' in subagent settings. "
-      + "You must either set 'run_in_background: true' to run this task asynchronously, "
-      + "or inform the user that their current configuration prevents foreground execution.",
+      + "You must explicitly set 'run_in_background: true' to spawn this subagent asynchronously, "
+      + "or inform the user that their current configuration forbids foreground execution.",
     );
   }
 
-  const runInBackground = requestedBackground === true || store.agent.forceBackground;
+  const runInBackground = requestedBackground === true;
   const scopedModels = structuredClone(ctx.scopedModels);
   const routing = store.routing;
   const explicitModel = typeof params.model === "string" && params.model.trim() !== "";

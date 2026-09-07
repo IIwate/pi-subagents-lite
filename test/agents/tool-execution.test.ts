@@ -283,7 +283,13 @@ describe("executeAgentTool — worktree_path validation", () => {
 
     vi.clearAllMocks();
     mockForceBackground.value = true;
-    await executeAgentTool("tc-forced-bg-signal", makeParams(), controller.signal, undefined, ctx);
+    await executeAgentTool(
+      "tc-forced-bg-signal",
+      makeParams({ run_in_background: true }),
+      controller.signal,
+      undefined,
+      ctx,
+    );
     expect(mockSpawn.mock.calls[0][4].signal).toBeUndefined();
   });
 
@@ -442,12 +448,14 @@ describe("executeAgentTool — forceBackground policy enforcement", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  it("spawns in background when run_in_background is omitted and forceBackground is true", async () => {
+  it("rejects with error when run_in_background is omitted and forceBackground is true", async () => {
     mockForceBackground.value = true;
     const result = await executeAgentTool("tc-default-bg", makeParams(), undefined, undefined, ctx);
 
-    expect(result.isError).toBeUndefined();
-    expect(mockSpawnIntents[0].runInBackground).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Foreground execution is disabled: the user has enabled 'forceBackground'");
+    expect(result.content[0].text).toContain("run_in_background: true");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("spawns in background when run_in_background is true and forceBackground is true", async () => {
