@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeResolvablePromise } from "../fixtures.ts";
 
 const state = vi.hoisted(() => ({
   entries: [] as any[],
@@ -170,7 +171,7 @@ describe("durable result delivery integration", () => {
       .toBe("continued result");
   });
 
-  it("keeps foreground continuation results out of the inbox", async () => {
+  it("delivers foreground continuation results to the inbox and parent session", async () => {
     const spawned = await state.coordinator.spawn(state.pi, state.ctx, {
       type: "reviewer",
       prompt: "review",
@@ -188,8 +189,46 @@ describe("durable result delivery integration", () => {
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
 
-    expect(spawned.record.execution.resultSessionId).toBeUndefined();
-    expect(spawned.record.execution).not.toHaveProperty("backgroundDelivery");
-    expect(readResultEntries(state.ctx).pending.size).toBe(0);
+    expect(spawned.record.execution.resultSessionId).toBe("parent-session");
+    expect(spawned.record.execution.resultOriginEntryId).toBe("origin-a");
+    expect(readResultEntries(state.ctx).pending.size).toBe(1);
+    expect([...readResultEntries(state.ctx).pending.values()][0].result).toBe("foreground continuation");
+    expect(state.pi.sendMessage).toHaveBeenCalled();
+  });
+
+  it("delivers results to the parent session when an interrupted foreground agent is resumed", async () => {
+    const controller = new AbortController();
+    const runWait = makeResolvablePromise();
+    state.runAgent.mockReturnValue(runWait.promise);
+
+    const spawnPromise = state.coordinator.spawn(state.pi, state.ctx, {
+      type: "reviewer",
+      prompt: "review",
+      description: "review",
+      modelKey: "test/model",
+      runInBackground: false,
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    runWait.resolve({ responseText: "", session: state.session, aborted: true, turnLimited: false });
+    const spawned = await spawnPromise;
+    expect(spawned.record.lifecycle.status).toBe("stopped");
+
+    state.continueAgentSession.mockResolvedValue({
+      responseText: "completed after esc",
+      aborted: false,
+      turnLimited: false,
+    });
+
+    await expect(state.coordinator.interact(spawned.agentId, "resume"))
+      .resolves.toEqual({ accepted: true });
+    await spawned.record.execution.promise;
+
+    expect(spawned.record.lifecycle.status).toBe("completed");
+    expect(spawned.record.execution.resultSessionId).toBe("parent-session");
+    expect(readResultEntries(state.ctx).pending.size).toBe(1);
+    expect([...readResultEntries(state.ctx).pending.values()][0].result).toBe("completed after esc");
+    expect(state.pi.sendMessage).toHaveBeenCalled();
   });
 });

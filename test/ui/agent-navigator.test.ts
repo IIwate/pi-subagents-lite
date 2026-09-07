@@ -1307,6 +1307,36 @@ describe("AgentNavigator", () => {
     expect(parentSubmit).toHaveBeenCalledWith("/agents");
   });
 
+  it("stops a running subagent when Escape is pressed in the editor while viewing it", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "running";
+    const manager = makeManager([record]);
+    (manager as any).abort = vi.fn().mockReturnValue(true);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    const parentEscape = vi.fn();
+    editor.onEscape = parentEscape;
+
+    (ui.baseEditor as any).onEscape();
+
+    expect((manager as any).abort).toHaveBeenCalledWith(record.id, "user");
+    expect(parentEscape).not.toHaveBeenCalled();
+
+    // When the agent is no longer running, Escape falls through to parentEscape:
+    record.lifecycle.status = "stopped";
+    (ui.baseEditor as any).onEscape();
+    expect(parentEscape).toHaveBeenCalledOnce();
+  });
+
   it("renders interaction blocks on Main and restores counts after a successful retry", async () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

@@ -84,11 +84,13 @@ failed parent run.
   its result is acknowledged only if that parent turn settles successfully.
   Implicit delivery never crosses into an unrelated branch.
 - Foreground calls still return directly and are unaffected by background
-  result persistence.
+  result persistence. When an interrupted or settled foreground agent is
+  continued manually via the child view, it is promoted to inbox delivery so
+  its continuation results reach the parent session.
 - Child provider, quota, authentication, content-filter, configuration, and
   exhausted transport-retry failures are ordinary one-shot `error` results.
   The extension does not spawn replacements or add another retry timer. Pi's
   own transient transport retry loop remains unchanged.
-- A retained settled error session may accept a manual UI continuation during
-  ordinary record retention. The first result remains delivered; continuation
-  produces a distinct terminal result and delivery ID.
+- A retained settled session may accept manual UI continuations during ordinary
+  record retention. The first result remains delivered; each continuation produces
+  a distinct terminal result and delivery ID.

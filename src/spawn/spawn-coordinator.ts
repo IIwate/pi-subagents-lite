@@ -153,6 +153,15 @@ export class SpawnCoordinator {
     const record = this.manager.getRecord(agentId);
     if (!record) return { accepted: false, reason: "unavailable" };
 
+    if (!record.execution.resultSessionId) {
+      const ctx = getSessionCtx();
+      record.execution.resultSessionId = ctx.sessionManager.getSessionId();
+      record.execution.resultOriginEntryId = ctx.sessionManager.getLeafId();
+      if (record.execution.resultOriginEntryId) {
+        this.activeBranchIds.add(record.execution.resultOriginEntryId);
+      }
+    }
+
     const result = await this.manager.interact(agentId, message, images);
     if (result.accepted) getNavigator()?.ensureTimer();
     return result;

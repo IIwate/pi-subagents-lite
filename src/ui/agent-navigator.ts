@@ -283,6 +283,7 @@ class ForwardingActionMap extends Map<string, () => void> {
 /** Editor decorator that receives navigation keys only while the editor is focused. */
 class AgentNavigationEditor implements EditorComponent, Focusable {
   private parentOnSubmit: ((text: string) => void) | undefined;
+  private parentOnEscape: (() => void) | undefined;
   private forwardedActions: ForwardingActionMap | undefined;
 
   constructor(
@@ -354,11 +355,17 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
   }
 
   get onEscape(): (() => void) | undefined {
-    return (this.base as unknown as { onEscape?: () => void }).onEscape;
+    return this.parentOnEscape;
   }
 
   set onEscape(handler: (() => void) | undefined) {
-    (this.base as unknown as { onEscape?: () => void }).onEscape = handler;
+    this.parentOnEscape = handler;
+    (this.base as unknown as { onEscape?: () => void }).onEscape = () => {
+      if (this.navigator.abortActiveSubagent()) {
+        return;
+      }
+      handler?.();
+    };
   }
 
   get onCtrlD(): (() => void) | undefined {
@@ -562,6 +569,15 @@ export class AgentNavigator {
       this.update();
     }
     return this.selectedAgentId;
+  }
+
+  /** Stop the currently selected subagent if it is running. */
+  abortActiveSubagent(): boolean {
+    const id = this.selectedId();
+    if (!id) return false;
+    const record = this.manager.getRecord(id);
+    if (!record || record.lifecycle.status !== "running") return false;
+    return this.manager.abort(id, "user");
   }
 
   /** Apply or clear a UI-only status preview from /agents → Debug. */
