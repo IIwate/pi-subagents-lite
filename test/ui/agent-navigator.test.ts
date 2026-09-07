@@ -1934,4 +1934,40 @@ describe("AgentNavigator", () => {
       "warning",
     );
   });
+
+  it("omits empty or whitespace-only thinking blocks and trailing blank assistant headers", () => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    session.messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Valid thought process" },
+          { type: "text", text: "Answer with trailing empty thinking" },
+          { type: "thinking", thinking: "   \n\t  " },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "" },
+        ],
+      },
+    ];
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    const lines = transcript.render(120);
+    const renderedText = lines.join("\n");
+
+    expect(renderedText).toContain("Valid thought process");
+    expect(renderedText).toContain("Answer with trailing empty thinking");
+    expect(renderedText.match(/Thinking/g)).toHaveLength(1);
+    expect(renderedText.match(/Assistant/g)).toHaveLength(1);
+  });
 });

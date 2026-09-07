@@ -1263,22 +1263,28 @@ export class AgentNavigator {
       }
       case "assistant": {
         if (!Array.isArray(message.content)) return;
-        lines.push("");
-        lines.push(theme.bold("Assistant"));
+        const assistantLines: string[] = [];
         for (const item of message.content as Array<Record<string, unknown>>) {
-          if (item.type === "text" && typeof item.text === "string") {
-            appendWrapped(lines, item.text, width);
+          if (item.type === "text" && typeof item.text === "string" && item.text) {
+            appendWrapped(assistantLines, item.text, width);
           } else if (item.type === "thinking" && typeof item.thinking === "string") {
-            lines.push(theme.fg("dim", "  Thinking"));
-            appendWrapped(lines, theme.fg("dim", item.thinking), width);
+            const thinking = item.thinking.trim();
+            if (thinking) {
+              assistantLines.push(theme.fg("dim", "  Thinking"));
+              appendWrapped(assistantLines, theme.fg("dim", thinking), width);
+            }
           } else if (item.type === "toolCall") {
             const name = typeof item.name === "string" ? item.name : "tool";
             const args = item.arguments && typeof item.arguments === "object"
               ? item.arguments as Record<string, unknown>
               : undefined;
-            appendWrapped(lines, theme.fg("dim", `▸ ${name}${summarizeToolArgs(name, args)}`), width);
+            appendWrapped(assistantLines, theme.fg("dim", `▸ ${name}${summarizeToolArgs(name, args)}`), width);
           }
         }
+        if (assistantLines.length === 0) return;
+        lines.push("");
+        lines.push(theme.bold("Assistant"));
+        for (const line of assistantLines) lines.push(line);
         return;
       }
       case "toolResult": {
