@@ -28,6 +28,7 @@ import { showWidgetSettingsMenu } from "../../../src/ui/menu/menu-widget-setting
 function resetMocks(): void {
   mockModules.mockConfig.agent = {
     forceBackground: false,
+    expandListByDefault: true,
     showTools: true,
     showTurns: true,
     showInput: true,
@@ -51,6 +52,7 @@ describe("showWidgetSettingsMenu", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(settingsListCalls).toHaveLength(1);
     expect(settingsListCalls[0].items.map(item => item.id)).toEqual([
+      "expandListByDefault",
       "showTools",
       "showTurns",
       "showInput",
@@ -62,15 +64,29 @@ describe("showWidgetSettingsMenu", () => {
   });
 
   it("shows current ON/OFF values", async () => {
+    mockModules.mockConfig.agent.expandListByDefault = false;
     mockModules.mockConfig.agent.showTurns = false;
     mockModules.mockConfig.agent.showCost = false;
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
 
     const items = settingsListCalls[0].items;
+    expect(items.find(item => item.id === "expandListByDefault").currentValue).toBe("OFF");
     expect(items.find(item => item.id === "showTools").currentValue).toBe("ON");
     expect(items.find(item => item.id === "showTurns").currentValue).toBe("OFF");
     expect(items.find(item => item.id === "showCost").currentValue).toBe("OFF");
+  });
+
+  it("tells the user to reload after changing the list default", async () => {
+    const ctx = createMockCtx();
+    await showWidgetSettingsMenu(ctx);
+
+    settingsListCalls[0].onChange("expandListByDefault", "OFF");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Expand list by default OFF · /reload to apply now",
+      "info",
+    );
   });
 
   it("updates every display setting", async () => {
@@ -79,6 +95,7 @@ describe("showWidgetSettingsMenu", () => {
     const { onChange } = settingsListCalls[0];
 
     for (const id of [
+      "expandListByDefault",
       "showTools",
       "showTurns",
       "showInput",
@@ -91,6 +108,6 @@ describe("showWidgetSettingsMenu", () => {
     }
     onChange("showCost", "ON");
     expect(mockModules.mockConfig.agent.showCost).toBe(true);
-    expect(ctx.ui.notify).toHaveBeenCalledTimes(7);
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(8);
   });
 });

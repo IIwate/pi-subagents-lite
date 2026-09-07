@@ -11,6 +11,7 @@ function defaultConfig(): SubagentsConfig {
       systemPromptMode: "replace",
       includeContextFiles: true,
       disableDefaultAgents: false,
+      expandListByDefault: true,
       showTools: true,
       showTurns: true,
       showInput: true,
@@ -41,6 +42,7 @@ describe("ConfigStore routing reads", () => {
     const store = new ConfigStore(memIO().io);
     expect(store.routing).toEqual({ enabled: false, enabledProviders: [], agentAccess: {} });
     expect(store.agent.graceTurns).toBe(6);
+    expect(store.agent.expandListByDefault).toBe(true);
     expect(store.concurrency).toEqual({ default: 4, providers: {}, models: {} });
   });
 
@@ -198,17 +200,19 @@ describe("ConfigStore non-routing behavior", () => {
     const store = new ConfigStore(io);
     store.mutate.agent.setGraceTurns(9);
     store.mutate.agent.setShowCost(true);
+    store.mutate.agent.setExpandListByDefault(false);
     store.mutate.concurrency.setDefault(2);
     store.mutate.concurrency.setProvider("openai", 1);
     store.mutate.concurrency.setModel("openai/gpt-5", 3);
     expect(store.agent.graceTurns).toBe(9);
     expect(store.agent.showCost).toBe(true);
+    expect(store.agent.expandListByDefault).toBe(false);
     expect(store.concurrency).toEqual({
       default: 2,
       providers: { openai: 1 },
       models: { "openai/gpt-5": 3 },
     });
-    expect(saves).toHaveLength(5);
+    expect(saves).toHaveLength(6);
   });
 
   it("reloads persisted state", () => {

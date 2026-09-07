@@ -57,6 +57,8 @@ export interface ResolvedAgentSettings {
   readonly loadExtensionsImplicitly: boolean;
   /** Whether built-in default agent types are available for new calls. */
   readonly disableDefaultAgents: boolean;
+  /** Whether new conversations start with the subagent list expanded. */
+  readonly expandListByDefault: boolean;
   /** Whether to show toolUses count in list stats. */
   readonly showTools: boolean;
   /** Whether to show turn count in list stats. */
@@ -108,6 +110,7 @@ export class ConfigStore {
       loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
       loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
       disableDefaultAgents: a.disableDefaultAgents === true,
+      expandListByDefault: a.expandListByDefault !== false,
       showTools: a.showTools !== false,
       showTurns: a.showTurns !== false,
       showInput: a.showInput !== false,
@@ -253,6 +256,10 @@ export class ConfigStore {
       },
       setDisableDefaultAgents: (value: boolean): void => {
         this.config.agent.disableDefaultAgents = value;
+        this.persist();
+      },
+      setExpandListByDefault: (value: boolean): void => {
+        this.config.agent.expandListByDefault = value;
         this.persist();
       },
       setShowTools: (enabled: boolean) => this.setAgentVisibility("showTools", enabled),

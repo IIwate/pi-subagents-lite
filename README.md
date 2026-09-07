@@ -20,7 +20,7 @@ The extension registers three tools for the LLM:
 - `StopAgent` — stop a running or queued agent by ID.
 - `AgentStatus` — list agents, or read one exact result by `agent_id` without polling or waiting.
 
-Once a subagent exists, progress appears in the below-editor list with a sticky Main row and up to six visible subagents scrolled around the focused row. The list starts expanded; `Alt+A` toggles it, and that choice remains for the current extension runtime even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. Agent rows retain manager order:
+Once a subagent exists, progress appears in the below-editor list or its folded Footer summary. The list has a sticky Main row and up to six visible subagents scrolled around the focused row. It starts expanded by default; `/agents` → Display settings → Expand list by default persists a different initial choice for new conversations. After changing it, the menu reports that `/reload` applies the new default immediately by recreating the current conversation's extension runtime. `Alt+A` toggles only the current runtime, and that choice remains even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. Agent rows retain manager order:
 
 ```text
 › ● Main (1 running · 3 total · Alt+A collapse)

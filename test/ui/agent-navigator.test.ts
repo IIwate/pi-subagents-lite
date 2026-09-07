@@ -385,6 +385,24 @@ describe("AgentNavigator", () => {
     expect(ui.statuses.has("subagents-lite")).toBe(false);
   });
 
+  it("starts folded when the default expansion setting is off", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]), undefined, undefined, undefined, false);
+    navigator.setUICtx(ui.ctx as any);
+    const { selector } = mountSelector(ui);
+
+    expect(selector.render(120)).toEqual([]);
+    expect(ui.statuses.get("subagents-lite")).toBe(
+      "Subagent (1 running · 1 total · Alt+A expand)",
+    );
+
+    navigator.toggleList();
+    expect(selector.render(120).join("\n")).toContain(
+      "● Main (1 running · 1 total · Alt+A collapse)",
+    );
+  });
+
   it("returns to Main without changing expanded or collapsed list state", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

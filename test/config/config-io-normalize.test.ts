@@ -32,6 +32,14 @@ describe("config-io model access normalization", () => {
     expect(JSON.parse(files.get(CONFIG_PATH)!).agent).not.toHaveProperty("backgroundDelivery");
   });
 
+  it("defaults list expansion on and preserves explicit off", () => {
+    writeConfig({});
+    expect(loadConfig().agent.expandListByDefault).toBe(true);
+
+    writeConfig({ agent: { expandListByDefault: false } });
+    expect(loadConfig().agent.expandListByDefault).toBe(false);
+  });
+
   it("returns fresh routing defaults for missing and malformed blocks", () => {
     for (const value of [{}, { modelRouting: null }, { modelRouting: [] }, { modelRouting: "on" }]) {
       writeConfig(value);
@@ -149,12 +157,13 @@ describe("config-io model access normalization", () => {
   it("preserves non-model settings and saves only canonical routing fields", () => {
     writeConfig({
       modelRouting: { enabled: true, allowedProviders: ["openai"] },
-      agent: { forceBackground: true, systemPromptMode: "custom" },
+      agent: { forceBackground: true, systemPromptMode: "custom", expandListByDefault: false },
       concurrency: { default: 7 },
     });
     const config = loadConfig();
     expect(config.agent.forceBackground).toBe(true);
     expect(config.agent.systemPromptMode).toBe("custom");
+    expect(config.agent.expandListByDefault).toBe(false);
     expect(config.concurrency.default).toBe(7);
 
     saveConfigAtomic(config);

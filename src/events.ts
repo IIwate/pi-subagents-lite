@@ -64,6 +64,7 @@ export function ensureManagerAndNavigator(): void {
           thinkingLevel: session.thinkingLevel,
         };
       },
+      getStore().agent.expandListByDefault,
     );
     setNavigator(newNavigator);
     // ConfigStore synchronizes list stats visibility through dependency injection.
