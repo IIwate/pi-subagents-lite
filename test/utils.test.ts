@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   isUnsafeName,
   parseModelKey,
-  parseModelSpec,
   parseThinkingLevel,
   resolveExactModel,
   unknownModelError,
@@ -74,48 +73,6 @@ describe("parseModelKey", () => {
   });
 });
 
-describe("parseModelSpec", () => {
-  it("parses bare model id", () => {
-    expect(parseModelSpec("grok-4.5")).toEqual({ modelRef: "grok-4.5" });
-  });
-
-  it("parses provider/model-id", () => {
-    expect(parseModelSpec("cpa-responses/grok-4.5")).toEqual({
-      modelRef: "cpa-responses/grok-4.5",
-    });
-  });
-
-  it("parses model:thinking shorthand", () => {
-    expect(parseModelSpec("grok-4.5:low")).toEqual({
-      modelRef: "grok-4.5",
-      thinkingFromModel: "low",
-    });
-  });
-
-  it("parses provider/model:thinking shorthand", () => {
-    expect(parseModelSpec("cpa-responses/grok-4.5:high")).toEqual({
-      modelRef: "cpa-responses/grok-4.5",
-      thinkingFromModel: "high",
-    });
-  });
-
-  it("accepts free-form thinking suffix not in the known list", () => {
-    expect(parseModelSpec("grok-4.5:custom-level")).toEqual({
-      modelRef: "grok-4.5",
-      thinkingFromModel: "custom-level",
-    });
-  });
-
-  it("does not split when thinking suffix is empty", () => {
-    expect(parseModelSpec("grok-4.5:")).toEqual({ modelRef: "grok-4.5:" });
-  });
-
-  it("returns undefined modelRef for empty input", () => {
-    expect(parseModelSpec(undefined)).toEqual({ modelRef: undefined });
-    expect(parseModelSpec("  ")).toEqual({ modelRef: undefined });
-  });
-});
-
 describe("parseThinkingLevel", () => {
   it("accepts known levels", () => {
     expect(parseThinkingLevel("low")).toBe("low");
@@ -123,8 +80,13 @@ describe("parseThinkingLevel", () => {
     expect(parseThinkingLevel("max")).toBe("max");
   });
 
-  it("accepts free-form levels", () => {
+  it("preserves unknown levels for model-aware validation", () => {
     expect(parseThinkingLevel("custom-level")).toBe("custom-level");
+  });
+
+  it("normalizes case and surrounding whitespace", () => {
+    expect(parseThinkingLevel(" High ")).toBe("high");
+    expect(parseThinkingLevel("LOW")).toBe("low");
   });
 
   it("rejects empty / whitespace", () => {

@@ -41,7 +41,7 @@ const mocks = vi.hoisted(() => {
     let activeTools = [...registeredTools];
     const session: any = {
       model: options.model,
-      thinkingLevel: options.thinkingLevel,
+      thinkingLevel: options.model.reasoning === false ? "off" : options.thinkingLevel,
       agent: { onPayload: undefined },
       extensionRunner: { emit: vi.fn(async () => {}) },
       setSessionName: vi.fn(),
@@ -186,9 +186,9 @@ describe("queued invocation snapshots", () => {
     mocks.store.agent.includeContextFiles = false;
     mocks.store.agent.systemPromptMode = "replace";
     const models = [
-      { provider: "parent", id: "main-model" },
-      { provider: "parent", id: "next-model" },
-      { provider: "other", id: "worker-model" },
+      { provider: "parent", id: "main-model", reasoning: true },
+      { provider: "parent", id: "next-model", reasoning: true },
+      { provider: "other", id: "worker-model", reasoning: true },
     ];
     mocks.ctx = {
       cwd: "/tmp/project",
@@ -235,10 +235,10 @@ describe("queued invocation snapshots", () => {
 
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(2);
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0];
-    expect(queuedOptions.model).toEqual({ provider: "other", id: "worker-model" });
+    expect(queuedOptions.model).toEqual({ provider: "other", id: "worker-model", reasoning: true });
     expect(queuedOptions.scopedModels).toEqual([
-      { model: { provider: "parent", id: "main-model" } },
-      { model: { provider: "other", id: "worker-model" }, thinkingLevel: "high" },
+      { model: { provider: "parent", id: "main-model", reasoning: true } },
+      { model: { provider: "other", id: "worker-model", reasoning: true }, thinkingLevel: "high" },
     ]);
     expect(queuedOptions.thinkingLevel).toBe("high");
     expect(second.lifecycle.status, second.error).toBe("completed");
@@ -465,17 +465,58 @@ describe("queued invocation snapshots", () => {
     await dispose();
   });
 
-  it("keeps an undefined thinking snapshot after the default changes", async () => {
+  it.each([
+    { source: "inherited", thinking: undefined, expected: "high" },
+    { source: "explicit", thinking: "low", expected: "low" },
+  ])("keeps $source thinking when the parent changes before dequeue", async ({ thinking, expected }) => {
+    mocks.ctx.scopedModels = [];
+    mocks.ctx.thinkingLevel = "high";
+    await executeAgentTool("first", params("blocker", "other/worker-model"), undefined, undefined, mocks.ctx);
+    await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
+    await executeAgentTool(
+      "second",
+      { ...params("queued", "other/worker-model"), thinking },
+      undefined,
+      undefined,
+      mocks.ctx,
+    );
+
+    const queued = mocks.manager.listAgents().find((record: any) => record.display.description === "queued")!;
+    expect(queued.lifecycle.status).toBe("queued");
+    expect(queued.display.invocation.thinkingLevel).toBe(expected);
+
+    mocks.ctx.thinkingLevel = "off";
+    mocks.releaseFirst();
+    await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
+
+    expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBe(expected);
+    expect(queued.display.invocation.thinkingLevel).toBe(expected);
+    expect(queued.lifecycle.status, queued.error).toBe("completed");
+    await dispose();
+  });
+
+  it("keeps a clamped undefined snapshot after parent and default changes", async () => {
     mocks.routing = { enabled: false, enabledProviders: [], agentAccess: {} };
+    mocks.ctx.model.reasoning = false;
+    mocks.ctx.thinkingLevel = "high";
     await executeAgentTool("first", params("first"), undefined, undefined, mocks.ctx);
     await vi.waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledTimes(1));
     await executeAgentTool("second", params("second"), undefined, undefined, mocks.ctx);
 
+    const queued = mocks.manager.listAgents().find((record: any) => record.display.description === "second")!;
+    expect(queued.lifecycle.status).toBe("queued");
+    expect(queued.display.invocation.thinkingLevel).toBeUndefined();
+
+    mocks.ctx.thinkingLevel = "low";
+    mocks.ctx.model.reasoning = true;
     mocks.store.agent.defaultThinking = "xhigh";
     mocks.releaseFirst();
     await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
 
     expect(mocks.createAgentSession.mock.calls[1][0].thinkingLevel).toBeUndefined();
+    expect(queued.execution.session.thinkingLevel).toBe("off");
+    expect(queued.display.invocation.thinkingLevel).toBeUndefined();
+    expect(queued.lifecycle.status, queued.error).toBe("completed");
     await dispose();
   });
 
@@ -489,7 +530,7 @@ describe("queued invocation snapshots", () => {
     mocks.releaseFirst();
     await Promise.all(mocks.manager.listAgents().map((record: any) => record.execution.promise));
 
-    expect(mocks.createAgentSession.mock.calls[1][0].model).toEqual({ provider: "parent", id: "main-model" });
+    expect(mocks.createAgentSession.mock.calls[1][0].model).toEqual({ provider: "parent", id: "main-model", reasoning: true });
     await dispose();
   });
 

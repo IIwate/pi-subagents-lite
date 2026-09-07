@@ -228,7 +228,7 @@ body
     // Should not error on unknown fields
   });
 
-  it("accepts free-form thinking values", () => {
+  it("retains unknown thinking values for model-aware invocation validation", () => {
     const content = `---
 name: agent
 thinking: ultra

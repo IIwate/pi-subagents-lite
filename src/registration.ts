@@ -5,6 +5,7 @@ import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.
 import { executeAgentStatusTool } from "./agents/agent-status.js";
 import { showAgentsMenu } from "./ui/menu/menus.js";
 import { getNavigator } from "./shell.js";
+import { VALID_THINKING_LEVELS } from "./models/thinking-resolver.js";
 
 // Subagent state belongs to the below-editor list. Results still reach the LLM,
 // but all three tools render zero chat rows so Pi's default tool cards cannot leak back in.
@@ -31,10 +32,12 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         description: "Short action phrase for the subagent list row (max 40 characters).",
       })),
       agent: agentParam,
-      // Optional explicit alternate: "id", "provider/id", or "id:thinking".
-      model: Type.Optional(Type.String()),
-      // Optional thinking override (off/minimal/low/medium/high/xhigh/max).
-      thinking: Type.Optional(Type.String()),
+      model: Type.Optional(Type.String({
+        description: "Exact model ID or provider/model ID. Set thinking with the separate thinking field.",
+      })),
+      thinking: Type.Optional(Type.Union(VALID_THINKING_LEVELS.map(level => Type.Literal(level)), {
+        description: "Thinking level supported by the selected model.",
+      })),
       run_in_background: Type.Optional(Type.Boolean()),
       worktree_path: Type.Optional(Type.String({
         description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",

@@ -378,7 +378,6 @@ export class AgentManager {
       scopedModels: options.scopedModels,
       maxTurns: options.maxTurns,
       thinkingLevel: options.thinkingLevel,
-      thinkingResolved: options.thinkingResolved,
       cwd: options.worktreePath,
       graceTurns: options.graceTurns,
       signal: record.execution.abortController!.signal,
@@ -397,12 +396,6 @@ export class AgentManager {
         }
         record.execution.session = session;
         if (debugFault) record.execution.debugFaultKind = debugFault.kind;
-        // Replace queued predictions with the session's actual model/thinking.
-        const inv = record.display.invocation ?? {};
-        if (session.model?.id) inv.modelName = session.model.id;
-        if (session.model?.provider) inv.providerName = session.model.provider;
-        if (session.thinkingLevel) inv.thinkingLevel = session.thinkingLevel;
-        record.display.invocation = inv;
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
           for (const pending of record.execution.pendingSteers) {

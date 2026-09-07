@@ -100,10 +100,12 @@ A missing or legacy `modelRouting` block starts with routing OFF and no alternat
 - `prompt` — required task text.
 - `description` — short list label; defaults to the first prompt line.
 - `agent` — agent type; defaults to `general-purpose`.
-- `model` — `id`, `provider/id`, or either form with a `:thinking` suffix. The model must resolve exactly and remain inside Pi's active model scope.
-- `thinking` — a non-empty provider thinking level; common values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
+- `model` — an exact `id` or `provider/id` inside Pi's active model scope. Set thinking through the separate `thinking` field.
+- `thinking` — `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`, subject to the selected model's reasoning capabilities.
 - `run_in_background` — return immediately and notify the parent when complete.
 - `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
+
+Thinking is resolved when the call is accepted, in order: `thinking` parameter, agent frontmatter, scoped-model setting, global default, then parent session. Empty or whitespace-only values fall through to the next source. Explicit parameters and frontmatter must name a supported level; unsupported levels inherited from settings or the parent use the model's highest supported level. Non-reasoning models receive no inherited thinking override. Pi's `thinkingLevelMap` defines support, including `null` exclusions and explicit opt-in for `xhigh` and `max`.
 
 ## Model Routing
 

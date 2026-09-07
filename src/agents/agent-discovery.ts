@@ -12,7 +12,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentConfig } from "./types.js";
-import type { ThinkingLevel } from "../types.js";
 import { parseThinkingLevel } from "../utils.js";
 
 /* ------------------------------------------------------------------ */
@@ -30,7 +29,7 @@ export interface AgentConfigFromMd {
   exclude_extensions?: string[];
   skills?: boolean | string[];
   preload_skills?: string[] | false;
-  thinking?: ThinkingLevel;
+  thinking?: string;
   max_turns?: number;
   max_tokens?: number;
   hidden?: boolean;

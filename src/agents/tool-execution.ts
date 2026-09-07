@@ -8,15 +8,14 @@ import { getStatusNote } from "../status-note.js";
 
 import { type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 
-import type { AgentRecord } from "../types.js";
+import type { AgentRecord, ThinkingLevel } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
-  parseThinkingLevel,
+  errorMessage,
   parseModelKey,
-  parseModelSpec,
   resolveExactModel,
   unknownModelError,
 } from "../utils.js";
@@ -34,6 +33,7 @@ import {
   modelUnavailableError,
 } from "../models/model-scope.js";
 import { authorizeModel } from "../models/model-access.js";
+import { resolveThinkingLevel } from "../models/thinking-resolver.js";
 import {
   getPiInstance,
   getSessionCtx,
@@ -132,12 +132,13 @@ export async function executeAgentTool(
   const runInBackground = requestedBackground === true;
   const scopedModels = structuredClone(ctx.scopedModels);
   const routing = store.routing;
-  const explicitModel = typeof params.model === "string" && params.model.trim() !== "";
+  const explicitModelRef = typeof params.model === "string" ? params.model.trim() || undefined : undefined;
+  const explicitModel = explicitModelRef !== undefined;
   if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
 
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
-  const selectedModelSpec = explicitModel ? params.model as string : parentModelRef;
-  const { modelRef, thinkingFromModel } = parseModelSpec(selectedModelSpec);
+  const modelRef = explicitModelRef ?? parentModelRef;
+  if (explicitModel && modelRef.includes(":")) return errorResult(unknownModelError(modelRef));
   const explicitlyRequestsParent = Boolean(
     ctx.model
     && modelRef
@@ -176,7 +177,7 @@ export async function executeAgentTool(
       return errorResult(outOfScopeModelError(resolvedModelKey, scopedKeys!));
     }
     if (verdict.reason === "routing-disabled") {
-      return errorResult(routingDisabledModelError(selectedModelSpec));
+      return errorResult(routingDisabledModelError(modelRef));
     }
     if (verdict.reason === "provider-disabled") {
       return errorResult(providerDisabledError(resolvedModelKey, provider));
@@ -211,18 +212,24 @@ export async function executeAgentTool(
 
   const acceptedModel = structuredClone(model);
 
-  // Capture the predicted model/provider for queued-agent display.
+  // Capture the accepted model/provider for queued-agent display.
   const modelName = acceptedModel.id;
   const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
-  const explicitThinkingLevel = parseThinkingLevel(params.thinking as string | undefined);
-  const thinkingLevel = explicitThinkingLevel
-    ?? thinkingFromModel
-    ?? scopedThinkingLevel(scopedModels, model)
-    ?? acceptedPolicy.definition.thinkingLevel
-    ?? store.agent.defaultThinking
-    ?? ctx.thinkingLevel;
+  let thinkingLevel: ThinkingLevel | undefined;
+  try {
+    thinkingLevel = resolveThinkingLevel({
+      model: acceptedModel,
+      thinking: params.thinking as string | undefined,
+      agentThinking: acceptedPolicy.definition.thinkingLevel,
+      scopedThinking: scopedThinkingLevel(scopedModels, acceptedModel),
+      defaultThinking: store.agent.defaultThinking,
+      parentThinking: ctx.thinkingLevel,
+    });
+  } catch (err) {
+    return errorResult(errorMessage(err));
+  }
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;
@@ -237,10 +244,9 @@ export async function executeAgentTool(
     scopedModels,
     maxTurns,
     thinkingLevel,
-    thinkingResolved: true,
     graceTurns: store.agent.graceTurns,
     worktreePath: validatedWorktreePath,
-    invocation: { modelName, providerName, thinkingLevel },
+    invocation: Object.freeze({ modelName, providerName, thinkingLevel }),
     runInBackground,
   });
 

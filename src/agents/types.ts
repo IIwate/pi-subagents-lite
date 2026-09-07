@@ -30,7 +30,8 @@ export interface AgentConfig {
   skills?: true | string[] | false;
   /** Skills to preload with full content into system prompt. string[] = listed, false/undefined = none */
   preloadSkills?: string[] | false;
-  thinkingLevel?: ThinkingLevel;
+  /** Normalized frontmatter value; validated against the authorized model at invocation. */
+  thinkingLevel?: string;
   maxTurns?: number;
   /** Max output tokens per LLM response. Applied through Pi's native model limit. */
   maxTokens?: number;
@@ -44,8 +45,8 @@ export interface AgentConfig {
 
 export interface AgentInvocation {
   /** Model id shown in the TUI. */
-  modelName?: string;
+  readonly modelName?: string;
   /** Provider id shown immediately after the model. */
-  providerName?: string;
-  thinkingLevel?: ThinkingLevel;
+  readonly providerName?: string;
+  readonly thinkingLevel?: ThinkingLevel;
 }

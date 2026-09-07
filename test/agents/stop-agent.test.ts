@@ -31,7 +31,6 @@ vi.mock("../../src/spawn/worktree-validator.js", () => ({
 }));
 vi.mock("../../src/utils.js", () => ({
   parseThinkingLevel: () => undefined,
-  parseModelSpec: () => ({ modelRef: undefined }),
   resolveExactModel: () => undefined,
   unknownModelError: () => "unused",
 }));

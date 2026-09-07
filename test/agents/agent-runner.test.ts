@@ -543,18 +543,31 @@ describe("runAgent — tool visibility wiring", () => {
       .rejects.toThrow("no subagent model could be resolved");
   });
 
-  it("keeps a resolved undefined thinking snapshot from reading live defaults", async () => {
+  it("passes an undefined thinking snapshot without consulting other sources", async () => {
     const session = createMockSession();
     mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
     mockModules.mockDefaultThinking = "xhigh";
+    mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig, thinkingLevel: "medium" });
+    const ctx = fakeCtx();
+    ctx.thinkingLevel = "low";
+    ctx.scopedModels = [{ model: ctx.model, thinkingLevel: "high" }];
 
-    await runAgent(fakeCtx(), "test-agent", "do something", {
+    await runAgent(ctx, "test-agent", "do something", {
       pi: fakePi,
       thinkingLevel: undefined,
-      thinkingResolved: true,
     });
 
     expect(mockModules.mockCreateAgentSession.mock.calls[0][0].thinkingLevel).toBeUndefined();
+  });
+
+  it("passes an explicit off snapshot to session creation", async () => {
+    const session = createMockSession();
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+    mockModules.mockGetAgentConfig.mockReturnValue({ ...defaultAgentConfig, thinkingLevel: "high" });
+
+    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi, thinkingLevel: "off" });
+
+    expect(mockModules.mockCreateAgentSession.mock.calls[0][0].thinkingLevel).toBe("off");
   });
 
   it("uses the invocation scope and thinking snapshot instead of live context", async () => {

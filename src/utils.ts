@@ -2,7 +2,6 @@
  * utils.ts — Security helpers and general utilities.
  */
 import type { Model } from "@earendil-works/pi-ai";
-import type { ThinkingLevel } from "./types.js";
 
 /**
  * Returns true if a name contains characters not allowed in agent/skill names.
@@ -12,14 +11,9 @@ export function isUnsafeName(name: string): boolean {
   return !name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
 }
 
-/**
- * Normalize a raw thinking value.
- * Accepts any non-empty string, so provider-specific levels can pass through.
- */
-export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+/** Normalize input before model-aware validation at the Agent entry point. */
+export function parseThinkingLevel(raw: string | undefined): string | undefined {
+  return raw?.trim().toLowerCase() || undefined;
 }
 
 /**
@@ -46,39 +40,6 @@ export interface ModelLookupRegistry {
   getAll?: () => Array<Model<any>>;
   /** Compatibility fallback for minimal registries in tests/integrations. */
   getAvailable?: () => Array<Model<any>>;
-}
-
-/**
- * Parse a model tool argument that may embed thinking as `model:thinking`.
- *
- * Supported forms:
- *   - "grok-4.5"
- *   - "cpa-responses/grok-4.5"
- *   - "grok-4.5:low"
- *   - "cpa-responses/grok-4.5:low"
- *   - "grok-4.5:custom-level"  (free-form thinking, not restricted to known levels)
- *
- * When a `:` is present and both sides are non-empty, the suffix after the
- * last `:` is always treated as thinking (no allowlist check).
- */
-export function parseModelSpec(raw: string | undefined): {
-  modelRef: string | undefined;
-  thinkingFromModel?: ThinkingLevel;
-} {
-  if (raw === undefined) return { modelRef: undefined };
-  const trimmed = raw.trim();
-  if (!trimmed) return { modelRef: undefined };
-
-  const colonIdx = trimmed.lastIndexOf(":");
-  if (colonIdx > 0) {
-    const modelRef = trimmed.slice(0, colonIdx).trim();
-    const thinkingFromModel = parseThinkingLevel(trimmed.slice(colonIdx + 1));
-    if (modelRef && thinkingFromModel !== undefined) {
-      return { modelRef, thinkingFromModel };
-    }
-  }
-
-  return { modelRef: trimmed };
 }
 
 /**
@@ -120,7 +81,7 @@ export function unknownModelError(modelRef: string): string {
     `Unknown model id: "${modelRef}". ` +
     `Use a bare model id that exactly matches an available model (e.g. "grok-4.5"), ` +
     `or "provider/model-id" (e.g. "cpa-responses/grok-4.5"). ` +
-    `Optional thinking shorthand: "grok-4.5:low". ` +
+    `Set thinking with the separate "thinking" parameter (e.g. "low"). ` +
     `List available models first (e.g. via your model list / list-models), then retry with a valid id.`
   );
 }

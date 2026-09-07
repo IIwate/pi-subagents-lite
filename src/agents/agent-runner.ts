@@ -27,7 +27,7 @@ import {
 import { extractText } from "../prompt/context.js";
 import type { LifetimeUsage } from "./usage.js";
 import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
-import { missingSubagentModelError, scopedThinkingLevel } from "../models/model-scope.js";
+import { missingSubagentModelError } from "../models/model-scope.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
 import { type AcceptedRunPolicy, type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
@@ -468,14 +468,7 @@ async function initSession(
     ? { ...sourceModel, maxTokens }
     : sourceModel;
 
-  // Agent-tool calls pass invocation snapshots. The fallback keeps direct
-  // internal runAgent callers working without weakening accepted-call locks.
   const scopedModels = options.scopedModels ? [...options.scopedModels] : [...ctx.scopedModels];
-  const thinkingLevel = options.thinkingResolved
-    ? options.thinkingLevel
-    : options.thinkingLevel
-      ?? scopedThinkingLevel(scopedModels, model)
-      ?? policy.definition.thinkingLevel;
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.inMemory(cwd);
   inheritCustomSessionEntries(ctx.sessionManager.getBranch(), sessionManager);
@@ -484,6 +477,7 @@ async function initSession(
     sessionManager,
     settingsManager: SettingsManager.create(cwd, agentDir),
     model,
+    thinkingLevel: options.thinkingLevel,
     tools: resolveSessionAllowedTools({
       registeredTools: policy.registeredTools,
       restrictToRegisteredTools: policy.restrictToRegisteredTools,
@@ -493,11 +487,6 @@ async function initSession(
     // Use the exact scope snapshot validated against the initial model above.
     scopedModels,
   };
-  // Always pass when set — including "off" — so settings default cannot override.
-  // Free-form thinking strings are allowed; cast for pi's narrower ThinkingLevel type.
-  if (thinkingLevel !== undefined) {
-    sessionOpts.thinkingLevel = thinkingLevel as typeof sessionOpts.thinkingLevel;
-  }
   const result = await createAgentSession(sessionOpts);
   enableTransientTransportErrorRetry(result.session);
   return result;
