@@ -998,6 +998,41 @@ describe("SpawnCoordinator", () => {
     );
   });
 
+  it("does not wake pre-existing pending results when settling a turn that only spawned a subagent", async () => {
+    sessionEntries.push({
+      type: "custom",
+      customType: "subagents-lite:pending-result",
+      data: {
+        deliveryId: "orphan-delivery-1",
+        parentSessionId: "test-session",
+        originEntryId: "origin-a",
+        agentId: "914d7b55-6cfc-4ef",
+        type: "Explore",
+        status: "completed",
+        result: "Orphan result from earlier task",
+        error: null,
+        createdAt: 1000,
+      },
+    });
+
+    const coordinator = new SpawnCoordinator(manager as any);
+    mockPi.sendMessage.mockClear();
+
+    // Main agent executes a turn that only spawns a new background subagent (no completed results presented)
+    const newSpawn = await spawnBackground(coordinator);
+    expect(newSpawn.record.lifecycle.status).toBe("running");
+
+    // Main agent finishes its response ("I have spawned the subagent for you") and settles
+    coordinator.onParentAgentStart();
+    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentSettled();
+
+    await Promise.resolve();
+
+    // The orphan result must NOT be triggered after spawning
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("does not wake after disposal", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);

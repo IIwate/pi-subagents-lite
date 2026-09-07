@@ -314,7 +314,9 @@ export class SpawnCoordinator {
   onParentAgentStart(): void {
     if (this.disposed) return;
     this.parentRunPhase = "running";
-    this.requestParentWake();
+    if (this.completionVersion > this.parentWakeCompletionVersion) {
+      this.requestParentWake();
+    }
   }
 
   /** Track the outcome of the current parent agent run. */
@@ -340,12 +342,13 @@ export class SpawnCoordinator {
     let wakeAfterSettle = false;
     if (succeeded) {
       this.lastWakeFailed = false;
-      const acknowledged = ids.length === 0 || this.acknowledge(ids);
+      const acknowledged = ids.length > 0 && this.acknowledge(ids);
+      const deliveryDrained = acknowledged && !deliveryFailed && this.eligiblePendingResults().length > 0;
       this.lastWakeFailed ||= deliveryFailed && this.pendingState().length > 0;
       // A successful acknowledgement drains results completed while this turn
       // ran. A failed delivery needs another persisted completion or
       // an explicit lifecycle restoration event before it can try again.
-      wakeAfterSettle = (!deliveryFailed && acknowledged) || hasNewWakeOpportunity;
+      wakeAfterSettle = deliveryDrained || hasNewWakeOpportunity;
     } else {
       this.lastWakeFailed = true;
       for (const deliveryId of ids) {
