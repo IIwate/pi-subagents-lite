@@ -675,6 +675,64 @@ describe("runAgent — transient transport retry", () => {
     expect(originalClassifier).toHaveBeenCalledTimes(14);
     expect(originalClassifier.mock.contexts.every((context) => context === session)).toBe(true);
   });
+
+  it("classifies blank and thinking-only assistant responses as retryable", async () => {
+    type RetryMessage = { stopReason?: string; errorMessage?: string; content?: unknown[] };
+    const session = createMockSession() as ReturnType<typeof createMockSession> & {
+      _isRetryableError: (message: RetryMessage) => boolean;
+    };
+    session._isRetryableError = () => false;
+    session.getActiveToolNames.mockReturnValue(["read", "bash", "edit"]);
+    mockModules.mockCreateAgentSession.mockResolvedValue({ session, extensionsResult: {} });
+
+    await runAgent(fakeCtx(), "test-agent", "do something", { pi: fakePi });
+
+    const classifyRetryableError = session._isRetryableError;
+
+    // Completely empty content
+    const emptyMsg: RetryMessage = { stopReason: "stop", content: [] };
+    expect(classifyRetryableError(emptyMsg)).toBe(true);
+    expect(emptyMsg.errorMessage).toBe("Empty assistant response received");
+
+    // Thinking blocks only (no text blocks, no tool calls)
+    const thinkingOnlyMsg: RetryMessage = {
+      stopReason: "stop",
+      content: [{ type: "thinking", thinking: "Analyzing..." }],
+    };
+    expect(classifyRetryableError(thinkingOnlyMsg)).toBe(true);
+
+    // Whitespace text only
+    const whitespaceMsg: RetryMessage = {
+      stopReason: "stop",
+      content: [{ type: "text", text: "   \n  " }],
+    };
+    expect(classifyRetryableError(whitespaceMsg)).toBe(true);
+
+    // Non-blank text response must not be retried
+    expect(classifyRetryableError({
+      stopReason: "stop",
+      content: [{ type: "text", text: "task completed" }],
+    })).toBe(false);
+
+    // Tool call response must not be retried
+    expect(classifyRetryableError({
+      stopReason: "stop",
+      content: [{ type: "toolCall", name: "bash", arguments: {} }],
+    })).toBe(false);
+
+    // Aborted empty message must not be retried
+    expect(classifyRetryableError({
+      stopReason: "aborted",
+      content: [],
+    })).toBe(false);
+
+    // Non-transient explicit error must not be retried as blank
+    expect(classifyRetryableError({
+      stopReason: "error",
+      errorMessage: "invalid api key",
+      content: [],
+    })).toBe(false);
+  });
 });
 
 /* ------------------------------------------------------------------ */

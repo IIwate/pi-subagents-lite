@@ -83,10 +83,22 @@ export interface ContinueAgentResult {
 interface RetryClassifierMessage {
   stopReason?: string;
   errorMessage?: string;
+  content?: unknown[];
 }
 
 const TRANSIENT_TRANSPORT_ERROR_PATTERN =
   /\b(?:stream|socket|network|transport)(?:[_\s-]+(?:read|write|connect(?:ion)?|disconnect(?:ed|ion)?|closed?|reset|lost|timeout))(?:[_\s-]+error)?\b|\b(?:EOF|ECONNRESET|ETIMEDOUT|EPIPE)\b|invalid SSE data JSON|\bupstream_error\b|Upstream request failed/i;
+
+const RETRY_CLASSIFIER_PATCHED = Symbol("subagents-lite:retry-classifier-patched");
+
+function isBlankAssistantMessage(message: RetryClassifierMessage): boolean {
+  if (message.stopReason === "aborted" || message.stopReason === "error") return false;
+  if (!Array.isArray(message.content)) return false;
+  const hasToolCalls = message.content.some((c: any) => c?.type === "toolCall" || c?.type === "tool_use");
+  if (hasToolCalls) return false;
+  const text = extractText(message.content).trim();
+  return !text;
+}
 
 /**
  * Pi has no public hook for extending per-session retry classification, so wrap
@@ -96,15 +108,28 @@ const TRANSIENT_TRANSPORT_ERROR_PATTERN =
 function enableTransientTransportErrorRetry(session: AgentSession): void {
   const retrySession = session as unknown as {
     _isRetryableError?: (message: RetryClassifierMessage) => boolean;
+    [RETRY_CLASSIFIER_PATCHED]?: boolean;
   };
+  if (retrySession[RETRY_CLASSIFIER_PATCHED]) return;
   const classifyRetryableError = retrySession._isRetryableError;
   if (typeof classifyRetryableError !== "function") return;
 
-  retrySession._isRetryableError = (message) =>
-    classifyRetryableError.call(retrySession, message) ||
-    (message.stopReason === "error" &&
+  retrySession[RETRY_CLASSIFIER_PATCHED] = true;
+  retrySession._isRetryableError = (message) => {
+    if (classifyRetryableError.call(retrySession, message)) return true;
+    if (
+      message.stopReason === "error" &&
       typeof message.errorMessage === "string" &&
-      TRANSIENT_TRANSPORT_ERROR_PATTERN.test(message.errorMessage));
+      TRANSIENT_TRANSPORT_ERROR_PATTERN.test(message.errorMessage)
+    ) {
+      return true;
+    }
+    if (isBlankAssistantMessage(message)) {
+      message.errorMessage ||= "Empty assistant response received";
+      return true;
+    }
+    return false;
+  };
 }
 
 /**
@@ -650,6 +675,7 @@ export async function continueAgentSession(
   prompt: string,
   options: ContinueAgentOptions = {},
 ): Promise<ContinueAgentResult> {
+  enableTransientTransportErrorRetry(session);
   const turnTracking = wireTurnTracking(session, options);
   const unsubscribeEvents = subscribeToSessionEvents(session, options);
   const collector = collectFinalAssistantMessage(session);
