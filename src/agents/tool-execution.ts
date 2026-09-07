@@ -8,7 +8,7 @@ import { getStatusNote } from "../status-note.js";
 
 import { type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 
-import type { AgentRecord, ThinkingLevel } from "../types.js";
+import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
 import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
@@ -82,22 +82,22 @@ export async function executeAgentTool(
   const rawWorktreePath = params.worktree_path as string | undefined;
   let validatedWorktreePath: string | undefined;
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
+    const parentCwd = getSessionCtx()?.cwd ?? ctx.cwd;
+    const warnings: string[] = [];
+    const onWarning = (msg: string) => { warnings.push(msg); };
+    let validation;
     try {
-      const parentCwd = getSessionCtx()?.cwd ?? ctx.cwd;
-      const warnings: string[] = [];
-      const onWarning = (msg: string) => { warnings.push(msg); };
-      const validation = await validateWorktreePath(getPiInstance(), rawWorktreePath, parentCwd, onWarning);
-      if (!validation.ok) {
-        for (const msg of warnings) {
-          if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
-        }
-        return errorResult(validation.error);
-      }
-      validatedWorktreePath = validation.resolvedPath;
+      validation = await validateWorktreePath(getPiInstance(), rawWorktreePath, parentCwd, onWarning);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return errorResult(`worktree_path validation failed: ${msg}`);
+      throw new Error(`worktree_path validation failed: ${errorMessage(err)}`);
     }
+    if (!validation.ok) {
+      for (const msg of warnings) {
+        if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
+      }
+      throw new Error(validation.error);
+    }
+    validatedWorktreePath = validation.resolvedPath;
   }
 
   const type = (params.agent as string) || "general-purpose";
@@ -105,12 +105,14 @@ export async function executeAgentTool(
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
     // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
-    const worktreeDir = validatedWorktreePath ? `${validatedWorktreePath}/.pi/agents` : undefined;
+    const worktreeDir = validatedWorktreePath && ctx.isProjectTrusted?.() !== false
+      ? `${validatedWorktreePath}/.pi/agents`
+      : undefined;
     await discoverNewAgents(worktreeDir);
     resolvedType = resolveType(type);
   }
   if (!resolvedType) {
-    return errorResult(`Unknown agent type: ${type}`);
+    throw new Error(`Unknown agent type: ${type}`);
   }
 
   const prompt = params.prompt as string;
@@ -122,7 +124,7 @@ export async function executeAgentTool(
   const store = getStore();
 
   if (requestedBackground !== true && store.agent.forceBackground) {
-    return errorResult(
+    throw new Error(
       "Foreground execution is disabled: the user has enabled 'forceBackground' in subagent settings. "
       + "You must explicitly set 'run_in_background: true' to spawn this subagent asynchronously, "
       + "or inform the user that their current configuration forbids foreground execution.",
@@ -134,11 +136,11 @@ export async function executeAgentTool(
   const routing = store.routing;
   const explicitModelRef = typeof params.model === "string" ? params.model.trim() || undefined : undefined;
   const explicitModel = explicitModelRef !== undefined;
-  if (!explicitModel && !ctx.model) return errorResult(missingParentModelError());
+  if (!explicitModel && !ctx.model) throw new Error(missingParentModelError());
 
   const parentModelRef = ctx.model ? modelKey(ctx.model) : "";
   const modelRef = explicitModelRef ?? parentModelRef;
-  if (explicitModel && modelRef.includes(":")) return errorResult(unknownModelError(modelRef));
+  if (explicitModel && modelRef.includes(":")) throw new Error(unknownModelError(modelRef));
   const explicitlyRequestsParent = Boolean(
     ctx.model
     && modelRef
@@ -158,8 +160,8 @@ export async function executeAgentTool(
       ? `${parsedModelKey.provider}/${parsedModelKey.modelId}`
       : "";
 
-  if (explicitModel && modelRef && !resolvedModelKey) return errorResult(unknownModelError(modelRef));
-  if (!resolvedModelKey) return errorResult(missingSubagentModelError());
+  if (explicitModel && modelRef && !resolvedModelKey) throw new Error(unknownModelError(modelRef));
+  if (!resolvedModelKey) throw new Error(missingSubagentModelError());
 
   const scopedKeys = scopedModelKeys(scopedModels);
   const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
@@ -174,23 +176,23 @@ export async function executeAgentTool(
   if (!verdict.ok) {
     const provider = resolvedModelKey.slice(0, resolvedModelKey.indexOf("/"));
     if (verdict.reason === "out-of-scope") {
-      return errorResult(outOfScopeModelError(resolvedModelKey, scopedKeys!));
+      throw new Error(outOfScopeModelError(resolvedModelKey, scopedKeys!));
     }
     if (verdict.reason === "routing-disabled") {
-      return errorResult(routingDisabledModelError(modelRef));
+      throw new Error(routingDisabledModelError(modelRef));
     }
     if (verdict.reason === "provider-disabled") {
-      return errorResult(providerDisabledError(resolvedModelKey, provider));
+      throw new Error(providerDisabledError(resolvedModelKey, provider));
     }
     if (verdict.reason === "agent-provider-denied") {
-      return errorResult(agentProviderDeniedError(resolvedModelKey, resolvedType, provider));
+      throw new Error(agentProviderDeniedError(resolvedModelKey, resolvedType, provider));
     }
     if (verdict.reason === "model-denied") {
-      return errorResult(modelDeniedError(resolvedModelKey, resolvedType));
+      throw new Error(modelDeniedError(resolvedModelKey, resolvedType));
     }
-    return errorResult(modelUnavailableError(resolvedModelKey));
+    throw new Error(modelUnavailableError(resolvedModelKey));
   }
-  if (!model) return errorResult(unknownModelError(modelRef!));
+  if (!model) throw new Error(unknownModelError(modelRef!));
 
   let defaultTools: string[] | undefined;
   try {
@@ -207,7 +209,7 @@ export async function executeAgentTool(
     parentModelKey: parentModelRef,
     defaultTools,
   });
-  if (!acceptedPolicy) return errorResult(`Unknown agent type: ${type}`);
+  if (!acceptedPolicy) throw new Error(`Unknown agent type: ${type}`);
   const maxTurns = acceptedPolicy.definition.maxTurns;
 
   const acceptedModel = structuredClone(model);
@@ -217,19 +219,14 @@ export async function executeAgentTool(
   const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
-  let thinkingLevel: ThinkingLevel | undefined;
-  try {
-    thinkingLevel = resolveThinkingLevel({
-      model: acceptedModel,
-      thinking: params.thinking as string | undefined,
-      agentThinking: acceptedPolicy.definition.thinkingLevel,
-      scopedThinking: scopedThinkingLevel(scopedModels, acceptedModel),
-      defaultThinking: store.agent.defaultThinking,
-      parentThinking: ctx.thinkingLevel,
-    });
-  } catch (err) {
-    return errorResult(errorMessage(err));
-  }
+  const thinkingLevel = resolveThinkingLevel({
+    model: acceptedModel,
+    thinking: params.thinking as string | undefined,
+    agentThinking: acceptedPolicy.definition.thinkingLevel,
+    scopedThinking: scopedThinkingLevel(scopedModels, acceptedModel),
+    defaultThinking: store.agent.defaultThinking,
+    parentThinking: ctx.thinkingLevel,
+  });
 
   // Use SpawnCoordinator for unified spawn path
   const coordinator = getCoordinator()!;

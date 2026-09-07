@@ -656,17 +656,23 @@ describe("runAgent — transient transport retry", () => {
       "Codex error: stream closed before response.completed",
       "Codex error: invalid SSE data JSON: truncated payload",
       "stream_read_error: upstream closed the response",
+      "upstream_error",
+      "Gateway response: upstream_error (request timeout)",
+      "Upstream request failed",
+      "upstream request failed: gateway timeout",
       'Codex error: Post "https://chatgpt.com/backend-api/codex/responses": EOF',
       "existing retryable error",
     ]) {
       expect(classifyRetryableError({ stopReason: "error", errorMessage })).toBe(true);
     }
     expect(classifyRetryableError({ stopReason: "error", errorMessage: "invalid request" })).toBe(false);
+    expect(classifyRetryableError({ stopReason: "error", errorMessage: "not_upstream_error" })).toBe(false);
+    expect(classifyRetryableError({ stopReason: "stop", errorMessage: "upstream_error" })).toBe(false);
     expect(classifyRetryableError({
       stopReason: "stop",
       errorMessage: "stream disconnected before completion",
     })).toBe(false);
-    expect(originalClassifier).toHaveBeenCalledTimes(8);
+    expect(originalClassifier).toHaveBeenCalledTimes(14);
     expect(originalClassifier.mock.contexts.every((context) => context === session)).toBe(true);
   });
 });

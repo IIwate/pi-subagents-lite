@@ -81,7 +81,8 @@ export function ensureManagerAndNavigator(): void {
 export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
   const homeDir = process.env.HOME || "";
   const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
-  const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
+  const trusted = ctx.isProjectTrusted?.() !== false;
+  const projectAgentDir = trusted ? path.join(ctx.cwd, ".pi", "agents") : "";
 
   const disableDefaults = getStore().agent.disableDefaultAgents;
   setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);

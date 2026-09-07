@@ -4,6 +4,7 @@ import type { AgentStatus } from "../types.js";
 export const PENDING_RESULT_ENTRY = "subagents-lite:pending-result";
 export const RESULT_ACK_ENTRY = "subagents-lite:result-ack";
 export const RESULT_MESSAGE_TYPE = "subagent-result";
+export const PARENT_INJECTION_RESULT_CHAR_LIMIT = 4000;
 
 export interface PendingResult {
   /** Unique completion identity. A continuation gets a new deliveryId. */
@@ -139,9 +140,13 @@ export function appendResultAck(
 }
 
 function buildResultContent(results: readonly PendingResult[]): string {
-  return results.map(result =>
-    `[Subagent "${result.type}" ${result.agentId} ${result.status}]\n\n${result.result}`,
-  ).join("\n\n---\n\n");
+  return results.map(result => {
+    const text = result.result.length > PARENT_INJECTION_RESULT_CHAR_LIMIT
+      ? result.result.slice(0, PARENT_INJECTION_RESULT_CHAR_LIMIT)
+        + `\n… (truncated; use AgentStatus({ agent_id: "${result.agentId}" }) to read the full result)`
+      : result.result;
+    return `[Subagent "${result.type}" ${result.agentId} ${result.status}]\n\n${text}`;
+  }).join("\n\n---\n\n");
 }
 
 export function buildResultMessage(results: readonly PendingResult[]) {

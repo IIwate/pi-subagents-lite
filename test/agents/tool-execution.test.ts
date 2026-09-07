@@ -217,13 +217,13 @@ describe("executeAgentTool — worktree_path validation", () => {
     );
   });
 
-  it("returns an error when worktree_path validation fails", async () => {
+  it("throws when worktree_path validation fails", async () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: false,
       error: "Path '/etc' is not inside a git repository",
     });
 
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-2",
       makeParams({ worktree_path: "/etc" }),
       undefined,
@@ -231,9 +231,7 @@ describe("executeAgentTool — worktree_path validation", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("not inside a git repository");
-    // Should NOT have spawned
+    await expect(result).rejects.toThrow("not inside a git repository");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
   it("flushes validator warnings via ctx.ui.notify on validation failure", async () => {
@@ -244,7 +242,7 @@ describe("executeAgentTool — worktree_path validation", () => {
     });
 
     ctx.ui = { notify: vi.fn() };
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-warn",
       makeParams({ worktree_path: "/etc" }),
       undefined,
@@ -252,7 +250,7 @@ describe("executeAgentTool — worktree_path validation", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
+    await expect(result).rejects.toThrow("worktree_path validation failed: git rev-parse failed: EACCES permission denied");
     expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "[pi-subagents-lite] git rev-parse --git-common-dir failed in /etc: EACCES permission denied",
@@ -326,7 +324,7 @@ describe("executeAgentTool — worktree_path validation", () => {
       vi.clearAllMocks();
       mockValidateWorktreePath.mockResolvedValue({ ok: false, error });
 
-      const result = await executeAgentTool(
+      const result = executeAgentTool(
         "tc-err",
         makeParams({ worktree_path: "/some/path" }),
         undefined,
@@ -334,8 +332,7 @@ describe("executeAgentTool — worktree_path validation", () => {
         ctx,
       );
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain(match);
+      await expect(result).rejects.toThrow(match);
     }
   });
 
@@ -391,10 +388,10 @@ describe("executeAgentTool — worktree_path validation", () => {
     expect(result.content[0].text).toBe("Agent failed: 503 service_unavailable");
   });
 
-  it("does not crash the parent when validator throws unexpectedly", async () => {
+  it("throws a diagnostic when the validator fails unexpectedly", async () => {
     mockValidateWorktreePath.mockRejectedValue(new Error("Unexpected filesystem error"));
 
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-crash",
       makeParams({ worktree_path: "/wt/feature" }),
       undefined,
@@ -402,8 +399,8 @@ describe("executeAgentTool — worktree_path validation", () => {
       ctx,
     );
 
-    // Should return an error result, not throw
-    expect(result.isError).toBe(true);
+    await expect(result).rejects.toThrow("worktree_path validation failed: Unexpected filesystem error");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("returns detachment notice when subagent is detached to background", async () => {
@@ -437,7 +434,7 @@ describe("executeAgentTool — forceBackground policy enforcement", () => {
 
   it("rejects with error when run_in_background: false and forceBackground is enabled", async () => {
     mockForceBackground.value = true;
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-reject-fg",
       makeParams({ run_in_background: false }),
       undefined,
@@ -445,19 +442,15 @@ describe("executeAgentTool — forceBackground policy enforcement", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Foreground execution is disabled: the user has enabled 'forceBackground'");
-    expect(result.content[0].text).toContain("run_in_background: true");
+    await expect(result).rejects.toThrow(/Foreground execution is disabled:.*forceBackground.*run_in_background: true/s);
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects with error when run_in_background is omitted and forceBackground is true", async () => {
     mockForceBackground.value = true;
-    const result = await executeAgentTool("tc-default-bg", makeParams(), undefined, undefined, ctx);
+    const result = executeAgentTool("tc-default-bg", makeParams(), undefined, undefined, ctx);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Foreground execution is disabled: the user has enabled 'forceBackground'");
-    expect(result.content[0].text).toContain("run_in_background: true");
+    await expect(result).rejects.toThrow(/Foreground execution is disabled:.*forceBackground.*run_in_background: true/s);
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
@@ -537,13 +530,13 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
     expect(result.content[0].text).toContain("delivered automatically");
   });
 
-  it("returns error for invalid worktree_path in background spawn", async () => {
+  it("throws for invalid worktree_path in background spawn", async () => {
     mockValidateWorktreePath.mockResolvedValue({
       ok: false,
       error: "Path does not exist",
     });
 
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-bg-err",
       makeParams({ worktree_path: "/nonexistent", run_in_background: true }),
       undefined,
@@ -551,7 +544,7 @@ describe("executeAgentTool — worktree_path with background spawn", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
+    await expect(result).rejects.toThrow("Path does not exist");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
@@ -619,6 +612,31 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
     expect(mockDiscoverNewAgents).toHaveBeenCalledTimes(1);
     expect(mockDiscoverNewAgents).toHaveBeenCalledWith(undefined);
   });
+
+  it("excludes the worktree directory when the project is untrusted", async () => {
+    ctx.isProjectTrusted = () => false;
+    mockValidateWorktreePath.mockResolvedValue({ ok: true, resolvedPath: "/wt/feature" });
+    vi.mocked(agentTypes.resolveType).mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
+
+    await expect(executeAgentTool(
+      "untrusted-worktree",
+      makeParams({ agent: "project-only", worktree_path: "/wt/feature" }),
+      undefined,
+      undefined,
+      ctx,
+    )).rejects.toThrow("Unknown agent type: project-only");
+
+    expect(mockDiscoverNewAgents).toHaveBeenCalledWith(undefined);
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("throws when the agent definition cannot be resolved", async () => {
+    vi.mocked(agentTypes.resolveAcceptedRunPolicy).mockReturnValueOnce(undefined);
+
+    await expect(executeAgentTool("missing-definition", makeParams(), undefined, undefined, ctx))
+      .rejects.toThrow("Unknown agent type: general-purpose");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
 });
 
 describe("executeAgentTool — thinking param", () => {
@@ -653,7 +671,7 @@ describe("executeAgentTool — thinking param", () => {
   });
 
   it.each(["super-high", "ultra"])("rejects unknown thinking level %s before spawn", async thinking => {
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "tc-think-custom",
       makeParams({ thinking }),
       undefined,
@@ -661,36 +679,32 @@ describe("executeAgentTool — thinking param", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Valid levels: off, minimal, low, medium, high, xhigh, max.");
+    await expect(result).rejects.toThrow("Valid levels: off, minimal, low, medium, high, xhigh, max.");
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects explicit reasoning on the authorized non-reasoning model", async () => {
     ctx.model.reasoning = false;
-    const result = await executeAgentTool("no-reasoning", makeParams({ thinking: "low" }), undefined, undefined, ctx);
+    const result = executeAgentTool("no-reasoning", makeParams({ thinking: "low" }), undefined, undefined, ctx);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Model "model" does not support reasoning.');
+    await expect(result).rejects.toThrow('Model "model" does not support reasoning.');
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects a model-excluded level before spawn", async () => {
     ctx.model.thinkingLevelMap = { off: null };
-    const result = await executeAgentTool("requires-reasoning", makeParams({ thinking: "off" }), undefined, undefined, ctx);
+    const result = executeAgentTool("requires-reasoning", makeParams({ thinking: "off" }), undefined, undefined, ctx);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Thinking level "off" is not supported by model "model".');
+    await expect(result).rejects.toThrow('Thinking level "off" is not supported by model "model".');
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
   it("validates frontmatter against the authorized model", async () => {
     mockAgentThinking.value = "low";
     ctx.model.reasoning = false;
-    const result = await executeAgentTool("frontmatter", makeParams(), undefined, undefined, ctx);
+    const result = executeAgentTool("frontmatter", makeParams(), undefined, undefined, ctx);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe('Model "model" does not support reasoning.');
+    await expect(result).rejects.toThrow('Model "model" does not support reasoning.');
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
@@ -750,16 +764,15 @@ describe("executeAgentTool — model access", () => {
     "test/parent-model:high",
     "grok-4.5:",
   ])("rejects a colon in model %s as an unknown model", async model => {
-    const result = await executeAgentTool("colon", makeParams({ model, thinking: "low" }), undefined, undefined, ctx);
+    const result = executeAgentTool("colon", makeParams({ model, thinking: "low" }), undefined, undefined, ctx);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain(`Unknown model id: "${model}".`);
+    await expect(result).rejects.toThrow(`Unknown model id: "${model}".`);
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
   it("authorizes the model before validating thinking", async () => {
     mockRouting.enabled = false;
-    const result = await executeAgentTool(
+    const result = executeAgentTool(
       "unauthorized-thinking",
       makeParams({ model: "cpa-responses/grok-4.5", thinking: "ultra" }),
       undefined,
@@ -767,8 +780,7 @@ describe("executeAgentTool — model access", () => {
       ctx,
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Model routing is OFF");
+    await expect(result).rejects.toThrow("Model routing is OFF");
     expect(mockCoordinatorSpawn).not.toHaveBeenCalled();
   });
 
@@ -806,16 +818,15 @@ describe("executeAgentTool — model access", () => {
 
   it("rejects every non-parent explicit model while routing is OFF", async () => {
     mockRouting.enabled = false;
-    const result = await executeAgentTool("off", makeParams({ model: "test/other-model" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Model routing is OFF");
+    const result = executeAgentTool("off", makeParams({ model: "test/other-model" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("Model routing is OFF");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("requires a parent only when model is omitted", async () => {
     ctx.model = undefined;
-    const omitted = await executeAgentTool("missing-parent", makeParams({ model: undefined }), undefined, undefined, ctx);
-    expect(omitted.content[0].text).toContain("parent session has no active model");
+    const omitted = executeAgentTool("missing-parent", makeParams({ model: undefined }), undefined, undefined, ctx);
+    await expect(omitted).rejects.toThrow("parent session has no active model");
 
     await executeAgentTool("explicit-no-parent", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
     expect(mockSpawn).toHaveBeenCalledTimes(1);
@@ -823,8 +834,8 @@ describe("executeAgentTool — model access", () => {
 
   it("requires the provider to be globally enabled", async () => {
     mockRouting.enabledProviders = [];
-    const result = await executeAgentTool("provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("provider \"cpa-responses\" is disabled");
+    const result = executeAgentTool("provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("provider \"cpa-responses\" is disabled");
   });
 
   it("allows an explicit current-parent-provider alternate past only the global gate", async () => {
@@ -843,33 +854,32 @@ describe("executeAgentTool — model access", () => {
 
     vi.clearAllMocks();
     mockRouting.agentAccess = {};
-    const denied = await executeAgentTool(
+    const denied = executeAgentTool(
       "parent-provider-no-rule",
       makeParams({ model: "test/other-model" }),
       undefined,
       undefined,
       ctx,
     );
-    expect(denied.content[0].text).toContain("has no access");
+    await expect(denied).rejects.toThrow("has no access");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("applies policy gates before registry availability for qualified models", async () => {
     mockRouting.enabledProviders = [];
-    const result = await executeAgentTool("unknown-provider", makeParams({ model: "missing/worker" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("provider \"missing\" is disabled");
-    expect(result.content[0].text).not.toContain("Unknown model id");
+    const result = executeAgentTool("unknown-provider", makeParams({ model: "missing/worker" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow('Model "missing/worker" is not authorized: provider "missing" is disabled.');
   });
 
   it("requires an Agent/provider rule", async () => {
     mockRouting.agentAccess = {};
-    const result = await executeAgentTool("agent-provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("has no access");
+    const result = executeAgentTool("agent-provider", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("has no access");
   });
 
   it("requires a matching exact model rule", async () => {
-    const result = await executeAgentTool("model-rule", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("not authorized for Agent");
+    const result = executeAgentTool("model-rule", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("not authorized for Agent");
   });
 
   it("allows an all-model rule", async () => {
@@ -880,15 +890,15 @@ describe("executeAgentTool — model access", () => {
 
   it("rejects catalogue-only alternate models", async () => {
     ctx.modelRegistry.getAvailable = vi.fn(() => [{ provider: "test", id: "parent-model" }]);
-    const result = await executeAgentTool("availability", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("not currently available to Pi");
+    const result = executeAgentTool("availability", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("not currently available to Pi");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("rejects alternate models outside active scope", async () => {
     mockScopedModelKeys.mockReturnValueOnce(new Set(["test/parent-model"]));
-    const result = await executeAgentTool("scope", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
-    expect(result.content[0].text).toContain("active model scope");
+    const result = executeAgentTool("scope", makeParams({ model: "cpa-responses/grok-4.5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("active model scope");
   });
 
   it("resolves bare IDs from the full registry", async () => {
@@ -921,8 +931,8 @@ describe("executeAgentTool — model access", () => {
   });
 
   it("never falls back after an explicit denial", async () => {
-    const result = await executeAgentTool("no-fallback", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
-    expect(result.isError).toBe(true);
+    const result = executeAgentTool("no-fallback", makeParams({ model: "cpa-responses/grok-5" }), undefined, undefined, ctx);
+    await expect(result).rejects.toThrow("not authorized for Agent");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 });

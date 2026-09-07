@@ -59,6 +59,7 @@ function mockRunResult(overrides?: Partial<ReturnType<typeof mockRunResult>>) {
 
 import { AgentManager } from "../../src/agents/agent-manager.js";
 import type { ConcurrencyConfig } from "../../src/agents/agent-manager.js";
+import type { AgentStatus } from "../../src/types.js";
 
 describe("AgentManager", () => {
   let manager: AgentManager;
@@ -76,9 +77,151 @@ describe("AgentManager", () => {
     vi.useRealTimers();
   });
 
+  describe("list ordering", () => {
+    beforeEach(() => {
+      manager = new AgentManager(onComplete);
+      mockModules.mockRunAgent.mockReturnValue(new Promise(() => {}));
+    });
+
+    function addRecord(name: string, status: AgentStatus, startedAt: number, completedAt?: number, pinnedAt?: number) {
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", name, { description: name });
+      const record = manager.getRecord(id)!;
+      Object.assign(record.lifecycle, { status, startedAt, completedAt, pinnedAt });
+      return record;
+    }
+
+    function names() {
+      return manager.listAgents().map(record => record.display.description);
+    }
+
+    it("ranks attention, motion, queue, and archive with their time orders", () => {
+      addRecord("completed", "completed", 10, 900);
+      addRecord("queued-later", "queued", 900);
+      addRecord("error", "error", 100, 800);
+      addRecord("running-later", "running", 200);
+      addRecord("stopped", "stopped", 300, 700);
+      addRecord("turn-limited", "turn_limited", 500, 600);
+      addRecord("running-earlier", "running", 100);
+      addRecord("queued-earlier", "queued", 100);
+      addRecord("aborted", "aborted", 600, 1000);
+
+      expect(names()).toEqual([
+        "aborted", "error", "turn-limited", "running-earlier", "running-later",
+        "queued-earlier", "queued-later", "completed", "stopped",
+      ]);
+    });
+
+    it.each([
+      { status: "error", expected: ["pinned-later", "pinned-earlier", "unpinned"] },
+      { status: "running", expected: ["pinned-earlier", "pinned-later", "unpinned"] },
+      { status: "queued", expected: ["pinned-earlier", "pinned-later", "unpinned"] },
+      { status: "completed", expected: ["pinned-later", "pinned-earlier", "unpinned"] },
+    ] as const)("elevates pins within $status while preserving time order", ({ status, expected }) => {
+      addRecord("unpinned", status, 20, 20);
+      addRecord("pinned-earlier", status, 10, 10, 0);
+      addRecord("pinned-later", status, 30, 30, 1);
+
+      expect(names()).toEqual(expected);
+    });
+
+    it("keeps pins inside their attention group", () => {
+      addRecord("pinned-archive", "stopped", 400, 400, 1);
+      addRecord("pinned-queue", "queued", 300, undefined, 1);
+      addRecord("running", "running", 200);
+      addRecord("error", "error", 100, 100);
+
+      expect(names()).toEqual(["error", "running", "pinned-queue", "pinned-archive"]);
+    });
+
+    it("uses registration order to break timestamp ties", () => {
+      addRecord("first-error", "error", 100, 200);
+      addRecord("first-running", "running", 100);
+      addRecord("second-error", "aborted", 100, 200);
+      addRecord("second-running", "running", 100);
+
+      expect(names()).toEqual(["first-error", "second-error", "first-running", "second-running"]);
+    });
+
+    it("uses start time only when completion time is absent", () => {
+      addRecord("zero-completion", "error", 1000, 0);
+      addRecord("missing-completion", "aborted", 100);
+      addRecord("completed", "completed", 1000, 200);
+      addRecord("stopped", "stopped", 300);
+
+      expect(names()).toEqual(["missing-completion", "zero-completion", "stopped", "completed"]);
+    });
+  });
+
   // ── Concurrency ──
 
   describe("concurrency", () => {
+    it.each([
+      { ceiling: "model", nextModel: "test/first", stopBeforeClear: false },
+      { ceiling: "provider", nextModel: "test/second", stopBeforeClear: true },
+    ])("releases the $ceiling slot on clear without releasing it twice", async ({ nextModel, stopBeforeClear }) => {
+      manager = new AgentManager(onComplete, { default: 1, providers: { test: 1 } });
+      const first = makeResolvablePromise();
+      const second = makeResolvablePromise();
+      const third = makeResolvablePromise();
+      mockModules.mockRunAgent
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise)
+        .mockReturnValueOnce(third.promise);
+
+      const firstId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", {
+        description: "first", modelKey: "test/first",
+      });
+      const firstRun = manager.getRecord(firstId)!.execution.promise;
+      const secondId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "second", {
+        description: "second", modelKey: nextModel,
+      });
+      const thirdId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "third", {
+        description: "third", modelKey: nextModel,
+      });
+      expect(manager.getRecord(secondId)!.lifecycle.status).toBe("queued");
+
+      if (stopBeforeClear) manager.abort(firstId, "user");
+      expect(manager.clear(firstId)).toBe(true);
+      expect(manager.getRecord(secondId)!.lifecycle.status).toBe("running");
+      expect(manager.getRecord(thirdId)!.lifecycle.status).toBe("queued");
+
+      first.resolve(mockRunResult());
+      await firstRun;
+      expect(manager.getRecord(thirdId)!.lifecycle.status).toBe("queued");
+      expect(mockModules.mockRunAgent).toHaveBeenCalledTimes(2);
+
+      second.resolve(mockRunResult());
+      await manager.getRecord(secondId)!.execution.promise;
+      expect(manager.getRecord(thirdId)!.lifecycle.status).toBe("running");
+      third.resolve(mockRunResult());
+      await manager.getRecord(thirdId)!.execution.promise;
+    });
+
+    it("releases a cleared continuation slot only once", async () => {
+      manager = new AgentManager(onComplete, { default: 1 });
+      const next = makeResolvablePromise();
+      const continuation = makeResolvablePromise();
+      mockModules.mockRunAgent.mockResolvedValueOnce(mockRunResult()).mockReturnValue(next.promise);
+      mockModules.mockContinueAgentSession.mockReturnValue(continuation.promise);
+      const options = { description: "task", modelKey: "test/model" };
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "first", options);
+      await manager.getRecord(id)!.execution.promise;
+      expect(await manager.interact(id, "continue")).toEqual({ accepted: true });
+      const continuationRun = manager.getRecord(id)!.execution.promise;
+      const nextId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "next", options);
+
+      manager.clear(id);
+      expect(manager.getRecord(nextId)!.lifecycle.status).toBe("running");
+      const queuedId = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "queued", options);
+      continuation.resolve({ responseText: "late", aborted: true, turnLimited: false });
+      await continuationRun;
+      expect(manager.getRecord(queuedId)!.lifecycle.status).toBe("queued");
+
+      manager.abort(queuedId);
+      next.resolve(mockRunResult());
+      await manager.getRecord(nextId)!.execution.promise;
+    });
+
     it("starts all agents when under per-model limit", () => {
       const config: ConcurrencyConfig = { default: 4, models: {} };
       manager = new AgentManager(onComplete, config);
@@ -473,6 +616,38 @@ describe("AgentManager", () => {
 
     expect(session.dispose).toHaveBeenCalledTimes(1);
     expect(manager.getRecord(id)).toBeUndefined();
+  });
+
+  it.each(["stopped", "error"] as const)("closes a late session for a %s record without flushing steers", async status => {
+    const setup = makeResolvablePromise();
+    const session = mockAgentSession();
+    mockModules.mockRunAgent.mockImplementationOnce(async (_ctx, _type, _prompt, options) => {
+      options.onSessionSetupStarted();
+      await setup.promise;
+      await options.onSessionCreated(session);
+      options.onSessionSetupFinished();
+      return mockRunResult({ session });
+    });
+
+    manager = new AgentManager(onComplete);
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "late setup", {
+      description: "late setup", modelKey: "test/model",
+    });
+    const record = manager.getRecord(id)!;
+    expect(await manager.interact(id, "pending steer")).toEqual({ accepted: true });
+    expect(record.execution.pendingSteers).toHaveLength(1);
+    if (status === "stopped") manager.abort(id, "user");
+    else record.lifecycle.status = "error";
+
+    setup.resolve(undefined);
+    await record.execution.promise;
+
+    expect(record.execution.pendingSteers).toBeUndefined();
+    expect(record.execution.abortController!.signal.aborted).toBe(true);
+    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(record.execution.session).toBeUndefined();
+    expect(record.lifecycle.status).toBe(status);
   });
 
   it("settles a foreground wait when a queued agent is stopped", async () => {
@@ -1622,35 +1797,48 @@ describe("AgentManager", () => {
       const onStatsUpdate = vi.fn();
       manager.setOnStatsUpdate(onStatsUpdate);
 
+      const session = mockAgentSession();
+      session.getSessionStats = vi.fn().mockReturnValue({ contextUsage: { percent: 12 } });
+      const run = makeResolvablePromise();
       let capturedOptions: any;
-      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+      mockModules.mockRunAgent.mockImplementation((_ctx, _type, _prompt, options) => {
         capturedOptions = options;
-        return mockRunResult();
+        return run.promise;
       });
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
       const record = manager.getRecord(id)!;
+      await capturedOptions.onSessionCreated(session);
 
       capturedOptions.onToolUse();
       expect(record.stats.toolUses).toBe(1);
+      expect(record.stats.contextPercent).toBe(12);
       expect(onStatsUpdate).toHaveBeenCalledTimes(1);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
 
+      session.getSessionStats.mockReturnValue({ contextUsage: { percent: 23 } });
       capturedOptions.onAssistantUsage({ input: 100, output: 50, cacheWrite: 0, cost: 0.01 });
       expect(record.stats.lifetimeUsage.input).toBe(100);
+      expect(record.stats.contextPercent).toBe(23);
       expect(onStatsUpdate).toHaveBeenCalledTimes(2);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
 
+      session.getSessionStats.mockReturnValue({ contextUsage: { percent: null } });
       capturedOptions.onCompaction();
       expect(record.stats.compactionCount).toBe(1);
+      expect(record.stats.contextPercent).toBeNull();
       expect(onStatsUpdate).toHaveBeenCalledTimes(3);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
 
+      session.getSessionStats.mockReturnValue({ contextUsage: { percent: 34 } });
       capturedOptions.onTurnEnd(3);
       expect(record.stats.turnCount).toBe(3);
+      expect(record.stats.contextPercent).toBe(34);
       expect(onStatsUpdate).toHaveBeenCalledTimes(4);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+      expect(session.getSessionStats).toHaveBeenCalledTimes(4);
 
+      run.resolve(mockRunResult({ session }));
       await record.execution.promise;
     });
 
@@ -1660,12 +1848,14 @@ describe("AgentManager", () => {
       manager.setOnStatsUpdate(onStatsUpdate);
 
       const session = mockAgentSession();
+      session.getSessionStats = vi.fn().mockReturnValue({ contextUsage: { percent: 10 } });
       mockModules.mockRunAgent.mockResolvedValue(mockRunResult({ session }));
 
+      const continuation = makeResolvablePromise();
       let continueOptions: any;
-      mockModules.mockContinueAgentSession.mockImplementation(async (_session, _prompt, options) => {
+      mockModules.mockContinueAgentSession.mockImplementation((_session, _prompt, options) => {
         continueOptions = options;
-        return { responseText: "cont", aborted: false, turnLimited: false };
+        return continuation.promise;
       });
 
       const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", { description: "task", modelKey: "test/model" });
@@ -1673,18 +1863,25 @@ describe("AgentManager", () => {
       await record.execution.promise;
 
       onStatsUpdate.mockClear();
+      session.getSessionStats.mockClear();
 
       await manager.interact(id, "continue");
+      session.getSessionStats.mockReturnValue({ contextUsage: { percent: 45 } });
       continueOptions.onToolUse();
       expect(record.stats.toolUses).toBe(1);
+      expect(record.stats.contextPercent).toBe(45);
       expect(onStatsUpdate).toHaveBeenCalledTimes(1);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
 
+      session.getSessionStats.mockReturnValue({ contextUsage: { percent: 56 } });
       continueOptions.onTurnEnd(2);
       expect(record.stats.turnCount).toBe(3);
+      expect(record.stats.contextPercent).toBe(56);
       expect(onStatsUpdate).toHaveBeenCalledTimes(2);
       expect(onStatsUpdate).toHaveBeenLastCalledWith(record);
+      expect(session.getSessionStats).toHaveBeenCalledTimes(2);
 
+      continuation.resolve({ responseText: "cont", aborted: false, turnLimited: false });
       await record.execution.promise;
     });
   });

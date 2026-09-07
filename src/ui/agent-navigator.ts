@@ -28,7 +28,6 @@ import type { AgentRecord } from "../types.js";
 import { extractDeliverableMessages } from "../prompt/subagent-delivery.js";
 import { getCoordinator, getSessionCtx } from "../shell.js";
 import { DeliverySelectorComponent } from "./delivery-selector.js";
-import { getSessionContextPercent } from "../agents/usage.js";
 import {
   buildStatsParts,
   formatModelIdentity,
@@ -1242,9 +1241,7 @@ export class AgentNavigator {
           maxTurns: record.stats.maxTurns,
           input: record.stats.lifetimeUsage.input,
           output: record.stats.lifetimeUsage.output,
-          contextPercent: record.execution.session
-            ? getSessionContextPercent(record.execution.session)
-            : record.stats.contextPercent ?? null,
+          contextPercent: record.stats.contextPercent ?? null,
           compactions: record.stats.compactionCount,
           cost: record.stats.lifetimeUsage.cost,
           durationMs,
@@ -1606,9 +1603,7 @@ export class AgentNavigator {
       const session = record.execution.session;
       const invocation = record.display.invocation;
       const usage = record.stats.lifetimeUsage;
-      const contextPercent = session
-        ? getSessionContextPercent(session)
-        : record.stats.contextPercent ?? null;
+      const contextPercent = record.stats.contextPercent ?? null;
       const elapsedSec = Math.floor(
         ((record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt) / 1000,
       );

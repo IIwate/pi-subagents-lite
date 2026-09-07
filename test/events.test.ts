@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ensureManagerAndNavigator, setupEventListeners } from "../src/events.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ensureManagerAndNavigator, scanAndRegisterAgents, setupEventListeners } from "../src/events.js";
+import * as agentDiscovery from "../src/agents/agent-discovery.js";
+import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs } from "../src/agents/agent-types.js";
 import {
   getManager,
   getNavigator,
+  getStore,
   setManager,
   setNavigator,
   setCoordinator,
@@ -43,10 +49,57 @@ describe("ensureManagerAndNavigator", () => {
     const ensureTimerSpy = vi.spyOn(navigator!, "ensureTimer").mockImplementation(() => {});
 
     // Trigger stats update notification on the manager
-    const dummyRecord: any = { id: "test-agent" };
+    const dummyRecord: any = { id: "test-agent", execution: {}, stats: {} };
     (manager as any).notifyStatsUpdate(dummyRecord);
 
     expect(ensureTimerSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("project trust during agent discovery", () => {
+  let project: string;
+
+  beforeEach(() => {
+    project = mkdtempSync(join(tmpdir(), "pi-agent-trust-"));
+    const agentDir = join(project, ".pi", "agents");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, "project-only.md"), "---\nname: project-only\ndescription: Project agent\n---\nProject instructions.");
+    writeFileSync(join(agentDir, "shared-agent.md"), "---\nname: shared-agent\ndescription: Project override\n---\nProject override.");
+
+    const scan = agentDiscovery.scanAgentFilesInDir;
+    vi.spyOn(agentDiscovery, "scanAgentFilesInDir").mockImplementation((dir, source) => source === "user"
+      ? Promise.resolve([{ name: "shared-agent", description: "Global agent", systemPrompt: "Global instructions.", source: "user" }])
+      : scan(dir, source));
+    const store = getStore();
+    vi.spyOn(store, "agent", "get").mockReturnValue({ ...store.agent, disableDefaultAgents: false });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setAgentScanDirs("", "", false);
+    registerAgents(new Map());
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it("keeps built-in and global agents while excluding untrusted project definitions", async () => {
+    await scanAndRegisterAgents({ cwd: project, isProjectTrusted: () => true } as any);
+    expect(getAgentConfig("project-only")).toBeDefined();
+
+    await scanAndRegisterAgents({ cwd: project, isProjectTrusted: () => false } as any);
+
+    expect(getAvailableTypes()).toContain("general-purpose");
+    expect(getAgentConfig("shared-agent")!.systemPrompt).toBe("Global instructions.");
+    expect(getAgentConfig("project-only")).toBeUndefined();
+  });
+
+  it.each([true, undefined])("loads project agents when trust is %s", async trusted => {
+    await scanAndRegisterAgents({
+      cwd: project,
+      isProjectTrusted: trusted === undefined ? undefined : () => trusted,
+    } as any);
+
+    expect(getAgentConfig("project-only")!.systemPrompt).toBe("Project instructions.");
+    expect(getAgentConfig("shared-agent")!.systemPrompt).toBe("Project override.");
   });
 });
 

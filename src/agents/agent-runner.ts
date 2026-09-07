@@ -86,7 +86,7 @@ interface RetryClassifierMessage {
 }
 
 const TRANSIENT_TRANSPORT_ERROR_PATTERN =
-  /\b(?:stream|socket|network|transport)(?:[_\s-]+(?:read|write|connect(?:ion)?|disconnect(?:ed|ion)?|closed?|reset|lost|timeout))(?:[_\s-]+error)?\b|\b(?:EOF|ECONNRESET|ETIMEDOUT|EPIPE)\b|invalid SSE data JSON/i;
+  /\b(?:stream|socket|network|transport)(?:[_\s-]+(?:read|write|connect(?:ion)?|disconnect(?:ed|ion)?|closed?|reset|lost|timeout))(?:[_\s-]+error)?\b|\b(?:EOF|ECONNRESET|ETIMEDOUT|EPIPE)\b|invalid SSE data JSON|\bupstream_error\b|Upstream request failed/i;
 
 /**
  * Pi has no public hook for extending per-session retry classification, so wrap

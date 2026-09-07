@@ -34,15 +34,17 @@ Once a subagent exists, progress appears in the below-editor list or its folded 
 - `◇` and `◆` mark inactive and active session-local pinned transcripts.
 - Main shows nonzero `running` and `queued` counts plus the total list count. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
 - While expanded, sticky Main owns the running/queued/total counts, exceptional `results pending` state for the active branch, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status in the normal path. Normal in-flight automatic delivery does not show pending text. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Zero pending results are hidden. Both forms show counts, delivery state when nonzero, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
-- Status values are `Queued`, `Running`, `Done`, `Stopped`, `Turn limit`, `Aborted`, and `Error`.
+- Rows are grouped by attention: `Error`/`Aborted`/`Turn limit`, `Running`, `Queued`, then `Done`/`Stopped`. Running and queued rows show the earliest start or queue time first; terminal rows show the latest completion first. Registration order breaks timestamp ties.
 - With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
-- Pins pause automatic cleanup without changing status ordering. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
+- Pins move rows to the front of their status group and pause automatic cleanup. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
 - Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
 - Foreground Agent calls honor Pi's interrupt signal: `Esc` from the editor stops every running or queued foreground Agent in the interrupted parent turn, while background Agents continue. If the list has focus, `Esc` only returns to the editor; press it again there to interrupt. While a child view is active, `Esc` from the editor stops that running subagent.
 - While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
 - Persisted terminal results are normally removed from the volatile Agent list after 10 minutes; the parent session result entry remains available for later delivery and exact lookup. Automatic delivery is limited to branches that retain the Agent call's origin entry; explicit `AgentStatus({ agent_id })` lookup remains session-wide. A settled record with a retained live session can accept subsequent prompts through the selected child view during the same ordinary retention period. Each continuation produces a new terminal result and delivery ID, delivering to the parent session without retracting or duplicating prior deliveries. When an interrupted foreground subagent is continued, its continuation results are delivered to the parent session. Pinning extends ordinary retention; viewing does not. Child sessions and pins are not persisted across `/reload` or process exit, and the parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background terminal results, including errors, are immediately persisted in the parent Pi session with the Agent call's session ID and origin entry before one automatic wake opportunity. They are delivered only while that origin remains on the active branch. A completion persisted during a failed parent turn provides one later wake opportunity after settlement; the failed result alone does not retry itself. A later persisted completion may carry older eligible pending results, while the next natural parent prompt injects them during preflight even after an automatic wake failed. Explicit reload or `/tree` return to the origin is a separate restoration event; forked or new sessions ignore copied entries from the old session. Do not poll, sleep, or repeatedly call `AgentStatus` while waiting. Use `AgentStatus({ agent_id })` only for explicit session-wide result lookup; that read is acknowledged only after its parent turn settles successfully.
+
+Parent wake messages include up to 4000 characters per result, followed by an `AgentStatus({ agent_id })` hint when truncated. Persisted results and exact `AgentStatus` queries retain the full text.
 
 ## Built-in Agents
 
@@ -56,7 +58,7 @@ Built-ins can be overridden by custom agents or disabled from `/agents`. Disabli
 Agent definitions are Markdown files loaded from:
 
 - `~/.pi/agent/agents/*.md` — user-wide agents.
-- `.pi/agents/*.md` — project agents.
+- `.pi/agents/*.md` — project agents, loaded only when Pi trusts the project.
 
 Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field.
 
@@ -103,7 +105,7 @@ A missing or legacy `modelRouting` block starts with routing OFF and no alternat
 - `model` — an exact `id` or `provider/id` inside Pi's active model scope. Set thinking through the separate `thinking` field.
 - `thinking` — `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`, subject to the selected model's reasoning capabilities.
 - `run_in_background` — return immediately and notify the parent when complete.
-- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn.
+- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn when Pi trusts the project.
 
 Thinking is resolved when the call is accepted, in order: `thinking` parameter, agent frontmatter, scoped-model setting, global default, then parent session. Empty or whitespace-only values fall through to the next source. Explicit parameters and frontmatter must name a supported level; unsupported levels inherited from settings or the parent use the model's highest supported level. Non-reasoning models receive no inherited thinking override. Pi's `thinkingLevelMap` defines support, including `null` exclusions and explicit opt-in for `xhigh` and `max`.
 

@@ -40,6 +40,16 @@ const AGENT_ID_PREFIX_LENGTH = 17;
 /** Default per-model concurrency limit when not specified in config. */
 const DEFAULT_CONCURRENCY_LIMIT = 4;
 
+const STATUS_ATTENTION_RANK: Record<AgentStatus, number> = {
+  error: 0,
+  aborted: 0,
+  turn_limited: 0,
+  running: 1,
+  queued: 2,
+  completed: 3,
+  stopped: 3,
+};
+
 /** Whether the agent status is terminal (no longer running or queued). */
 function isTerminalStatus(status: AgentStatus): boolean {
   return status !== "running" && status !== "queued";
@@ -113,6 +123,8 @@ export class AgentManager {
   /** Running counts are independent from mutable limits so config changes preserve live accounting. */
   private modelRunning = new Map<string, number>();
   private providerRunning = new Map<string, number>();
+  /** Clear and delayed completion share ownership so each reservation is released once. */
+  private reservedModelKeys = new Map<string, string>();
 
   /** Per-model ceiling when no explicit model override exists. */
   private defaultConcurrency: number;
@@ -231,15 +243,19 @@ export class AgentManager {
       || this.runningCount(this.providerRunning, provider) < providerLimit;
   }
 
-  private reserveConcurrency(modelKey: string): boolean {
+  private reserveConcurrency(id: string, modelKey: string): boolean {
     if (!this.hasConcurrencyCapacity(modelKey)) return false;
     const provider = this.providerFromModelKey(modelKey);
     this.modelRunning.set(modelKey, this.runningCount(this.modelRunning, modelKey) + 1);
     this.providerRunning.set(provider, this.runningCount(this.providerRunning, provider) + 1);
+    this.reservedModelKeys.set(id, modelKey);
     return true;
   }
 
-  private releaseConcurrency(modelKey: string): void {
+  private releaseConcurrency(id: string): void {
+    const modelKey = this.reservedModelKeys.get(id);
+    if (modelKey === undefined) return;
+    this.reservedModelKeys.delete(id);
     const provider = this.providerFromModelKey(modelKey);
     const modelRunning = Math.max(0, this.runningCount(this.modelRunning, modelKey) - 1);
     const providerRunning = Math.max(0, this.runningCount(this.providerRunning, provider) - 1);
@@ -266,10 +282,7 @@ export class AgentManager {
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
     // Reserve both the per-model ceiling and any shared Provider ceiling.
-    const reservedModelKey = options.modelKey && this.reserveConcurrency(options.modelKey)
-      ? options.modelKey
-      : undefined;
-    const queued = options.modelKey !== undefined && reservedModelKey === undefined;
+    const queued = options.modelKey !== undefined && !this.reserveConcurrency(id, options.modelKey);
 
     let queuedPromise: Promise<string> | undefined;
     if (queued) {
@@ -315,8 +328,8 @@ export class AgentManager {
       if (queued) {
         this.queue = this.queue.filter(entry => entry.id !== id);
         this.settleQueued(id);
-      } else if (reservedModelKey) {
-        this.releaseConcurrency(reservedModelKey);
+      } else {
+        this.releaseConcurrency(id);
       }
       this.safeNotifyComplete(record);
       return id;
@@ -331,10 +344,10 @@ export class AgentManager {
 
     // startAgent can throw — clean up record so callers don't see an orphan
     try {
-      this.startAgent(id, record, args, reservedModelKey);
+      this.startAgent(id, record, args);
     } catch (err) {
       this.detachParentAbort(id);
-      if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+      this.releaseConcurrency(id);
       this.agents.delete(id);
       throw err;
     }
@@ -343,13 +356,12 @@ export class AgentManager {
 
   /**
    * Actually start an agent (called immediately or from queue drain).
-   * reservedModelKey identifies the already-acquired Provider and model ceilings.
+   * The run already owns its Provider and model reservation.
    */
   private startAgent(
     id: string,
     record: AgentRecord,
     { pi, ctx, type, prompt, options }: SpawnArgs,
-    reservedModelKey?: string,
   ) {
     const debugFault = this.armedDebugFault;
     this.armedDebugFault = undefined;
@@ -390,7 +402,14 @@ export class AgentManager {
         this.notifyStatsUpdate(record);
       },
       onSessionCreated: async (session) => {
-        if (this.disposing || this.agents.get(id) !== record) {
+        if (
+          this.disposing
+          || this.agents.get(id) !== record
+          || record.lifecycle.status === "stopped"
+          || record.lifecycle.status === "error"
+        ) {
+          record.execution.pendingSteers = undefined;
+          record.execution.abortController?.abort();
           await this.closeSession(session);
           return;
         }
@@ -409,7 +428,7 @@ export class AgentManager {
       },
     })
       .then(({ responseText, session, aborted, turnLimited }) => {
-        if (this.disposing || this.agents.get(id) !== record) {
+        if (this.disposing || this.agents.get(id) !== record || this.closedSessions.has(session)) {
           void this.closeSession(session);
           return responseText;
         }
@@ -435,7 +454,7 @@ export class AgentManager {
       })
       .finally(() => {
         this.detachParentAbort(id);
-        if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+        this.releaseConcurrency(id);
 
         record.execution.settled = true;
         this.safeNotifyComplete(record);
@@ -481,6 +500,7 @@ export class AgentManager {
   }
 
   private notifyStatsUpdate(record: AgentRecord): void {
+    record.stats.contextPercent = getSessionContextPercent(record.execution.session);
     try { this.onStatsUpdate?.(record); } catch { /* ignore */ }
   }
 
@@ -508,14 +528,14 @@ export class AgentManager {
     for (const entry of this.queue) {
       const record = this.agents.get(entry.id);
       if (!record || record.lifecycle.status !== "queued") continue;
-      if (!this.reserveConcurrency(entry.modelKey)) continue;
+      if (!this.reserveConcurrency(entry.id, entry.modelKey)) continue;
 
       try {
-        this.startAgent(entry.id, record, entry.args, entry.modelKey);
+        this.startAgent(entry.id, record, entry.args);
         started.add(entry.id);
       } catch (err) {
         this.detachParentAbort(entry.id);
-        this.releaseConcurrency(entry.modelKey);
+        this.releaseConcurrency(entry.id);
         // Late failure — surface on the record so the user can see it
         record.lifecycle.status = "error";
         record.error = errorMessage(err);
@@ -588,7 +608,7 @@ export class AgentManager {
     }
 
     const reservedModelKey = record.execution.modelKey;
-    if (reservedModelKey && !this.reserveConcurrency(reservedModelKey)) {
+    if (reservedModelKey && !this.reserveConcurrency(id, reservedModelKey)) {
       return { accepted: false, reason: "concurrency", modelKey: reservedModelKey };
     }
 
@@ -649,7 +669,7 @@ export class AgentManager {
       })
       .finally(() => {
         abortController.signal.removeEventListener("abort", abortSession);
-        if (reservedModelKey) this.releaseConcurrency(reservedModelKey);
+        this.releaseConcurrency(id);
         record.execution.settled = true;
         this.safeNotifyComplete(record);
         this.drainQueue();
@@ -664,9 +684,17 @@ export class AgentManager {
   }
 
   listAgents(): AgentRecord[] {
-    return [...this.agents.values()].sort(
-      (a, b) => b.lifecycle.startedAt - a.lifecycle.startedAt,
-    );
+    // Stable sort retains Map registration order when all attention keys tie.
+    return [...this.agents.values()].sort((a, b) => {
+      const rank = STATUS_ATTENTION_RANK[a.lifecycle.status];
+      const rankDifference = rank - STATUS_ATTENTION_RANK[b.lifecycle.status];
+      if (rankDifference !== 0) return rankDifference;
+      const pinDifference = Number(b.lifecycle.pinnedAt != null) - Number(a.lifecycle.pinnedAt != null);
+      if (pinDifference !== 0) return pinDifference;
+      return rank === 0 || rank === 3
+        ? (b.lifecycle.completedAt ?? b.lifecycle.startedAt) - (a.lifecycle.completedAt ?? a.lifecycle.startedAt)
+        : a.lifecycle.startedAt - b.lifecycle.startedAt;
+    });
   }
 
   abort(id: string, stoppedBy?: StopInitiator): boolean {
@@ -688,6 +716,8 @@ export class AgentManager {
       this.stopAgent(record, stoppedBy, false);
     }
     this.removeRecord(id, record);
+    this.releaseConcurrency(id);
+    this.drainQueue();
     return true;
   }
 

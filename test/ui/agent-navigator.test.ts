@@ -1962,6 +1962,30 @@ describe("AgentNavigator", () => {
     expect((navigator as any).refreshTimer).toBeUndefined();
   });
 
+  it("renders pushed context usage without reading session stats on timer ticks", () => {
+    vi.useFakeTimers();
+    const record = makeRecord();
+    record.stats.lifetimeUsage.input = 100;
+    record.stats.contextPercent = 23;
+    record.execution.session.getSessionStats = vi.fn(() => {
+      throw new Error("Session history must not be read during list rendering");
+    });
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui, selector } = mountSelector(ui);
+    tui.terminal.columns = 180;
+
+    expect(selector.render(180).join("\n")).toContain("23%");
+    record.stats.contextPercent = 47;
+    vi.advanceTimersByTime(1000);
+    expect(selector.render(180).join("\n")).toContain("47%");
+    record.stats.contextPercent = null;
+    vi.advanceTimersByTime(1000);
+    expect(selector.render(180).join("\n")).not.toContain("47%");
+    expect(record.execution.session.getSessionStats).not.toHaveBeenCalled();
+  });
+
   it("keeps refresh timer running while any agent is unsettled even if status is not running or queued", () => {
     const record = makeRecord("agent-unsettled", "error");
     record.execution.settled = false;

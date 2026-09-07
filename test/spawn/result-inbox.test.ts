@@ -113,4 +113,34 @@ describe("result inbox", () => {
     expect(message.content).toContain("A");
     expect(message.content).toContain("B");
   });
+
+  it.each(["Short report", "x".repeat(4000)])("delivers a result within the limit intact (%#)", text => {
+    expect(buildResultMessage([result("a", text)])!.content)
+      .toBe(`[Subagent "reviewer" a completed]\n\n${text}`);
+  });
+
+  it("truncates each long wake payload while retaining full persisted results", () => {
+    const entries: any[] = [];
+    const pi = {
+      appendEntry: vi.fn((customType: string, data: unknown) => entries.push({ type: "custom", customType, data })),
+    } as any;
+    const firstText = "A".repeat(4000) + "First full report tail";
+    const secondText = "B".repeat(4000) + "Second full report tail";
+    const first = result("a", firstText);
+    const second = result("b", secondText);
+    appendPendingResult(pi, first);
+    appendPendingResult(pi, second);
+
+    const ctx = context(entries);
+    const message = buildResultMessage([...readResultEntries(ctx).pending.values()])!;
+    expect(message.content).toContain("A".repeat(4000));
+    expect(message.content).toContain("B".repeat(4000));
+    expect(message.content).not.toContain("First full report tail");
+    expect(message.content).not.toContain("Second full report tail");
+    expect(message.content).toContain('\n… (truncated; use AgentStatus({ agent_id: "a" }) to read the full result)');
+    expect(message.content).toContain('\n… (truncated; use AgentStatus({ agent_id: "b" }) to read the full result)');
+    expect(findStoredResult(ctx, "a")!.result).toBe(firstText);
+    expect(findStoredResult(ctx, "b")!.result).toBe(secondText);
+    expect(entries[0].data.result).toBe(firstText);
+  });
 });
