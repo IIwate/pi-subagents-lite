@@ -1,16 +1,25 @@
-# Dev
-**Package manager:** bun (`bun install`, `bun add`, `bun add -d`)
-**Typecheck:** `bun run typecheck`
-**Tests:** `bun run test` (the full suite; runs in CI via `test.yml`)
-**Before committing:** run typecheck and the full test suite.
+# Development and verification
 
-# Repository language and style
+**Package manager:** bun (`bun install`, `bun add`, `bun add -d`).
 
-**Commits:** English Conventional Commits; add concise `-` bullets for non-trivial changes.
+**Typecheck:** `bun run typecheck`.
 
-**Review checkpoint:** After review fixes and required checks pass, add one commit-message line: `Review-Result: PASS`. Treat that commit as the inclusive checkpoint; the next review starts after it.
+**Tests:** `bun run test` is the official full suite and keeps `--maxWorkers=1` for CI stability. `bun run test:parallel` runs without that cap.
 
-**Comments and tests:** English only; explain why, tradeoffs, failure boundaries, and revisit conditions.
+During implementation, run the narrowest tests that cover the change. Run selected evidence once for an unchanged tree; do not repeat it merely because a commit or push follows.
+
+Before committing, run `git diff --cached --check`. Run the full suite locally only for an explicit user request, CI failure diagnosis, or a repository-wide change with no credible narrower evidence. The Test workflow owns mandatory full-suite execution on Linux and Windows for every push and pull request.
+
+**Worktrees:** When creating a worktree, link reusable dependency directories such as `node_modules` to the main checkout; do not copy, reinstall, or move the main checkout's `node_modules`. Keep the main checkout and worktree on the same filesystem side (both Windows or both WSL/Linux); do not cross-link Win<->WSL. **Windows:** `cmd /c mklink /J <worktree>/node_modules <main>/node_modules`; unlink with `cmd /c rmdir <worktree>/node_modules` (do not recursively delete a junction). **WSL/Linux:** `ln -s <main>/node_modules <worktree>/node_modules`; unlinking the symlink must remove only the link. After merge, unlink first, then remove the worktree and leftover branches.
+
+# Language, code, and Git
+
+- Agent responses use Simplified Chinese.
+- Code comments, JSDoc, test names, test descriptions, assertion messages, commits, and PR descriptions use English.
+- Comments explain why, trade-offs, failure boundaries, and revisit conditions; they do not restate visible control flow.
+- Follow KISS: no unrequested compatibility layer, migration shim, duplicate implementation, speculative fallback, or scope expansion. Because releases exist, any persisted-format or public-contract break requires an explicit migration/version decision.
+- Match surrounding naming, comment density, and idiom.
+- Commits use English Conventional Commits. Non-trivial commits add concise `- ` bullets and never include AI attribution.
 
 # Release
 
