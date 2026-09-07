@@ -5,4 +5,5 @@
 export type Theme = {
   fg(color: string, text: string): string;
   bold(text: string): string;
+  bg?(color: string, text: string): string;
 };

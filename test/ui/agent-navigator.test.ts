@@ -751,19 +751,22 @@ describe("AgentNavigator", () => {
     const runningIndex = lines.findIndex((line: string) => line.includes("Running"));
     const errorIndex = lines.findIndex((line: string) => line.includes("Error"));
     expect(manager.togglePinned).toHaveBeenCalledWith(done.id);
-    expect(lines[doneIndex]).toContain("◇ Explore");
+    expect(lines[doneIndex]).toContain("○ Explore");
+    expect(lines[doneIndex]).toContain("◆");
     expect(lines.join("\n")).toContain("Space Unpin");
     expect(doneIndex).toBeLessThan(runningIndex);
     expect(runningIndex).toBeLessThan(errorIndex);
 
     navigator.handleTerminalInput("\r");
     lines = selector.render(120);
-    expect(lines.find((line: string) => line.includes("Done"))).toContain("◆ Explore");
+    expect(lines.find((line: string) => line.includes("Done"))).toContain("● Explore");
+    expect(lines.find((line: string) => line.includes("Done"))).toContain("◆");
     expect(lines.find((line: string) => line.includes("Main"))).toContain("○ Main");
 
     navigator.handleTerminalInput(" ");
     lines = selector.render(120);
     expect(lines.find((line: string) => line.includes("Done"))).toContain("● Explore");
+    expect(lines.find((line: string) => line.includes("Done"))).not.toContain("◆");
     expect(lines.join("\n")).toContain("Space Pin");
   });
 
@@ -779,8 +782,7 @@ describe("AgentNavigator", () => {
 
     selector.render(120);
 
-    expect(fg).toHaveBeenCalledWith("accent", "◇");
-    expect(fg).not.toHaveBeenCalledWith("dim", "◇");
+    expect(fg).toHaveBeenCalledWith("accent", "◆");
   });
 
   it("Ctrl+D then Enter clears inactive subagents and moves the highlight", () => {
@@ -803,13 +805,13 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B"); // Empty editor + Down enters the list at Main.
     navigator.handleTerminalInput("\x1b[B"); // Highlight the first subagent.
     navigator.handleTerminalInput("\x04");   // Ctrl+D enters confirmation.
-    expect(selector.render(120)[0]).toBe('  Remove “Inspect the project”? · Enter Remove · Esc Cancel');
+    expect(selector.render(120)[0]).toBe('Remove “Inspect the project”? · Enter Remove · Esc Cancel');
 
     navigator.handleTerminalInput("\r");     // Enter confirms.
     expect(manager.clear).toHaveBeenCalledWith("agent-11111111", "user");
     const lines = selector.render(120);
     expect(lines.join("\n")).not.toContain("Remove “Inspect the project”?");
-    expect(lines[0]).toMatch(/^  ↑↓ Move/);
+    expect(lines[0]).toMatch(/^↑↓ Move/);
   });
 
   it("requests a redraw when the displayed model changes", () => {
@@ -1034,12 +1036,12 @@ describe("AgentNavigator", () => {
     // Focus hint only renders while listFocused; retained after Enter so the
     // next Up still navigates without re-entering from the editor.
     expect(text).toContain("↑↓ Move");
-    expect(text).toContain("› ●");
+    expect(text).toContain("● Explore");
     expect(text).toContain("Inspect the project");
     expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
     expect(navigator.selectedId()).toBe(record.id);
-    // Highlight moved to Main (○) while the selected agent remains active (●).
-    expect(selector.render(120).join("\n")).toContain("› ○ Main");
+    // Highlight moved to Main while the selected agent remains active (●).
+    expect(selector.render(120).join("\n")).toContain("○ Main");
   });
 
   it("switches error views without mutating lifecycle state", () => {
@@ -1076,7 +1078,7 @@ describe("AgentNavigator", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
     const focused = selector.render(120).join("\n");
-    expect(focused).toMatch(/› ○ \S+/);
+    expect(focused).toMatch(/○ \S+/);
     expect(focused).toContain("Inspect the project");
     expect(focused).toContain("↑↓ Move"); // focus hint while list-focused
 
@@ -1969,5 +1971,49 @@ describe("AgentNavigator", () => {
     expect(renderedText).toContain("Answer with trailing empty thinking");
     expect(renderedText.match(/Thinking/g)).toHaveLength(1);
     expect(renderedText.match(/Assistant/g)).toHaveLength(1);
+  });
+
+  it("highlights focused rows with selectedBg and renders pin badges cleanly", () => {
+    const r1 = makeRecord("agent-1");
+    r1.lifecycle.pinnedAt = Date.now();
+    const r2 = makeRecord("agent-2");
+    const ui = makeUI({ value: "" });
+    ui.theme.bg = vi.fn((color: string, text: string) => `[bg:${color}]${text}[/bg]`);
+    navigator = new AgentNavigator(makeManager([r1, r2]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    // Focus Main
+    navigator.handleTerminalInput("\x1b[B");
+    let lines = selector.render(120);
+    expect(lines.find((l: string) => l.includes("Main"))).toContain("[bg:selectedBg]");
+
+    // Focus agent-1 (pinned)
+    navigator.handleTerminalInput("\x1b[B");
+    lines = selector.render(120);
+    const agent1Line = lines.find((l: string) => l.includes("agent-1") || l.includes("Explore"))!;
+    expect(agent1Line).toContain("[bg:selectedBg]");
+    expect(agent1Line).toContain("◆");
+    expect(agent1Line).not.toContain("›");
+  });
+
+  it("preserves selectedBg background color across inner ANSI SGR resets", () => {
+    const record = makeRecord("agent-long");
+    record.display.description = "A".repeat(200); // Guarantees truncation with ellipsis and SGR reset
+    const ui = makeUI({ value: "" });
+    ui.theme.bg = vi.fn((_color: string, text: string) => `\x1b[44m${text}\x1b[49m`);
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    navigator.handleTerminalInput("\x1b[B"); // Focus Main
+    navigator.handleTerminalInput("\x1b[B"); // Focus agent-long
+    const lines = selector.render(120);
+    const highlightedRow = lines.find((l: string) => l.includes("Explore"))!;
+    expect(highlightedRow).toContain("\x1b[44m");
+    // Ensure every \x1b[0m has the background code re-asserted immediately
+    expect(highlightedRow).not.toMatch(/\x1b\[0m(?!\x1b\[44m)/);
   });
 });

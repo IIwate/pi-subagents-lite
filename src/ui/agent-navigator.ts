@@ -156,6 +156,18 @@ function renderAgentRow(
   return `${leftText}${" ".repeat(padding)}${statsText}`;
 }
 
+function applySelectedBackground(line: string, width: number, theme: Theme): string {
+  if (!theme.bg) return line;
+  const padding = Math.max(0, width - visibleWidth(line));
+  const paddedLine = `${line}${" ".repeat(padding)}`;
+  const sample = theme.bg("selectedBg", "");
+  const bgMatch = sample.match(/^\x1b\[[0-9;]*m/);
+  if (!bgMatch) return theme.bg("selectedBg", paddedLine);
+  const bgCode = bgMatch[0];
+  const restored = paddedLine.replace(/\x1b\[0?m/g, (match) => `${match}${bgCode}`);
+  return theme.bg("selectedBg", restored);
+}
+
 function agentStatusValue(record: AgentRecord, preview?: DebugStatusPreview): DebugStatusPreview {
   return preview ?? record.lifecycle.status;
 }
@@ -1017,7 +1029,7 @@ export class AgentNavigator {
     // The two-column prefix aligns it with the row circles, not the focus marker.
     const lines: string[] = [];
     const cols = tui.terminal.columns;
-    const commandWidth = Math.max(1, cols - 2);
+    const commandWidth = Math.max(1, cols);
     if (this.listFocused) {
       if (this.confirmingClearId !== null) {
         const record = this.manager.getRecord(this.confirmingClearId);
@@ -1027,21 +1039,20 @@ export class AgentNavigator {
           theme.fg("error", "Remove"),
           theme.fg("dim", " · Esc Cancel"),
         ].join("");
-        lines.push(`  ${truncateToWidth(confirmation, commandWidth)}`);
+        lines.push(truncateToWidth(confirmation, commandWidth));
       } else {
         const pinHint = highlightedRecord
           ? ` · Space ${highlightedRecord.lifecycle.pinnedAt != null ? "Unpin" : "Pin"}`
           : "";
-        lines.push(`  ${truncateToWidth(
+        lines.push(truncateToWidth(
           theme.fg("dim", `↑↓ Move · Enter Open${pinHint} · Ctrl+D Remove · Esc Editor`),
           commandWidth,
-        )}`);
+        ));
       }
     }
     const mainActive = this.selectedAgentId === null;
     const mainHighlighted = this.listFocused && this.highlightedAgentId === null;
     const mainIndicator = mainActive ? theme.fg("accent", "●") : theme.fg("dim", "○");
-    const mainFocus = mainHighlighted ? theme.fg("accent", "›") : " ";
     const mainLabel = mainActive || mainHighlighted ? theme.bold("Main") : "Main";
     const running = records.filter(record => record.lifecycle.status === "running").length;
     const queued = records.filter(record => record.lifecycle.status === "queued").length;
@@ -1057,13 +1068,15 @@ export class AgentNavigator {
     summaryParts.push(theme.fg("dim", "Alt+A collapse"));
     if (this.selectedAgentId) summaryParts.push(theme.fg("dim", "Alt+M main"));
     const summary = summaryParts.join(theme.fg("dim", " · "));
-    lines.push(truncateToWidth(
-      `${mainFocus} ${mainIndicator} ${mainLabel}${theme.fg("dim", " (")}${summary}${theme.fg("dim", ")")}`,
-      tui.terminal.columns,
-    ));
+    const mainText = `${mainIndicator} ${mainLabel}${theme.fg("dim", " (")}${summary}${theme.fg("dim", ")")}`;
+    let mainLine = truncateToWidth(mainText, tui.terminal.columns);
+    if (mainHighlighted) {
+      mainLine = applySelectedBackground(mainLine, tui.terminal.columns, theme);
+    }
+    lines.push(mainLine);
 
     if (start > 0) {
-      lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
+      lines.push(theme.fg("dim", `↑ ${start} hidden`));
     }
 
     for (const entry of visibleEntries) {
@@ -1071,13 +1084,9 @@ export class AgentNavigator {
       const active = entry.id === this.selectedAgentId;
       const highlighted = this.listFocused && entry.id === this.highlightedAgentId;
       const pinned = record.lifecycle.pinnedAt != null;
-      const indicatorText = pinned
-        ? active ? "◆" : "◇"
-        : active ? "●" : "○";
-      const indicator = active || pinned
-        ? theme.fg("accent", indicatorText)
-        : theme.fg("dim", indicatorText);
-      const focus = highlighted ? theme.fg("accent", "›") : " ";
+      const indicator = active
+        ? theme.fg("accent", "●")
+        : theme.fg("dim", "○");
       const name = getDisplayName(record.display.type);
       const description = record.display.description;
       const durationMs = (record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt;
@@ -1106,9 +1115,11 @@ export class AgentNavigator {
       const plainStatus = plainAgentStatus(record, this.debugStatusPreview);
       const status = renderAgentStatus(record, theme, this.debugStatusPreview);
       const debugBadge = renderDebugBadge(record, theme);
-      const fixedPrefix = `${focus} ${indicator} `;
-      const statusSuffix = `${debugBadge ? ` ${debugBadge}` : ""} (${status})`;
-      const plainStatusSuffix = `${debugBadge ? " [DEBUG]" : ""} (${plainStatus})`;
+      const fixedPrefix = `${indicator} `;
+      const pinBadge = pinned ? ` ${theme.fg("accent", "◆")}` : "";
+      const plainPinBadge = pinned ? " ◆" : "";
+      const statusSuffix = `${debugBadge ? ` ${debugBadge}` : ""} (${status})${pinBadge}`;
+      const plainStatusSuffix = `${debugBadge ? " [DEBUG]" : ""} (${plainStatus})${plainPinBadge}`;
       const identityStats = [providerName, modelName].filter(Boolean).join(STATS_SEP);
       const reservedStatsWidth = Math.max(MIN_STATS_COLUMN_WIDTH, visibleWidth(identityStats));
       const maxNameWidth = Math.max(
@@ -1126,18 +1137,22 @@ export class AgentNavigator {
         + visibleWidth(visibleNameText)
         + visibleWidth(plainStatusSuffix);
       const stats = statsParts.length > 0 ? theme.fg("dim", statsParts.join(STATS_SEP)) : "";
-      lines.push(renderAgentRow(
+      let agentLine = renderAgentRow(
         leftPrefix,
         description,
         stats,
         tui.terminal.columns,
         prefixWidth,
         theme,
-      ));
+      );
+      if (highlighted) {
+        agentLine = applySelectedBackground(agentLine, tui.terminal.columns, theme);
+      }
+      lines.push(agentLine);
     }
 
     if (end < agentEntries.length) {
-      lines.push(theme.fg("dim", `  ↓ ${agentEntries.length - end} hidden`));
+      lines.push(theme.fg("dim", `↓ ${agentEntries.length - end} hidden`));
     }
 
     return lines;
