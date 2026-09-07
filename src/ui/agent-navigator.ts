@@ -708,10 +708,21 @@ export class AgentNavigator {
 
     if (matchesKey(data, Key.enter)) {
       const candidate = this.highlightedAgentId;
-      // Keep list focus so consecutive Up/Down/Enter switches do not require
-      // re-entering the list after every confirmation (upstream 8a7a01f).
-      if (!this.activate(candidate)) {
+      const hasText = Boolean(this.uiCtx?.getEditorText()?.trim());
+
+      if (candidate === this.selectedAgentId && hasText) {
+        this.listFocused = false;
         this.highlightedAgentId = this.selectedAgentId;
+        this.update();
+        return undefined;
+      }
+
+      if (candidate !== this.selectedAgentId) {
+        if (!this.activate(candidate)) {
+          this.highlightedAgentId = this.selectedAgentId;
+        } else if (hasText) {
+          this.listFocused = false;
+        }
       }
       this.update();
       return { consume: true };
@@ -741,7 +752,11 @@ export class AgentNavigator {
       return { consume: true };
     }
 
-    if (data.length === 1 && data.charCodeAt(0) >= 32) {
+    if (
+      (data.length === 1 && data.charCodeAt(0) >= 32)
+      || (data.length > 1 && !data.startsWith("\x1b"))
+      || data.includes("\x1b[200~")
+    ) {
       this.listFocused = false;
       this.highlightedAgentId = this.selectedAgentId;
       this.update();

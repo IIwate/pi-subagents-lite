@@ -245,7 +245,11 @@ function makeUI(editorText: { value: string }) {
   const baseEditor = {
     getText: () => editorText.value,
     setText: (text: string) => { editorText.value = text; },
-    handleInput: vi.fn(),
+    handleInput: vi.fn((data: string) => {
+      if (data === "\r" || data === "\n") {
+        (baseEditor as any).onSubmit?.(editorText.value);
+      }
+    }),
     wantsKeyRelease: true,
     actionHandlers: new Map<string, () => void>(),
     addToHistory: vi.fn(),
@@ -2377,5 +2381,221 @@ describe("AgentNavigator", () => {
     expect(highlightedRow).toContain("\x1b[44m");
     // Ensure every \x1b[0m has the background code re-asserted immediately
     expect(highlightedRow).not.toMatch(/\x1b\[0m(?!\x1b\[44m)/);
+  });
+
+  describe("unified Enter resolution and paste handling", () => {
+    it("submits to Main when pressing Enter on active Main row with non-empty text", () => {
+      const record = makeRecord("agent-1");
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+      const editor = ui.editorFactory(makeTui(), {}, {});
+      const parentSubmit = vi.fn();
+      editor.onSubmit = parentSubmit;
+
+      // In Main screen (selected === null). Enter list and keep highlight on Main (highlighted === null).
+      navigator.handleTerminalInput("\x1b[B");
+      expect(navigator.isListFocused()).toBe(true);
+      expect(navigator.selectedId()).toBeNull();
+
+      // Inject non-empty text into editor
+      ui.baseEditor.setText("Hello Main");
+
+      const inputSpy = vi.spyOn(navigator, "handleTerminalInput");
+      const baseSubmitSpy = vi.fn((ui.baseEditor as any).onSubmit);
+      (ui.baseEditor as any).onSubmit = baseSubmitSpy;
+
+      editor.handleInput("\r");
+
+      expect(inputSpy).toHaveReturnedWith(undefined);
+      expect(navigator.isListFocused()).toBe(false);
+      expect(baseSubmitSpy).toHaveBeenCalledWith("Hello Main");
+      expect(parentSubmit).toHaveBeenCalledWith("Hello Main");
+    });
+
+    it("submits to active subagent via routeInput when pressing Enter with non-empty text", () => {
+      const record = makeRecord("agent-1");
+      const ui = makeUI({ value: "" });
+      const routeInput = vi.fn().mockResolvedValue({ accepted: true });
+      navigator = new AgentNavigator(makeManager([record]), routeInput);
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+      const editor = ui.editorFactory(makeTui(), {}, {});
+      const parentSubmit = vi.fn();
+      editor.onSubmit = parentSubmit;
+
+      // Navigate to agent-1 screen (empty editor + Down, Down, Enter)
+      navigator.handleTerminalInput("\x1b[B"); // focus Main
+      navigator.handleTerminalInput("\x1b[B"); // focus agent-1
+      navigator.handleTerminalInput("\r");     // switch to agent-1
+      expect(navigator.selectedId()).toBe("agent-1");
+      expect(navigator.isListFocused()).toBe(true);
+      expect((navigator as any).highlightedAgentId).toBe("agent-1");
+
+      // Inject non-empty text "Fix this bug" into editor
+      ui.baseEditor.setText("Fix this bug");
+
+      const inputSpy = vi.spyOn(navigator, "handleTerminalInput");
+      editor.handleInput("\r");
+
+      expect(inputSpy).toHaveReturnedWith(undefined);
+      expect(navigator.isListFocused()).toBe(false);
+      expect(routeInput).toHaveBeenCalledWith("agent-1", "Fix this bug");
+      expect(parentSubmit).not.toHaveBeenCalled();
+    });
+
+    it("switches to Main on Enter from subagent view without sending message", () => {
+      const record = makeRecord("agent-1");
+      const ui = makeUI({ value: "" });
+      const routeInput = vi.fn().mockResolvedValue({ accepted: true });
+      navigator = new AgentNavigator(makeManager([record]), routeInput);
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+      const editor = ui.editorFactory(makeTui(), {}, {});
+      const parentSubmit = vi.fn();
+      editor.onSubmit = parentSubmit;
+
+      // Switch to agent-1
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\x1b[B");
+      navigator.handleTerminalInput("\r");
+      expect(navigator.selectedId()).toBe("agent-1");
+
+      // Move highlight up to Main (highlighted === null)
+      navigator.handleTerminalInput("\x1b[A");
+      expect((navigator as any).highlightedAgentId).toBeNull();
+
+      // Inject text "Draft for main"
+      ui.baseEditor.setText("Draft for main");
+
+      // Press Enter to switch to Main
+      const inputSpy = vi.spyOn(navigator, "handleTerminalInput");
+      editor.handleInput("\r");
+
+      expect(inputSpy).toHaveReturnedWith({ consume: true });
+      expect(navigator.selectedId()).toBeNull();
+      expect(routeInput).not.toHaveBeenCalled();
+      expect(parentSubmit).not.toHaveBeenCalled();
+      expect(ui.baseEditor.getText()).toBe("Draft for main");
+      expect(navigator.isListFocused()).toBe(false);
+
+      // Second Enter: since listFocused is false, sends message to Main
+      editor.handleInput("\r");
+      expect(parentSubmit).toHaveBeenCalledWith("Draft for main");
+      expect(routeInput).not.toHaveBeenCalled();
+    });
+
+    it("switches to subagent on Enter from Main without sending message", () => {
+      const record1 = makeRecord("agent-1");
+      const record2 = makeRecord("agent-2");
+      const ui = makeUI({ value: "" });
+      const routeInput = vi.fn().mockResolvedValue({ accepted: true });
+      navigator = new AgentNavigator(makeManager([record1, record2]), routeInput);
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+      const editor = ui.editorFactory(makeTui(), {}, {});
+      const parentSubmit = vi.fn();
+      editor.onSubmit = parentSubmit;
+
+      // In Main screen (selected === null)
+      expect(navigator.selectedId()).toBeNull();
+
+      // Enter list and move highlight to agent-2
+      navigator.handleTerminalInput("\x1b[B"); // focus Main
+      navigator.handleTerminalInput("\x1b[B"); // focus agent-1
+      navigator.handleTerminalInput("\x1b[B"); // focus agent-2
+      expect((navigator as any).highlightedAgentId).toBe("agent-2");
+
+      // Inject text "Draft for agent 2"
+      ui.baseEditor.setText("Draft for agent 2");
+
+      // Press Enter
+      const inputSpy = vi.spyOn(navigator, "handleTerminalInput");
+      editor.handleInput("\r");
+
+      expect(inputSpy).toHaveReturnedWith({ consume: true });
+      expect(navigator.selectedId()).toBe("agent-2");
+      expect(routeInput).not.toHaveBeenCalled();
+      expect(parentSubmit).not.toHaveBeenCalled();
+      expect(ui.baseEditor.getText()).toBe("Draft for agent 2");
+      expect(navigator.isListFocused()).toBe(false);
+    });
+
+    it("preserves continuous keyboard navigation and list focus across switches with empty editor", () => {
+      const record1 = makeRecord("agent-1");
+      const record2 = makeRecord("agent-2");
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record1, record2]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+
+      // Down enters list from empty editor
+      expect(navigator.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      expect(navigator.isListFocused()).toBe(true);
+
+      // Down to agent-1, Enter to switch
+      expect(navigator.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      expect((navigator as any).highlightedAgentId).toBe("agent-1");
+      expect(navigator.handleTerminalInput("\r")).toEqual({ consume: true });
+      expect(navigator.selectedId()).toBe("agent-1");
+      expect(navigator.isListFocused()).toBe(true);
+
+      // Down to agent-2, Enter to switch
+      expect(navigator.handleTerminalInput("\x1b[B")).toEqual({ consume: true });
+      expect((navigator as any).highlightedAgentId).toBe("agent-2");
+      expect(navigator.handleTerminalInput("\r")).toEqual({ consume: true });
+      expect(navigator.selectedId()).toBe("agent-2");
+      expect(navigator.isListFocused()).toBe(true);
+
+      // Up, Up back to Main, Enter to switch
+      expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
+      expect(navigator.handleTerminalInput("\x1b[A")).toEqual({ consume: true });
+      expect((navigator as any).highlightedAgentId).toBeNull();
+      expect(navigator.handleTerminalInput("\r")).toEqual({ consume: true });
+      expect(navigator.selectedId()).toBeNull();
+      expect(navigator.isListFocused()).toBe(true);
+    });
+
+    it("releases list focus when bulk text or bracketed paste arrives", () => {
+      const record = makeRecord("agent-1");
+      const ui = makeUI({ value: "" });
+      navigator = new AgentNavigator(makeManager([record]));
+      navigator.setUICtx(ui.ctx as any);
+      navigator.ensureTimer();
+      mountSelector(ui);
+
+      // Enter list
+      navigator.handleTerminalInput("\x1b[B");
+      expect(navigator.isListFocused()).toBe(true);
+
+      // 1. Bulk paste text (length > 1 and not an ANSI escape sequence)
+      const bulkResult = navigator.handleTerminalInput("pasted text");
+      expect(bulkResult).toBeUndefined();
+      expect(navigator.isListFocused()).toBe(false);
+
+      // Re-enter list
+      navigator.handleTerminalInput("\x1b[B");
+      expect(navigator.isListFocused()).toBe(true);
+
+      // 2. Bracketed paste stream
+      const bracketResult = navigator.handleTerminalInput("\x1b[200~pasted via bracket\x1b[201~");
+      expect(bracketResult).toBeUndefined();
+      expect(navigator.isListFocused()).toBe(false);
+
+      // Re-enter list
+      navigator.handleTerminalInput("\x1b[B");
+      expect(navigator.isListFocused()).toBe(true);
+
+      // 3. ANSI escape sequence (e.g. right arrow \x1b[C) does not release list focus
+      const ansiResult = navigator.handleTerminalInput("\x1b[C");
+      expect(ansiResult).toBeUndefined();
+      expect(navigator.isListFocused()).toBe(true);
+    });
   });
 });
