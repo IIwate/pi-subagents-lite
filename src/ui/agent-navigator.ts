@@ -453,6 +453,15 @@ export class AgentNavigator {
    */
   private hostTui: TUI | undefined;
   private screenSwap: ScreenSwapState | undefined;
+  /** Keypresses redraw the whole transcript; retain wrapped rows until their messages change. */
+  private transcriptCache: {
+    session: NonNullable<AgentRecord["execution"]["session"]>;
+    messages: MessageLike[];
+    theme: Theme;
+    width: number;
+    lines: WeakMap<MessageLike, string[]>;
+    unsubscribe: () => void;
+  } | undefined;
   private layoutWarningShown = false;
   private errorWarningShown = false;
   private restoreEditor: (() => void) | undefined;
@@ -854,7 +863,7 @@ export class AgentNavigator {
 
     const transcript: Component = {
       render: (width) => this.renderActiveTranscript(width),
-      invalidate: () => {},
+      invalidate: () => this.clearTranscriptCache(),
     };
     const originalFooterRender = footerContainer.render;
     this.screenSwap = {
@@ -902,6 +911,7 @@ export class AgentNavigator {
   }
 
   private restoreMainScreen(): boolean {
+    this.clearTranscriptCache();
     const screen = this.screenSwap;
     if (!screen?.active) return false;
 
@@ -1153,45 +1163,88 @@ export class AgentNavigator {
 
     const theme = this.uiCtx?.theme;
     if (!theme) return [];
-    return this.buildTranscriptLines(record, theme, width)
-      .map(line => truncateToWidth(line, width));
+    return this.buildTranscriptLines(record, theme, width);
+  }
+
+  private clearTranscriptCache(): void {
+    this.transcriptCache?.unsubscribe();
+    this.transcriptCache = undefined;
   }
 
   private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
     const status = plainAgentStatus(record);
     const debugLabel = record.execution.debugFaultKind ? " [DEBUG]" : "";
-    const lines: string[] = [
+    const lines = [
       theme.fg("accent", theme.bold(
         `${getDisplayName(record.display.type)}${debugLabel} (${status})`,
       )),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
-    ];
+    ].map(line => truncateToWidth(line, width));
 
     const session = record.execution.session;
     if (!session) {
+      this.clearTranscriptCache();
       if (record.error) {
-        lines.push(theme.fg("error", `Error: ${record.error}`));
+        lines.push(truncateToWidth(theme.fg("error", `Error: ${record.error}`), width));
       } else {
-        lines.push(theme.fg("dim", record.lifecycle.status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
+        lines.push(truncateToWidth(
+          theme.fg("dim", record.lifecycle.status === "queued" ? "Waiting in queue…" : "Starting agent session…"),
+          width,
+        ));
       }
       return lines;
     }
 
     const messages = session.messages as unknown as MessageLike[];
+    let cache = this.transcriptCache;
+    if (!cache || cache.session !== session || cache.messages !== messages || cache.theme !== theme || cache.width !== width) {
+      this.clearTranscriptCache();
+      const messageLines = new WeakMap<MessageLike, string[]>();
+      cache = {
+        session,
+        messages,
+        theme,
+        width,
+        lines: messageLines,
+        unsubscribe: session.subscribe((event) => {
+          // Extension hooks can revise a message after it entered session.messages.
+          if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+            messageLines.delete(event.message as MessageLike);
+          }
+        }),
+      };
+      this.transcriptCache = cache;
+    }
+
     for (const message of messages) {
-      this.appendMessage(lines, message, theme, width);
+      for (const line of this.renderMessageLines(message, theme, width, cache.lines)) lines.push(line);
     }
 
     const streamingMessage = (session.agent.state as unknown as { streamingMessage?: MessageLike }).streamingMessage;
     if (streamingMessage) {
-      this.appendMessage(lines, streamingMessage, theme, width);
+      for (const line of this.renderMessageLines(streamingMessage, theme, width, cache.lines)) lines.push(line);
     }
 
     if (record.error) {
-      lines.push(theme.fg("error", `Error: ${record.error}`));
+      lines.push(truncateToWidth(theme.fg("error", `Error: ${record.error}`), width));
     }
 
     return lines;
+  }
+
+  private renderMessageLines(
+    message: MessageLike,
+    theme: Theme,
+    width: number,
+    cache: WeakMap<MessageLike, string[]>,
+  ): string[] {
+    const cached = cache.get(message);
+    if (cached) return cached;
+    const lines: string[] = [];
+    this.appendMessage(lines, message, theme, width);
+    const rendered = lines.map(line => truncateToWidth(line, width));
+    cache.set(message, rendered);
+    return rendered;
   }
 
   private appendMessage(lines: string[], message: MessageLike, theme: Theme, width: number): void {

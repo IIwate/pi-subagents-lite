@@ -45,6 +45,7 @@ function makeRecord(id = "agent-12345678", status = "running"): any {
           },
         ],
         agent: { state: {} },
+        subscribe: vi.fn(() => vi.fn()),
       },
     },
     stats: {
@@ -1378,6 +1379,157 @@ describe("AgentNavigator", () => {
     expect(text).toContain("I found the project structure.");
     expect(text).toContain("# Project");
     expect(ui.widgets.has("agent-navigator-transcript")).toBe(false);
+  });
+
+  it.each(["regular", "fullscreen"] as const)("reuses unchanged transcript content while typing in %s mode", (mode) => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    const readHistory = vi.fn((index: number) => [
+      { type: "text", text: `Synthetic history ${index}. ${"Sample output. ".repeat(40)}` },
+    ]);
+    session.messages = Array.from({ length: 200 }, (_, index) => ({
+      role: "assistant",
+      get content() { return readHistory(index); },
+    }));
+    const liveText = { type: "text", text: "Partial answer" };
+    const readStreaming = vi.fn(() => [liveText]);
+    const streamingMessage = { role: "assistant", get content() { return readStreaming(); } };
+    session.agent.state.streamingMessage = streamingMessage;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const fixture = makeSwitchableTui();
+    fixture.switchMode(mode);
+    const { tui } = mountSelector(ui, fixture.tui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    fixture.renderCurrent();
+    readHistory.mockClear();
+    readStreaming.mockClear();
+    const editor = tui.children[tui.editorIndex].children[0];
+    for (const key of "draft") {
+      editor.handleInput(key);
+      expect(fixture.renderCurrent().join("\n")).toContain("Partial answer");
+    }
+    expect(ui.baseEditor.handleInput).toHaveBeenCalledTimes(5);
+    expect(readHistory).not.toHaveBeenCalled();
+    expect(readStreaming).not.toHaveBeenCalled();
+    expect(session.subscribe).toHaveBeenCalledOnce();
+
+    liveText.text = "Updated partial answer";
+    const onEvent = session.subscribe.mock.calls[0][0];
+    onEvent({ type: "message_update", message: streamingMessage });
+    expect(fixture.renderCurrent().join("\n")).toContain("Updated partial answer");
+    expect(readStreaming).toHaveBeenCalled();
+    expect(readHistory).not.toHaveBeenCalled();
+
+    session.messages.push(streamingMessage);
+    session.agent.state.streamingMessage = undefined;
+    onEvent({ type: "message_end", message: streamingMessage });
+    const text = fixture.renderCurrent().join("\n");
+    expect(text.match(/Updated partial answer/g)).toHaveLength(1);
+    expect(text).toContain("Synthetic history 199.");
+    expect(readHistory).not.toHaveBeenCalled();
+  });
+
+  it("refreshes message edits and lifecycle metadata when a message ends", () => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    transcript.render(120);
+
+    const message = session.messages[1];
+    message.content[2].text = "Revised synthetic answer";
+    session.subscribe.mock.calls[0][0]({ type: "message_end", message });
+    record.lifecycle.status = "error";
+    record.error = "Synthetic completion error";
+    const text = transcript.render(120).join("\n");
+    expect(text).toContain("Revised synthetic answer");
+    expect(text).not.toContain("I found the project structure.");
+    expect(text).toContain("Explore (Error)");
+    expect(text).toContain("Error: Synthetic completion error");
+  });
+
+  it.each(["history", "session"])("rebuilds a replaced %s with the same message count", (replacement) => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    transcript.render(120);
+    const unsubscribe = session.subscribe.mock.results[0].value;
+
+    const messages = Array.from({ length: session.messages.length }, (_, index) => ({
+      role: "compactionSummary",
+      summary: `Synthetic compacted history ${index}`,
+    }));
+    if (replacement === "history") session.messages = messages;
+    else record.execution.session = { ...session, messages, subscribe: vi.fn(() => vi.fn()) };
+
+    const text = transcript.render(120).join("\n");
+    expect(text).toContain("Synthetic compacted history 0");
+    expect(text).not.toContain("I found the project structure.");
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("reflows cached messages on resize and refreshes them on theme invalidation", () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    const wide = transcript.render(120);
+    const narrow = transcript.render(24);
+    expect(narrow.length).toBeGreaterThan(wide.length);
+    expect(narrow.every((line: string) => stripAnsi(line).length <= 24)).toBe(true);
+
+    const nextTheme = makeTheme();
+    nextTheme.bold.mockImplementation((text: string) => `Styled ${text}`);
+    Object.defineProperty(ui.ctx, "theme", { value: nextTheme });
+    expect(transcript.render(24).join("\n")).toContain("Styled Assistant");
+
+    nextTheme.bold.mockImplementation((text: string) => `Updated ${text}`);
+    transcript.invalidate();
+    expect(transcript.render(24).join("\n")).toContain("Updated Assistant");
+  });
+
+  it.each(["main", "context", "dispose"])("releases transcript subscriptions on %s transitions", (transition) => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    tui.document.children[tui.chatIndex].render(120);
+    const unsubscribe = session.subscribe.mock.results[0].value;
+
+    if (transition === "main") navigator.activateMain();
+    else if (transition === "context") navigator.setUICtx(makeUI({ value: "" }).ctx as any);
+    else navigator.dispose();
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(session.subscribe).toHaveBeenCalledOnce();
   });
 
   it("removes built-in Main footer data while preserving extension statuses", () => {
