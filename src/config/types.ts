@@ -1,6 +1,8 @@
 /**
  * config/types.ts — Persisted config shapes for subagents-lite.json.
  *
+ * Note: see .agents/notes/implemented/architecture/2026-09-09-model-routing-and-access-policy.md
+ *
  * Model routing is an access policy: a global switch, globally enabled
  * providers, and per-agent provider/model grants. It never assigns a default
  * model; omitting Agent.model always selects the exact parent model.

@@ -1,4 +1,8 @@
-/** Pure Agent model-access policy helpers. */
+/**
+ * Pure Agent model-access policy helpers.
+ *
+ * Note: see .agents/notes/implemented/architecture/2026-09-09-model-routing-and-access-policy.md
+ */
 
 import type { ModelRoutingConfig, ProviderModelAccess } from "../config/types.js";
 

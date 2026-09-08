@@ -1,3 +1,9 @@
+/**
+ * result-inbox.ts — Session-local durable storage and receipt tracking for background agent results.
+ *
+ * Note: see .agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md
+ */
+
 import { readFile } from "node:fs/promises";
 import { parseSessionEntries, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentStatus } from "../types.js";

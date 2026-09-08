@@ -1,7 +1,9 @@
 /**
  * shell.ts — Composition root shell.
  *
- * Per ADR 0004, the Shell is the single mutable container for all per-session
+ * Note: see .agents/notes/implemented/architecture/2026-09-09-composition-root-and-shell-singleton.md
+ *
+ * The Shell is the single mutable container for all per-session
  * state. Created at session_start, disposed at session_shutdown. Handler
  * modules read from shell via the getter functions — no module-level mutable
  * globals.

@@ -2,7 +2,7 @@
  * config-store.ts — Deep module owning persisted configuration.
  *
  * Absorbs config-io.ts, config-mutator.ts, and the config-sync half of
- * state.ts. See docs/adr/0004-composition-root-over-shared-state.md.
+ * state.ts. See .agents/notes/implemented/architecture/2026-09-09-composition-root-and-shell-singleton.md.
  *
  * - Reads return defaults baked in (no `?? 6` at call sites).
  * - Each persisted mutate method is mutate + persist + its side effect, so a

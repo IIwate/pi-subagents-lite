@@ -1,6 +1,8 @@
 /**
  * worktree-validator.ts — Validate, resolve, and label a worktree path.
  *
+ * Note: see .agents/notes/implemented/architecture/2026-09-09-worktree-path-parameter-naming.md
+ *
  * Pure async functions that validate a `worktree_path` value against the parent's
  * git repository. Depends on `pi.exec` for git commands.
  *
