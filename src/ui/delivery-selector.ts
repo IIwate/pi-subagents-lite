@@ -148,27 +148,44 @@ export class DeliverySelectorComponent implements Component {
   }
 
   render(width: number): string[] {
-    const totalWidth = Math.max(40, width);
+    const totalWidth = Math.max(50, width);
+    const innerW = totalWidth - 2;
+    const borderV = this.theme.fg("accent", "│");
+    const topBorder = this.theme.fg("accent", `╭${"─".repeat(innerW)}╮`);
+    const midBorder = this.theme.fg("accent", `├${"─".repeat(innerW)}┤`);
+    const botBorder = this.theme.fg("accent", `╰${"─".repeat(innerW)}╯`);
+
+    const pad = (text: string, len: number): string => {
+      const vis = visibleWidth(text);
+      if (vis >= len) return truncateToWidth(text, len);
+      return text + " ".repeat(len - vis);
+    };
+
+    const row = (content: string): string => `${borderV}${pad(content, innerW)}${borderV}`;
+
     const lines: string[] = [];
 
     // Title bar
-    const title = this.theme.bold(this.theme.fg("accent", "Deliver to Parent Session"))
+    const title = ` ${this.theme.bold(this.theme.fg("accent", "Deliver to Parent Session"))}`
       + this.theme.fg("dim", ` · ${this.record.display.type} (${this.record.id.slice(0, 8)})`);
-    lines.push(truncateToWidth(title, totalWidth));
-    lines.push(this.theme.fg("dim", "─".repeat(totalWidth)));
+    lines.push(topBorder);
+    lines.push(row(title));
+    lines.push(midBorder);
 
     if (this.items.length === 0) {
-      lines.push(this.theme.fg("dim", " (no deliverable messages in child session)"));
-      lines.push(this.theme.fg("dim", "─".repeat(totalWidth)));
-      lines.push(this.theme.fg("dim", " Esc Cancel"));
+      lines.push(row(this.theme.fg("dim", " (no deliverable messages in child session)")));
+      lines.push(midBorder);
+      lines.push(row(this.theme.fg("dim", " Esc Cancel")));
+      lines.push(botBorder);
       return lines;
     }
 
-    // Geometry calculation: 40% left, 60% right, min widths
-    const leftWidth = Math.max(26, Math.min(38, Math.floor(totalWidth * 0.38)));
+    // Geometry calculation: 1 space padding on both sides, 38% left, 62% right
+    const contentWidth = innerW - 2;
+    const leftWidth = Math.max(26, Math.min(36, Math.floor(contentWidth * 0.38)));
     const divider = ` ${this.theme.fg("dim", "│")} `;
     const dividerWidth = 3;
-    const rightWidth = Math.max(10, totalWidth - leftWidth - dividerWidth);
+    const rightWidth = Math.max(10, contentWidth - leftWidth - dividerWidth);
 
     // Visible window for left list
     const maxVisibleRows = Math.max(6, Math.min(14, (this.tui?.terminal?.rows ?? 24) - 8));
@@ -197,7 +214,7 @@ export class DeliverySelectorComponent implements Component {
       const summaryText = this.theme.fg("dim", truncateToWidth(item.summary, availSummary));
 
       const rowText = `${cursor}${checkbox}${labelText} ${summaryText}`;
-      const padded = rowText + " ".repeat(Math.max(0, leftWidth - visibleWidth(rowText)));
+      const padded = pad(rowText, leftWidth);
       leftRows.push(padded);
     }
 
@@ -223,23 +240,26 @@ export class DeliverySelectorComponent implements Component {
       rightRows.push(...renderedMd);
     }
 
-    // Limit rightRows to reasonable height or match leftRows
-    const bodyHeight = Math.max(leftRows.length, Math.min(rightRows.length, maxVisibleRows + 4));
+    // Maintain a stable body height across cursor movements to prevent vertical jitter
+    // and stop line-count shrinkage from triggering terminal clearOnShrink (\x1b[3J) redraws.
+    const bodyHeight = maxVisibleRows;
     for (let r = 0; r < bodyHeight; r++) {
-      const left = leftRows[r] ?? " ".repeat(leftWidth);
+      const left = leftRows[r] ?? pad("", leftWidth);
       const right = rightRows[r] ?? "";
-      const paddedRight = truncateToWidth(right, rightWidth);
-      lines.push(`${left}${divider}${paddedRight}`);
+      const paddedLeft = pad(left, leftWidth);
+      const paddedRight = pad(right, rightWidth);
+      lines.push(row(` ${paddedLeft}${divider}${paddedRight} `));
     }
 
     // Footer command bar
-    lines.push(this.theme.fg("dim", "─".repeat(totalWidth)));
+    lines.push(midBorder);
     const selectedCount = this.selectedIndices.size;
     const deliverHint = selectedCount > 0
       ? `Enter Deliver (${selectedCount} selected)`
       : "Enter Deliver (select at least 1)";
     const footer = ` ↑↓ Move · Space Toggle · ${deliverHint} · Esc Cancel`;
-    lines.push(this.theme.fg("dim", truncateToWidth(footer, totalWidth)));
+    lines.push(row(this.theme.fg("dim", footer)));
+    lines.push(botBorder);
 
     return lines;
   }

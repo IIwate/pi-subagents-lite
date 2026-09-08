@@ -37,7 +37,7 @@ Status: implemented
 5. **人工介入静默与手动选择性交付（Human Takeover & Selective Delivery）**：
    - **介入切断自动唤醒**：用户在 TUI 中向子代理发送消息交互时，立即标记 `takenOver = true`，自动触发前台解绑（`detach()` 释放主会话等待）与自动置顶（`Auto-Pin`，免疫 15 分钟 TTL GC 淘汰）；
    - 接管后的子代理执行完毕时，`onAgentComplete` 识别其为接管状态，**彻底剥夺自动唤醒权（Silent Completion）**，保持完全静默以保护人类调试上下文；
-   - **快捷键 Alt+S 手动剪裁交付**：用户在 TUI 列表中按下 `Alt+S` 打开 `DeliverySelector` 对话框，由人类手动勾选高价值消息。协调器生成**全新派生的 `deliveryId`**，将定制摘要以 `### Delivered Output` 格式写入信箱投递，支持多阶段按需交付。
+   - **快捷键 Alt+S 手动剪裁交付**：用户在 TUI 列表中按下 `Alt+S` 打开 `DeliverySelector` 对话框，由人类手动勾选高价值消息。选择器以居中模态浮层（`overlay: true`）呈现，且渲染主体高度保持恒定（锁定 `maxVisibleRows`，右侧预览超出截断、不足留白补齐），消除长短消息切换时的动态行数抖动，杜绝差量渲染器行数缩水触发的清屏清回滚（`\x1b[3J`）。协调器生成**全新派生的 `deliveryId`**，将定制摘要以 `### Delivered Output` 格式写入信箱投递，支持多阶段按需交付。
 
 6. **树分支敏感交付（Branch-aware Local Delivery）**：
    - 每个 pending 结果均绑定派生时的入口条目 ID（`originEntryId`）；
@@ -84,4 +84,5 @@ export interface PendingResult {
 ## Verification
 
 - 交付持久化、唤醒合并、幽灵消灭与 ACK 对账逻辑经集成测试全面覆盖：`test/spawn/durable-inbox.integration.test.ts`、`test/agents/result-delivery.integration.test.ts` 与 `test/spawn/spawn-coordinator.test.ts`。
+- 选择器长短消息光标切换行数恒定与模态浮层边界经单测验证：`test/ui/delivery-selector.test.ts`。
 - 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。

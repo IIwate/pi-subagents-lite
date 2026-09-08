@@ -189,5 +189,44 @@ describe("DeliverySelectorComponent", () => {
     expect(rendered).toContain("Preview: [Assistant #2]");
     expect(rendered).toContain("Final answer");
     expect(rendered).toContain("↑↓ Move · Space Toggle · Enter Deliver");
+    expect(rendered).toContain("╭");
+    expect(rendered).toContain("╯");
+  });
+
+  it("maintains a constant rendered line count when navigating between long and short messages", () => {
+    const mixedMessages: DeliverableMessage[] = [
+      { role: "user", content: "Short question" },
+      {
+        role: "assistant",
+        content: Array.from({ length: 40 }, (_, i) => `Long analysis line ${i + 1}`).join("\n"),
+      },
+      { role: "user", content: "Another short query" },
+    ];
+
+    const mockTui = {
+      terminal: { rows: 24, columns: 80 },
+      requestRender: vi.fn(),
+    };
+
+    const component = new DeliverySelectorComponent({
+      record: makeRecord(),
+      messages: mixedMessages,
+      theme: mockTheme as any,
+      tui: mockTui as any,
+      onConfirm: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // Starts on assistant (long message)
+    expect(component.cursorIndex).toBe(1);
+    const longLinesCount = component.render(80).length;
+
+    // Navigate to short user message
+    component.handleInput("\x1b[A"); // Up to index 0
+    expect(component.cursorIndex).toBe(0);
+    const shortLinesCount = component.render(80).length;
+
+    // Line count must remain stable to prevent differential shrink and scrollback clearing
+    expect(shortLinesCount).toBe(longLinesCount);
   });
 });

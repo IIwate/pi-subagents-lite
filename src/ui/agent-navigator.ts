@@ -1112,6 +1112,13 @@ export class AgentNavigator {
           },
           onCancel: () => done(false),
         });
+      }, {
+        overlay: true,
+        overlayOptions: {
+          anchor: "center",
+          width: "90%",
+          maxHeight: "85%",
+        },
       });
     } finally {
       this.isDeliverySelectorOpen = false;
