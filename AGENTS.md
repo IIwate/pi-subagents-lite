@@ -34,3 +34,13 @@ Before committing, run `git diff --cached --check`. Run the full suite locally o
 **Tagging:** `git tag -a v<version> -m "v<version>" && git push origin v<version>`. Never move or force-push a release tag. Rerun a failed workflow only when npm has not published that version; code fixes require a new version and tag.
 
 **Trusted Publisher setup:** npm package settings must authorize GitHub Actions for owner `IIwate`, repository `pi-subagents-lite`, workflow `publish.yml`, and the `npm publish` action. The workflow uses GitHub-hosted runners with `id-token: write` and a pinned Trusted Publishing-compatible npm CLI; no npm token secret is required.
+
+## 架构决策留痕与防撞规范
+
+在进行任何非平凡变更（技术选型、架构重构、接口约定变更、缺陷复盘、特性裁撤）前：
+1. 遵循 [.agents/skills/write-notes/SKILL.md](.agents/skills/write-notes/SKILL.md)。
+2. 既有模块重构优先就地更新对应 Note 的事实部分，严禁只改代码不改 Note，严禁追加流水账。
+3. 新路线先在 `.agents/notes/proposed/` 编写提案；交付时随同次代码提交移入 `implemented/` 并改写为现在时。
+4. 必须包含 `## Alternatives considered` 章节，且必须包含维持现状选项与对手方案的最强论据。
+5. 核心代码入口保留反向追溯注释：`// Note: 见 .agents/notes/...`。
+6. Note 中的代码片段与核心类型声明必须通过 `npm run verify-notes` 门禁检查。
