@@ -11,8 +11,7 @@ vi.mock("node:fs", () => ({
   mkdirSync: () => {},
 }));
 
-const CONFIG_PATH = `${process.env.HOME || ""}/.pi/agent/subagents-lite.json`;
-import { loadConfig, saveConfigAtomic } from "../../src/config/config-io.js";
+import { CONFIG_PATH, loadConfig, saveConfigAtomic } from "../../src/config/config-io.js";
 
 function writeConfig(value: unknown): void {
   files.set(CONFIG_PATH, JSON.stringify(value));

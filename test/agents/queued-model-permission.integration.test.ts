@@ -233,8 +233,11 @@ describe("queued invocation snapshots", () => {
     const queuedOptions = mocks.createAgentSession.mock.calls[1][0]!;
     const queuedLoader = mocks.loaderOptions[1];
     const queuedSession = mocks.sessions[1];
-    expect(queuedOptions.tools).toEqual(["read", "bash", "grep", "find"]);
-    expect(queuedSession.getActiveToolNames()).toEqual(["read", "bash", "grep", "find"]);
+    const expectedReadOnlyTools = process.platform === "win32"
+      ? ["read", "bash", "powershell", "grep", "find"]
+      : ["read", "bash", "grep", "find"];
+    expect(queuedOptions.tools).toEqual(expectedReadOnlyTools);
+    expect(queuedSession.getActiveToolNames()).toEqual(expectedReadOnlyTools);
     expect(queuedSession.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write"]));
     expect(queuedLoader.noExtensions).toBe(false);
     expect(queuedLoader.noSkills).toBe(false);
