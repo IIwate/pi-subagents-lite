@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mockModules } from "../../menu-mock-setup.js";
+import { resetMenuStore } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
 
 // Capture SettingsList constructor calls from pi-tui
@@ -52,7 +52,7 @@ import { showSpawnOptionsMenu } from "../../../src/ui/menu/menu-spawn-options.js
 
 describe("showSpawnOptionsMenu — SettingsList integration", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    resetMenuStore({ agent: { forceBackground: false } });
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -64,12 +64,11 @@ describe("showSpawnOptionsMenu — SettingsList integration", () => {
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
-
 });
 
 describe("showSpawnOptionsMenu — force background", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    resetMenuStore({ agent: { forceBackground: false } });
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -79,10 +78,11 @@ describe("showSpawnOptionsMenu — force background", () => {
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     const fb = settingsListCalls[0].items.find((i: any) => i.id === "forceBackground");
+    expect(fb.currentValue).toBe("OFF");
   });
 
   it("shows 'Force background · ON' when enabled", async () => {
-    mockModules.mockConfig.agent.forceBackground = true;
+    resetMenuStore({ agent: { forceBackground: true } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     const fb = settingsListCalls[0].items.find((i: any) => i.id === "forceBackground");
@@ -90,18 +90,18 @@ describe("showSpawnOptionsMenu — force background", () => {
   });
 
   it("toggles force background via onChange", async () => {
-    mockModules.mockConfig.agent.forceBackground = false;
+    const { store } = resetMenuStore({ agent: { forceBackground: false } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     settingsListCalls[0].onChange("forceBackground", "ON");
-    expect(mockModules.mockConfig.agent.forceBackground).toBe(true);
+    expect(store.agent.forceBackground).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
   });
 });
 
 describe("showSpawnOptionsMenu — background delivery", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    resetMenuStore({ agent: { forceBackground: false } });
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -117,7 +117,7 @@ describe("showSpawnOptionsMenu — background delivery", () => {
 
 describe("showSpawnOptionsMenu — grace turns", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    resetMenuStore({ agent: { forceBackground: false } });
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -132,7 +132,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   });
 
   it("shows configured grace turns value", async () => {
-    mockModules.mockConfig.agent.graceTurns = 10;
+    resetMenuStore({ agent: { forceBackground: false, graceTurns: 10 } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
@@ -140,7 +140,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   });
 
   it("grace turns submenu creates Input and handles valid submit", async () => {
-    mockModules.mockConfig.agent.graceTurns = 5;
+    const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 5 } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
 
@@ -152,13 +152,13 @@ describe("showSpawnOptionsMenu — grace turns", () => {
     expect(inputInstances[0].value).toBe("5");
 
     inputInstances[0].onSubmit!("0");
-    expect(mockModules.mockConfig.agent.graceTurns).toBe(0);
+    expect(store.agent.graceTurns).toBe(0);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
     expect(mockDone).toHaveBeenCalledWith("0");
   });
 
   it("grace turns submenu rejects negative numbers", async () => {
-    mockModules.mockConfig.agent.graceTurns = 3;
+    const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
 
@@ -167,7 +167,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
     gt.submenu("3", mockDone);
 
     inputInstances[0].onSubmit!("-1");
-    expect(mockModules.mockConfig.agent.graceTurns).toBe(3);
+    expect(store.agent.graceTurns).toBe(3);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
     expect(mockDone).not.toHaveBeenCalled();
   });
@@ -187,7 +187,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
 
 describe("showSpawnOptionsMenu — default thinking level", () => {
   beforeEach(() => {
-    mockModules.mockConfig.agent = { forceBackground: false };
+    resetMenuStore({ agent: { forceBackground: false } });
     vi.clearAllMocks();
     settingsListCalls = [];
     inputInstances = [];
@@ -197,10 +197,11 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
+    expect(dt.currentValue).toBe("inherit");
   });
 
   it("shows configured thinking level", async () => {
-    mockModules.mockConfig.agent.defaultThinking = "high";
+    resetMenuStore({ agent: { forceBackground: false, defaultThinking: "high" } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
@@ -215,20 +216,45 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
   });
 
   it("sets thinking level via onChange", async () => {
+    const { store } = resetMenuStore({ agent: { forceBackground: false } });
     const ctx = createMockCtx();
     await showSpawnOptionsMenu(ctx);
     settingsListCalls[0].onChange("defaultThinking", "medium");
-    expect(mockModules.mockConfig.agent.defaultThinking).toBe("medium");
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
-  });
-
-  it("sets thinking level to inherit (undefined) via onChange", async () => {
-    mockModules.mockConfig.agent.defaultThinking = "high";
-    const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    expect(store.agent.defaultThinking).toBe("medium");
     settingsListCalls[0].onChange("defaultThinking", "inherit");
-    expect(mockModules.mockConfig.agent.defaultThinking).toBeUndefined();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+    expect(store.agent.defaultThinking).toBeUndefined();
   });
 });
 
+describe("showSpawnOptionsMenu — Disable default agents", () => {
+  beforeEach(() => {
+    resetMenuStore({ agent: { forceBackground: false } });
+    vi.clearAllMocks();
+    settingsListCalls = [];
+    inputInstances = [];
+  });
+
+  it("shows 'Disable default agents · OFF' by default", async () => {
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const dda = settingsListCalls[0].items.find((i: any) => i.id === "disableDefaultAgents");
+    expect(dda.currentValue).toBe("OFF");
+  });
+
+  it("shows 'Disable default agents · ON' when disableDefaultAgents is true", async () => {
+    resetMenuStore({ agent: { forceBackground: false, disableDefaultAgents: true } });
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const dda = settingsListCalls[0].items.find((i: any) => i.id === "disableDefaultAgents");
+    expect(dda.currentValue).toBe("ON");
+  });
+
+  it("toggles disable default agents via onChange", async () => {
+    const { store } = resetMenuStore({ agent: { forceBackground: false, disableDefaultAgents: false } });
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    settingsListCalls[0].onChange("disableDefaultAgents", "ON");
+    expect(store.agent.disableDefaultAgents).toBe(true);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+  });
+});

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeResolvablePromise } from "../fixtures.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeResolvablePromise } from "../fixtures.js";
 
 const state = vi.hoisted(() => ({
   entries: [] as any[],
@@ -39,9 +39,12 @@ import { AgentManager } from "../../src/agents/agent-manager.js";
 import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import { registerAgents } from "../../src/agents/agent-types.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
+import { createTestHarness, type TestHarness } from "../harness.js";
 
 describe("human takeover and selective delivery integration", () => {
+  let harness: TestHarness;
   beforeEach(() => {
+    harness = createTestHarness();
     registerAgents(new Map());
     state.entries.length = 0;
     state.runAgent.mockReset();
@@ -59,11 +62,12 @@ describe("human takeover and selective delivery integration", () => {
         { role: "assistant", content: "Step 2: data migration script." },
       ],
     };
-    state.runAgent.mockResolvedValue({
-      responseText: "durable result",
+    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+      await options.onSessionCreated(state.session);
+      return { responseText: "durable result",
       session: state.session,
       aborted: false,
-      turnLimited: false,
+      turnLimited: false };
     });
     state.ctx = {
       cwd: "/repo",
@@ -88,11 +92,21 @@ describe("human takeover and selective delivery integration", () => {
     state.manager = new AgentManager(undefined);
     state.coordinator = new SpawnCoordinator(state.manager);
     state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
+    harness.onDispose(async () => {
+      await state.manager.dispose();
+      await state.coordinator.reconcileDeliveryState();
+      state.coordinator.dispose();
+    });
   });
+
+  afterEach(async () => { await harness.dispose(); });
 
   it("detaches foreground subagent immediately on interact and frees main session", async () => {
     const runDeferred = makeResolvablePromise();
-    state.runAgent.mockReturnValue(runDeferred.promise);
+    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+      await options.onSessionCreated(state.session);
+      return runDeferred.promise;
+    });
 
     // Spawn in foreground
     const toolExecutionPromise = executeAgentTool(
@@ -105,7 +119,6 @@ describe("human takeover and selective delivery integration", () => {
 
     const record = state.manager.listAgents()[0];
     expect(record).toBeDefined();
-    record.execution.session = state.session;
 
     // User takes over in child view
     const interactResult = await state.coordinator.interact(record.id, "I will take over here");
@@ -136,7 +149,7 @@ describe("human takeover and selective delivery integration", () => {
     expect(state.entries.length).toBe(0);
   });
 
-  it("allows multi-selection delivery with fences and wakes parent session", () => {
+  it("allows multi-selection delivery with fences and wakes parent session", async () => {
     const record = state.manager.spawn(
       state.pi,
       state.ctx,
@@ -145,9 +158,8 @@ describe("human takeover and selective delivery integration", () => {
       { description: "Investigate memory leak", runInBackground: true },
     );
     const agentRecord = state.manager.getRecord(record)!;
-    agentRecord.lifecycle.takenOver = true;
-    agentRecord.lifecycle.pinnedAt = Date.now();
-    agentRecord.execution.session = state.session;
+    expect(await state.coordinator.interact(record, "Review the available results")).toEqual({ accepted: true });
+    await agentRecord.execution.promise;
 
     // Deliver assistant messages only -> Delivered Output
     const delivered1 = state.coordinator.deliverSelectedMessages(record, [1, 3]);
@@ -196,8 +208,7 @@ describe("human takeover and selective delivery integration", () => {
     const record = state.manager.listAgents()[0];
     expect(record.lifecycle.takenOver).toBeUndefined();
 
-    // Simulate completion
-    state.coordinator.onAgentComplete(record);
+    await record.execution.promise;
 
     // Normal delivery happens automatically
     expect(state.pi.appendEntry).toHaveBeenCalledWith(

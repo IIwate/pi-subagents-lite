@@ -2,9 +2,9 @@
 
 **Package manager:** bun (`bun install`, `bun add`, `bun add -d`).
 
-**Typecheck:** `bun run typecheck`.
+**Typecheck:** `bun run typecheck` for production code; `bun run typecheck:test` for governed tests and shared fixtures.
 
-**Tests:** `bun run test` is the official full suite and keeps `--maxWorkers=1` for CI stability. `bun run test:parallel` runs without that cap.
+**Tests:** `bun run test` is the official full suite and uses `--maxWorkers=4`. `bun run test:parallel` runs without that cap. CI checks normal and fixed-seed shuffled execution on Linux and Windows.
 
 During implementation, run the narrowest tests that cover the change. Run selected evidence once for an unchanged tree; do not repeat it merely because a commit or push follows.
 

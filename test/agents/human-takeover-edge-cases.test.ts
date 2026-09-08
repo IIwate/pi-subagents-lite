@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeResolvablePromise } from "../fixtures.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeResolvablePromise } from "../fixtures.js";
 import { DeliverySelectorComponent } from "../../src/ui/delivery-selector.js";
 import {
   extractDeliverableMessages,
@@ -46,6 +46,7 @@ import { AgentManager } from "../../src/agents/agent-manager.js";
 import { registerAgents } from "../../src/agents/agent-types.js";
 import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
 import { AgentNavigator } from "../../src/ui/agent-navigator.js";
+import { createTestHarness, type TestHarness } from "../harness.js";
 
 const mockTheme = {
   bold: (t: string) => `*${t}*`,
@@ -53,7 +54,10 @@ const mockTheme = {
 };
 
 describe("Human takeover & selective delivery — edge cases & boundary verification", () => {
+  let harness: TestHarness;
   beforeEach(() => {
+    harness = createTestHarness();
+    vi.useFakeTimers();
     registerAgents(new Map());
     state.entries.length = 0;
     state.runAgent.mockReset();
@@ -68,11 +72,12 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
       messages: [],
     };
 
-    state.runAgent.mockResolvedValue({
-      responseText: "default agent response",
+    state.runAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+      await options.onSessionCreated(state.session);
+      return { responseText: "default agent response",
       session: state.session,
       aborted: false,
-      turnLimited: false,
+      turnLimited: false };
     });
 
     state.ctx = {
@@ -94,6 +99,9 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
         setStatus: vi.fn(),
         getEditorComponent: vi.fn(),
         setEditorComponent: vi.fn(),
+        getEditorText: () => "",
+        setWidget: vi.fn(),
+        theme: mockTheme,
       },
     };
 
@@ -108,7 +116,15 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
     state.coordinator = new SpawnCoordinator(state.manager);
     state.manager.setOnComplete((record: any) => state.coordinator.onAgentComplete(record));
     state.navigator = new AgentNavigator(state.manager);
+    harness.onDispose(async () => {
+      state.navigator.dispose();
+      await state.manager.dispose();
+      await state.coordinator.reconcileDeliveryState();
+      state.coordinator.dispose();
+    });
   });
+
+  afterEach(async () => { await harness.dispose(); });
 
   describe("1. Message extraction & text filtering edge cases", () => {
     it("handles complex multimodal arrays with thinking, toolCall, toolResult and whitespace", () => {
@@ -210,7 +226,7 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
         runInBackground: false,
       });
 
-      const secondRecord = state.manager.listAgents().find(a => a.id !== firstId)!;
+      const secondRecord = state.manager.listAgents().find((a: { id: string }) => a.id !== firstId)!;
       expect(secondRecord.lifecycle.status).toBe("queued");
       expect(secondRecord.execution.detach).toBeDefined();
 
@@ -263,34 +279,20 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
       expect(state.entries.length).toBe(0);
     });
 
-    it("allows selective delivery from a completed or stopped takenOver agent with fallback to record.result", () => {
-      const record = state.manager.spawn(
-        state.pi,
-        state.ctx,
-        "Explore",
-        "Finished task",
-        { description: "Completed inspect", runInBackground: true },
-      );
-      const agentRecord = state.manager.getRecord(record)!;
-      agentRecord.lifecycle.takenOver = true;
-      agentRecord.lifecycle.pinnedAt = Date.now();
-      agentRecord.lifecycle.status = "completed";
-
-      // Session disposed or closed, but record.result contains final output
-      agentRecord.execution.session = undefined;
-      agentRecord.result = "Final output summary text from completed run.";
-
-      expect(state.navigator.canDeliverRecord(agentRecord)).toBe(true);
-
-      const deliverable = state.coordinator.getDeliverableMessages(record);
-      expect(deliverable).toEqual([
-        { role: "assistant", content: "Final output summary text from completed run." },
+    it("delivers stored final text when a taken-over session has no transcript messages", async () => {
+      const id = state.manager.spawn(state.pi, state.ctx, "Explore", "Finished task", {
+        description: "Completed inspect", runInBackground: true,
+      });
+      const record = state.manager.getRecord(id)!;
+      expect(await state.coordinator.interact(id, "Review the result")).toEqual({ accepted: true });
+      await record.execution.promise;
+      expect(state.navigator.canDeliverRecord(record)).toBe(true);
+      expect(state.coordinator.getDeliverableMessages(id)).toEqual([
+        { role: "assistant", content: "default agent response" },
       ]);
-
-      const delivered = state.coordinator.deliverSelectedMessages(record, [0]);
-      expect(delivered).toBeDefined();
+      const delivered = state.coordinator.deliverSelectedMessages(id, [0]);
       expect(delivered?.result).toContain("### Delivered Output");
-      expect(delivered?.result).toContain("Final output summary text from completed run.");
+      expect(delivered?.result).toContain("default agent response");
     });
 
     it("notifies navigator.update() immediately when subsequent continuations complete", async () => {
@@ -423,7 +425,7 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
     });
 
     it("guarantees chronological message delivery even when user selects items out-of-order", () => {
-      const messages = [
+      const messages: Array<{ role: "user" | "assistant"; content: string }> = [
         { role: "user", content: "Message 0" },
         { role: "assistant", content: "Message 1" },
         { role: "user", content: "Message 2" },
@@ -506,15 +508,14 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
         { description: "Re-entrancy test", runInBackground: true },
       );
       const agentRecord = state.manager.getRecord(record)!;
-      agentRecord.lifecycle.takenOver = true;
-      agentRecord.lifecycle.pinnedAt = Date.now();
-      agentRecord.execution.session = {
-        messages: [{ role: "assistant", content: "Hello" }],
-      };
+      state.session.messages = [{ role: "assistant", content: "Hello" }];
+      expect(await state.coordinator.interact(record, "Review results")).toEqual({ accepted: true });
+      await agentRecord.execution.promise;
 
       state.navigator.setUICtx(state.ctx.ui);
-      (state.navigator as any).highlightedAgentId = record;
-      (state.navigator as any).listFocused = true;
+      state.navigator.handleTerminalInput("\x1b[B");
+      state.navigator.handleTerminalInput("\x1b[B");
+      expect(state.navigator.highlightedId()).toBe(record);
 
       // Mock ui.custom to hang until we resolve it
       let customResolver: any;
@@ -536,7 +537,7 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
   });
 
   describe("4. Multi-stage delivery & TTL cleanup interaction", () => {
-    it("supports 3 consecutive stages of delivery with distinct IDs and preserves Pin", () => {
+    it("supports 3 consecutive stages of delivery with distinct IDs and preserves Pin", async () => {
       const recordId = state.manager.spawn(
         state.pi,
         state.ctx,
@@ -545,18 +546,16 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
         { description: "Complex research", runInBackground: true },
       );
       const record = state.manager.getRecord(recordId)!;
-      record.lifecycle.takenOver = true;
-      record.lifecycle.pinnedAt = Date.now();
-      record.execution.session = {
-        messages: [
+      state.session.messages = [
           { role: "user", content: "Step 1 question" },
           { role: "assistant", content: "Step 1 answer" },
           { role: "user", content: "Step 2 question" },
           { role: "assistant", content: "Step 2 answer" },
           { role: "user", content: "Step 3 question" },
           { role: "assistant", content: "Step 3 answer" },
-        ],
-      };
+      ];
+      expect(await state.coordinator.interact(recordId, "Review results")).toEqual({ accepted: true });
+      await record.execution.promise;
 
       // Stage 1: deliver step 1 answer
       const d1 = state.coordinator.deliverSelectedMessages(recordId, [1])!;
@@ -581,9 +580,8 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
       // Record remains pinned and active
       expect(record.lifecycle.pinnedAt).toBeDefined();
 
-      // Advance clock past 15 minutes and trigger cleanup
-      record.lifecycle.completedAt = Date.now() - 15 * 60_000;
-      (state.manager as any).cleanup();
+      await record.execution.promise;
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
 
       // Pinned record MUST NOT be removed!
       expect(state.manager.getRecord(recordId)).toBeDefined();

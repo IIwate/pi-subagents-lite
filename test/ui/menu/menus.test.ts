@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mockModules } from "../../menu-mock-setup.js";
+import { resetMenuStore } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
 import { getAgentConfig } from "../../../src/agents/agent-types.js";
 
@@ -14,9 +14,11 @@ import { getAgentConfig } from "../../../src/agents/agent-types.js";
 import { showAgentsMenu } from "../../../src/ui/menu/menus.js";
 
 function resetAgentState(): void {
-  mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
-  mockModules.mockConfig.agent = { forceBackground: false };
-  mockModules.mockConfig.concurrency = { default: 4 };
+  resetMenuStore({
+    modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} },
+    agent: { forceBackground: false },
+    concurrency: { default: 4 },
+  });
 }
 
 function captureMenuFlow(ctx: any, firstChoice: string, cancelKey = "\x1b"): {
@@ -129,7 +131,7 @@ describe("showAgentsMenu — current state", () => {
   });
 
   it("shows the current fallback value without calling it Default", async () => {
-    mockModules.mockConfig.concurrency = { default: 8 };
+    resetMenuStore({ concurrency: { default: 8 } });
     const ctx = createMockCtx();
     let rendered = "";
     ctx.ui.custom.mockImplementation(async (factory: any) => {

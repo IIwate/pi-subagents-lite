@@ -51,9 +51,10 @@ describe("deferred submenu close", () => {
     }], 5, theme, () => {}, () => {});
 
     list.handleInput("\r");
-    expect((list as any).submenuComponent).not.toBeNull();
+    expect(list.render(80).join("\n")).toContain("No rules remain");
     await Promise.resolve();
-    expect((list as any).submenuComponent).toBeNull();
+    expect(list.render(80).join("\n")).toContain("Clean");
+    expect(list.render(80).join("\n")).not.toContain("No rules remain");
   });
 });
 
@@ -65,7 +66,7 @@ describe("enableSpaceSelection", () => {
     ], 10, buildListTheme(mockTheme));
     const selected = vi.fn();
     list.onSelect = selected;
-    list.selectedIndex = 1;
+    list.setSelectedIndex(1);
     enableSpaceSelection(list);
 
     list.handleInput(" ");
@@ -83,15 +84,15 @@ describe("skipNonSelectableRows", () => {
     ] as any, 10, buildListTheme(mockTheme));
     skipNonSelectableRows(list, (item) => item?.nonSelectable === true);
 
-    expect(list.selectedIndex).toBe(1);
+    expect(list.getSelectedItem()?.value).toBe("anthropic");
     list.handleInput("\x1b[B");
-    expect(list.selectedIndex).toBe(3);
+    expect(list.getSelectedItem()?.value).toBe("__proto__");
     list.handleInput("\x1b[A");
-    expect(list.selectedIndex).toBe(1);
+    expect(list.getSelectedItem()?.value).toBe("anthropic");
     list.handleInput("\x1b[A");
-    expect(list.selectedIndex).toBe(3);
+    expect(list.getSelectedItem()?.value).toBe("__proto__");
     list.handleInput("\x1b[B");
-    expect(list.selectedIndex).toBe(1);
+    expect(list.getSelectedItem()?.value).toBe("anthropic");
   });
 });
 

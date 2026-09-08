@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeResolvablePromise } from "../fixtures.ts";
+import { makeResolvablePromise } from "../fixtures.js";
 
 const state = vi.hoisted(() => ({
   entries: [] as any[],
@@ -43,6 +43,7 @@ import { SpawnCoordinator } from "../../src/spawn/spawn-coordinator.js";
 
 describe("durable result delivery integration", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     state.entries.length = 0;
     state.runAgent.mockReset();
     state.continueAgentSession.mockReset();
@@ -86,8 +87,10 @@ describe("durable result delivery integration", () => {
   });
 
   afterEach(async () => {
-    state.coordinator.dispose();
     await state.manager.dispose();
+    await state.coordinator.reconcileDeliveryState();
+    state.coordinator.dispose();
+    vi.useRealTimers();
   });
 
   it("reads and acknowledges a durable result after TTL cleanup removes the Agent record", async () => {
@@ -102,8 +105,7 @@ describe("durable result delivery integration", () => {
     await record.execution.promise;
     expect(record.lifecycle.resultPersisted).toBe(true);
 
-    record.lifecycle.completedAt = Date.now() - 20 * 60_000;
-    (state.manager as any).cleanup();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
     expect(state.manager.getRecord(id)).toBeUndefined();
 
     const status = await executeAgentStatusTool(

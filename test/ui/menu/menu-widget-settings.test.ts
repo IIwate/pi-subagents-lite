@@ -1,7 +1,7 @@
 /** Display settings menu tests. */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mockModules } from "../../menu-mock-setup.js";
+import { resetMenuStore } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
 
 let settingsListCalls: Array<{
@@ -26,17 +26,19 @@ vi.mock("@earendil-works/pi-tui", () => ({
 import { showWidgetSettingsMenu } from "../../../src/ui/menu/menu-widget-settings.js";
 
 function resetMocks(): void {
-  mockModules.mockConfig.agent = {
-    forceBackground: false,
-    expandListByDefault: true,
-    showTools: true,
-    showTurns: true,
-    showInput: true,
-    showOutput: true,
-    showContext: true,
-    showCost: false,
-    showTime: true,
-  };
+  resetMenuStore({
+    agent: {
+      forceBackground: false,
+      expandListByDefault: true,
+      showTools: true,
+      showTurns: true,
+      showInput: true,
+      showOutput: true,
+      showContext: true,
+      showCost: false,
+      showTime: true,
+    },
+  });
   vi.clearAllMocks();
   settingsListCalls = [];
 }
@@ -64,17 +66,27 @@ describe("showWidgetSettingsMenu", () => {
   });
 
   it("shows current ON/OFF values", async () => {
-    mockModules.mockConfig.agent.expandListByDefault = false;
-    mockModules.mockConfig.agent.showTurns = false;
-    mockModules.mockConfig.agent.showCost = false;
+    resetMenuStore({
+      agent: {
+        forceBackground: false,
+        expandListByDefault: false,
+        showTools: true,
+        showTurns: false,
+        showInput: true,
+        showOutput: true,
+        showContext: true,
+        showCost: false,
+        showTime: true,
+      },
+    });
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
 
     const items = settingsListCalls[0].items;
-    expect(items.find(item => item.id === "expandListByDefault").currentValue).toBe("OFF");
-    expect(items.find(item => item.id === "showTools").currentValue).toBe("ON");
-    expect(items.find(item => item.id === "showTurns").currentValue).toBe("OFF");
-    expect(items.find(item => item.id === "showCost").currentValue).toBe("OFF");
+    expect(items.find((item: any) => item.id === "expandListByDefault").currentValue).toBe("OFF");
+    expect(items.find((item: any) => item.id === "showTools").currentValue).toBe("ON");
+    expect(items.find((item: any) => item.id === "showTurns").currentValue).toBe("OFF");
+    expect(items.find((item: any) => item.id === "showCost").currentValue).toBe("OFF");
   });
 
   it("tells the user to reload after changing the list default", async () => {
@@ -90,6 +102,7 @@ describe("showWidgetSettingsMenu", () => {
   });
 
   it("updates every display setting", async () => {
+    const { store } = resetMenuStore();
     const ctx = createMockCtx();
     await showWidgetSettingsMenu(ctx);
     const { onChange } = settingsListCalls[0];
@@ -102,12 +115,12 @@ describe("showWidgetSettingsMenu", () => {
       "showOutput",
       "showContext",
       "showTime",
-    ]) {
+    ] as const) {
       onChange(id, "OFF");
-      expect(mockModules.mockConfig.agent[id]).toBe(false);
+      expect(store.agent[id]).toBe(false);
     }
     onChange("showCost", "ON");
-    expect(mockModules.mockConfig.agent.showCost).toBe(true);
+    expect(store.agent.showCost).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledTimes(8);
   });
 });

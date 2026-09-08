@@ -65,6 +65,10 @@ describe("defaultTools edge cases & sanitization", () => {
 });
 
 describe("Frontmatter policy conflicts & resolution order", () => {
+  beforeEach(() => {
+    registerAgents(new Map(), { disableDefaultAgents: false });
+  });
+
   it("tools whitelist wins over excludeTools when both are specified", () => {
     // tools has "powershell", excludeTools has "powershell"
     // Rule: tools wins over excludeTools

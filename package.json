@@ -43,7 +43,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --maxWorkers=1",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --maxWorkers=4",
     "test:parallel": "vitest run",
     "test:watch": "vitest"
   },

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { Value } from "typebox/value";
 import {
   createMockExtensionAPI,
   hasParam,
@@ -19,36 +20,6 @@ import {
 } from "./fixtures";
 
 // Mock external dependencies before any imports
-vi.mock("typebox", () => {
-  const createType = (type: string) => (opts?: any) => ({
-    type,
-    ...(opts || {}),
-  });
-  return {
-    Type: {
-      Object: (properties: Record<string, any>, opts?: any) => ({
-        type: "object",
-        properties,
-        ...(opts || {}),
-      }),
-      String: createType("string"),
-      Number: createType("number"),
-      Boolean: createType("boolean"),
-      Optional: (schema: any) => ({ ...schema, optional: true }),
-      Array: (items: any) => ({ type: "array", items }),
-      Record: (keyType: any, valueType: any) => ({
-        type: "record",
-        keyType,
-        valueType,
-      }),
-      Union: (variants: any[]) => ({ type: "union", variants }),
-      Literal: (value: string | number | boolean) => ({
-        type: "literal",
-        const: value,
-      }),
-    },
-  };
-});
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   DynamicBorder: class {},
 }));
@@ -143,6 +114,18 @@ describe("Agent tool schema — stealth", () => {
   });
 
   const agentTool = () => findTool(api, "Agent");
+
+  it.each([
+    { params: { prompt: "Inspect" }, valid: true },
+    { params: { prompt: "Inspect", agent: "Explore", thinking: "off", run_in_background: true }, valid: true },
+    { params: {}, valid: false },
+    { params: { prompt: 1 }, valid: false },
+    { params: { prompt: "Inspect", thinking: "invalid" }, valid: false },
+    { params: { prompt: "Inspect", run_in_background: "true" }, valid: false },
+    { params: { prompt: "Inspect", unknown: true }, valid: false },
+  ])("validates registered Agent parameters with TypeBox: $params", ({ params, valid }) => {
+    expect(Value.Check(agentTool()!.parameters, params)).toBe(valid);
+  });
 
   it("has no description (stealth)", () => {
     expect(agentTool()).toBeDefined();

@@ -579,6 +579,11 @@ export class AgentNavigator {
     return this.selectedAgentId;
   }
 
+  /** Current highlighted subagent ID in the list, or null for Main. Pure read, no side-effects. */
+  highlightedId(): string | null {
+    return this.highlightedAgentId;
+  }
+
   /** Stop the currently selected subagent if it is running. */
   abortActiveSubagent(): boolean {
     const id = this.selectedId();

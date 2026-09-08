@@ -3,6 +3,7 @@ import {
   mockModules,
   resetSelectDialogInstances,
   selectDialogInstances,
+  resetMenuStore,
 } from "../../menu-mock-setup.js";
 import { createMockCtx } from "../../menu-test-helpers.js";
 
@@ -70,8 +71,10 @@ vi.mock("../../../src/ui/menu/wrappers/settings-list.js", () => ({
 import { showConcurrencySettingsMenu } from "../../../src/ui/menu/menu-concurrency.js";
 
 function resetState(): void {
-  mockModules.mockConfig.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
-  mockModules.mockConfig.concurrency = { default: 4 };
+  resetMenuStore({
+    modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} },
+    concurrency: { default: 4 },
+  });
   mockModules.mockManager.listAgents.mockReturnValue([]);
   settingsListCalls = [];
   inputInstances = [];
@@ -106,7 +109,7 @@ describe("showConcurrencySettingsMenu", () => {
   });
 
   it("shows a custom fallback without calling it Default and restores Default at four", async () => {
-    mockModules.mockConfig.concurrency = { default: 8 };
+    resetMenuStore({ concurrency: { default: 8 } });
     const ctx = createMockCtx();
     await showConcurrencySettingsMenu(ctx);
     expect(items().find((item) => item.id === "defaultConcurrency").currentValue).toBe("8 slots");
@@ -118,11 +121,13 @@ describe("showConcurrencySettingsMenu", () => {
   });
 
   it("shows active Provider and Model overrides without section separators", async () => {
-    mockModules.mockConfig.concurrency = {
-      default: 4,
-      providers: { anthropic: 2 },
-      models: { "anthropic/claude-sonnet-4-20250514": 1 },
-    };
+    resetMenuStore({
+      concurrency: {
+        default: 4,
+        providers: { anthropic: 2 },
+        models: { "anthropic/claude-sonnet-4-20250514": 1 },
+      },
+    });
     await showConcurrencySettingsMenu(createMockCtx());
 
     expect(items().find((item) => item.id === "provider:anthropic")).toMatchObject({
@@ -137,35 +142,40 @@ describe("showConcurrencySettingsMenu", () => {
   });
 
   it("preserves inactive limits behind one conditional management row", async () => {
-    mockModules.mockConfig.concurrency = {
-      default: 4,
-      providers: { openai: 2 },
-      models: { "openai/gpt-4o": 1 },
-    };
+    const { store } = resetMenuStore({
+      concurrency: {
+        default: 4,
+        providers: { openai: 2 },
+        models: { "openai/gpt-4o": 1 },
+      },
+    });
     await showConcurrencySettingsMenu(createMockCtx());
 
     expect(items().find((item) => item.id === "provider:openai")).toBeUndefined();
     expect(items().find((item) => item.id === "model:openai/gpt-4o")).toBeUndefined();
     expect(items().find((item) => item.id === "inactiveLimits").currentValue).toBe("2");
-    expect(mockModules.mockConfig.concurrency).toMatchObject({
+    expect(store.concurrency).toMatchObject({
+      default: 4,
       providers: { openai: 2 },
       models: { "openai/gpt-4o": 1 },
     });
   });
 
   it("restores dormant limits when Model routing makes them actionable again", async () => {
-    mockModules.mockConfig.modelRouting = {
-      enabled: true,
-      enabledProviders: ["openai"],
-      agentAccess: {
-        "general-purpose": { providers: { openai: { models: ["gpt-4o"] } } },
+    resetMenuStore({
+      modelRouting: {
+        enabled: true,
+        enabledProviders: ["openai"],
+        agentAccess: {
+          "general-purpose": { providers: { openai: { models: ["gpt-4o"] } } },
+        },
       },
-    };
-    mockModules.mockConfig.concurrency = {
-      default: 4,
-      providers: { openai: 2 },
-      models: { "openai/gpt-4o": 1 },
-    };
+      concurrency: {
+        default: 4,
+        providers: { openai: 2 },
+        models: { "openai/gpt-4o": 1 },
+      },
+    });
     await showConcurrencySettingsMenu(createMockCtx());
 
     expect(items().map((item) => item.id)).toContain("provider:openai");
@@ -174,10 +184,12 @@ describe("showConcurrencySettingsMenu", () => {
   });
 
   it("keeps accepted-session models actionable after routing changes", async () => {
-    mockModules.mockConfig.concurrency = {
-      default: 4,
-      models: { "google/gemini-2.5-pro": 2 },
-    };
+    resetMenuStore({
+      concurrency: {
+        default: 4,
+        models: { "google/gemini-2.5-pro": 2 },
+      },
+    });
     mockModules.mockManager.listAgents.mockReturnValue([
       { execution: { modelKey: "google/gemini-2.5-pro" }, lifecycle: { status: "completed" } },
     ] as any);
@@ -198,7 +210,7 @@ describe("showConcurrencySettingsMenu", () => {
   });
 
   it("edits and removes an active override", async () => {
-    mockModules.mockConfig.concurrency = { default: 4, providers: { anthropic: 2 } };
+    const { store } = resetMenuStore({ concurrency: { default: 4, providers: { anthropic: 2 } } });
     const ctx = createMockCtx();
     await showConcurrencySettingsMenu(ctx);
     const row = items().find((item) => item.id === "provider:anthropic");
@@ -207,29 +219,31 @@ describe("showConcurrencySettingsMenu", () => {
     let editList = selectListInstances.at(-1)!;
     editList.onSelect!({ value: "edit" });
     inputInstances.at(-1)!.onSubmit!("5");
-    expect(mockModules.mockConfig.concurrency.providers!.anthropic).toBe(5);
+    expect(store.concurrency.providers!.anthropic).toBe(5);
 
     row.submenu("5 slots", done);
     editList = selectListInstances.at(-1)!;
     editList.onSelect!({ value: "remove" });
-    expect(mockModules.mockConfig.concurrency.providers!.anthropic).toBeUndefined();
+    expect(store.concurrency.providers!.anthropic).toBeUndefined();
     await Promise.resolve();
     expect(settingsListCalls[0].items.some((item: any) => item.id === "provider:anthropic")).toBe(false);
     expect(settingsListCalls[0].selectedIndex).toBe(0);
   });
 
   it("shows Reset only for non-default state and clears active and inactive limits", async () => {
-    mockModules.mockConfig.concurrency = {
-      default: 8,
-      providers: { anthropic: 2, openai: 3 },
-      models: { "openai/gpt-4o": 1 },
-    };
+    const { store } = resetMenuStore({
+      concurrency: {
+        default: 8,
+        providers: { anthropic: 2, openai: 3 },
+        models: { "openai/gpt-4o": 1 },
+      },
+    });
     const ctx = createMockCtx();
     await showConcurrencySettingsMenu(ctx);
     const reset = items().find((item) => item.id === "resetAll");
     reset.submenu("", vi.fn());
     selectListInstances.at(-1)!.onSelect!({ value: "Yes" });
 
-    expect(mockModules.mockConfig.concurrency).toEqual({ default: 4 });
+    expect(store.concurrency).toEqual({ default: 4, providers: {}, models: {} });
   });
 });

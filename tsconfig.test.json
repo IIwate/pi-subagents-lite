@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM"]
+  },
+  "include": [
+    "src/",
+    "test/harness.ts",
+    "test/harness.test.ts",
+    "test/fixtures.ts",
+    "test/menu-mock-setup.ts",
+    "test/ui/navigator/",
+    "test/ui/menu/",
+    "test/agents/manager/",
+    "test/agents/runner/",
+    "test/index.test.ts",
+    "test/events.test.ts",
+    "test/agents/queued-model-permission.integration.test.ts",
+    "test/agents/result-delivery.integration.test.ts",
+    "test/agents/human-takeover-delivery.integration.test.ts",
+    "test/agents/human-takeover-edge-cases.test.ts",
+    "test/spawn/durable-inbox.integration.test.ts"
+  ],
+  "exclude": ["node_modules"]
+}

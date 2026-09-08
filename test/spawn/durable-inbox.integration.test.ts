@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../../src/agents/agent-manager.js";
+import { runAgent } from "../../src/agents/agent-runner.js";
+import { fakeOptions, mockRunResult } from "../agents/manager/manager-test-helpers.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { setupEventListeners } from "../../src/events.js";
 import { setCoordinator, setManager, setPiInstance, setSessionCtx } from "../../src/shell.js";
@@ -22,6 +24,8 @@ vi.mock("node:fs/promises", async importOriginal => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return { ...actual, readFile: vi.fn(actual.readFile) };
 });
+
+vi.mock("../../src/agents/agent-runner.js", () => ({ runAgent: vi.fn(), continueAgentSession: vi.fn() }));
 
 describe("durable result delivery", () => {
   let directory: string;
@@ -69,21 +73,26 @@ describe("durable result delivery", () => {
     };
   }
 
-  function addRecord(completion: PendingResult) {
-    const record: any = {
-      id: completion.agentId,
-      display: { type: completion.type },
-      lifecycle: { status: "completed", completedAt: Date.now() - 20 * 60_000, resultPersisted: true },
-      execution: {
-        resultSessionId: completion.parentSessionId,
-        resultOriginEntryId: completion.originEntryId,
-        resultDeliveryId: completion.deliveryId,
-        settled: true,
-      },
-      result: completion.result,
-    };
-    (manager as any).agents.set(record.id, record);
+  async function addRecord(completion: PendingResult) {
+    vi.mocked(runAgent).mockResolvedValueOnce(mockRunResult({ responseText: completion.result }));
+    const id = manager.spawn(pi, ctx, completion.type, completion.result, fakeOptions({
+      resultSessionId: completion.parentSessionId,
+      resultOriginEntryId: completion.originEntryId,
+    }));
+    const record = manager.getRecord(id)!;
+    await record.execution.promise;
     return record;
+  }
+
+  function withUnwritableLog(action: () => void): void {
+    const file = session.getSessionFile()!;
+    const backup = `${file}.saved`;
+    renameSync(file, backup);
+    mkdirSync(file);
+    try { action(); } finally {
+      rmdirSync(file);
+      renameSync(backup, file);
+    }
   }
 
   async function state() {
@@ -103,7 +112,9 @@ describe("durable result delivery", () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.mocked(readFile).mockReset();
+    vi.mocked(runAgent).mockReset();
     directory = mkdtempSync(join(tmpdir(), "pi-durable-inbox-"));
     session = SessionManager.create(directory, directory);
     rootId = session.appendMessage({ role: "user", content: "Start", timestamp: Date.now() } as any);
@@ -119,7 +130,7 @@ describe("durable result delivery", () => {
     ctx = { sessionManager: session, isIdle: () => true, hasUI: false };
     setSessionCtx(ctx);
     setPiInstance(pi);
-    manager = new AgentManager();
+    manager = new AgentManager(record => coordinator.onAgentComplete(record));
     setManager(manager);
     coordinator = new SpawnCoordinator(manager);
     setCoordinator(coordinator);
@@ -127,13 +138,15 @@ describe("durable result delivery", () => {
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    coordinator.dispose();
     await manager.dispose();
+    await coordinator.reconcileDeliveryState();
+    coordinator.dispose();
     setCoordinator(null);
     setManager(null);
     setSessionCtx(null as any);
     setPiInstance(null as any);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
     rmSync(directory, { recursive: true, force: true });
   });
 
@@ -174,7 +187,9 @@ describe("durable result delivery", () => {
     const completion = result();
     save(completion);
     deliver(completion);
-    vi.spyOn(session as any, "_persist").mockImplementationOnce(() => { throw new Error("disk full"); });
+    pi.appendEntry.mockImplementationOnce((type: string, data: unknown) => {
+      withUnwritableLog(() => session.appendCustomEntry(type, data));
+    });
     await coordinator.restorePending();
     expect((await state()).acknowledgedIds.size).toBe(0);
     expect(session.getEntries().some(entry => entry.type === "custom" && entry.customType === RESULT_ACK_ENTRY)).toBe(true);
@@ -189,8 +204,7 @@ describe("durable result delivery", () => {
   it("does not acknowledge a receipt left only in Pi memory after a failed write", async () => {
     const completion = result();
     save(completion);
-    vi.spyOn(session as any, "_persist").mockImplementationOnce(() => { throw new Error("disk full"); });
-    expect(() => deliver(completion)).toThrow("disk full");
+    expect(() => withUnwritableLog(() => deliver(completion))).toThrow();
     await coordinator.reconcileDeliveryState();
     expect((await state()).acknowledgedIds.size).toBe(0);
     expect(pi.appendEntry).not.toHaveBeenCalled();
@@ -224,10 +238,9 @@ describe("durable result delivery", () => {
   });
 
   it("reads and acknowledges a result after GC removes its execution record", async () => {
-    const completion = result();
-    save(completion);
-    addRecord(completion);
-    (manager as any).cleanup();
+    const record = await addRecord(result());
+    const completion = coordinator.getStoredResult(record.id)!;
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
     expect(manager.getRecord(completion.agentId)).toBeUndefined();
     await coordinator.reconcileDeliveryState();
     const response = await executeAgentStatusTool("status-call", { agent_id: completion.agentId }, undefined, undefined, ctx);
@@ -326,8 +339,7 @@ describe("durable result delivery", () => {
     const read = pauseRead();
     const reconciliation = coordinator.reconcileDeliveryState();
     await read.started;
-    const record = addRecord(result("agent-new"));
-    coordinator.onAgentComplete(record);
+    const record = await addRecord(result("agent-new"));
     read.release();
     await reconciliation;
     await Promise.resolve();
@@ -335,7 +347,7 @@ describe("durable result delivery", () => {
       expect.objectContaining({ content: expect.stringContaining("Result for agent-new") }),
       expect.anything(),
     );
-    expect((await state()).saved.has(record.execution.resultDeliveryId)).toBe(true);
+    expect((await state()).saved.has(record.execution.resultDeliveryId!)).toBe(true);
   });
 
   it("performs a trailing read when a receipt arrives during reconciliation", async () => {

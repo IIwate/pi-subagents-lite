@@ -16,6 +16,7 @@ const theme = {
 function makeSettingsList(items: any[]) {
   return {
     items,
+    filteredItems: items,
     onChange: vi.fn(),
     onCancel: vi.fn(),
     selectedIndex: 0,
@@ -33,6 +34,7 @@ function makeSelectList(items: any[]) {
     selectedIndex: 0,
     render: () => [] as string[],
     handleInput: () => {},
+    invalidate: () => {},
   };
 }
 
@@ -87,7 +89,7 @@ describe("SettingsListWrapper — __sep__ navigation", () => {
     new SettingsListWrapper(list, { title: "T", theme, onCancel: () => {} });
     expect(list.selectedIndex).toBe(0);
     // down past the separator
-    (list as any).selectedIndex = 1;
+    list.selectedIndex = 1;
     expect((list.items as any[])[list.selectedIndex].id).toBe("b");
   });
 
@@ -98,10 +100,10 @@ describe("SettingsListWrapper — __sep__ navigation", () => {
       { id: "b", label: "B", currentValue: "" },
     ]);
     new SettingsListWrapper(list, { title: "T", theme, onCancel: () => {} });
-    (list as any).selectedIndex = 2;
+    list.selectedIndex = 2;
     expect((list.items as any[])[list.selectedIndex].id).toBe("b");
     // up past the separator
-    (list as any).selectedIndex = 1;
+    list.selectedIndex = 1;
     expect((list.items as any[])[list.selectedIndex].id).toBe("a");
   });
 
@@ -112,8 +114,8 @@ describe("SettingsListWrapper — __sep__ navigation", () => {
       { id: "__sep__", label: " ", currentValue: "" },
     ]);
     new SettingsListWrapper(list, { title: "T", theme, onCancel: () => {} });
-    (list as any).selectedIndex = 1;
-    (list as any).selectedIndex = 2;
+    list.selectedIndex = 1;
+    list.selectedIndex = 2;
     expect((list.items as any[])[list.selectedIndex].id).toBe("a");
   });
 });
