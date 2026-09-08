@@ -20,6 +20,7 @@ describe("ensureManagerAndNavigator", () => {
     setSessionCtx({
       sessionManager: {
         getSessionId: () => "test-session",
+        getSessionFile: () => undefined,
         getEntries: () => [],
         getBranch: () => [],
       },

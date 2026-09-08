@@ -20,7 +20,8 @@ import {
   appendPendingResult,
   appendResultAck,
   buildResultMessage,
-  readResultEntries,
+  deriveResultStateFromEntries,
+  readDurableLogState,
   type PendingResult,
 } from "./result-inbox.js";
 
@@ -39,16 +40,6 @@ export interface SpawnResult {
   agentId: string;
   record: AgentRecord;
   detached?: boolean;
-}
-
-function isParentRunSuccessful(
-  messages: readonly { role: string; stopReason?: string; errorMessage?: string }[],
-): boolean {
-  const last = messages.filter(message => message.role === "assistant").at(-1);
-  return !!last
-    && last.stopReason !== "error"
-    && last.stopReason !== "aborted"
-    && last.errorMessage === undefined;
 }
 
 function storedResult(record: AgentRecord): PendingResult | undefined {
@@ -79,24 +70,22 @@ function storedResult(record: AgentRecord): PendingResult | undefined {
  * background completion is durable, while concurrent completions share one
  * parent wake-up so a provider error cannot turn into N queued parent turns.
  */
-function parentSessionId(): string {
-  return getSessionCtx().sessionManager.getSessionId();
-}
-
 export class SpawnCoordinator {
+  private readonly sessionId: string;
+  private readonly sessionFile: string | undefined;
+  private lifecycleVersion = 0;
   /** Parent lifecycle phase distinguishes idle preflight from settled-idle gaps. */
   private parentRunPhase: "idle" | "preflight" | "running" | "settling" = "idle";
   /** True while one parent turn is carrying a result delivery request. */
   private parentWakeActive = false;
-  /** Result IDs presented by the currently active parent turn. */
-  private parentTurnResultIds = new Set<string>();
+  /** In-flight delivery IDs currently dispatched to prevent concurrent duplicate sends. */
+  private inFlightDeliveryIds = new Set<string>();
+  /** Only receipts verified in the session file can establish delivery. */
+  private deliveredResultIds = new Set<string>();
+  private acknowledgedResultIds = new Set<string>();
   /** Monotonic persisted-completion version and the snapshot carried by the active parent turn. */
   private completionVersion = 0;
   private parentWakeCompletionVersion = 0;
-  /** Latest parent run outcome, consumed at agent_settled. */
-  private parentRunSucceeded = true;
-  /** Last wake failed; used only to bound automatic retry at settlement. */
-  private lastWakeFailed = false;
   /** Delivery failures stay attached to their result. */
   private failedResultIds = new Set<string>();
   /** Results restored once from the parent session, then maintained incrementally. */
@@ -106,15 +95,21 @@ export class SpawnCoordinator {
   private activeBranchIds = new Set<string>();
   /** Results retained in memory while the parent session append is unavailable. */
   private fallbackResults = new Map<string, PendingResult>();
+  /** In-flight reconciliation promise for merging concurrent calls. */
+  private reconcilingPromise: Promise<boolean> | null = null;
+  private reconcileQueued = false;
   /** Set during dispose to prevent stale pi usage after session replacement. */
   private disposed = false;
 
   constructor(private manager: AgentManager) {
-    const entries = readResultEntries(getSessionCtx());
-    this.pendingResults = entries.pending;
+    const ctx = getSessionCtx();
+    this.sessionId = ctx.sessionManager.getSessionId();
+    this.sessionFile = ctx.sessionManager.getSessionFile();
+    const entries = deriveResultStateFromEntries(ctx.sessionManager.getEntries(), this.sessionId);
+    this.pendingResults = entries.saved;
     this.latestResults = entries.latest;
     this.refreshActiveBranch();
-    for (const result of takeFallbackResults(parentSessionId())) {
+    for (const result of takeFallbackResults(this.sessionId)) {
       this.fallbackResults.set(result.deliveryId, result);
     }
   }
@@ -282,85 +277,75 @@ export class SpawnCoordinator {
     const completionVersion = this.completionVersion;
     this.flushFallbackResults();
     if (this.fallbackResults.has(result.deliveryId)) {
-      this.lastWakeFailed = true;
       if (this.completionVersion > completionVersion) this.requestParentWake();
       getNavigator()?.update();
       return;
     }
 
-    this.lastWakeFailed = false;
     this.requestParentWake();
     getNavigator()?.update();
   }
 
   /** Inject pending results into a normal parent prompt. */
-  prepareBeforeAgentStart(): ReturnType<typeof buildResultMessage> {
-    if (this.disposed) return undefined;
+  async prepareBeforeAgentStart(): Promise<ReturnType<typeof buildResultMessage>> {
+    if (!this.isActive()) return undefined;
+    if (this.parentRunPhase === "preflight") {
+      this.inFlightDeliveryIds.clear();
+      this.parentWakeActive = false;
+    }
+    const version = ++this.lifecycleVersion;
     this.parentRunPhase = "preflight";
-    this.flushFallbackResults();
-    const results = this.eligiblePendingResults();
+    if (!await this.reconcileDeliveryState() || !this.isActive() || version !== this.lifecycleVersion) return undefined;
+    const results = this.eligiblePendingResults()
+      .filter(result => !this.inFlightDeliveryIds.has(result.deliveryId));
     const message = buildResultMessage(results);
     if (!message) return undefined;
 
     this.parentWakeActive = true;
     this.parentWakeCompletionVersion = this.completionVersion;
-    this.parentRunSucceeded = false;
-    this.parentTurnResultIds = new Set(results.map(result => result.deliveryId));
-    this.lastWakeFailed = false;
+    for (const result of results) {
+      this.inFlightDeliveryIds.add(result.deliveryId);
+    }
     return message;
   }
 
   /** Flush a completion that landed after preflight but before the run started. */
   onParentAgentStart(): void {
-    if (this.disposed) return;
+    if (!this.isActive()) return;
+    this.lifecycleVersion++;
     this.parentRunPhase = "running";
     if (this.completionVersion > this.parentWakeCompletionVersion) {
       this.requestParentWake();
     }
   }
 
-  /** Track the outcome of the current parent agent run. */
-  onParentAgentEnd(messages: readonly { role: string; stopReason?: string; errorMessage?: string }[]): void {
+  /** Keep follow-ups out of the gap before Pi finishes its post-run work. */
+  onParentAgentEnd(): void {
     this.parentRunPhase = "settling";
-    this.parentRunSucceeded = isParentRunSuccessful(messages);
   }
 
   /** Finalize delivery after Pi has exhausted retries and queued continuations. */
-  onParentSettled(): void {
-    if (this.disposed) return;
-
-    const ids = [...this.parentTurnResultIds];
-    const succeeded = this.parentRunSucceeded;
-    const deliveryFailed = this.lastWakeFailed;
+  async onParentSettled(): Promise<void> {
+    if (!this.isActive()) return;
+    const version = ++this.lifecycleVersion;
+    this.parentRunPhase = "settling";
+    const reconciled = await this.reconcileDeliveryState();
+    if (!this.isActive() || version !== this.lifecycleVersion) return;
     const hasNewCompletion = this.completionVersion > this.parentWakeCompletionVersion;
-    const hasPending = this.eligiblePendingResults().length > 0;
-    const hasNewWakeOpportunity = hasNewCompletion && hasPending;
+    this.parentWakeCompletionVersion = this.completionVersion;
     this.parentRunPhase = "idle";
     this.parentWakeActive = false;
-    this.parentTurnResultIds.clear();
-
-    let wakeAfterSettle = false;
-    if (succeeded) {
-      this.lastWakeFailed = false;
-      const acknowledged = ids.length > 0 && this.acknowledge(ids);
-      const deliveryDrained = acknowledged && !deliveryFailed && this.eligiblePendingResults().length > 0;
-      this.lastWakeFailed ||= deliveryFailed && this.pendingState().length > 0;
-      // A successful acknowledgement drains results completed while this turn
-      // ran. A failed delivery needs another persisted completion or
-      // an explicit lifecycle restoration event before it can try again.
-      wakeAfterSettle = deliveryDrained || hasNewWakeOpportunity;
-    } else {
-      this.lastWakeFailed = true;
-      for (const deliveryId of ids) {
-        if (this.pendingResults.has(deliveryId)) this.failedResultIds.add(deliveryId);
-      }
-      // Do not retry the same failed delivery by itself. A completion
-      // during that failed turn is a new event and may request one later wake.
-      wakeAfterSettle = hasNewWakeOpportunity;
+    for (const id of this.inFlightDeliveryIds) {
+      if (this.pendingResults.has(id) && !this.deliveredResultIds.has(id)) this.failedResultIds.add(id);
     }
-    if (wakeAfterSettle) {
+    this.inFlightDeliveryIds.clear();
+
+    if (reconciled && hasNewCompletion) {
       queueMicrotask(() => {
-        this.requestParentWake();
+        if (!this.isActive() || version !== this.lifecycleVersion) return;
+        if (this.eligiblePendingResults().length > 0) {
+          this.requestParentWake();
+        }
         getNavigator()?.update();
       });
     }
@@ -368,29 +353,29 @@ export class SpawnCoordinator {
   }
 
   /** Re-arm eligible delivery after a session reload without resuming child sessions. */
-  restorePending(): void {
-    if (this.disposed) return;
+  async restorePending(): Promise<void> {
+    const version = this.lifecycleVersion;
+    if (!await this.reconcileDeliveryState() || !this.isActive() || version !== this.lifecycleVersion) return;
     this.activateEligiblePending();
     getNavigator()?.update();
   }
 
   /** Refresh branch-local visibility after /tree navigation. */
-  onSessionTree(): void {
-    if (this.disposed) return;
+  async onSessionTree(): Promise<void> {
+    if (!this.isActive()) return;
+    this.lifecycleVersion++;
     this.refreshActiveBranch();
     this.parentRunPhase = "idle";
     this.parentWakeActive = false;
-    this.parentTurnResultIds.clear();
+    this.inFlightDeliveryIds.clear();
     this.parentWakeCompletionVersion = this.completionVersion;
-    this.lastWakeFailed = false;
-    this.activateEligiblePending();
-    getNavigator()?.update();
+    await this.restorePending();
   }
 
   /** Return only exceptional pending state; normal in-flight delivery stays hidden. */
   pendingResultCount(): number | undefined {
     const visible = this.pendingState()
-      .filter(result => !this.parentTurnResultIds.has(result.deliveryId));
+      .filter(result => !this.inFlightDeliveryIds.has(result.deliveryId));
     if (visible.length === 0) return undefined;
 
     const hasFailedDelivery = visible.some(result =>
@@ -421,10 +406,12 @@ export class SpawnCoordinator {
     return latest;
   }
 
-  /** Include an explicitly read durable result in the current parent turn's acknowledgement. */
+  /** Suppress concurrent automatic sends while a tool result is still in flight. */
   markResultPresented(deliveryId: string): void {
     this.flushFallbackResults();
-    if (this.pendingResults.has(deliveryId)) this.parentTurnResultIds.add(deliveryId);
+    if (this.pendingResults.has(deliveryId)) {
+      this.inFlightDeliveryIds.add(deliveryId);
+    }
   }
 
   /** Dispose delivery state; parent session entries remain durable. */
@@ -435,8 +422,14 @@ export class SpawnCoordinator {
     this.flushFallbackResults();
     // Keep unsuccessful fallbacks in the composition-root shell so an
     // in-process session reload can retry them with the new coordinator.
-    setFallbackResults(parentSessionId(), [...this.fallbackResults.values()]);
+    setFallbackResults(this.sessionId, [...this.fallbackResults.values()]);
     this.disposed = true;
+  }
+
+  private isActive(): boolean {
+    if (this.disposed) return false;
+    const session = getSessionCtx()?.sessionManager;
+    return session?.getSessionId() === this.sessionId && session.getSessionFile() === this.sessionFile;
   }
 
   private pendingState(): PendingResult[] {
@@ -453,12 +446,14 @@ export class SpawnCoordinator {
   }
 
   private belongsToActiveBranch(result: PendingResult): boolean {
-    return result.parentSessionId === parentSessionId()
+    return result.parentSessionId === this.sessionId
       && (result.originEntryId === null || this.activeBranchIds.has(result.originEntryId));
   }
 
   private eligiblePendingResults(): PendingResult[] {
-    return [...this.pendingResults.values()].filter(result => this.belongsToActiveBranch(result));
+    return [...this.pendingResults.values()].filter(result =>
+      this.belongsToActiveBranch(result) && !this.deliveredResultIds.has(result.deliveryId)
+    );
   }
 
   private activateEligiblePending(): void {
@@ -467,6 +462,7 @@ export class SpawnCoordinator {
   }
 
   private flushFallbackResults(): void {
+    if (!this.isActive()) return;
     const pi = getPiInstance();
     for (const [deliveryId, result] of this.fallbackResults) {
       if (!appendPendingResult(pi, result)) {
@@ -475,7 +471,8 @@ export class SpawnCoordinator {
       }
       this.fallbackResults.delete(deliveryId);
       this.completionVersion++;
-      this.pendingResults.set(deliveryId, result);
+      if (this.reconcilingPromise) this.reconcileQueued = true;
+      if (!this.acknowledgedResultIds.has(deliveryId)) this.pendingResults.set(deliveryId, result);
       const latest = this.latestResults.get(result.agentId);
       if (!latest || result.createdAt >= latest.createdAt) this.latestResults.set(result.agentId, result);
       const record = this.manager.getRecord(result.agentId);
@@ -483,29 +480,112 @@ export class SpawnCoordinator {
     }
   }
 
+  /**
+   * Reconcile durable delivery state from the persisted session log.
+   *
+   * Verifies delivery receipts on disk (subagent-result messages and AgentStatus
+   * tool results) and appends missing result-ack entries. ACK indicates that
+   * the parent session has durably ingested the result into its context.
+   */
+  async reconcileDeliveryState(): Promise<boolean> {
+    if (!this.isActive()) return false;
+    if (this.reconcilingPromise) {
+      this.reconcileQueued = true;
+      return this.reconcilingPromise;
+    }
+
+    this.reconcilingPromise = (async () => {
+      let reconciled = false;
+      try {
+        do {
+          this.reconcileQueued = false;
+          reconciled = await this.doReconcileDeliveryState();
+        } while (this.reconcileQueued && this.isActive());
+        return reconciled;
+      } finally {
+        this.reconcilingPromise = null;
+      }
+    })();
+    return this.reconcilingPromise;
+  }
+
+  private async doReconcileDeliveryState(): Promise<boolean> {
+    if (!this.isActive()) return false;
+    this.flushFallbackResults();
+    const pendingAtRead = new Map(this.pendingResults);
+    const durable = await readDurableLogState(this.sessionFile, this.sessionId);
+    if (!durable || !this.isActive()) return false;
+
+    // A failed Pi append can leave an entry in its memory view. Preserve the
+    // payload for a later append, without treating it as safely persisted.
+    for (const [id, result] of pendingAtRead) {
+      if (durable.saved.has(id)) continue;
+      this.pendingResults.delete(id);
+      this.fallbackResults.set(id, result);
+      const record = this.manager.getRecord(result.agentId);
+      if (record?.execution.resultDeliveryId === id) record.lifecycle.resultPersisted = false;
+    }
+    for (const [id, result] of durable.saved) {
+      this.fallbackResults.delete(id);
+      if (!this.acknowledgedResultIds.has(id)) this.pendingResults.set(id, result);
+      const record = this.manager.getRecord(result.agentId);
+      if (record?.execution.resultDeliveryId === id) record.lifecycle.resultPersisted = true;
+    }
+    for (const id of durable.acknowledgedIds) {
+      this.acknowledgedResultIds.add(id);
+      this.pendingResults.delete(id);
+      this.failedResultIds.delete(id);
+      const result = durable.saved.get(id);
+      const record = result ? this.manager.getRecord(result.agentId) : undefined;
+      if (record?.execution.resultDeliveryId === id) record.lifecycle.resultConsumed = true;
+    }
+    for (const id of durable.deliveredIds) this.deliveredResultIds.add(id);
+
+    const toAck = [...durable.deliveredIds].filter(id => !this.acknowledgedResultIds.has(id));
+    if (toAck.length > 0) this.acknowledge(toAck);
+
+    for (const [agentId, result] of durable.latest) {
+      const current = this.latestResults.get(agentId);
+      if (!current || result.createdAt >= current.createdAt) {
+        this.latestResults.set(agentId, result);
+      }
+    }
+    for (const id of [...this.inFlightDeliveryIds]) {
+      if (this.deliveredResultIds.has(id) || this.acknowledgedResultIds.has(id)) {
+        this.inFlightDeliveryIds.delete(id);
+      }
+    }
+
+    getNavigator()?.update();
+    return true;
+  }
+
   /** One idempotent wake request; later completions only add to the session inbox. */
   private requestParentWake(): void {
     if (
-      this.disposed
+      !this.isActive()
       || this.parentWakeActive
       || this.parentRunPhase === "preflight"
       || this.parentRunPhase === "settling"
     ) return;
+    if (this.reconcilingPromise) {
+      void this.reconcilingPromise.then(reconciled => {
+        if (reconciled) this.requestParentWake();
+      });
+      return;
+    }
     this.flushFallbackResults();
     const pi = getPiInstance();
-    const pending = this.eligiblePendingResults();
+    const pending = this.eligiblePendingResults()
+      .filter(result => !this.inFlightDeliveryIds.has(result.deliveryId));
     const message = buildResultMessage(pending);
     if (!message) return;
-    const previousTurnIds = this.parentTurnResultIds;
-    const previousRunSucceeded = this.parentRunSucceeded;
+
     this.parentWakeActive = true;
     this.parentWakeCompletionVersion = this.completionVersion;
-    this.parentRunSucceeded = false;
-    this.parentTurnResultIds = new Set([
-      ...previousTurnIds,
-      ...pending.map(result => result.deliveryId),
-    ]);
-    this.lastWakeFailed = false;
+    for (const result of pending) {
+      this.inFlightDeliveryIds.add(result.deliveryId);
+    }
 
     try {
       if (this.parentRunPhase === "running" || !getSessionCtx().isIdle()) {
@@ -515,26 +595,28 @@ export class SpawnCoordinator {
       }
     } catch {
       this.parentWakeActive = false;
-      this.parentRunSucceeded = previousRunSucceeded;
-      this.parentTurnResultIds = previousTurnIds;
-      for (const result of pending) this.failedResultIds.add(result.deliveryId);
-      this.lastWakeFailed = true;
+      for (const result of pending) {
+        this.inFlightDeliveryIds.delete(result.deliveryId);
+        this.failedResultIds.add(result.deliveryId);
+      }
       getNavigator()?.update();
     }
   }
 
   private acknowledge(ids: readonly string[]): boolean {
     const pi = getPiInstance();
-    if (!appendResultAck(pi, parentSessionId(), ids)) {
+    if (!appendResultAck(pi, this.sessionId, ids)) {
       for (const deliveryId of ids) this.failedResultIds.add(deliveryId);
-      this.lastWakeFailed = true;
       return false;
     }
     for (const deliveryId of ids) {
       const result = this.pendingResults.get(deliveryId);
       this.pendingResults.delete(deliveryId);
+      this.acknowledgedResultIds.add(deliveryId);
+      this.inFlightDeliveryIds.delete(deliveryId);
       this.failedResultIds.delete(deliveryId);
-      const record = result ? this.manager.getRecord(result.agentId) : undefined;
+      const agentId = result?.agentId;
+      const record = agentId ? this.manager.getRecord(agentId) : undefined;
       if (record?.execution.resultDeliveryId === deliveryId) record.lifecycle.resultConsumed = true;
     }
     return true;

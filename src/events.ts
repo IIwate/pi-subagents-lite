@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
+import { getDeliveryReceipt } from "./spawn/result-inbox.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
@@ -105,8 +106,8 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 
 /** Register all pi.on() event listeners. */
 export function setupEventListeners(pi: ExtensionAPI): void {
-  pi.on("before_agent_start", (event, ctx) => {
-    const resultMessage = getCoordinator()?.prepareBeforeAgentStart();
+  pi.on("before_agent_start", async (event, ctx) => {
+    const resultMessage = await getCoordinator()?.prepareBeforeAgentStart();
     if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {
       return resultMessage ? { message: resultMessage } : undefined;
     }
@@ -156,21 +157,32 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     getCoordinator()?.onParentAgentStart();
   });
 
+  pi.on("message_end", (event, ctx) => {
+    const receipt = getDeliveryReceipt(event.message);
+    const coordinator = getCoordinator();
+    if (receipt?.parentSessionId === ctx.sessionManager.getSessionId() && coordinator) {
+      // Pi persists the message after extension handlers return.
+      setImmediate(() => {
+        void coordinator.reconcileDeliveryState();
+      });
+    }
+  });
+
   // Main session run ended — Working row is gone; force reflow so Pi's
   // differential render does not leave blank gaps above the agent list.
   // setTimeout(0) lets Pi remove the Working row before relayout on the next event-loop turn.
-  pi.on("agent_end", (event, ctx) => {
-    getCoordinator()?.onParentAgentEnd(event.messages);
+  pi.on("agent_end", (_event, ctx) => {
+    getCoordinator()?.onParentAgentEnd();
     if (!ctx.hasUI) return;
     setTimeout(() => getNavigator()?.forceLayoutReflow(), 0);
   });
 
-  pi.on("agent_settled", () => {
-    getCoordinator()?.onParentSettled();
+  pi.on("agent_settled", async () => {
+    await getCoordinator()?.onParentSettled();
   });
 
-  pi.on("session_tree", () => {
-    getCoordinator()?.onSessionTree();
+  pi.on("session_tree", async () => {
+    await getCoordinator()?.onSessionTree();
   });
 
   pi.on("model_select", (_event, ctx) => {
@@ -190,7 +202,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
     if (ctx.mode === "tui") {
       getNavigator()?.setUICtx(ctx.ui);
     }
-    getCoordinator()?.restorePending();
+    await getCoordinator()?.restorePending();
   });
 
   // session_shutdown — abort all, dispose manager

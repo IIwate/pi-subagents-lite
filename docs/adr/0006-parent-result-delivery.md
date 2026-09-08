@@ -25,10 +25,19 @@ when no result delivery is already active. If the natural turn already carries
 a result delivery, the new result starts a fresh turn after settlement instead.
 A completion in the `agent_end` to `agent_settled` gap also waits for full
 settlement and starts a fresh turn. This avoids treating both idle-looking gaps
-as the same lifecycle state. A result is acknowledged only after the parent turn
-carrying it settles successfully.
-An exact `AgentStatus` read adds that result to the current parent turn's
-presented IDs and follows the same successful-settlement acknowledgement rule.
+as the same lifecycle state. A result is acknowledged (`result-ack`) once the hidden
+`subagent-result` delivery message or the exact `AgentStatus` tool result entry is
+durably persisted in the parent session log. The ACK contract confirms that the
+parent session has durably ingested the completion into its persistent context;
+whether the subsequent LLM model turn succeeds, errors, or is aborted does not gate
+ACK persistence. Session recovery reconciles durable delivery receipts from disk and
+automatically appends missing ACKs without re-injecting duplicate results into context.
+Natural prompt preparation and lifecycle restoration await receipt reconciliation
+before selecting results for delivery. Receipt metadata identifies the parent
+session and exact completion IDs; only hidden `subagent-result` messages and
+successful `AgentStatus` tool results carrying content qualify. Explicit lookup
+tracking suppresses concurrent sends while the tool result is in flight, and does
+not establish durable receipt.
 
 The delivery policy is automatic. Every successfully persisted
 completion rechecks pending results whose origin remains on the active branch,
@@ -63,6 +72,12 @@ failed parent run.
   after delivery is blocked or fails.
 - New and forked sessions ignore copied entries with a different parent session
   ID.
+- Receipt reconciliation reads the current session file and verifies its header
+  and complete JSONL records. An unavailable file or incomplete final line leaves
+  results unacknowledged. Each asynchronous read is bound to its coordinator,
+  parent session ID, and session file; stale reads cannot acknowledge another
+  session. Completions persisted during a read remain pending and request a fresh
+  snapshot. Missing ACKs are retried independently of result delivery.
 - They persist final result text and metadata, not prompts, full transcripts,
   or child-session state.
 - An append failure is kept in a process-local Map keyed by parent session ID.
@@ -78,11 +93,10 @@ failed parent run.
 - A failed parent run does not immediately retry itself. A later completion,
   a natural parent turn, or an explicit result lookup provides the next
   delivery opportunity.
-- The fixed 200ms nudge debounce is removed; result aggregation happens when
-  the parent turn is prepared.
+- Result aggregation happens when the parent turn is prepared.
 - Exact `AgentStatus({ agent_id })` lookup is an explicit session-wide read;
-  its result is acknowledged only if that parent turn settles successfully.
-  Implicit delivery never crosses into an unrelated branch.
+  its result carries delivery receipt metadata and is acknowledged once persisted
+  in the session log. Implicit delivery never crosses into an unrelated branch.
 - Foreground calls still return directly and are unaffected by background
   result persistence. When an interrupted or settled foreground agent is
   continued manually via the child view, it is promoted to inbox delivery so

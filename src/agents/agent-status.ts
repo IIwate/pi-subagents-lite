@@ -73,8 +73,16 @@ export async function executeAgentStatusTool(
       };
     }
 
-    if (stored) coordinator?.markResultPresented(stored.deliveryId);
-    return { content: [{ type: "text", text: `${text}\n\n${nudge}` }] };
+    const recordResult = record?.result?.trim();
+    const delivered = stored && (!recordResult || recordResult === stored.result.trim()) ? stored : undefined;
+    if (delivered) coordinator?.markResultPresented(delivered.deliveryId);
+    return {
+      content: [{ type: "text", text: `${text}\n\n${nudge}` }],
+      details: delivered ? {
+        parentSessionId: delivered.parentSessionId,
+        deliveryIds: [delivered.deliveryId],
+      } : undefined,
+    };
   }
 
   const agents = manager.listAgents();

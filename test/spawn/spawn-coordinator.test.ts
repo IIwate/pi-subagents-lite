@@ -48,7 +48,20 @@ const {
     idle: true,
   },
   mockPi: {
-    sendMessage: vi.fn(),
+    sendMessage: vi.fn((message: any) => {
+      if (message && message.customType) {
+        sessionEntries.push({
+          type: "custom_message",
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+          id: `msg-${sessionEntries.length}`,
+          parentId: "origin-a",
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }),
     appendEntry: vi.fn((customType: string, data: unknown) => {
       sessionEntries.push({ type: "custom", customType, data });
     }),
@@ -63,6 +76,15 @@ const {
   sessionEntries: [] as any[],
   activeBranchEntries: [{ id: "origin-a" }] as any[],
 }));
+
+vi.mock("../../src/spawn/result-inbox.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../src/spawn/result-inbox.js")>();
+  return {
+    ...actual,
+    readDurableLogState: vi.fn(async (_file: string, sessionId: string) =>
+      actual.deriveResultStateFromEntries(sessionEntries, sessionId)),
+  };
+});
 
 vi.mock("../../src/shell.js", () => ({
   getPiInstance: () => mockGetPiInstance(),
@@ -84,6 +106,7 @@ vi.mock("../../src/shell.js", () => ({
       getEntries: mockGetEntries,
       getLeafId: () => fallbackMeta.currentLeafId,
       getSessionId: () => fallbackMeta.currentSessionId,
+      getSessionFile: () => "session.jsonl",
     },
     ui: { notify: vi.fn() },
   }),
@@ -142,6 +165,23 @@ function complete(record: any, status = "completed", result = "result") {
   record.lifecycle.status = status;
   record.lifecycle.completedAt = Date.now();
   record.result = result;
+}
+
+function persistStatusRead(deliveryId: string): void {
+  sessionEntries.push({
+    type: "message",
+    id: `status-${sessionEntries.length}`,
+    parentId: "origin-a",
+    timestamp: new Date().toISOString(),
+    message: {
+      role: "toolResult",
+      toolName: "AgentStatus",
+      toolCallId: "status-call",
+      content: [{ type: "text", text: "Stored result" }],
+      isError: false,
+      details: { parentSessionId: fallbackMeta.currentSessionId, deliveryIds: [deliveryId] },
+    },
+  });
 }
 
 describe("SpawnCoordinator", () => {
@@ -368,7 +408,7 @@ describe("SpawnCoordinator", () => {
 
   it("uses follow-up when a completion lands after natural preflight but before the run becomes non-idle", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
-    expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
+    expect(await coordinator.prepareBeforeAgentStart()).toBeUndefined();
     expect(fallbackMeta.idle).toBe(true);
 
     const result = await spawnBackground(coordinator);
@@ -385,16 +425,16 @@ describe("SpawnCoordinator", () => {
 
   it("defers a completion from the settled-idle gap until settlement", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
-    coordinator.prepareBeforeAgentStart();
+    await coordinator.prepareBeforeAgentStart();
     coordinator.onParentAgentStart();
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
+    coordinator.onParentAgentEnd();
 
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "settled gap result");
     coordinator.onAgentComplete(result.record);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
 
-    coordinator.onParentSettled();
+    await coordinator.onParentSettled();
     await Promise.resolve();
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("settled gap result") }),
@@ -435,7 +475,7 @@ describe("SpawnCoordinator", () => {
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
     complete(result.record, "completed", "branch-local result");
     coordinator.onAgentComplete(result.record);
 
@@ -444,12 +484,12 @@ describe("SpawnCoordinator", () => {
       expect.objectContaining({ originEntryId: "origin-a", parentSessionId: "test-session" }),
     );
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
-    expect(coordinator.prepareBeforeAgentStart()).toBeUndefined();
+    expect(await coordinator.prepareBeforeAgentStart()).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBeUndefined();
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" }, { id: "descendant" });
     fallbackMeta.currentLeafId = "descendant";
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
 
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("branch-local result") }),
@@ -462,24 +502,24 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "retry on return");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("delivery failed"); });
     coordinator.onAgentComplete(result.record);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    await coordinator.onParentSettled();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
     fallbackMeta.currentLeafId = "origin-a";
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("acknowledges only the result IDs delivered by a successful parent turn", async () => {
+  it("acknowledges only result IDs with persisted delivery receipts", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
@@ -488,8 +528,8 @@ describe("SpawnCoordinator", () => {
 
     coordinator.onAgentComplete(first.record);
     coordinator.onAgentComplete(second.record);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(first.record.lifecycle.resultConsumed).toBe(true);
@@ -510,8 +550,8 @@ describe("SpawnCoordinator", () => {
     complete(result.record, "completed", "continuation result");
     coordinator.onAgentComplete(result.record);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(result.record.execution.resultDeliveryId).not.toBe(firstDeliveryId);
@@ -519,17 +559,21 @@ describe("SpawnCoordinator", () => {
     expect(coordinator.getStoredResult(result.agentId)?.result).toContain("continuation result");
   });
 
-  it("does not acknowledge results after an aborted parent turn", async () => {
+  it("acknowledges results after an aborted parent turn once delivered", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record);
     coordinator.onAgentComplete(result.record);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "aborted" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
-    expect(coordinator.pendingResultCount()).toBe(1);
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(coordinator.pendingResultCount()).toBeUndefined();
+    expect(sessionEntries.some(entry =>
+      entry.customType === "subagents-lite:result-ack"
+      && entry.data.deliveryIds.includes(result.record.execution.resultDeliveryId),
+    )).toBe(true);
   });
 
   it("keeps results pending when acknowledgement persistence fails", async () => {
@@ -542,8 +586,8 @@ describe("SpawnCoordinator", () => {
       sessionEntries.push({ type: "custom", customType, data });
     });
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(result.record.lifecycle.resultConsumed).toBeUndefined();
@@ -563,19 +607,20 @@ describe("SpawnCoordinator", () => {
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       sessionEntries.push({ type: "custom", customType, data });
     });
-    const message = coordinator.prepareBeforeAgentStart();
+    const message = await coordinator.prepareBeforeAgentStart();
     expect(message?.content).toContain("retry me");
     expect(result.record.lifecycle.resultPersisted).toBe(true);
   });
 
-  it("keeps results after a failed parent turn and lets a later completion retry", async () => {
+  it("keeps results after a failed delivery and lets a later completion retry", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const first = await spawnBackground(coordinator);
     complete(first.record, "completed", "first");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("send failure"); });
     coordinator.onAgentComplete(first.record);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     expect(coordinator.pendingResultCount()).toBe(1);
 
     const second = await spawnBackground(coordinator);
@@ -590,14 +635,15 @@ describe("SpawnCoordinator", () => {
     const first = await spawnBackground(coordinator);
     const second = await spawnBackground(coordinator);
     complete(first.record, "completed", "first");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("send failure"); });
     coordinator.onAgentComplete(first.record);
 
     complete(second.record, "completed", "second");
     coordinator.onAgentComplete(second.record);
-    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
@@ -605,12 +651,12 @@ describe("SpawnCoordinator", () => {
     expect(mockPi.sendMessage.mock.calls[1][0].content).toContain("second");
     expect(coordinator.pendingResultCount()).toBeUndefined();
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
-    expect(coordinator.pendingResultCount()).toBe(2);
+    expect(coordinator.pendingResultCount()).toBeUndefined();
   });
 
   it("allows one new wake per later persisted completion and then stops", async () => {
@@ -623,21 +669,21 @@ describe("SpawnCoordinator", () => {
     coordinator.onAgentComplete(first.record);
     complete(second.record, "completed", "second");
     coordinator.onAgentComplete(second.record);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(2);
 
     complete(third.record, "completed", "third");
     coordinator.onAgentComplete(third.record);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(3);
     expect(mockPi.sendMessage.mock.calls[2][0].content).toContain("third");
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(3);
   });
@@ -650,17 +696,22 @@ describe("SpawnCoordinator", () => {
 
     const second = await spawnBackground(coordinator);
     complete(second.record, "completed", "second");
-    mockPi.appendEntry.mockImplementationOnce(() => { throw new Error("stale session"); });
+    mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+      if (customType === "subagents-lite:pending-result" && (data as any)?.result?.includes("second")) {
+        throw new Error("stale session");
+      }
+      sessionEntries.push({ type: "custom", customType, data });
+    });
     coordinator.onAgentComplete(second.record);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "auth_unavailable" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
     expect(sessionEntries.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
-    expect(coordinator.pendingResultCount()).toBe(2);
+    expect(coordinator.pendingResultCount()).toBe(1);
   });
 
   it("wakes results recovered while the current completion remains unpersisted", async () => {
@@ -697,19 +748,30 @@ describe("SpawnCoordinator", () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "recovered result");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("delivery error"); });
     coordinator.onAgentComplete(result.record);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
     expect(coordinator.pendingResultCount()).toBe(1);
 
-    const message = coordinator.prepareBeforeAgentStart();
+    const message = await coordinator.prepareBeforeAgentStart();
     expect(message?.customType).toBe("subagent-result");
     expect(message?.content).toContain("recovered result");
+    sessionEntries.push({
+      type: "custom_message",
+      customType: message!.customType,
+      content: message!.content,
+      display: false,
+      details: (message as any).details,
+      id: "msg-prompt",
+      parentId: "origin-a",
+      timestamp: new Date().toISOString(),
+    });
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
     expect(result.record.lifecycle.resultConsumed).toBe(true);
     expect(coordinator.pendingResultCount()).toBeUndefined();
@@ -720,24 +782,22 @@ describe("SpawnCoordinator", () => {
     )).toBe(true);
   });
 
-  it("keeps a result pending when its natural retry turn also fails", async () => {
+  it("keeps a result pending when its delivery also fails on prompt", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "retry later");
+    mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("delivery error"); });
     coordinator.onAgentComplete(result.record);
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
-    coordinator.prepareBeforeAgentStart();
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
     expect(result.record.lifecycle.resultConsumed).toBeUndefined();
     expect(coordinator.pendingResultCount()).toBe(1);
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("acknowledges an explicitly read result only after the parent turn succeeds", async () => {
+  it("acknowledges an explicitly read result after its receipt is persisted", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "explicit result");
@@ -746,8 +806,9 @@ describe("SpawnCoordinator", () => {
     const deliveryId = result.record.execution.resultDeliveryId;
 
     coordinator.markResultPresented(deliveryId);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    persistStatusRead(deliveryId);
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
     expect(result.record.lifecycle.resultConsumed).toBe(true);
     expect(coordinator.pendingResultCount()).toBeUndefined();
@@ -760,6 +821,7 @@ describe("SpawnCoordinator", () => {
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
     coordinator.onAgentComplete(explicit.record);
     coordinator.markResultPresented(explicit.record.execution.resultDeliveryId);
+    persistStatusRead(explicit.record.execution.resultDeliveryId);
 
     fallbackMeta.idle = false;
     const automatic = await spawnBackground(coordinator);
@@ -770,8 +832,8 @@ describe("SpawnCoordinator", () => {
       { deliverAs: "followUp" },
     );
 
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
     expect(explicit.record.lifecycle.resultConsumed).toBe(true);
     expect(automatic.record.lifecycle.resultConsumed).toBe(true);
@@ -782,7 +844,7 @@ describe("SpawnCoordinator", () => {
     ]));
   });
 
-  it("keeps an explicitly read result pending when the parent turn fails", async () => {
+  it("acknowledges an explicitly read result even when the parent turn fails", async () => {
     const coordinator = new SpawnCoordinator(manager as any);
     const result = await spawnBackground(coordinator);
     complete(result.record, "completed", "explicit result");
@@ -790,11 +852,12 @@ describe("SpawnCoordinator", () => {
     coordinator.onAgentComplete(result.record);
 
     coordinator.markResultPresented(result.record.execution.resultDeliveryId);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "error", errorMessage: "EOF" }]);
-    coordinator.onParentSettled();
+    persistStatusRead(result.record.execution.resultDeliveryId);
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
-    expect(result.record.lifecycle.resultConsumed).toBeUndefined();
-    expect(coordinator.pendingResultCount()).toBe(1);
+    expect(result.record.lifecycle.resultConsumed).toBe(true);
+    expect(coordinator.pendingResultCount()).toBeUndefined();
   });
 
   it("reads a stored result after the manager record is removed", async () => {
@@ -832,8 +895,9 @@ describe("SpawnCoordinator", () => {
     });
 
     coordinator.markResultPresented(currentDeliveryId);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    persistStatusRead(currentDeliveryId);
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     const ack = sessionEntries.findLast(entry => entry.customType === "subagents-lite:result-ack");
     expect(ack?.data.deliveryIds).toContain(currentDeliveryId);
     expect(ack?.data.deliveryIds).not.toContain(olderDeliveryId);
@@ -913,8 +977,8 @@ describe("SpawnCoordinator", () => {
     mockPi.sendMessage.mockImplementationOnce(() => { throw new Error("stale context"); });
 
     coordinator.onAgentComplete(result.record);
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
     await Promise.resolve();
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
@@ -929,12 +993,12 @@ describe("SpawnCoordinator", () => {
 
     coordinator.onAgentComplete(result.record);
     expect(coordinator.pendingResultCount()).toBe(1);
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
     expect(coordinator.pendingResultCount()).toBe(1);
     coordinator.dispose();
 
     const replacement = new SpawnCoordinator(manager as any);
-    replacement.restorePending();
+    await replacement.restorePending();
     expect(replacement.pendingResultCount()).toBe(1);
   });
 
@@ -970,7 +1034,7 @@ describe("SpawnCoordinator", () => {
       sessionEntries.push({ type: "custom", customType, data });
     });
     const replacement = new SpawnCoordinator(manager as any);
-    const message = replacement.prepareBeforeAgentStart();
+    const message = await replacement.prepareBeforeAgentStart();
 
     expect(message?.content).toContain("reload result");
     expect(result.record.lifecycle.resultPersisted).toBe(true);
@@ -981,7 +1045,7 @@ describe("SpawnCoordinator", () => {
     const result = await spawnBackground(coordinator);
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "other-branch" });
     fallbackMeta.currentLeafId = "other-branch";
-    coordinator.onSessionTree();
+    await coordinator.onSessionTree();
     complete(result.record, "completed", "restore me");
     coordinator.onAgentComplete(result.record);
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
@@ -990,7 +1054,7 @@ describe("SpawnCoordinator", () => {
     activeBranchEntries.splice(0, activeBranchEntries.length, { id: "origin-a" });
     fallbackMeta.currentLeafId = "origin-a";
     const replacement = new SpawnCoordinator(manager as any);
-    replacement.restorePending();
+    await replacement.restorePending();
 
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("restore me") }),
@@ -1024,8 +1088,8 @@ describe("SpawnCoordinator", () => {
 
     // Main agent finishes its response ("I have spawned the subagent for you") and settles
     coordinator.onParentAgentStart();
-    coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    coordinator.onParentSettled();
+    coordinator.onParentAgentEnd();
+    await coordinator.onParentSettled();
 
     await Promise.resolve();
 

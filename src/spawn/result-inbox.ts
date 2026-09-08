@@ -1,10 +1,23 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { readFile } from "node:fs/promises";
+import { parseSessionEntries, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentStatus } from "../types.js";
 
 export const PENDING_RESULT_ENTRY = "subagents-lite:pending-result";
 export const RESULT_ACK_ENTRY = "subagents-lite:result-ack";
 export const RESULT_MESSAGE_TYPE = "subagent-result";
 export const PARENT_INJECTION_RESULT_CHAR_LIMIT = 4000;
+
+export interface DeliveryReceiptMetadata {
+  parentSessionId: string;
+  deliveryIds: string[];
+}
+
+export interface ResultInboxState {
+  saved: Map<string, PendingResult>;
+  deliveredIds: Set<string>;
+  acknowledgedIds: Set<string>;
+  latest: Map<string, PendingResult>;
+}
 
 export interface PendingResult {
   /** Unique completion identity. A continuation gets a new deliveryId. */
@@ -60,6 +73,7 @@ function parsePendingResult(data: unknown): PendingResult | undefined {
     || error === undefined
     || !validStatus(data.status)
     || typeof data.createdAt !== "number"
+    || !Number.isFinite(data.createdAt)
   ) return undefined;
   return {
     deliveryId,
@@ -86,33 +100,114 @@ function parseAck(data: unknown): { parentSessionId: string; deliveryIds: string
   };
 }
 
+export function getDeliveryReceipt(message: unknown): DeliveryReceiptMetadata | undefined {
+  if (!isRecord(message)) return undefined;
+  const isAutomatic = message.role === "custom"
+    && message.customType === RESULT_MESSAGE_TYPE
+    && message.display === false;
+  const isLookup = message.role === "toolResult"
+    && message.toolName === "AgentStatus"
+    && !!stringValue(message.toolCallId)
+    && message.isError === false;
+  if (!isAutomatic && !isLookup) return undefined;
+  const hasContent = typeof message.content === "string"
+    ? message.content.trim().length > 0
+    : Array.isArray(message.content) && message.content.some(part =>
+      isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0
+    );
+  if (!hasContent || !isRecord(message.details)) return undefined;
+  const { parentSessionId, deliveryIds } = message.details;
+  if (!stringValue(parentSessionId) || !Array.isArray(deliveryIds) || deliveryIds.length === 0
+    || !deliveryIds.every(id => typeof id === "string" && id.length > 0)) return undefined;
+  return { parentSessionId: parentSessionId as string, deliveryIds: [...new Set(deliveryIds)] };
+}
+
+/** Derive saved, delivered, and acknowledged result sets from raw session entries. */
+export function deriveResultStateFromEntries(
+  entries: readonly unknown[],
+  parentSessionId: string,
+): ResultInboxState {
+  const saved = new Map<string, PendingResult>();
+  const deliveredIds = new Set<string>();
+  const acknowledgedIds = new Set<string>();
+  const latest = new Map<string, PendingResult>();
+
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue;
+
+    if (entry.type === "custom" && entry.customType === PENDING_RESULT_ENTRY) {
+      const result = parsePendingResult(entry.data);
+      if (!result || result.parentSessionId !== parentSessionId) continue;
+      saved.set(result.deliveryId, result);
+      const currentLatest = latest.get(result.agentId);
+      if (!currentLatest || result.createdAt >= currentLatest.createdAt) {
+        latest.set(result.agentId, result);
+      }
+      continue;
+    }
+
+    if (entry.type === "custom" && entry.customType === RESULT_ACK_ENTRY) {
+      const ack = parseAck(entry.data);
+      if (!ack || ack.parentSessionId !== parentSessionId) continue;
+      for (const id of ack.deliveryIds) {
+        acknowledgedIds.add(id);
+      }
+      continue;
+    }
+
+    if (!stringValue(entry.id) || !stringValue(entry.timestamp)
+      || (entry.parentId !== null && !stringValue(entry.parentId))) continue;
+    const receipt = entry.type === "custom_message"
+      ? getDeliveryReceipt({ ...entry, role: "custom" })
+      : entry.type === "message" && isRecord(entry.message) && entry.message.role === "toolResult"
+        ? getDeliveryReceipt(entry.message)
+        : undefined;
+    if (receipt?.parentSessionId === parentSessionId) {
+      for (const id of receipt.deliveryIds) deliveredIds.add(id);
+    }
+  }
+
+  for (const id of deliveredIds) {
+    if (!saved.has(id)) deliveredIds.delete(id);
+  }
+  return { saved, deliveredIds, acknowledgedIds, latest };
+}
+
+/** Read session entries directly from the persisted JSONL file on disk. */
+export async function readDurableLogState(
+  sessionFile: string | undefined,
+  parentSessionId: string,
+): Promise<ResultInboxState | undefined> {
+  if (!sessionFile) return undefined;
+  try {
+    const content = await readFile(sessionFile, "utf-8");
+    // Appending an ACK after a partial line would corrupt both records.
+    if (!content.endsWith("\n")) return undefined;
+    const entries = parseSessionEntries(content);
+    const header = entries[0];
+    if (!isRecord(header) || header.type !== "session" || header.id !== parentSessionId) return undefined;
+    return deriveResultStateFromEntries(entries, parentSessionId);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read this session's latest result data and currently unacknowledged subset. */
 export function readResultEntries(ctx: ExtensionContext): {
   latest: Map<string, PendingResult>;
   pending: Map<string, PendingResult>;
 } {
-  const latest = new Map<string, PendingResult>();
-  const pending = new Map<string, PendingResult>();
   const parentSessionId = ctx.sessionManager.getSessionId();
+  const state = deriveResultStateFromEntries(ctx.sessionManager.getEntries(), parentSessionId);
+  const pending = new Map<string, PendingResult>();
 
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (!isRecord(entry) || entry.type !== "custom") continue;
-    if (entry.customType === PENDING_RESULT_ENTRY) {
-      const result = parsePendingResult(entry.data);
-      if (!result || result.parentSessionId !== parentSessionId) continue;
-      const currentLatest = latest.get(result.agentId);
-      if (!currentLatest || result.createdAt >= currentLatest.createdAt) latest.set(result.agentId, result);
-      pending.set(result.deliveryId, result);
-      continue;
-    }
-    if (entry.customType === RESULT_ACK_ENTRY) {
-      const ack = parseAck(entry.data);
-      if (!ack || ack.parentSessionId !== parentSessionId) continue;
-      for (const deliveryId of ack.deliveryIds) pending.delete(deliveryId);
+  for (const [id, result] of state.saved) {
+    if (!state.acknowledgedIds.has(id)) {
+      pending.set(id, result);
     }
   }
 
-  return { latest, pending };
+  return { latest: state.latest, pending };
 }
 
 /** Persist one completed result in the parent session without adding it to LLM context. */
@@ -125,7 +220,7 @@ export function appendPendingResult(pi: ExtensionAPI, result: PendingResult): bo
   }
 }
 
-/** Persist an acknowledgement after a parent turn successfully received result IDs. */
+/** Persist an acknowledgement for result IDs with verified durable receipts. */
 export function appendResultAck(
   pi: ExtensionAPI,
   parentSessionId: string,
@@ -151,10 +246,16 @@ function buildResultContent(results: readonly PendingResult[]): string {
 
 export function buildResultMessage(results: readonly PendingResult[]) {
   if (results.length === 0) return undefined;
+  const parentSessionId = results[0].parentSessionId;
+  const deliveryIds = results.map(r => r.deliveryId);
   return {
     customType: RESULT_MESSAGE_TYPE,
     content: buildResultContent(results),
     display: false as const,
+    details: {
+      parentSessionId,
+      deliveryIds,
+    } satisfies DeliveryReceiptMetadata,
   };
 }
 

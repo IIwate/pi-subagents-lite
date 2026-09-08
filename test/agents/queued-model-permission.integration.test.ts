@@ -100,7 +100,20 @@ const mocks = vi.hoisted(() => {
       appendEntry: vi.fn((customType: string, data: unknown) => {
         state.entries.push({ type: "custom", customType, data });
       }),
-      sendMessage: vi.fn(),
+      sendMessage: vi.fn((message: any) => {
+        if (message?.customType) {
+          state.entries.push({
+            type: "custom_message",
+            customType: message.customType,
+            content: message.content,
+            display: message.display,
+            details: message.details,
+            id: `msg-${state.entries.length}`,
+            parentId: "origin-a",
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }),
     } as any,
   });
 });
@@ -142,6 +155,15 @@ vi.mock("../../src/shell.js", () => ({
   getSessionCtx: () => mocks.ctx,
   withSubagentSpawn: (operation: () => Promise<unknown>) => operation(),
 }));
+
+vi.mock("../../src/spawn/result-inbox.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../src/spawn/result-inbox.js")>();
+  return {
+    ...actual,
+    readDurableLogState: vi.fn(async (_file: string, sessionId: string) =>
+      actual.deriveResultStateFromEntries(mocks.entries, sessionId)),
+  };
+});
 
 import { AgentManager } from "../../src/agents/agent-manager.js";
 import {
@@ -207,6 +229,7 @@ describe("queued invocation snapshots", () => {
         getEntries: () => mocks.entries,
         getLeafId: () => "origin-a",
         getSessionId: () => "test-session",
+        getSessionFile: () => "test-session.jsonl",
       },
       isIdle: () => true,
       getSystemPrompt: () => "Parent prompt",
@@ -442,8 +465,8 @@ describe("queued invocation snapshots", () => {
       && entry.data.deliveryId === firstDeliveryId,
     )).toHaveLength(1);
 
-    mocks.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    mocks.coordinator.onParentSettled();
+    mocks.coordinator.onParentAgentEnd();
+    await mocks.coordinator.onParentSettled();
     await Promise.resolve();
 
     const firstAck = mocks.entries.find((entry: any) =>
@@ -454,8 +477,8 @@ describe("queued invocation snapshots", () => {
     expect(readResultEntries(mocks.ctx).pending.has(secondDeliveryId)).toBe(true);
     expect(mocks.pi.sendMessage).toHaveBeenCalledTimes(2);
 
-    mocks.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    mocks.coordinator.onParentSettled();
+    mocks.coordinator.onParentAgentEnd();
+    await mocks.coordinator.onParentSettled();
     expect(readResultEntries(mocks.ctx).pending.size).toBe(0);
     const acknowledgedIds = mocks.entries
       .filter((entry: any) => entry.customType === "subagents-lite:result-ack")

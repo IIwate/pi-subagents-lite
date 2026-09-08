@@ -83,6 +83,7 @@ describe("Human takeover & selective delivery — edge cases & boundary verifica
       isIdle: () => true,
       sessionManager: {
         getSessionId: () => "parent-session-123",
+        getSessionFile: () => undefined,
         getLeafId: () => "leaf-node-xyz",
         getBranch: () => [{ id: "leaf-node-xyz" }],
         getEntries: () => state.entries,

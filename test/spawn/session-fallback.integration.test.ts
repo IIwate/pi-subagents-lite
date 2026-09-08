@@ -2,7 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   runAgent: vi.fn(),
+  entries: new Map<string, any[]>(),
 }));
+
+vi.mock("../../src/spawn/result-inbox.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../src/spawn/result-inbox.js")>();
+  return {
+    ...actual,
+    readDurableLogState: vi.fn(async (_file: string, sessionId: string) =>
+      actual.deriveResultStateFromEntries(state.entries.get(sessionId) ?? [], sessionId)),
+  };
+});
 
 vi.mock("../../src/agents/agent-runner.js", () => ({
   runAgent: state.runAgent,
@@ -48,11 +58,13 @@ function createSession() {
 }
 
 function createContext(sessionId: string, entries: any[]) {
+  state.entries.set(sessionId, entries);
   return {
     cwd: "/tmp/project",
     isIdle: () => true,
     sessionManager: {
       getSessionId: () => sessionId,
+      getSessionFile: () => `${sessionId}.jsonl`,
       getLeafId: () => "origin-a",
       getBranch: () => [{ id: "origin-a" }],
       getEntries: () => entries,
@@ -81,6 +93,7 @@ async function disposeRuntime(manager?: AgentManager, coordinator?: SpawnCoordin
 
 describe("session-keyed coordinator fallback", () => {
   afterEach(() => {
+    state.entries.clear();
     takeFallbackResults("session-a");
     takeFallbackResults("session-b");
   });
@@ -135,7 +148,7 @@ describe("session-keyed coordinator fallback", () => {
       setManager(managerB);
       coordinatorB = new SpawnCoordinator(managerB);
       setCoordinator(coordinatorB);
-      coordinatorB.restorePending();
+      await coordinatorB.restorePending();
 
       expect(entriesB).toEqual([]);
       expect(coordinatorB.pendingResultCount()).toBeUndefined();
@@ -150,7 +163,7 @@ describe("session-keyed coordinator fallback", () => {
       restoredA = new SpawnCoordinator(managerA);
       setCoordinator(restoredA);
       managerA.setOnComplete(record => restoredA!.onAgentComplete(record));
-      restoredA.restorePending();
+      await restoredA.restorePending();
 
       expect(entriesA.filter(entry => entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
       expect(piA.sendMessage).toHaveBeenCalledOnce();
@@ -164,9 +177,23 @@ describe("session-keyed coordinator fallback", () => {
         ctxA,
       );
       expect(status.content[0].text).toContain("result from A");
+      entriesA.push({
+        type: "message",
+        id: "status-result",
+        parentId: "origin-a",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "toolResult",
+          toolCallId: "status",
+          toolName: "AgentStatus",
+          content: status.content,
+          details: status.details,
+          isError: false,
+        },
+      });
 
-      restoredA.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-      restoredA.onParentSettled();
+      restoredA.onParentAgentEnd();
+      await restoredA.onParentSettled();
       expect(readResultEntries(ctxA).pending.size).toBe(0);
       expect(entriesA.filter(entry => entry.customType === "subagents-lite:result-ack")).toHaveLength(1);
       expect(entriesB).toEqual([]);

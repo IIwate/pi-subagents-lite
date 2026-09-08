@@ -112,7 +112,7 @@ export interface AgentLifecycle {
   resultPersisted?: boolean;
   /**
    * Whether the parent has received the result through a foreground return
-   * or a successfully settled background turn.
+   * or a verified durable delivery receipt.
    * Cleanup preserves terminal records until this is set or the result is persisted.
    */
   resultConsumed?: boolean;
@@ -179,4 +179,3 @@ interface AgentAccumulatedStats {
   /** Context usage percentage (0-100), cached from progress and completion events. */
   contextPercent?: number | null;
 }
-

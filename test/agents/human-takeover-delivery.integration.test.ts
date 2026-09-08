@@ -73,6 +73,7 @@ describe("human takeover and selective delivery integration", () => {
       isIdle: () => true,
       sessionManager: {
         getSessionId: () => "parent-session",
+        getSessionFile: () => undefined,
         getLeafId: () => "leaf-a",
         getBranch: () => [{ id: "leaf-a" }],
         getEntries: () => state.entries,

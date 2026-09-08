@@ -130,7 +130,26 @@ describe("AgentStatus tool execute behavior", () => {
 
     expect(result.content[0].text).toContain("durable final result");
     expect(result.content[0].text).toContain("Provider: cliproxyapi");
+    expect(result.details).toEqual({ parentSessionId: "test-session", deliveryIds: ["delivery-1"] });
     expect(mockMarkResultPresented).toHaveBeenCalledWith("delivery-1");
+  });
+
+  it("does not attach an older completion's receipt to a different live result", async () => {
+    mockGetRecord.mockReturnValue({
+      id: "agent-a",
+      display: { type: "reviewer" },
+      lifecycle: { status: "completed" },
+      execution: {},
+      result: "Current result",
+    });
+    mockGetStoredResult.mockReturnValue({
+      agentId: "agent-a", deliveryId: "older-delivery", parentSessionId: "test-session", result: "Older result",
+    });
+    const { executeAgentStatusTool } = await import("../../src/agents/agent-status.js");
+    const result = await executeAgentStatusTool("status", { agent_id: "agent-a" }, undefined, undefined, {} as any);
+    expect(result.content[0].text).toContain("Current result");
+    expect(result.details).toBeUndefined();
+    expect(mockMarkResultPresented).not.toHaveBeenCalled();
   });
 
   it("returns empty state message when no agents exist", async () => {

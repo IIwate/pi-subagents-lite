@@ -17,6 +17,15 @@ vi.mock("../../src/agents/agent-runner.js", () => ({
   continueAgentSession: state.continueAgentSession,
 }));
 
+vi.mock("../../src/spawn/result-inbox.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../src/spawn/result-inbox.js")>();
+  return {
+    ...actual,
+    readDurableLogState: vi.fn(async (_file: string, sessionId: string) =>
+      actual.deriveResultStateFromEntries(state.entries, sessionId)),
+  };
+});
+
 vi.mock("../../src/shell.js", () => ({
   getManager: () => state.manager,
   getCoordinator: () => state.coordinator,
@@ -53,6 +62,7 @@ describe("durable result delivery integration", () => {
       isIdle: () => true,
       sessionManager: {
         getSessionId: () => "parent-session",
+        getSessionFile: () => "parent-session.jsonl",
         getLeafId: () => "origin-a",
         getBranch: () => [{ id: "origin-a" }],
         getEntries: () => state.entries,
@@ -62,7 +72,13 @@ describe("durable result delivery integration", () => {
       appendEntry: vi.fn((customType: string, data: unknown) => {
         state.entries.push({ type: "custom", customType, data });
       }),
-      sendMessage: vi.fn(),
+      sendMessage: vi.fn((message: any) => state.entries.push({
+        ...message,
+        type: "custom_message",
+        id: `delivery-${state.entries.length}`,
+        parentId: "origin-a",
+        timestamp: new Date().toISOString(),
+      })),
     };
     state.manager = new AgentManager(undefined);
     state.coordinator = new SpawnCoordinator(state.manager);
@@ -100,8 +116,8 @@ describe("durable result delivery integration", () => {
     expect(status.content[0].text).toContain("durable result");
     expect(readResultEntries(state.ctx).pending.size).toBe(1);
 
-    state.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    state.coordinator.onParentSettled();
+    state.coordinator.onParentAgentEnd();
+    await state.coordinator.onParentSettled();
 
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
   });
@@ -149,8 +165,8 @@ describe("durable result delivery integration", () => {
     const firstDeliveryId = record.execution.resultDeliveryId;
 
     state.coordinator.markResultPresented(firstDeliveryId);
-    state.coordinator.onParentAgentEnd([{ role: "assistant", stopReason: "stop" }]);
-    state.coordinator.onParentSettled();
+    state.coordinator.onParentAgentEnd();
+    await state.coordinator.onParentSettled();
     expect(readResultEntries(state.ctx).pending.size).toBe(0);
 
     state.continueAgentSession.mockResolvedValue({
