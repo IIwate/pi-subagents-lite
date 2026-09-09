@@ -132,6 +132,68 @@ describe("AgentNavigator — Interaction", () => {
     expect(manager.abort).toHaveBeenCalledWith(record.id, "user");
   });
 
+  it("cancels subagent retry backoff on Escape in editor without stopping the subagent", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "running";
+    record.execution.retryState = {
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      startAt: Date.now(),
+    };
+    const manager = makeManager([record]);
+    manager.abortRetry = vi.fn().mockReturnValue(true);
+    manager.abort = vi.fn().mockReturnValue(true);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+
+    const editor = ui.editorFactory(makeTui(), {}, {});
+    const parentEscape = vi.fn();
+    editor.onEscape = parentEscape;
+
+    ui.baseEditor.onEscape?.();
+
+    expect(manager.abortRetry).toHaveBeenCalledWith(record.id);
+    expect(manager.abort).not.toHaveBeenCalled();
+    expect(parentEscape).not.toHaveBeenCalled();
+  });
+
+  it("cancels subagent retry backoff on Escape with list focused without stopping the subagent", () => {
+    const record = makeRecord();
+    record.lifecycle.status = "running";
+    record.execution.retryState = {
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      startAt: Date.now(),
+    };
+    const manager = makeManager([record]);
+    manager.abortRetry = vi.fn().mockReturnValue(true);
+    manager.abort = vi.fn().mockReturnValue(true);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+    expect(navigator.isListFocused()).toBe(true);
+
+    const res = navigator.handleTerminalInput("\x1b");
+    expect(res?.consume).toBe(true);
+    expect(manager.abortRetry).toHaveBeenCalledWith(record.id);
+    expect(manager.abort).not.toHaveBeenCalled();
+  });
+
   it("renders interaction blocks on Main and restores counts after a successful retry", async () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });

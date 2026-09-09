@@ -72,7 +72,10 @@ export function ensureManagerAndNavigator(): void {
     getStore().setDeps({ navigator: newNavigator });
   }
   getManager()?.setOnRemove(() => getNavigator()?.update());
-  getManager()?.setOnStatsUpdate(() => getNavigator()?.ensureTimer());
+  getManager()?.setOnStatsUpdate(() => {
+    getNavigator()?.ensureTimer();
+    getNavigator()?.update();
+  });
 }
 
 /**

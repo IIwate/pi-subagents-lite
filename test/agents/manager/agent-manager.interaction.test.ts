@@ -390,4 +390,91 @@ describe("AgentManager — Interaction", () => {
       continuation.resolve({ responseText: "cont", aborted: false, turnLimited: false });
       await record.execution.promise;
     });
+
+    it("cancels active retry via abortRetry when session is retrying", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession() as any;
+      session.isRetrying = true;
+      session.abortRetry = vi.fn();
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        await options.onSessionCreated(session);
+        return deferred.promise;
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", fakeOptions({ description: "task", modelKey: "test/model" }));
+      const record = manager.getRecord(id)!;
+      record.execution.retryState = {
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2000,
+        startAt: Date.now(),
+      };
+
+      const aborted = manager.abortRetry(id);
+      expect(aborted).toBe(true);
+      expect(session.abortRetry).toHaveBeenCalledOnce();
+      expect(record.execution.retryState).toBeUndefined();
+
+      deferred.resolve(mockRunResult({ session }));
+    });
+
+    it("returns false from abortRetry when agent is not retrying", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession() as any;
+      session.isRetrying = false;
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        await options.onSessionCreated(session);
+        return deferred.promise;
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", fakeOptions({ description: "task", modelKey: "test/model" }));
+
+      expect(manager.abortRetry(id)).toBe(false);
+
+      deferred.resolve(mockRunResult({ session }));
+    });
+
+    it("tracks auto_retry_start and auto_retry_end events on the record", async () => {
+      manager = new AgentManager(onComplete);
+      let sessionListener: ((event: any) => void) | undefined;
+      const session = mockAgentSession() as any;
+      session.subscribe = vi.fn((fn: any) => {
+        sessionListener = fn;
+        return vi.fn();
+      });
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        await options.onSessionCreated(session);
+        return deferred.promise;
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", fakeOptions({ description: "task", modelKey: "test/model" }));
+      const record = manager.getRecord(id)!;
+      expect(record.execution.retryState).toBeUndefined();
+
+      sessionListener?.({
+        type: "auto_retry_start",
+        attempt: 2,
+        maxAttempts: 4,
+        delayMs: 4000,
+        errorMessage: "stream timeout",
+      });
+      expect(record.execution.retryState).toEqual(expect.objectContaining({
+        attempt: 2,
+        maxAttempts: 4,
+        delayMs: 4000,
+        errorMessage: "stream timeout",
+      }));
+
+      sessionListener?.({
+        type: "auto_retry_end",
+        success: true,
+        attempt: 2,
+      });
+      expect(record.execution.retryState).toBeUndefined();
+
+      deferred.resolve(mockRunResult({ session }));
+    });
 });

@@ -21,6 +21,15 @@ export interface RunTunables {
   graceTurns?: number;
 }
 
+// Note: 见 .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
+export interface AgentRetryState {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  startAt: number;
+  errorMessage?: string;
+}
+
 export interface AgentRecord {
   id: string;
   result?: string;
@@ -154,6 +163,8 @@ interface AgentExecutionState {
   debugFaultKind?: DebugFaultKind;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
+  /** Active backoff delay state when an auto-retry is in progress. */
+  retryState?: AgentRetryState;
   /** Callback to immediately detach foreground execution into background. */
   detach?: () => void;
 }

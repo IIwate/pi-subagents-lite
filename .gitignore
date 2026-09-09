@@ -44,3 +44,6 @@ review-*.md
 tags
 
 temp/
+
+# Runtime test & scratchpad scripts
+runtime/

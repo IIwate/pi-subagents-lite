@@ -96,6 +96,8 @@ interface ScreenSwapState {
   originalStatusRender: Component["render"];
   originalFooterRender: Component["render"];
   emptyRender: Component["render"];
+  childPendingRender: Component["render"];
+  childStatusRender: Component["render"];
   childFooterRender: Component["render"];
   transcript: Component;
   active: boolean;
@@ -191,6 +193,9 @@ function agentStatusLabel(status: DebugStatusPreview): string {
 }
 
 function plainAgentStatus(record: AgentRecord, preview?: DebugStatusPreview): string {
+  if (record.execution.retryState) {
+    return `Retrying ${record.execution.retryState.attempt}/${record.execution.retryState.maxAttempts}`;
+  }
   return agentStatusLabel(agentStatusValue(record, preview));
 }
 
@@ -199,6 +204,9 @@ function renderAgentStatus(
   theme: Theme,
   preview?: DebugStatusPreview,
 ): string {
+  if (record.execution.retryState) {
+    return theme.fg("warning", `Retrying ${record.execution.retryState.attempt}/${record.execution.retryState.maxAttempts}`);
+  }
   const statusValue = agentStatusValue(record, preview);
   const color = statusValue === "turn_limited" || statusValue === "aborted"
     ? "warning"
@@ -365,6 +373,10 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
   set onEscape(handler: (() => void) | undefined) {
     this.parentOnEscape = handler;
     (this.base as unknown as { onEscape?: () => void }).onEscape = () => {
+      if (this.navigator.abortActiveRetry()) {
+        this.navigator.update();
+        return;
+      }
       if (this.navigator.abortActiveSubagent()) {
         return;
       }
@@ -584,6 +596,14 @@ export class AgentNavigator {
     return this.highlightedAgentId;
   }
 
+  // Note: 见 .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
+  /** Cancel active retry backoff sleep for the currently selected subagent if retrying. */
+  abortActiveRetry(): boolean {
+    const id = this.selectedId();
+    if (!id) return false;
+    return this.manager.abortRetry?.(id) ?? false;
+  }
+
   /** Stop the currently selected subagent if it is running. */
   abortActiveSubagent(): boolean {
     const id = this.selectedId();
@@ -688,6 +708,10 @@ export class AgentNavigator {
     }
 
     if (matchesKey(data, Key.escape)) {
+      if (this.selectedAgentId && this.abortActiveRetry()) {
+        this.update();
+        return { consume: true };
+      }
       if (this.selectedAgentId && this.abortActiveSubagent()) {
         this.update();
         return { consume: true };
@@ -788,6 +812,8 @@ export class AgentNavigator {
     if (requestId !== this.interactionRequestId || agentId !== this.selectedAgentId) return false;
     if (result.accepted) {
       this.clearInteractionNotice();
+      this.lastRenderSig = "";
+      this.update();
       return true;
     }
 
@@ -960,6 +986,8 @@ export class AgentNavigator {
       originalStatusRender: statusContainer.render,
       originalFooterRender,
       emptyRender: () => [],
+      childPendingRender: (width) => this.renderChildPending(width),
+      childStatusRender: (width) => this.renderChildStatus(width),
       childFooterRender: (width) => this.renderChildFooter(
         footerContainer,
         originalFooterRender,
@@ -977,16 +1005,18 @@ export class AgentNavigator {
     const currentChat = screen.documentChildren[screen.chatIndex];
     const chatCompatible = currentChat === screen.originalChat || currentChat === screen.transcript;
     const pendingCompatible = screen.pendingContainer.render === screen.originalPendingRender
+      || screen.pendingContainer.render === screen.childPendingRender
       || screen.pendingContainer.render === screen.emptyRender;
     const statusCompatible = screen.statusContainer.render === screen.originalStatusRender
+      || screen.statusContainer.render === screen.childStatusRender
       || screen.statusContainer.render === screen.emptyRender;
     const footerCompatible = screen.footerContainer.render === screen.originalFooterRender
       || screen.footerContainer.render === screen.childFooterRender;
     if (!chatCompatible || !pendingCompatible || !statusCompatible || !footerCompatible) return false;
 
     screen.documentChildren[screen.chatIndex] = screen.transcript;
-    screen.pendingContainer.render = screen.emptyRender;
-    screen.statusContainer.render = screen.emptyRender;
+    screen.pendingContainer.render = screen.childPendingRender;
+    screen.statusContainer.render = screen.childStatusRender;
     screen.footerContainer.render = screen.childFooterRender;
     screen.active = true;
     return true;
@@ -1002,11 +1032,17 @@ export class AgentNavigator {
       screen.documentChildren[screen.chatIndex] = screen.originalChat;
       restored = true;
     }
-    if (screen.pendingContainer.render === screen.emptyRender) {
+    if (
+      screen.pendingContainer.render === screen.childPendingRender
+      || screen.pendingContainer.render === screen.emptyRender
+    ) {
       screen.pendingContainer.render = screen.originalPendingRender;
       restored = true;
     }
-    if (screen.statusContainer.render === screen.emptyRender) {
+    if (
+      screen.statusContainer.render === screen.childStatusRender
+      || screen.statusContainer.render === screen.emptyRender
+    ) {
       screen.statusContainer.render = screen.originalStatusRender;
       restored = true;
     }
@@ -1333,6 +1369,42 @@ export class AgentNavigator {
     return lines;
   }
 
+  private renderChildPending(width: number): string[] {
+    const record = this.selectedAgentId ? this.manager.getRecord(this.selectedAgentId) : undefined;
+    if (!record) return [];
+    const theme = this.uiCtx?.theme;
+    if (!theme) return [];
+
+    const session = record.execution.session as unknown as { getSteeringMessages?: () => string[] } | undefined;
+    const queued = [
+      ...(session?.getSteeringMessages?.() ?? []),
+      ...((record.execution.pendingSteers ?? []).map(s => s.message)),
+    ];
+    if (queued.length === 0) return [];
+
+    const lines: string[] = [""];
+    for (const message of queued) {
+      lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
+    }
+    return lines;
+  }
+
+  private renderChildStatus(width: number): string[] {
+    const record = this.selectedAgentId ? this.manager.getRecord(this.selectedAgentId) : undefined;
+    if (!record) return [];
+    const theme = this.uiCtx?.theme;
+    if (!theme) return [];
+
+    const retry = record.execution.retryState;
+    if (!retry) return [];
+
+    const elapsed = Date.now() - retry.startAt;
+    const remainingMs = Math.max(0, retry.delayMs - elapsed);
+    const seconds = Math.ceil(remainingMs / 1000);
+    const retryText = `↻ Retrying (${retry.attempt}/${retry.maxAttempts}) in ${seconds}s... (Esc to cancel)`;
+    return [truncateToWidth(theme.fg("warning", retryText), width)];
+  }
+
   private renderChildFooter(
     footerContainer: Component & { children: Component[] },
     originalRender: Component["render"],
@@ -1417,6 +1489,26 @@ export class AgentNavigator {
 
     if (record.error) {
       lines.push(truncateToWidth(theme.fg("error", `Error: ${displayText(record.error)}`), width));
+    }
+
+    if (!this.screenSwap?.active) {
+      const retry = record.execution.retryState;
+      if (retry) {
+        const elapsed = Date.now() - retry.startAt;
+        const remainingMs = Math.max(0, retry.delayMs - elapsed);
+        const seconds = Math.ceil(remainingMs / 1000);
+        lines.push(truncateToWidth(
+          theme.fg("warning", `↻ Retrying (${retry.attempt}/${retry.maxAttempts}) in ${seconds}s... (Esc to cancel)`),
+          width,
+        ));
+      }
+      const queued = [
+        ...((session as unknown as { getSteeringMessages?: () => string[] }).getSteeringMessages?.() ?? []),
+        ...((record.execution.pendingSteers ?? []).map(s => s.message)),
+      ];
+      for (const message of queued) {
+        lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
+      }
     }
 
     return lines;
@@ -1670,6 +1762,22 @@ export class AgentNavigator {
       ? `${parent.providerName ?? ""}:${parent.modelName ?? ""}:${parent.thinkingLevel ?? ""}`
       : "";
     const cols = this.selectorTui?.terminal.columns ?? 0;
+    const selectedRecord = this.selectedAgentId
+      ? records.find(r => r.id === this.selectedAgentId)
+      : undefined;
+    const selectedSession = selectedRecord?.execution.session as unknown as { getSteeringMessages?: () => string[] } | undefined;
+    const selectedSteeringSig = [
+      ...(selectedSession?.getSteeringMessages?.() ?? []),
+      ...((selectedRecord?.execution.pendingSteers ?? []).map(s => s.message)),
+    ].join("\x1f");
+    const selectedRetry = selectedRecord?.execution.retryState;
+    const selectedRetrySec = selectedRetry
+      ? Math.ceil(Math.max(0, selectedRetry.delayMs - (Date.now() - selectedRetry.startAt)) / 1000)
+      : "";
+    const selectedRetrySig = selectedRetry
+      ? `${selectedRetry.attempt}:${selectedRetry.maxAttempts}:${selectedRetrySec}`
+      : "";
+
     return [
       parts.join("|"),
       parentSig,
@@ -1681,6 +1789,8 @@ export class AgentNavigator {
       this.interactionNotice ?? "",
       this.listExpanded ? "1" : "0",
       pending ? String(pending) : "",
+      selectedSteeringSig,
+      selectedRetrySig,
     ].join("#");
   }
 

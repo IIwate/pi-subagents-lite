@@ -201,6 +201,11 @@ export class SpawnCoordinator {
     return result;
   }
 
+  /** Cancel active auto-retry delay sleep for a running subagent. */
+  abortRetry(agentId: string): boolean {
+    return this.manager.abortRetry(agentId);
+  }
+
   getDeliverableMessages(agentId: string): DeliverableMessage[] {
     const record = this.manager.getRecord(agentId);
     if (!record) return [];

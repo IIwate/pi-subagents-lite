@@ -610,4 +610,51 @@ describe("AgentNavigator — Transcript & Footer", () => {
     expect(renderedText.match(/Thinking/g)).toHaveLength(1);
     expect(renderedText.match(/Assistant/g)).toHaveLength(1);
   });
+
+  it("renders queued steering messages immediately in the subagent view", () => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    session.getSteeringMessages = vi.fn().mockReturnValue(["Change direction to grep", "Avoid reading large files"]);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    const pendingContainer = tui.children[1];
+    const pendingLines = pendingContainer.render(120).join("\n");
+    expect(pendingLines).toContain("Steering: Change direction to grep");
+    expect(pendingLines).toContain("Steering: Avoid reading large files");
+  });
+
+  it("renders retry countdown status indicator and header badge when an auto-retry is active", () => {
+    const record = makeRecord();
+    record.execution.retryState = {
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      startAt: Date.now(),
+      errorMessage: "ECONNRESET",
+    };
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeManager([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    // Header reflects Retrying status
+    const transcript = tui.document.children[tui.chatIndex];
+    const headerLine = transcript.render(120)[0];
+    expect(headerLine).toContain("Retrying 1/3");
+
+    // Status container reflects retry countdown
+    const statusContainer = tui.children[2];
+    const statusLines = statusContainer.render(120).join("\n");
+    expect(statusLines).toContain("Retrying (1/3)");
+    expect(statusLines).toContain("Esc to cancel");
+  });
 });

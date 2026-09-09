@@ -416,6 +416,7 @@ export class AgentManager {
         }
         record.execution.session = session;
         if (debugFault) record.execution.debugFaultKind = debugFault.kind;
+        this.wireSessionLifecycleListeners(record, session);
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
           for (const pending of record.execution.pendingSteers) {
@@ -454,6 +455,7 @@ export class AgentManager {
         return "";
       })
       .finally(() => {
+        record.execution.retryState = undefined;
         this.detachParentAbort(id);
         this.releaseConcurrency(id);
 
@@ -521,6 +523,30 @@ export class AgentManager {
         this.notifyStatsUpdate(record);
       },
     };
+  }
+
+  private wireSessionLifecycleListeners(record: AgentRecord, session: AgentSession): void {
+    const s = session as unknown as {
+      subscribe?: (listener: (event: any) => void) => () => void;
+    };
+    if (typeof s.subscribe !== "function") return;
+    s.subscribe((event: any) => {
+      if (event.type === "auto_retry_start") {
+        record.execution.retryState = {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          startAt: Date.now(),
+          errorMessage: event.errorMessage,
+        };
+        this.notifyStatsUpdate(record);
+      } else if (event.type === "auto_retry_end") {
+        record.execution.retryState = undefined;
+        this.notifyStatsUpdate(record);
+      } else if (event.type === "queue_update") {
+        this.notifyStatsUpdate(record);
+      }
+    });
   }
 
   /** Start queued agents only when both Provider and model ceilings have room. */
@@ -669,6 +695,7 @@ export class AgentManager {
         return "";
       })
       .finally(() => {
+        record.execution.retryState = undefined;
         abortController.signal.removeEventListener("abort", abortSession);
         this.releaseConcurrency(id);
         record.execution.settled = true;
@@ -696,6 +723,23 @@ export class AgentManager {
         ? (b.lifecycle.completedAt ?? b.lifecycle.startedAt) - (a.lifecycle.completedAt ?? a.lifecycle.startedAt)
         : a.lifecycle.startedAt - b.lifecycle.startedAt;
     });
+  }
+
+  /** Cancel active auto-retry delay sleep for a running subagent without aborting the agent. */
+  abortRetry(id: string): boolean {
+    const record = this.agents.get(id);
+    if (!record || record.lifecycle.status !== "running") return false;
+    const session = record.execution.session as unknown as {
+      isRetrying?: boolean;
+      abortRetry?: () => void;
+    } | undefined;
+    if (session?.isRetrying || record.execution.retryState) {
+      session?.abortRetry?.();
+      record.execution.retryState = undefined;
+      this.notifyStatsUpdate(record);
+      return true;
+    }
+    return false;
   }
 
   abort(id: string, stoppedBy?: StopInitiator): boolean {

@@ -69,6 +69,8 @@ export function makeManager(records: any[]): AgentManager {
     listAgents: () => records,
     getRecord: (id: string) => records.find(record => record.id === id),
     togglePinned: vi.fn(),
+    abort: vi.fn(),
+    abortRetry: vi.fn(() => false),
   } as unknown as AgentManager;
 }
 
