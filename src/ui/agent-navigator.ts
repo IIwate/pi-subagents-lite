@@ -279,15 +279,30 @@ class ForwardingActionMap extends Map<string, () => void> {
   constructor(
     private base: Map<string, () => void>,
     private wrapFollowUp: (handler: () => void) => () => void,
+    private wrapDequeue: (handler: () => void) => () => void,
   ) {
     super();
+    for (const [action, handler] of base.entries()) {
+      this.set(action, handler);
+    }
+  }
+
+  override get(action: string): (() => void) | undefined {
+    return this.base.get(action);
+  }
+
+  override has(action: string): boolean {
+    return this.base.has(action);
   }
 
   override set(action: string, handler: () => void): this {
-    this.base.set(
-      action,
-      action === "app.message.followUp" ? this.wrapFollowUp(handler) : handler,
-    );
+    const wrapped = action === "app.message.followUp"
+      ? this.wrapFollowUp(handler)
+      : action === "app.message.dequeue"
+        ? this.wrapDequeue(handler)
+        : handler;
+    this.base.set(action, wrapped);
+    super.set(action, wrapped);
     return this;
   }
 }
@@ -358,6 +373,12 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
         if (this.navigator.handleEditorSubmit(text)) {
           this.base.addToHistory?.(text.trim());
           this.base.setText("");
+          return;
+        }
+        parentHandler();
+      },
+      (parentHandler) => () => {
+        if (this.navigator.handleEditorDequeue()) {
           return;
         }
         parentHandler();
@@ -658,6 +679,32 @@ export class AgentNavigator {
         text,
         { accepted: false, reason: "unavailable" },
       ));
+    return true;
+  }
+
+  /**
+   * Restore queued steering messages from the selected subagent back into the editor (Alt+Up).
+   * Falls through to Main handler when no subagent is active.
+   */
+  handleEditorDequeue(): boolean {
+    const agentId = this.selectedId();
+    if (!agentId) return false;
+
+    const dequeued = this.manager.dequeueMessages?.(agentId) ?? [];
+    if (dequeued.length === 0) {
+      this.uiCtx?.notify("No queued messages to restore", "info");
+      return true;
+    }
+
+    const queuedText = dequeued.join("\n\n");
+    const currentText = this.uiCtx?.getEditorText() ?? "";
+    const combinedText = [queuedText, currentText].filter(t => t.trim()).join("\n\n");
+    this.uiCtx?.setEditorText(combinedText);
+    this.lastRenderSig = "";
+    this.update();
+
+    const count = dequeued.length;
+    this.uiCtx?.notify(`Restored ${count} queued message${count > 1 ? "s" : ""} to editor`, "info");
     return true;
   }
 
@@ -1386,6 +1433,7 @@ export class AgentNavigator {
     for (const message of queued) {
       lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
     }
+    lines.push(truncateToWidth(theme.fg("dim", "↳ Alt+Up to edit all queued messages"), width));
     return lines;
   }
 
@@ -1508,6 +1556,9 @@ export class AgentNavigator {
       ];
       for (const message of queued) {
         lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
+      }
+      if (queued.length > 0) {
+        lines.push(truncateToWidth(theme.fg("dim", "↳ Alt+Up to edit all queued messages"), width));
       }
     }
 

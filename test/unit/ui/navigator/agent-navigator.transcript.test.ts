@@ -627,6 +627,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     const pendingLines = pendingContainer.render(120).join("\n");
     expect(pendingLines).toContain("Steering: Change direction to grep");
     expect(pendingLines).toContain("Steering: Avoid reading large files");
+    expect(pendingLines).toContain("↳ Alt+Up to edit all queued messages");
   });
 
   it("renders retry countdown status indicator and header badge when an auto-retry is active", () => {

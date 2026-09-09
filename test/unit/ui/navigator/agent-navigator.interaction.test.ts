@@ -348,4 +348,80 @@ describe("AgentNavigator — Interaction", () => {
     expect(selector.render(120).join("\n")).not.toContain("Blocked:");
     expect(ui.baseEditor.getText()).toBe("main draft");
   });
+
+  it("restores queued steering messages back into the editor on Alt+Up (dequeue)", () => {
+    const record = makeRecord();
+    const manager = makeManager([record]);
+    manager.dequeueMessages = vi.fn().mockReturnValue(["queued steer 1", "queued steer 2"]);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+
+    ui.baseEditor.setText("existing draft");
+    const parentDequeue = vi.fn();
+    ui.baseEditor.actionHandlers.set("app.message.dequeue", parentDequeue);
+    const editor = ui.editorFactory(makeTui(), {}, {});
+
+    // Trigger wrapped action
+    const dequeueHandler = editor.actionHandlers?.get("app.message.dequeue");
+    expect(dequeueHandler).toBeDefined();
+    dequeueHandler?.();
+
+    expect(manager.dequeueMessages).toHaveBeenCalledWith(record.id);
+    expect(parentDequeue).not.toHaveBeenCalled();
+    expect(ui.baseEditor.getText()).toBe("queued steer 1\n\nqueued steer 2\n\nexisting draft");
+    expect(ui.ctx.notify).toHaveBeenCalledWith("Restored 2 queued messages to editor", "info");
+  });
+
+  it("notifies when no queued messages exist to restore on Alt+Up", () => {
+    const record = makeRecord();
+    const manager = makeManager([record]);
+    manager.dequeueMessages = vi.fn().mockReturnValue([]);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(record.id);
+
+    const parentDequeue = vi.fn();
+    ui.baseEditor.actionHandlers.set("app.message.dequeue", parentDequeue);
+    const editor = ui.editorFactory(makeTui(), {}, {});
+
+    const dequeueHandler = editor.actionHandlers?.get("app.message.dequeue");
+    dequeueHandler?.();
+
+    expect(manager.dequeueMessages).toHaveBeenCalledWith(record.id);
+    expect(parentDequeue).not.toHaveBeenCalled();
+    expect(ui.ctx.notify).toHaveBeenCalledWith("No queued messages to restore", "info");
+  });
+
+  it("falls through to parent dequeue handler when no subagent is selected", () => {
+    const record = makeRecord();
+    const manager = makeManager([record]);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(manager);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    mountSelector(ui);
+
+    const parentDequeue = vi.fn();
+    ui.baseEditor.actionHandlers.set("app.message.dequeue", parentDequeue);
+    const editor = ui.editorFactory(makeTui(), {}, {});
+
+    expect(navigator.selectedId()).toBeNull();
+    const dequeueHandler = editor.actionHandlers?.get("app.message.dequeue");
+    dequeueHandler?.();
+
+    expect(parentDequeue).toHaveBeenCalledOnce();
+  });
 });

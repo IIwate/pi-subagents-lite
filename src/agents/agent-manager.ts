@@ -742,6 +742,29 @@ export class AgentManager {
     return false;
   }
 
+  /**
+   * Drain and return all queued steering and follow-up messages for a subagent session.
+   * Clears both session queues and any pending steers held before session creation.
+   */
+  dequeueMessages(id: string): string[] {
+    const record = this.agents.get(id);
+    if (!record) return [];
+
+    const pending = (record.execution.pendingSteers ?? []).map(s => s.message);
+    record.execution.pendingSteers = undefined;
+
+    const session = record.execution.session as unknown as {
+      clearQueue?: () => { steering?: string[]; followUp?: string[] };
+    } | undefined;
+    const cleared = session?.clearQueue?.() ?? {};
+    const dequeued = [...pending, ...(cleared.steering ?? []), ...(cleared.followUp ?? [])];
+
+    if (dequeued.length > 0) {
+      this.notifyStatsUpdate(record);
+    }
+    return dequeued;
+  }
+
   abort(id: string, stoppedBy?: StopInitiator): boolean {
     const record = this.agents.get(id);
     if (!record) return false;

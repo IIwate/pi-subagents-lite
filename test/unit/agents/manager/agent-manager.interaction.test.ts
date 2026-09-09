@@ -477,4 +477,33 @@ describe("AgentManager — Interaction", () => {
 
       deferred.resolve(mockRunResult({ session }));
     });
+
+    it("drains and returns queued messages via dequeueMessages", async () => {
+      manager = new AgentManager(onComplete);
+      const session = mockAgentSession() as any;
+      session.clearQueue = vi.fn().mockReturnValue({
+        steering: ["session steer 1"],
+        followUp: ["session followup 1"],
+      });
+      const deferred = makeResolvablePromise();
+      mockModules.mockRunAgent.mockImplementation(async (_ctx, _type, _prompt, options) => {
+        await options.onSessionCreated(session);
+        return deferred.promise;
+      });
+
+      const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", fakeOptions({ description: "task", modelKey: "test/model" }));
+      const record = manager.getRecord(id)!;
+      record.execution.pendingSteers = [{ message: "pending steer 0" }];
+
+      const dequeued = manager.dequeueMessages(id);
+      expect(dequeued).toEqual([
+        "pending steer 0",
+        "session steer 1",
+        "session followup 1",
+      ]);
+      expect(record.execution.pendingSteers).toBeUndefined();
+      expect(session.clearQueue).toHaveBeenCalledOnce();
+
+      deferred.resolve(mockRunResult({ session }));
+    });
 });

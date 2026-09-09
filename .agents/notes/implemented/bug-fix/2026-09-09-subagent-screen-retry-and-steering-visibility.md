@@ -13,9 +13,10 @@ When a user took over a subagent session and typed while the subagent encountere
 
 Subagent screen behavior aligns with native Pi interactive mode:
 1. `AgentRecord.execution.retryState` tracks active retry status via session lifecycle events (`auto_retry_start`, `auto_retry_end`).
-2. Queued steering messages (`session.getSteeringMessages?.()` and `record.execution.pendingSteers`) render in the subagent view (`pendingContainer` and transcript fallback) immediately upon submission.
-3. An active auto-retry delay countdown displays via `childStatusRender` in `statusContainer` and the transcript header badge.
-4. Pressing `Esc` in subagent view checks `abortActiveRetry()` first; if active, it cancels retry sleep via `session.abortRetry()` and immediately yields execution to pending input rather than terminating the subagent.
+2. Queued steering messages (`session.getSteeringMessages?.()` and `record.execution.pendingSteers`) render in the subagent view (`pendingContainer` and transcript fallback) immediately upon submission, with a `↳ Alt+Up to edit all queued messages` footer hint.
+3. Pressing `Alt+Up` (`app.message.dequeue`) in subagent view drains queued steering messages via `manager.dequeueMessages()` and restores them into the editor for revision without affecting Main agent queues.
+4. An active auto-retry delay countdown displays via `childStatusRender` in `statusContainer` and the transcript header badge.
+5. Pressing `Esc` in subagent view checks `abortActiveRetry()` first; if active, it cancels retry sleep via `session.abortRetry()` and immediately yields execution to pending input rather than terminating the subagent.
 
 ```ts type-equiv: AgentRetryState from src/types.ts
 export interface AgentRetryState {

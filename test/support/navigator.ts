@@ -71,6 +71,7 @@ export function makeManager(records: any[]): AgentManager {
     togglePinned: vi.fn(),
     abort: vi.fn(),
     abortRetry: vi.fn(() => false),
+    dequeueMessages: vi.fn(() => []),
   } as unknown as AgentManager;
 }
 
