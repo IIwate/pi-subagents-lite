@@ -73,7 +73,7 @@ export interface ModelRoutingConfig {
 
 ## Verification
 
-- 模型权限判定、父 Provider 特权与交集过滤由单元测试全面保证：`test/models/model-access.test.ts`。
-- 思考能力解耦与自适应钳制经测试覆盖：`test/models/thinking-resolver.test.ts` 与 `test/agents/runner/agent-runner.setup.test.ts`。
-- 纯思考与空白回复重试分类经真实会话集成测试验证：`test/agents/runner/agent-runner.pi.integration.test.ts`。
+- 模型权限判定、父 Provider 特权与交集过滤由单元测试全面保证：[test/unit/models/model-access.test.ts](../../../../test/unit/models/model-access.test.ts)。
+- 思考能力解耦与自适应钳制经测试覆盖：[test/unit/models/thinking-resolver.test.ts](../../../../test/unit/models/thinking-resolver.test.ts) 与 [test/unit/agents/runner/agent-runner.setup.test.ts](../../../../test/unit/agents/runner/agent-runner.setup.test.ts)。
+- 纯思考与空白回复重试分类经真实会话集成测试验证：[test/scenarios/agents/pi-session.test.ts](../../../../test/scenarios/agents/pi-session.test.ts)。
 - 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。

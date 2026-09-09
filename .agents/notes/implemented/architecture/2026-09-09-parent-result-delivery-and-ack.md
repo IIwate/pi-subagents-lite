@@ -83,6 +83,6 @@ export interface PendingResult {
 
 ## Verification
 
-- 交付持久化、唤醒合并、幽灵消灭与 ACK 对账逻辑经集成测试全面覆盖：`test/spawn/durable-inbox.integration.test.ts`、`test/agents/result-delivery.integration.test.ts` 与 `test/spawn/spawn-coordinator.test.ts`。
-- 选择器长短消息光标切换行数恒定与模态浮层边界经单测验证：`test/ui/delivery-selector.test.ts`。
+- 交付持久化、唤醒合并、幽灵消灭与 ACK 对账逻辑经集成测试全面覆盖：[test/scenarios/spawn/durable-inbox.test.ts](../../../../test/scenarios/spawn/durable-inbox.test.ts)、[test/scenarios/spawn/result-delivery.test.ts](../../../../test/scenarios/spawn/result-delivery.test.ts) 与 [test/unit/spawn/spawn-coordinator.test.ts](../../../../test/unit/spawn/spawn-coordinator.test.ts)。
+- 选择器长短消息光标切换行数恒定与模态浮层边界经单测验证：[test/unit/ui/delivery-selector.test.ts](../../../../test/unit/ui/delivery-selector.test.ts)。
 - 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。

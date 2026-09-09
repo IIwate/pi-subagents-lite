@@ -79,6 +79,6 @@ pi.registerTool({
 
 ## Verification
 
-- 静态 Schema 结构与参数校验经单测验证：`test/index.test.ts`（使用 TypeBox `Value.Check` 验证）。
-- 伪工具调用文本拒绝逻辑经单测覆盖：`test/agents/runner/agent-runner.limits.test.ts`。
-- Windows 平台 PowerShell 工具注入与排除边界经集成测试保证：`test/agents/powershell-execution.test.ts` 与 `test/agents/powershell-edge-cases.test.ts`。
+- 静态 Schema 结构与参数校验经单测验证：[test/unit/index.test.ts](../../../../test/unit/index.test.ts)（使用 TypeBox `Value.Check` 验证）。
+- 伪工具调用文本拒绝逻辑经单测覆盖：[test/unit/agents/runner/agent-runner.limits.test.ts](../../../../test/unit/agents/runner/agent-runner.limits.test.ts)。
+- Windows 平台 PowerShell 工具注入与排除边界经集成测试保证：[test/scenarios/agents/powershell-execution.test.ts](../../../../test/scenarios/agents/powershell-execution.test.ts) 与 [test/unit/agents/powershell-policy.test.ts](../../../../test/unit/agents/powershell-policy.test.ts)。

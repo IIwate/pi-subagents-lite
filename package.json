@@ -45,6 +45,8 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --maxWorkers=4",
+    "test:unit": "vitest run --project unit --maxWorkers=4",
+    "test:scenarios": "vitest run --project scenarios --maxWorkers=4",
     "test:parallel": "vitest run",
     "test:watch": "vitest",
     "verify-notes": "npx tsx scripts/verify-agent-note-tree.ts && npx tsx scripts/verify-agent-note-format.ts && npx tsx scripts/verify-doc-refs.ts && npx tsx scripts/verify-doc-typecheck.ts && npx tsx scripts/verify-type-equiv.ts",

@@ -72,6 +72,6 @@ export interface ConcurrencyConfig {
 
 ## Verification
 
-- 并发双上限判定、排队流转与锁死快照逻辑经单测与集成测试持续覆盖：`test/agents/manager/agent-manager.queue.test.ts` 与 `test/agents/queued-model-permission.integration.test.ts`。
-- 活跃模型库存计算与休眠配额隔离逻辑经单测持续覆盖：`test/ui/menu/menu-concurrency.test.ts`。
+- 并发双上限判定、排队流转与锁死快照逻辑经单测与集成测试持续覆盖：[test/unit/agents/manager/agent-manager.queue.test.ts](../../../../test/unit/agents/manager/agent-manager.queue.test.ts) 与 [test/scenarios/agents/queued-invocation.test.ts](../../../../test/scenarios/agents/queued-invocation.test.ts)。
+- 活跃模型库存计算与休眠配额隔离逻辑经单测持续覆盖：[test/unit/ui/menu/menu-concurrency.test.ts](../../../../test/unit/ui/menu/menu-concurrency.test.ts)。
 - 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。

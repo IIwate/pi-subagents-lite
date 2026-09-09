@@ -2,9 +2,11 @@
 
 **Package manager:** bun (`bun install`, `bun add`, `bun add -d`).
 
-**Typecheck:** `bun run typecheck` for production code; `bun run typecheck:test` for governed tests and shared fixtures.
+**Typecheck:** `bun run typecheck` for production code; `bun run typecheck:test` covers all tests, shared fixtures, and Vitest configuration.
 
-**Tests:** `bun run test` is the official full suite and uses `--maxWorkers=4`. `bun run test:parallel` runs without that cap. CI checks normal and fixed-seed shuffled execution on Linux and Windows.
+**Tests:** `bun run test:unit` runs module invariants in `test/unit/`. `bun run test:scenarios` runs cross-module, filesystem, reload, and real Pi session checks in `test/scenarios/`. Scenarios use offline providers; they do not exercise a physical terminal or live model API. Shared fixtures live in `test/support/` and own cleanup through `createTestHarness`.
+
+`bun run test` is the official full suite, includes both Vitest projects, and uses `--maxWorkers=4`. `bun run test:parallel` runs both projects without that cap. Use `bun run test:watch --project unit` for unit watch mode. CI checks both layers in normal and fixed-seed shuffled execution on Linux and Windows; publishing runs the full suite.
 
 During implementation, run the narrowest tests that cover the change. Run selected evidence once for an unchanged tree; do not repeat it merely because a commit or push follows.
 

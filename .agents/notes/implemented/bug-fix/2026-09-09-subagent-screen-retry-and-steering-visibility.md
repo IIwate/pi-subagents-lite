@@ -41,7 +41,7 @@ export interface AgentRetryState {
 
 Run unit and integration suites:
 ```bash ignore-check
-bun run test test/ui/navigator/ test/agents/manager/
+bun run test test/unit/ui/navigator/ test/unit/agents/manager/
 ```
 Verify agent note integrity and type alignment:
 ```bash ignore-check

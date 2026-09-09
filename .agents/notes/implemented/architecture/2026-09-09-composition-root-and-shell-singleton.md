@@ -57,6 +57,6 @@ const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/
 
 ## Verification
 
-- 服务生命周期初始化与销毁由集成测试验证：`test/agents/manager/agent-manager.shutdown.test.ts`。
-- 跨重载交接与会话隔离由集成测试保证：`test/harness.test.ts`。
-- 测试夹具通过统一的 `shellMock`（`test/fixtures.ts`）稳定提供环境隔离。
+- 服务生命周期初始化由 [test/scenarios/events.test.ts](../../../../test/scenarios/events.test.ts) 验证, 管理器销毁边界由 [test/unit/agents/manager/agent-manager.shutdown.test.ts](../../../../test/unit/agents/manager/agent-manager.shutdown.test.ts) 验证.
+- 跨重载交接与会话隔离由 [test/scenarios/shell-reload.test.ts](../../../../test/scenarios/shell-reload.test.ts) 和 [test/scenarios/spawn/session-fallback.test.ts](../../../../test/scenarios/spawn/session-fallback.test.ts) 验证.
+- 单元测试通过 `shellMock`([test/support/fixtures.ts](../../../../test/support/fixtures.ts)) 提供局部依赖. 交付场景通过 [test/support/agent-scenario.ts](../../../../test/support/agent-scenario.ts) 装配真实 Shell 服务, 资源清理边界由 [test/scenarios/harness.test.ts](../../../../test/scenarios/harness.test.ts) 验证.
