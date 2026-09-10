@@ -1,6 +1,16 @@
 # @iiwate/pi-subagents-lite
 
-Lightweight subagents for [pi](https://pi.dev), with isolated sessions, per-agent tools and models, background execution, and a keyboard-driven list below the editor. Agent tool calls and completion delivery stay out of the chat UI.
+Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent tools and models, background execution, and a keyboard-driven list below the editor. Subagent activity, tool calls, and completions stay out of your main chat until you need them.
+
+## Features
+
+- **Isolated Subagent Sessions**: Run multi-step tasks in dedicated, sandboxed sessions without polluting the parent conversation.
+- **Background & Foreground Execution**: Spawn background agents that report back when finished, or foreground agents that block the current turn.
+- **Model Routing & Thinking Access**: Inherit the parent model by default, or authorize alternate providers and models with fine-grained thinking budgets.
+- **TUI Below-Editor Navigator**: Monitor running, queued, and completed agents directly below the editor with responsive terminal layouts.
+- **Human Takeover & Selective Delivery**: Step into any subagent to steer its execution, and selectively deliver message snapshots (`Alt+S`) back to the parent session.
+- **Hierarchical Concurrency**: Enforce model- and provider-level concurrency limits with automatic queuing.
+- **Cross-Platform**: Seamless support for macOS, Linux, and Windows (with native PowerShell tool adaptation).
 
 ## Install
 
@@ -12,15 +22,9 @@ pi install -l npm:@iiwate/pi-subagents-lite   # project-local
 pi -e npm:@iiwate/pi-subagents-lite           # try for one run
 ```
 
-## Usage
+## Quick Look
 
-The extension registers three tools for the LLM:
-
-- `Agent` — start a subagent. Foreground runs wait for completion; `run_in_background: true` returns immediately.
-- `StopAgent` — stop a running or queued agent by ID.
-- `AgentStatus` — list agents, or read one exact result by `agent_id` without polling or waiting.
-
-Once a subagent exists, progress appears in the below-editor list or its folded Footer summary. The list has a sticky Main row and up to six visible subagents scrolled around the focused row. It starts expanded by default; `/agents` → Display settings → Expand list by default persists a different initial choice for new conversations. After changing it, the menu reports that `/reload` applies the new default immediately by recreating the current conversation's extension runtime. `Alt+A` toggles only the current runtime, and that choice remains even if the volatile record count temporarily reaches zero. With no records and no pending results eligible for the active branch, both the list and footer status stay hidden. Status follows the agent name in parentheses; provider, model, and thinking appear before usage stats. Agent rows retain manager order:
+Once subagents are active, progress appears in the interactive list below the editor:
 
 ```text
 › ● Main (1 running · 3 total · Alt+A collapse)
@@ -29,40 +33,36 @@ Once a subagent exists, progress appears in the below-editor list or its folded 
   ◇ Reviewer (Done)  Preserve this review               openai-codex · gpt-5.4 · high · 12 calls · 2m
 ```
 
-- `›` marks the keyboard-highlighted row.
-- `○` and `●` mark inactive and active unpinned transcripts.
-- `◇` and `◆` mark inactive and active session-local pinned transcripts.
-- Main shows nonzero `running` and `queued` counts plus the total list count. A blocked child interaction temporarily replaces those counts with a local `Blocked: ...` reason; while the list is folded, the Footer shows that reason instead. Neither path notifies in Main's transcript area.
-- While expanded, sticky Main owns the running/queued/total counts, exceptional `results pending` state for the active branch, `Alt+A collapse`, and active-child `Alt+M main`; this extension adds no Footer status in the normal path. Normal in-flight automatic delivery does not show pending text. While folded, the Footer becomes the compact replacement and uses `Subagent` or `Subagents` according to retained count. Zero pending results are hidden. Both forms show counts, delivery state when nonzero, `Alt+A`, then active-child `Alt+M`; narrow screens may truncate trailing help first.
-- Rows are grouped by attention: `Error`/`Aborted`/`Turn limit`, `Running`, `Queued`, then `Done`/`Stopped`. Running and queued rows show the earliest start or queue time first; terminal rows show the latest completion first. Registration order breaks timestamp ties.
-- With an expanded list and empty editor, press `↓` to focus it. Use `↑`/`↓` to move, `Enter` to activate, `Space` to pin or unpin, and `Esc` to return to the editor.
-- Pins move rows to the front of their status group and pause automatic cleanup. Multiple Agents may be pinned; unpinning resumes the remaining cleanup time rather than granting a fresh window.
-- Press `Ctrl+D` on an inactive subagent to clear it, including a pinned one; `Enter` confirms and `Esc` cancels. Running agents are stopped first.
-- Foreground Agent calls honor Pi's interrupt signal: `Esc` from the editor stops every running or queued foreground Agent in the interrupted parent turn, while background Agents continue. If the list has focus, `Esc` only returns to the editor; press it again there to interrupt. While a child view is active, `Esc` from the editor stops that running subagent.
-- While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
-- Sending editor input to a retained subagent takes over that session, pins its record, and releases any foreground wait in Main. Running sessions receive steering; settled sessions can accept a new prompt. Further output stays in the subagent session for explicit selection, including when continuing after an error.
-- To return output from a taken-over session, focus its row in the list and press `Alt+S`. Use `↑`/`↓` to browse messages, `Space` to select, `Enter` to deliver, or `Esc` to cancel. The selector captures messages when opened; reopen it to see newer output. Each new selection creates a parent-session result and delivery ID; earlier deliveries remain intact. If saving fails, `Enter` retries the same selection and ID, while `Esc` closes the view with the selection still pending.
-- Persisted terminal records are normally removed from the volatile Agent list after 10 minutes; saved parent-session results remain available for later delivery and exact lookup. Pinning pauses automatic cleanup; viewing does not. Child sessions, pins, and unselected takeover output are held in memory and do not survive `/reload` or process exit. The parent LLM has no continuation tool.
+### Keyboard Shortcuts
 
-Each new subagent starts without the parent's conversation history. Background terminal results from sessions without human takeover, including errors, are persisted in the parent Pi session with the Agent call's session ID and origin entry before one automatic wake opportunity. Automatic delivery is limited to branches retaining that origin. A completion persisted during a failed parent turn provides one later wake opportunity after settlement; the failed result alone does not retry itself. A later persisted completion may carry older eligible pending results, while the next natural parent prompt injects them during preflight even after an automatic wake failed. Explicit reload or `/tree` return to the origin is a separate restoration event; forked or new sessions ignore copied entries from the old session. Result acknowledgement confirms durable receipt ingestion in the parent session context, decoupled from LLM turn outcome. Do not poll, sleep, or repeatedly call `AgentStatus` while waiting. Use `AgentStatus({ agent_id })` only for explicit session-wide result lookup; that read is acknowledged once persisted in the session log.
+When the list is expanded and the editor is empty, press `↓` to focus the list:
 
-Parent wake messages include up to 4000 characters per result, followed by an `AgentStatus({ agent_id })` hint when truncated. Persisted results and exact `AgentStatus` queries retain the full text.
+| Shortcut | Action |
+|---|---|
+| `↑` / `↓` | Navigate between subagents |
+| `Enter` | Activate and inspect the selected subagent session |
+| `Space` | Pin / unpin subagent (pins protect from automatic cleanup) |
+| `Alt+S` | Open delivery selector to choose message snapshots to return to Main |
+| `Alt+M` | Return to Main session from any subagent |
+| `Alt+A` | Toggle subagent list expanded / collapsed |
+| `Alt+Up` | Pull queued steering messages back into the editor for editing |
+| `Ctrl+D` | Remove a completed or stopped subagent |
+| `Esc` | Return focus to the editor, or interrupt an active foreground agent |
 
-## Built-in Agents
+## Tools for LLM
 
-- `general-purpose` — general task execution using the configured session tools.
-- `Explore` — read-only codebase exploration.
+The extension registers three tools for the parent model:
 
-Built-ins can be overridden by custom agents or disabled from `/agents`. Disabling them takes effect immediately for future `Agent` calls and on-demand discovery; running and queued agents continue with the complete policy captured when accepted, and same-name custom definitions remain available.
+- `Agent({ prompt, agent?, model?, thinking?, run_in_background?, worktree_path? })`: Spawn a specialized subagent.
+- `StopAgent({ agent_id })`: Terminate a running or queued subagent.
+- `AgentStatus({ agent_id? })`: Inspect active subagents or retrieve an exact completion result.
 
 ## Custom Agents
 
-Agent definitions are Markdown files loaded from:
+Define project or user-wide agents using Markdown files with YAML frontmatter:
 
-- `<Pi agent directory>/agents/*.md` — user-wide agents, defaulting to `~/.pi/agent/agents/*.md`.
-- `.pi/agents/*.md` — project agents, loaded only when Pi trusts the project.
-
-Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field; files within each directory are applied in filename order. Type lookup prefers an exact canonical name, then a unique case-insensitive canonical name, then a unique display name. Ambiguous matches report the canonical candidates.
+- **User agents**: `<Pi agent directory>/agents/*.md` (defaults to `~/.pi/agent/agents/*.md`)
+- **Project agents**: `.pi/agents/*.md` (loaded when the project is trusted)
 
 ```markdown
 ---
@@ -75,133 +75,23 @@ tools:
   - find
 thinking: high
 max_turns: 12
-extensions: false
-skills:
-  - review-guidelines
 ---
 
 Review the requested changes. Prioritize correctness, regressions, and missing tests.
 ```
 
-Supported frontmatter fields:
-
-- Identity: `name`, `display_name`, `description`, `hidden`.
-- Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
-- Runtime: `thinking`, `max_turns`, `max_tokens`.
-
-Frontmatter uses Pi's YAML parser and supports LF or CRLF files, quoted values, and lists. Agent fields accept scalars and string lists; unrelated metadata is ignored. Identity text must be a string, so quote names such as `"123"` or `"false"`. Use `[]` for an explicit empty list. Duplicate keys, incorrect field types, and non-finite numeric limits produce a file diagnostic; other valid files continue to load.
-
-Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents. An omitted or zero `max_turns` means unlimited; other finite values round up to at least one turn.
-
-## Upgrading to 2.0
-
-Version 2.0 replaces fixed Agent model assignments with the access policy below. Legacy `allowCrossProvider`, `allowedProviders`, `agentModels`, dynamic `agent.<type>` model keys, `agent.default`, and session assignments are not read or migrated. Agent frontmatter `model` is also ignored; omit the Agent tool's `model` argument for the exact parent model, or pass an explicitly authorized alternate.
-
-A missing or legacy `modelRouting` block starts with routing OFF and no alternate access. Other Agent and concurrency settings continue to load. The next explicit settings save rewrites the file with only the canonical 2.0 routing schema.
-
-## Agent Options
-
-`Agent` accepts:
-
-- `prompt` — required task text.
-- `description` — short list label; defaults to the first prompt line.
-- `agent` — agent type; defaults to `general-purpose`.
-- `model` — an exact `id` or `provider/id` inside Pi's active model scope. Set thinking through the separate `thinking` field.
-- `thinking` — `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`, subject to the selected model's reasoning capabilities.
-- `run_in_background` — return immediately and notify the parent when complete.
-- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. When the requested Agent type is unknown and Pi trusts the project, discovery adds missing types from its `.pi/agents/` directory to the session registry. Existing definitions retain their values.
-
-Thinking is resolved when the call is accepted, in order: `thinking` parameter, agent frontmatter, scoped-model setting, global default, then parent session. Empty or whitespace-only values fall through to the next source. Explicit parameters and frontmatter must name a supported level; unsupported levels inherited from settings or the parent use the model's highest supported level. Non-reasoning models receive no inherited thinking override. Pi's `thinkingLevelMap` defines support, including `null` exclusions and explicit opt-in for `xhigh` and `max`.
-
-## Model Routing
-
-By default, every subagent uses the exact model active in the parent session when the Agent call is accepted. Omitting `model`, or explicitly passing that same model key, selects this **Parent default**. It is always available and is never persisted as routing configuration.
-
-With **Model routing** OFF (`/agents` > Model routing), any other model is rejected. With routing ON, an alternate model is authorized only when all of these are true:
-
-- its provider is globally enabled for routing, unless it is the current parent provider;
-- the selected agent type has access to that provider;
-- the agent's provider rule allows all models or the exact model ID;
-- Pi reports the exact model through `modelRegistry.getAvailable()`;
-- the model is inside Pi's active model scope.
-
-The current parent provider bypasses only the global provider switch while it remains the parent. Same-provider alternates still need an explicit Agent tool `model` argument, routing ON, a saved Agent/provider/model rule, Pi availability, and active scope. A rejected explicit choice is never replaced silently with the parent model. The exact parent model remains unconditional.
-
-The canonical configuration is:
-
-```json
-{
-  "modelRouting": {
-    "enabled": true,
-    "enabledProviders": ["anthropic", "openai", "google"],
-    "agentAccess": {
-      "Explore": {
-        "providers": {
-          "anthropic": { "models": ["claude-haiku-4"] },
-          "openai": {},
-          "google": { "models": ["gemini-2.5-pro", "gemini-2.5-flash"] }
-        }
-      }
-    }
-  }
-}
-```
-
-An omitted `models` property means all models that Pi currently or later reports available from that provider. It does not authorize unauthenticated entries from Pi's full built-in catalogue. A non-empty array means only those exact IDs. Empty arrays are removed and never interpreted as all-model access.
-
-Each agent access page begins with a locked dynamic row and a separator:
-
-```text
-[✓] Default · anthropic/claude-sonnet-4
-────────────────────────────────────────
-anthropic · Parent alternates
-openai
-google
-```
-
-**Quick model setup** grants one agent alternate access to models from the current parent provider in one short flow. Its model checkboxes save immediately, enabling routing and the concrete provider when access is added. It writes the same `enabledProviders` and `agentAccess` state as the full menus; there is no Apply row or separate quick configuration.
-
-**Provider access** is a direct switch list built fresh from `modelRegistry.getAvailable()`. It starts with the locked Parent default and one separator, excludes the current parent provider, and contains no availability diagnostics or Provider detail pages. Its summary counts only enabled alternate providers currently visible as mutable switches; unavailable saved providers and a redundantly persisted current parent do not count.
-
-Saved routing state for providers absent from Pi availability is shown separately as **Saved unavailable providers**. That exception flow can toggle dormant routing state or explicitly delete every saved Agent rule after multiline confirmation. Toggling never deletes rules, zero rule counts are omitted, and the current parent provider is excluded.
-
-After selecting an Agent, its Provider picker shows only providers that passed Provider access and remain available, plus the current parent provider as `Parent alternates`. Disabled or unavailable providers are hidden while their rules remain dormant.
-
-The normal Agent model picker shows only actionable alternates: Provider models from `getAvailable()` intersected with Pi's active model scope, excluding the exact parent model. `All models` and exact-model checkboxes save immediately and remain open at the changed row; there is no Apply row or normal-state status text. Scope-excluded and unavailable models stay hidden, while saved exact IDs remain dormant in configuration and reappear if their prerequisite returns.
-
-**Clean unavailable rules** appears only when a reliable fresh `modelRegistry.getAll()` catalogue proves that saved exact model IDs are missing while their provider remains in the catalogue. Its global multiline confirmation lists every affected Provider, Agent, and model ID, then re-reads the catalogue and removes only IDs still unavailable. Credential or `getAvailable()` loss, scope changes, all-model rules, and an absent/unreliable catalogue provider never create cleanup candidates. Persisted dormant exact IDs remain intact until an explicit rule change or cleanup action.
-
-Current Agent types, Parent default, and effective model access are added automatically to the parent system prompt with Pi's `before_agent_start` hook. Every callable alternate is listed as an exact `provider/model` key, including models allowed by an `All models` rule; wildcard policy summaries are never used as Agent arguments. Alternate authorization and guidance use the current `getAvailable()` keys; catalogue-only models are never advertised or callable. Configuration, parent-model, availability, and scope changes are reflected on the next parent run without `/reload`, a manual briefing, a session message, or an extra LLM turn.
-
-The selected Agent definition, tool policy, skill and extension loading policy, system prompt mode, context-file setting, model, parent model, thinking selection, scoped-model state, and grace turns are locked when the Agent call is accepted. Arrays and nested policy data are copied. Running and queued agents retain that accepted policy; later settings or registry changes affect only future Agent calls. In `inherit` mode, the mode is captured but Pi supplies the parent system prompt text when the queued run starts.
-
-## Concurrency
-
-The fallback ceiling is 4 concurrent runs per model. An explicit Model limit replaces that per-model fallback, while a Provider limit is an independent shared hard ceiling across every model from that Provider. A run starts only when both ceilings have room; Model limits may sum above the Provider limit so idle capacity remains shareable.
-
-New Agent calls beyond either ceiling enter `Queued`. Continuing a settled child does not queue: the input remains in the editor and Main shows `Blocked: provider/model concurrency limit reached` until a later successful send or Agent switch.
-
-The Concurrency menu shows only the parent model, currently authorized alternates, and models retained by existing child sessions. Limits outside that actionable inventory remain saved under **Saved inactive limits**, reappear automatically when their prerequisite returns, and are removed only through an explicit user action.
-
-Hand-edited finite limits round up to at least one slot. Invalid default limits recover to 4; invalid explicit Provider or Model limits recover to 1 with a diagnostic. Numeric menus require whole numbers within the field's allowed range.
+Supported frontmatter fields include `tools`, `exclude_tools`, `extensions`, `skills`, `preload_skills`, `thinking`, `max_turns`, and `max_tokens`. Built-in agents (`general-purpose`, `Explore`) can be customized or disabled.
 
 ## Settings
 
-Run `/agents` to configure:
+Run `/agents` in Pi to open the interactive settings menu:
 
-- Parent default inheritance, Quick model setup, Provider access switches, unavailable-provider exceptions, and per-agent provider/model access;
-- the fallback per-model ceiling, shared Provider ceilings, per-model ceilings, and saved inactive limits;
-- force-background mode, grace turns, and default thinking;
-- system prompt mode (`replace`, `inherit`, or `custom`) and `AGENTS.md` inclusion;
-- implicit skill and extension loading, built-in agents, and visible list statistics;
-- agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
-- one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
+- **Model Routing**: Subagents use the exact parent model by default. Turn routing ON to authorize specific providers and models with dynamic system prompt guidance.
+- **Concurrency**: Configure per-model and shared provider concurrency limits (defaults to 4 concurrent slots per model).
+- **Spawn Options**: Set default thinking levels, force-background mode, and grace turns.
+- **Display Settings**: Configure whether the subagent list starts expanded, and toggle visible metrics.
 
-Settings and custom prompts use `subagents-lite.json` and `subagents-lite-prompt.md` inside Pi's agent directory, normally `~/.pi/agent`. Pi's `PI_CODING_AGENT_DIR` override also applies to global Agent definitions and Pi skills. OS home `.agents/skills` keeps its independent location.
-
-When upgrading an installation that already uses a Pi directory override, move the required settings, custom prompt, `agents/`, and `skills/` files from the previous `~/.pi/agent` location into that directory before `/reload`. Reconcile any existing destination files explicitly. The Pi directory is the single resource location. Agent files use YAML scalar types: quote numeric or boolean identity text and consolidate duplicate fields when updating older definitions.
-
-Settings become effective after a successful save. A failed save reports the error and retains the previous effective values and displayed selections. Grace turns must be a non-negative integer; invalid loaded values recover to the default of 6.
+Global configuration and custom system prompts are stored in `subagents-lite.json` and `subagents-lite-prompt.md` inside Pi's agent directory (`getAgentDir()`).
 
 ## License
 
