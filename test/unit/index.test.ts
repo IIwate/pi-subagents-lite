@@ -20,11 +20,13 @@ import {
 } from "../support/fixtures.js";
 
 // Mock external dependencies before any imports
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-coding-agent")>(),
   DynamicBorder: class {},
 }));
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   Box: class {},
   Container: class {
     children: any[] = [];

@@ -19,6 +19,7 @@ import {
 } from "../../src/shell.js";
 
 import { createTestHarness, type TestHarness } from "../support/harness.js";
+import * as shell from "../../src/shell.js";
 
 let harness: TestHarness;
 beforeEach(() => {
@@ -34,6 +35,24 @@ beforeEach(() => {
   harness.onDispose(() => getNavigator()?.dispose());
 });
 afterEach(async () => { await harness.dispose(); });
+
+it("discovers global agents from Pi's directory override while honoring project trust", async () => {
+  const directory = harness.createTempDir();
+  const project = harness.createTempDir();
+  vi.stubEnv("PI_CODING_AGENT_DIR", directory);
+  vi.spyOn(shell, "getStore").mockReturnValue(harness.store);
+  const globalAgents = join(directory, "agents");
+  const projectAgents = join(project, ".pi", "agents");
+  mkdirSync(globalAgents);
+  mkdirSync(projectAgents, { recursive: true });
+  writeFileSync(join(globalAgents, "probe.md"), "---\r\nname: global-probe\r\n---\r\nGlobal prompt");
+  writeFileSync(join(projectAgents, "probe.md"), "---\nname: project-probe\n---\nProject prompt");
+  const scan = vi.spyOn(agentDiscovery, "scanAgentFilesInDir");
+  await scanAndRegisterAgents({ cwd: project, isProjectTrusted: () => false } as any);
+  expect(getAgentConfig("global-probe")?.systemPrompt).toBe("Global prompt");
+  expect(getAgentConfig("project-probe")).toBeUndefined();
+  expect(scan).not.toHaveBeenCalledWith(projectAgents, "project");
+});
 
 describe("ensureManagerAndNavigator", () => {
   beforeEach(() => {

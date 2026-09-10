@@ -27,12 +27,17 @@ let inputInstances: Array<{
   getValue: () => string;
 }> = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SettingsList: class MockSettingsList {
     items: any[];
     constructor(items: any[], maxVisible: number, theme: any, onChange: any, onCancel: any, options?: any) {
       this.items = items;
       settingsListCalls.push({ items, maxVisible, theme, onChange, onCancel, options });
+    }
+    updateValue(id: string, value: string) {
+      const item = this.items.find(item => item.id === id);
+      if (item) item.currentValue = value;
     }
   },
   Input: class MockInput {
@@ -96,6 +101,19 @@ describe("showSpawnOptionsMenu — force background", () => {
     settingsListCalls[0].onChange("forceBackground", "ON");
     expect(store.agent.forceBackground).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
+  });
+
+  it("restores the displayed switch after a failed save", async () => {
+    const { store, memIO } = resetMenuStore({ agent: { forceBackground: false } });
+    vi.spyOn(memIO.io, "save").mockImplementation(() => { throw new Error("Permission denied"); });
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const row = settingsListCalls[0].items.find(item => item.id === "forceBackground");
+    row.currentValue = "ON";
+    settingsListCalls[0].onChange(row.id, "ON");
+    expect(row.currentValue).toBe("OFF");
+    expect(store.agent.forceBackground).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith("Failed to save settings: Permission denied", "error");
   });
 });
 
@@ -182,6 +200,34 @@ describe("showSpawnOptionsMenu — grace turns", () => {
 
     inputInstances[0].onEscape!();
     expect(mockDone).toHaveBeenCalled();
+  });
+
+  it.each(["3junk", "1e999", "2.5"])("rejects the complete invalid numeric input %s", async value => {
+    const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const done = vi.fn();
+    settingsListCalls[0].items.find(item => item.id === "graceTurns").submenu("3", done);
+    inputInstances[0].onSubmit!(value);
+    expect(store.agent.graceTurns).toBe(3);
+    expect(done).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("keeps numeric input open until persistence succeeds", async () => {
+    const { store, memIO } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
+    vi.spyOn(memIO.io, "save").mockImplementationOnce(() => { throw new Error("Disk full"); });
+    const ctx = createMockCtx();
+    await showSpawnOptionsMenu(ctx);
+    const done = vi.fn();
+    settingsListCalls[0].items.find(item => item.id === "graceTurns").submenu("3", done);
+    inputInstances[0].onSubmit!("4");
+    expect(store.agent.graceTurns).toBe(3);
+    expect(done).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith("Failed to save settings: Disk full", "error");
+    inputInstances[0].onSubmit!("4");
+    expect(store.agent.graceTurns).toBe(4);
+    expect(done).toHaveBeenCalledExactlyOnceWith("4");
   });
 });
 

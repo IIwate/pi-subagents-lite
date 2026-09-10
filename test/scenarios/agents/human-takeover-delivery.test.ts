@@ -4,6 +4,10 @@ import { createAgentScenario, type AgentScenario } from "../../support/agent-sce
 import { mockAgentSession, mockRunResult, fakeOptions } from "../../support/manager.js";
 import { makeResolvablePromise } from "../../support/fixtures.js";
 import { executeAgentTool } from "../../../src/agents/tool-execution.js";
+import { AgentNavigator } from "../../../src/ui/agent-navigator.js";
+import type { DeliverySelectorComponent } from "../../../src/ui/delivery-selector.js";
+import { makeTui, makeUI } from "../../support/navigator.js";
+import * as shell from "../../../src/shell.js";
 
 vi.mock("../../../src/agents/agent-runner.js", () => ({ runAgent: vi.fn(), continueAgentSession: vi.fn() }));
 
@@ -29,6 +33,81 @@ describe("human takeover and selective delivery integration", () => {
   });
 
   afterEach(async () => { await scenario.dispose(); });
+
+  it.each(["append", "replace", "compact"])("retries the displayed snapshot after session messages %s", async mutation => {
+    const id = scenario.manager.spawn(scenario.pi, scenario.ctx, "Explore", "Inspect", fakeOptions());
+    const record = scenario.manager.getRecord(id)!;
+    await scenario.coordinator.interact(id, "Review results");
+    await record.execution.promise;
+    const previewed = "Previewed report\x07";
+    session.messages = [{ role: "user", content: "Original instruction" }, { role: "assistant", content: previewed }];
+
+    const navigator = new AgentNavigator(scenario.manager);
+    scenario.onDispose(() => navigator.dispose());
+    const ui = makeUI({ value: "" });
+    const modal = Promise.withResolvers<boolean>();
+    const done = vi.fn((saved: boolean) => modal.resolve(saved));
+    let selector!: DeliverySelectorComponent;
+    navigator.setUICtx({ ...ui.ctx, custom: (factory: any) => {
+      selector = factory(makeTui(), ui.theme, null, done);
+      return modal.promise;
+    } } as any);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    const opening = navigator.openDeliverySelector();
+    scenario.onDispose(async () => { modal.resolve(false); await opening; });
+    expect(selector.render(80).join("\n")).toContain("Previewed report");
+
+    if (mutation === "append") {
+      session.messages.push({ role: "assistant", content: "Replacement report" });
+    } else {
+      session.messages = mutation === "compact"
+        ? [{ role: "assistant", content: "Compacted report" }]
+        : [{ role: "user", content: "Replacement instruction" }, { role: "assistant", content: "Replacement report" }];
+    }
+    scenario.pi.appendEntry.mockImplementationOnce(() => { throw new Error("Parent log unavailable"); });
+    selector.handleInput("\r");
+    const deliveryId = record.execution.resultDeliveryId!;
+    expect(done).not.toHaveBeenCalled();
+    expect(selector.render(80).join("\n")).toContain("Save failed");
+    expect(scenario.pi.sendMessage).not.toHaveBeenCalled();
+    selector.handleInput(" ");
+    expect([...selector.selectedIndices]).toEqual([1]);
+
+    selector.handleInput("\r");
+    await opening;
+    expect(done).toHaveBeenCalledExactlyOnceWith(true);
+    expect(record.execution.resultDeliveryId).toBe(deliveryId);
+    const saved = scenario.coordinator.getStoredResult(id)!;
+    expect(saved.result).toContain(previewed);
+    expect(saved.result).not.toContain("Replacement report");
+    expect(saved.result).not.toContain("Compacted report");
+    expect(saved.result).toContain("(selected messages)");
+    expect(scenario.parent.getEntries().filter(entry => entry.type === "custom"
+      && entry.customType === "subagents-lite:pending-result")).toHaveLength(1);
+    expect(scenario.parent.getEntries().filter(entry => entry.type === "custom"
+      && entry.customType === "subagents-lite:result-ack")).toHaveLength(0);
+  });
+
+  it.each(["removed", "parent changed", "empty"])("rejects an invalid selection target: %s", async invalid => {
+    const id = scenario.manager.spawn(scenario.pi, scenario.ctx, "Explore", "Inspect", fakeOptions());
+    const record = scenario.manager.getRecord(id)!;
+    await scenario.coordinator.interact(id, "Review results");
+    await record.execution.promise;
+    const messages = scenario.coordinator.getDeliverableMessages(id);
+    if (invalid === "removed") scenario.manager.clear(id);
+    if (invalid === "parent changed") {
+      vi.spyOn(shell, "getSessionCtx").mockReturnValue({
+        ...scenario.ctx,
+        sessionManager: { getSessionId: () => "another-parent", getSessionFile: () => undefined },
+      } as any);
+    }
+    expect(scenario.coordinator.deliverSelectedMessages(id, invalid === "empty" ? [] : messages)).toEqual({
+      status: "rejected", reason: invalid === "empty" ? "empty" : "unavailable",
+    });
+    expect(scenario.pi.appendEntry).not.toHaveBeenCalled();
+    expect(scenario.pi.sendMessage).not.toHaveBeenCalled();
+  });
 
   it("detaches foreground subagent immediately on interact and frees main session", async () => {
     const runDeferred = makeResolvablePromise();
@@ -93,9 +172,14 @@ describe("human takeover and selective delivery integration", () => {
     await agentRecord.execution.promise;
 
     // Deliver assistant messages only -> Delivered Output
-    const delivered1 = scenario.coordinator.deliverSelectedMessages(record, [1, 3]);
+    const delivered1Selection = scenario.coordinator.deliverSelectedMessages(
+      record, scenario.coordinator.getDeliverableMessages(record).filter((_, index) => [1, 3].includes(index)),
+    );
+    expect(delivered1Selection.status).toBe("saved");
+    if (delivered1Selection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered1 = delivered1Selection.delivery;
     expect(delivered1).toBeDefined();
-    expect(delivered1!.result).toContain("[Subagent Result: general-purpose (completed)]");
+    expect(delivered1!.result).toContain("[Subagent Result: general-purpose (selected messages)]");
     expect(delivered1!.result).toContain('Task Origin: "Investigate memory leak"');
     expect(delivered1!.result).toContain("### Delivered Output");
     expect(delivered1!.result).toContain("Migration plan step 1: schema update.\n\n---\n\nStep 2: data migration script.");
@@ -111,7 +195,12 @@ describe("human takeover and selective delivery integration", () => {
     expect(agentRecord.lifecycle.pinnedAt).toBeDefined();
 
     // Stage 2: Deliver transcript with user instruction -> Delivered Transcript
-    const delivered2 = scenario.coordinator.deliverSelectedMessages(record, [0, 1]);
+    const delivered2Selection = scenario.coordinator.deliverSelectedMessages(
+      record, scenario.coordinator.getDeliverableMessages(record).filter((_, index) => [0, 1].includes(index)),
+    );
+    expect(delivered2Selection.status).toBe("saved");
+    if (delivered2Selection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered2 = delivered2Selection.delivery;
     expect(delivered2).toBeDefined();
     expect(delivered2!.deliveryId).not.toBe(delivered1!.deliveryId);
     expect(delivered2!.result).toContain("### Delivered Transcript");

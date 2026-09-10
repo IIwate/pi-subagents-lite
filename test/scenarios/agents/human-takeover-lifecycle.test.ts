@@ -126,7 +126,12 @@ describe("human takeover lifecycle", () => {
       expect(scenario.coordinator.getDeliverableMessages(id)).toEqual([
         { role: "assistant", content: "default agent response" },
       ]);
-      const delivered = scenario.coordinator.deliverSelectedMessages(id, [0]);
+      const deliveredSelection = scenario.coordinator.deliverSelectedMessages(
+        id, scenario.coordinator.getDeliverableMessages(id).filter((_, index) => [0].includes(index)),
+      );
+      expect(deliveredSelection.status).toBe("saved");
+      if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+      const delivered = deliveredSelection.delivery;
       expect(delivered?.result).toContain("### Delivered Output");
       expect(delivered?.result).toContain("default agent response");
     });
@@ -206,13 +211,23 @@ describe("human takeover lifecycle", () => {
       await record.execution.promise;
 
       // Stage 1: deliver step 1 answer
-      const d1 = scenario.coordinator.deliverSelectedMessages(recordId, [1])!;
+      const d1Selection = scenario.coordinator.deliverSelectedMessages(
+        recordId, scenario.coordinator.getDeliverableMessages(recordId).filter((_, index) => [1].includes(index)),
+      );
+      expect(d1Selection.status).toBe("saved");
+      if (d1Selection.status === "rejected") throw new Error("Selection was rejected");
+      const d1 = d1Selection.delivery;
       expect(d1).toBeDefined();
       expect(d1.result).toContain("Step 1 answer");
       expect(d1.result).toContain("### Delivered Output");
 
       // Stage 2: deliver step 2 transcript
-      const d2 = scenario.coordinator.deliverSelectedMessages(recordId, [2, 3])!;
+      const d2Selection = scenario.coordinator.deliverSelectedMessages(
+        recordId, scenario.coordinator.getDeliverableMessages(recordId).filter((_, index) => [2, 3].includes(index)),
+      );
+      expect(d2Selection.status).toBe("saved");
+      if (d2Selection.status === "rejected") throw new Error("Selection was rejected");
+      const d2 = d2Selection.delivery;
       expect(d2).toBeDefined();
       expect(d2.deliveryId).not.toBe(d1.deliveryId);
       expect(d2.result).toContain("### Delivered Transcript");
@@ -220,7 +235,12 @@ describe("human takeover lifecycle", () => {
       expect(d2.result).toContain("**Assistant:**\nStep 2 answer");
 
       // Stage 3: deliver full accumulated transcript
-      const d3 = scenario.coordinator.deliverSelectedMessages(recordId, [0, 1, 2, 3, 4, 5])!;
+      const d3Selection = scenario.coordinator.deliverSelectedMessages(
+        recordId, scenario.coordinator.getDeliverableMessages(recordId).filter((_, index) => [0, 1, 2, 3, 4, 5].includes(index)),
+      );
+      expect(d3Selection.status).toBe("saved");
+      if (d3Selection.status === "rejected") throw new Error("Selection was rejected");
+      const d3 = d3Selection.delivery;
       expect(d3).toBeDefined();
       expect(d3.deliveryId).not.toBe(d2.deliveryId);
       expect(d3.result).toContain("Step 3 answer");

@@ -10,7 +10,7 @@ Status: implemented
 
 [displayText](../../../../src/ui/format.ts) 先用 Node `stripVTControlCharacters` 去除可识别的终端序列, 再规范化 CRLF/CR 为 LF, 清除 C0/C1(保留 tab 和 LF). 源文本在加 UI 自己的 ANSI 样式、折行或截断前清洗. 只去 BEL 不足以覆盖 OSC 标题/链接/其他终端控制, 在最终整帧清洗又会删掉应用自己的颜色和光标控制.
 
-当前 navigator 的 user/assistant/thinking/toolResult/bashExecution/summary、错误、描述和模型身份使用这一显示转换. 单行字段另将换行展平. 原始 session 和父 inbox 内容不改写, 清洗不是数据持久化或交付内容的规范化规则. Tool argument summary 多数通过 JSON.stringify 转义字符串后展示.
+当前 navigator 的 user/assistant/thinking/toolResult/bashExecution/summary、错误、描述和模型身份使用这一显示转换. [selector 与 queued steering](2026-09-10-terminal-preview-and-queue-sanitization.md) 的独立显示入口同样清洗来源文本. 单行字段另将换行展平. 原始 session 和父 inbox 内容不改写, 清洗不是数据持久化或交付内容的规范化规则. Tool argument summary 多数通过 JSON.stringify 转义字符串后展示.
 
 AgentNavigationEditor 在列表聚焦时从 base editor 渲染行移除全部 Pi CURSOR_MARKER. 这是宿主私有 APC 光标协议, 不应当作普通内容打印. 真实 editor 聚焦时保留标记, 由 Pi 定位输入法/终端光标. [焦点处理](../architecture/2026-09-10-navigator-screen-and-input-ownership.md) 仍保留 Ctrl+C 和其他宿主输入能力.
 
@@ -25,7 +25,7 @@ AgentNavigationEditor 在列表聚焦时从 base editor 渲染行移除全部 Pi
 
 ## Consequences
 
-显示清洗保留正常 Unicode 文字, 代价是源 ANSI 颜色和控制语义不保留. 该防线仅对实际调用 displayText 的路径生效; DeliverySelector preview 和 queued-steering 展示尚有直通文本, 见 [补齐提案](../../proposed/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md). 不应据已有修复断言提示音永不复发.
+显示清洗保留正常 Unicode 文字, 代价是源 ANSI 颜色和控制语义不保留. 该防线仅对实际调用 displayText 的路径生效; 新 renderer 必须在加样式前转换来源文本. 自动验证覆盖指定输出入口, 不承诺宿主其他组件永不响铃.
 
 ## Evidence
 

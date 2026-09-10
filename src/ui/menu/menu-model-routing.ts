@@ -14,6 +14,7 @@ import {
   enableSpaceSelection,
   sectionRow,
   skipNonSelectableRows,
+  saveSetting,
 } from "./helpers.js";
 import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
@@ -207,18 +208,22 @@ function buildModelEditor(options: {
   const agentAccess = ownValue(store.routing.agentAccess, type);
   const existing = agentAccess ? ownValue(agentAccess.providers, provider) : undefined;
   let allModels = existing !== undefined && existing.models === undefined;
-  const selected = new Set(existing?.models ?? []);
+  let selected = new Set(existing?.models ?? []);
   const parentId = ctx.model?.provider === provider ? ctx.model.id : undefined;
   const scopedKeys = scopedModelKeys(ctx.scopedModels);
   let delegator: ReturnType<typeof createDelegatingComponent>;
 
-  const persist = (): void => {
-    const models = [...selected].sort();
-    if (quick && (allModels || models.length > 0)) {
-      store.mutate.routing.configureAgentProviderAccess(type, provider, allModels ? undefined : models);
-    } else {
-      store.mutate.routing.setAgentProviderAccess(type, provider, allModels ? undefined : models);
-    }
+  const persist = (nextAllModels: boolean, nextSelected: Set<string>): void => {
+    const models = [...nextSelected].sort();
+    if (!saveSetting(ctx, () => {
+      if (quick && (nextAllModels || models.length > 0)) {
+        store.mutate.routing.configureAgentProviderAccess(type, provider, nextAllModels ? undefined : models);
+      } else {
+        store.mutate.routing.setAgentProviderAccess(type, provider, nextAllModels ? undefined : models);
+      }
+    })) return;
+    allModels = nextAllModels;
+    selected = nextSelected;
     ctx.ui.notify(quick ? "Quick model setup updated" : `${type} model access updated for ${provider}`, "info");
     onApplied(true);
   };
@@ -267,16 +272,14 @@ function buildModelEditor(options: {
       const kind = (item as any).kind;
       if ((item as any).nonSelectable === true || kind === "empty") return;
       if (kind === "all") {
-        allModels = !allModels;
-        if (allModels) selected.clear();
-        persist();
+        persist(!allModels, allModels ? new Set(selected) : new Set());
         delegator.setActive(buildList({ kind, value: item.value }));
         return;
       }
       if (kind === "model") {
-        allModels = false;
-        if (selected.has(item.value)) selected.delete(item.value); else selected.add(item.value);
-        persist();
+        const nextSelected = new Set(selected);
+        if (nextSelected.has(item.value)) nextSelected.delete(item.value); else nextSelected.add(item.value);
+        persist(false, nextSelected);
         delegator.setActive(buildList({ kind, value: item.value }));
       }
     };
@@ -375,7 +378,7 @@ function providerAccessSubmenu(
           return;
         }
         const enabled = store.routing.enabledProviders.includes(item.provider);
-        store.mutate.routing.setProviderEnabled(item.provider, !enabled);
+        if (!saveSetting(ctx, () => store.mutate.routing.setProviderEnabled(item.provider, !enabled))) return;
         ctx.ui.notify(`${item.provider} ${enabled ? "disabled" : "enabled"} for routed models`, "info");
         onRebuild(true);
         delegator.setActive(build(item.provider));
@@ -481,7 +484,7 @@ function unavailableProvidersSubmenu(
               theme,
               done: subDone,
               onConfirm: () => {
-                store.mutate.routing.deleteProviderRules(provider);
+                if (!saveSetting(ctx, () => store.mutate.routing.deleteProviderRules(provider))) return false;
                 ctx.ui.notify(`Deleted saved ${provider} access rules`, "info");
                 onRebuild(true);
                 delegator.setActive(buildActions(provider));
@@ -498,7 +501,10 @@ function unavailableProvidersSubmenu(
           delegator.setActive(buildProviders());
           return;
         }
-        store.mutate.routing.setProviderEnabled(provider, value === "ON");
+        if (!saveSetting(ctx, () => store.mutate.routing.setProviderEnabled(provider, value === "ON"))) {
+          delegator.setActive(buildActions(provider));
+          return;
+        }
         ctx.ui.notify(`${provider} ${value === "ON" ? "enabled" : "disabled"} for routed models`, "info");
         onRebuild(true);
         delegator.setActive(buildActions(provider));
@@ -542,9 +548,7 @@ function cleanUnavailableSubmenu(
           ids.add(modelId);
           modelIdsByProvider.set(provider, ids);
         }
-        for (const [provider, ids] of modelIdsByProvider) {
-          store.mutate.routing.cleanUnavailableModels(provider, [...ids]);
-        }
+        if (!saveSetting(ctx, () => store.mutate.routing.cleanUnavailableModels(modelIdsByProvider))) return false;
         ctx.ui.notify(`Removed ${stillUnavailable.length} unavailable model access rules`, "info");
         onRebuild();
       },
@@ -687,7 +691,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
           message: "Clear all Model routing settings?",
           theme,
           onConfirm: () => {
-            store.mutate.routing.clearAll();
+            if (!saveSetting(ctx, () => store.mutate.routing.clearAll())) return false;
             ctx.ui.notify("Routing settings cleared", "info");
             triggerRebuild();
           },
@@ -697,8 +701,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
     };
 
     const settings = new SettingsList(buildItems(), 15, buildListTheme(theme), (id, value) => {
-      if (id === "enabled") {
-        getStore().mutate.routing.setEnabled(value === "ON");
+      if (id === "enabled" && saveSetting(ctx, () => getStore().mutate.routing.setEnabled(value === "ON"))) {
         ctx.ui.notify(`Model routing ${value === "ON" ? "enabled" : "disabled"}`, "info");
       }
       rebuild?.(buildItems());

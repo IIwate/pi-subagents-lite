@@ -7,7 +7,8 @@ let settingsLists: any[] = [];
 let selectLists: any[] = [];
 let wrappers: any[] = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SettingsList: class MockSettingsList {
     items: any[];
     onChange: any;
@@ -332,6 +333,27 @@ describe("Quick model setup", () => {
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
     expect(getMenuStore().routing.agentAccess.Explore.providers.anthropic).toEqual({});
+  });
+
+  it("keeps the effective checkbox selection when Quick setup cannot be saved", async () => {
+    const { store, memIO } = resetMenuStore({ modelRouting: {
+      enabled: true, enabledProviders: [], agentAccess: { Explore: { providers: { anthropic: {} } } },
+    } });
+    vi.spyOn(memIO.io, "save").mockImplementationOnce(() => { throw new Error("Rename denied"); });
+    const ctx = createMockCtx();
+    await showModelRoutingMenu(ctx);
+    topItem("quickSetup").submenu("", vi.fn());
+    selectLastValue("Explore");
+    selectLastValue("claude-haiku-4");
+    expect(store.routing.enabledProviders).toEqual([]);
+    expect(store.routing.agentAccess.Explore.providers.anthropic).toEqual({});
+    expect(lastSelect().items.find((item: any) => item.value === "__all__").label).toContain("[x]");
+    expect(lastSelect().items.find((item: any) => item.value === "claude-haiku-4").label).toContain("[ ]");
+    expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith("Failed to save settings: Rename denied", "error");
+
+    selectLastValue("claude-haiku-4");
+    expect(store.routing.agentAccess.Explore.providers.anthropic).toEqual({ models: ["claude-haiku-4"] });
+    expect(memIO.saves).toHaveLength(1);
   });
 
   it("switches from All models to an exact rule when a model is selected", async () => {

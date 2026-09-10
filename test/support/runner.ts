@@ -99,10 +99,11 @@ export function asSession(session: ReturnType<typeof createMockSession>): AgentS
   return session as unknown as AgentSession;
 }
 
-let harness: TestHarness;
+export let harness: TestHarness;
 export let ctx: ReturnType<typeof fakeCtx>;
 export let pi: ReturnType<typeof fakePi>;
 export let session: ReturnType<typeof createMockSession>;
+export let closeSession: ReturnType<typeof vi.fn<(session: AgentSession) => Promise<void>>>;
 
 beforeEach(() => {
   harness = createTestHarness();
@@ -119,11 +120,12 @@ beforeEach(() => {
   ctx.cwd = runner.agentDir;
   pi = fakePi();
   session = createMockSession();
+  closeSession = vi.fn(async session => { session.dispose(); });
   runner.createSession.mockResolvedValue({ session: asSession(session), extensionsResult: {} });
   harness.onDispose(() => session.dispose());
 });
 afterEach(async () => { await harness.dispose(); });
 
 export function run(options: Partial<Parameters<typeof execute>[3]> = {}, context: ExtensionContext = ctx) {
-  return execute(context, "test-agent", "Run the task", { pi, acceptedPolicy: policy(), ...options });
+  return execute(context, "test-agent", "Run the task", { pi, acceptedPolicy: policy(), closeSession, ...options });
 }

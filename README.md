@@ -41,7 +41,7 @@ Once a subagent exists, progress appears in the below-editor list or its folded 
 - Foreground Agent calls honor Pi's interrupt signal: `Esc` from the editor stops every running or queued foreground Agent in the interrupted parent turn, while background Agents continue. If the list has focus, `Esc` only returns to the editor; press it again there to interrupt. While a child view is active, `Esc` from the editor stops that running subagent.
 - While a subagent is active, editor input is routed to that session. Press `Alt+M` to return to Main from either an expanded or folded list; this changes only the active transcript and input route, not list visibility or child execution. The built-in Main cwd and model-usage footer rows are hidden on the child screen, leaving extension statuses; a custom footer supplied by another extension is preserved.
 - Sending editor input to a retained subagent takes over that session, pins its record, and releases any foreground wait in Main. Running sessions receive steering; settled sessions can accept a new prompt. Further output stays in the subagent session for explicit selection, including when continuing after an error.
-- To return output from a taken-over session, focus its row in the list and press `Alt+S`. Use `↑`/`↓` to browse messages, `Space` to select, `Enter` to deliver, or `Esc` to cancel. Each confirmed selection creates a new parent-session result and delivery ID; earlier deliveries remain intact.
+- To return output from a taken-over session, focus its row in the list and press `Alt+S`. Use `↑`/`↓` to browse messages, `Space` to select, `Enter` to deliver, or `Esc` to cancel. The selector captures messages when opened; reopen it to see newer output. Each new selection creates a parent-session result and delivery ID; earlier deliveries remain intact. If saving fails, `Enter` retries the same selection and ID, while `Esc` closes the view with the selection still pending.
 - Persisted terminal records are normally removed from the volatile Agent list after 10 minutes; saved parent-session results remain available for later delivery and exact lookup. Pinning pauses automatic cleanup; viewing does not. Child sessions, pins, and unselected takeover output are held in memory and do not survive `/reload` or process exit. The parent LLM has no continuation tool.
 
 Each new subagent starts without the parent's conversation history. Background terminal results from sessions without human takeover, including errors, are persisted in the parent Pi session with the Agent call's session ID and origin entry before one automatic wake opportunity. Automatic delivery is limited to branches retaining that origin. A completion persisted during a failed parent turn provides one later wake opportunity after settlement; the failed result alone does not retry itself. A later persisted completion may carry older eligible pending results, while the next natural parent prompt injects them during preflight even after an automatic wake failed. Explicit reload or `/tree` return to the origin is a separate restoration event; forked or new sessions ignore copied entries from the old session. Result acknowledgement confirms durable receipt ingestion in the parent session context, decoupled from LLM turn outcome. Do not poll, sleep, or repeatedly call `AgentStatus` while waiting. Use `AgentStatus({ agent_id })` only for explicit session-wide result lookup; that read is acknowledged once persisted in the session log.
@@ -59,10 +59,10 @@ Built-ins can be overridden by custom agents or disabled from `/agents`. Disabli
 
 Agent definitions are Markdown files loaded from:
 
-- `~/.pi/agent/agents/*.md` — user-wide agents.
+- `<Pi agent directory>/agents/*.md` — user-wide agents, defaulting to `~/.pi/agent/agents/*.md`.
 - `.pi/agents/*.md` — project agents, loaded only when Pi trusts the project.
 
-Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field.
+Project definitions override user definitions, which override built-ins with the same name. Overrides are merged field by field; files within each directory are applied in filename order. Type lookup prefers an exact canonical name, then a unique case-insensitive canonical name, then a unique display name. Ambiguous matches report the canonical candidates.
 
 ```markdown
 ---
@@ -89,7 +89,9 @@ Supported frontmatter fields:
 - Capability: `tools`, `exclude_tools`, `extensions`, `exclude_extensions`, `skills`, `preload_skills`.
 - Runtime: `thinking`, `max_turns`, `max_tokens`.
 
-Frontmatter supports flat values and lists, not nested YAML objects. Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents.
+Frontmatter uses Pi's YAML parser and supports LF or CRLF files, quoted values, and lists. Agent fields accept scalars and string lists; unrelated metadata is ignored. Identity text must be a string, so quote names such as `"123"` or `"false"`. Use `[]` for an explicit empty list. Duplicate keys, incorrect field types, and non-finite numeric limits produce a file diagnostic; other valid files continue to load.
+
+Extension tools may be selected with `extension/tool` or `extension/*`. Subagents cannot spawn further subagents. An omitted or zero `max_turns` means unlimited; other finite values round up to at least one turn.
 
 ## Upgrading to 2.0
 
@@ -107,7 +109,7 @@ A missing or legacy `modelRouting` block starts with routing OFF and no alternat
 - `model` — an exact `id` or `provider/id` inside Pi's active model scope. Set thinking through the separate `thinking` field.
 - `thinking` — `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`, subject to the selected model's reasoning capabilities.
 - `run_in_background` — return immediately and notify the parent when complete.
-- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. Its `.pi/agents/` directory is scanned for that spawn when Pi trusts the project.
+- `worktree_path` — the parent repository's main checkout or a linked worktree from the same repository. When the requested Agent type is unknown and Pi trusts the project, discovery adds missing types from its `.pi/agents/` directory to the session registry. Existing definitions retain their values.
 
 Thinking is resolved when the call is accepted, in order: `thinking` parameter, agent frontmatter, scoped-model setting, global default, then parent session. Empty or whitespace-only values fall through to the next source. Explicit parameters and frontmatter must name a supported level; unsupported levels inherited from settings or the parent use the model's highest supported level. Non-reasoning models receive no inherited thinking override. Pi's `thinkingLevelMap` defines support, including `null` exclusions and explicit opt-in for `xhigh` and `max`.
 
@@ -181,6 +183,8 @@ New Agent calls beyond either ceiling enter `Queued`. Continuing a settled child
 
 The Concurrency menu shows only the parent model, currently authorized alternates, and models retained by existing child sessions. Limits outside that actionable inventory remain saved under **Saved inactive limits**, reappear automatically when their prerequisite returns, and are removed only through an explicit user action.
 
+Hand-edited finite limits round up to at least one slot. Invalid default limits recover to 4; invalid explicit Provider or Model limits recover to 1 with a diagnostic. Numeric menus require whole numbers within the field's allowed range.
+
 ## Settings
 
 Run `/agents` to configure:
@@ -193,7 +197,11 @@ Run `/agents` to configure:
 - agent type inspection, runtime diagnostics, and UI-only status previews for list-layout testing;
 - one-shot fault injection after the next real child session is configured. Injected records show a separate accent-colored `[DEBUG]` badge before their ordinary terminal status in both the list and child header. Controls and runtime diagnostics are session-local and UI-only. The parent LLM can observe the normal Agent call failing, but cannot arm faults, inspect Debug diagnostics, or continue the child through an extra tool.
 
-Settings are stored in `~/.pi/agent/subagents-lite.json`. Custom prompt mode uses `~/.pi/agent/subagents-lite-prompt.md`.
+Settings and custom prompts use `subagents-lite.json` and `subagents-lite-prompt.md` inside Pi's agent directory, normally `~/.pi/agent`. Pi's `PI_CODING_AGENT_DIR` override also applies to global Agent definitions and Pi skills. OS home `.agents/skills` keeps its independent location.
+
+When upgrading an installation that already uses a Pi directory override, move the required settings, custom prompt, `agents/`, and `skills/` files from the previous `~/.pi/agent` location into that directory before `/reload`. Reconcile any existing destination files explicitly. The Pi directory is the single resource location. Agent files use YAML scalar types: quote numeric or boolean identity text and consolidate duplicate fields when updating older definitions.
+
+Settings become effective after a successful save. A failed save reports the error and retains the previous effective values and displayed selections. Grace turns must be a non-negative integer; invalid loaded values recover to the default of 6.
 
 ## License
 

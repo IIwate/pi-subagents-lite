@@ -86,6 +86,35 @@ describe("parseExtensions", () => {
 /* ------------------------------------------------------------------ */
 
 describe("parseAgentFile", () => {
+  it.each(["\n", "\r\n"])("projects YAML fields with equivalent line endings %j", newline => {
+    const content = [
+      "---", "name: probe", 'description: "Quoted: description"',
+      'tools: ["read", "grep"]', "skills: false", "extensions:", '  - "search"',
+      'preload_skills: ["review-guidelines"]', "max_turns: 3", "---", "Agent instructions.",
+    ].join(newline);
+    expect(parseAgentFile(content, "user")).toMatchObject({
+      name: "probe", description: "Quoted: description", tools: ["read", "grep"],
+      skills: false, extensions: ["search"], preload_skills: ["review-guidelines"], max_turns: 3, systemPrompt: "Agent instructions.",
+    });
+  });
+
+  it("accepts a closing delimiter at end of file with an empty prompt", () => {
+    expect(parseAgentFile("---\nname: probe\n---", "user")).toMatchObject({ name: "probe", systemPrompt: "" });
+  });
+
+  it.each([
+    "name: 123", "name: false", "name: first\nname: second", "name: probe\ntools: [read, 5]",
+    "name: probe\nmax_turns: 1e999", 'name: probe\nmax_turns: "1e999"', "name: probe\nmax_tokens: .inf",
+    "name: probe\npreload_skills: true", "name: probe\npreload_skills: {unexpected: value}",
+  ])("rejects malformed declared fields: %s", fields => {
+    expect(() => parseAgentFile(`---\n${fields}\n---\nInstructions`, "user")).toThrow();
+  });
+
+  it("preserves quoted scalar names and ignores unrelated YAML metadata", () => {
+    expect(parseAgentFile('---\nname: "123"\ndescription: "false"\nmetadata: {nested: true}\n---\n', "user"))
+      .toMatchObject({ name: "123", description: "false", systemPrompt: "" });
+  });
+
   it("parses all frontmatter fields into AgentConfigFromMd", () => {
     const content = `---
 name: explorer

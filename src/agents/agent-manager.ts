@@ -142,7 +142,7 @@ export class AgentManager {
   /** Session setup phases, awaited without waiting for the agent's full prompt run. */
   private pendingSetups = new Set<Promise<void>>();
   /** Prevent a clear/dispose race from emitting shutdown twice for one session. */
-  private closedSessions = new WeakSet<AgentSession>();
+  private closedSessions = new WeakMap<AgentSession, Promise<void>>();
 
   /** One-shot fault used by the session-local Debug menu. */
   private armedDebugFault?: ArmedDebugFault;
@@ -397,6 +397,11 @@ export class AgentManager {
       debugFault: debugFault?.kind,
       onSessionSetupStarted: markSetupStarted,
       onSessionSetupFinished: markSetupFinished,
+      closeSession: (session) => {
+        if (record.execution.session === session) record.execution.session = undefined;
+        record.execution.pendingSteers = undefined;
+        return this.closeSession(session);
+      },
       ...this.createRecordCallbacks(record),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
@@ -414,9 +419,9 @@ export class AgentManager {
           await this.closeSession(session);
           return;
         }
+        this.wireSessionLifecycleListeners(record, session);
         record.execution.session = session;
         if (debugFault) record.execution.debugFaultKind = debugFault.kind;
-        this.wireSessionLifecycleListeners(record, session);
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
           for (const pending of record.execution.pendingSteers) {
@@ -831,9 +836,10 @@ export class AgentManager {
    * inside child sessions do not register session_shutdown, so this emit cannot recurse into dispose().
    */
   private closeSession(session: AgentSession): Promise<void> {
-    if (this.closedSessions.has(session)) return Promise.resolve();
-    this.closedSessions.add(session);
-    const done = (async () => {
+    const existing = this.closedSessions.get(session);
+    if (existing) return existing;
+    // Register the promise before invoking hooks that may reenter teardown.
+    const done = Promise.resolve().then(async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
@@ -852,7 +858,11 @@ export class AgentManager {
         if (timer) clearTimeout(timer);
         session.dispose();
       }
-    })().catch(() => { /* teardown is best effort — never block agent removal */ });
+    }).catch(error => {
+      // Teardown is best effort; report its failure without blocking removal.
+      console.error(`[subagents] Session teardown failed: ${error}`);
+    });
+    this.closedSessions.set(session, done);
     this.closing.add(done);
     void done.finally(() => this.closing.delete(done));
     return done;

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, scanAndMerge } from "./agents/agent-types.js";
 import { getDeliveryReceipt } from "./spawn/result-inbox.js";
 import { AgentManager } from "./agents/agent-manager.js";
@@ -83,10 +83,9 @@ export function ensureManagerAndNavigator(): void {
  * and register into the type registry.
  */
 export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
-  const homeDir = process.env.HOME || "";
-  const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
+  const userAgentDir = path.join(getAgentDir(), "agents");
   const trusted = ctx.isProjectTrusted?.() !== false;
-  const projectAgentDir = trusted ? path.join(ctx.cwd, ".pi", "agents") : "";
+  const projectAgentDir = trusted ? path.join(ctx.cwd, CONFIG_DIR_NAME, "agents") : "";
 
   const disableDefaults = getStore().agent.disableDefaultAgents;
   setAgentScanDirs(userAgentDir, projectAgentDir, disableDefaults);

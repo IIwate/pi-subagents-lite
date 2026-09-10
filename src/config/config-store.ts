@@ -2,7 +2,7 @@
  * config-store.ts — Deep module owning persisted configuration.
  *
  * - Reads return defaults baked in (no `?? 6` at call sites).
- * - Each persisted mutate method is mutate + persist + its side effect, so a
+ * - Each persisted mutate method is prepare + persist + publish + its side effect, so a
  *   side effect cannot be forgotten.
  * - Navigator/manager are injected after construction (they're created lazily).
  *
@@ -15,7 +15,7 @@ import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
-import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic } from "./config-io.js";
+import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic, normalizeConcurrencyLimit, validateGraceTurns } from "./config-io.js";
 
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
@@ -26,6 +26,7 @@ function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
 }
 
 /** Injected persistence adapter. Swap for an in-memory adapter in tests. */
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-configuration-commit-and-validation.md
 export interface ConfigIO {
   load(): SubagentsConfig;
   save(config: SubagentsConfig): void;
@@ -155,110 +156,104 @@ export class ConfigStore {
   }
 
   // ── Mutations ──────────────────────────────────────────────────
-  // Each persisted method = mutate + persist (+ side effect).
+  // Publish candidates only after persistence succeeds.
 
   readonly mutate = {
     routing: {
       setEnabled: (enabled: boolean): void => {
-        this.config.modelRouting.enabled = enabled;
-        this.persist();
+        this.commit(config => { config.modelRouting.enabled = enabled; });
       },
       /** Pause or restore one provider without touching dormant agent rules. */
       setProviderEnabled: (provider: string, enabled: boolean): void => {
         const key = provider.trim();
         if (!key) return;
-        const providers = new Set(this.config.modelRouting.enabledProviders);
-        if (enabled) providers.add(key); else providers.delete(key);
-        this.config.modelRouting.enabledProviders = [...providers];
-        this.persist();
+        this.commit(config => {
+          const providers = new Set(config.modelRouting.enabledProviders);
+          if (enabled) providers.add(key); else providers.delete(key);
+          config.modelRouting.enabledProviders = [...providers];
+        });
       },
       /** Replace one canonical Agent/provider rule; an empty exact list deletes it. */
       setAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
-        this.writeAgentProviderAccess(type, provider, models);
-        this.persist();
+        this.commit(config => this.writeAgentProviderAccess(config, type, provider, models));
       },
       /** Quick setup: enable routing/provider and write the same canonical rule once. */
       configureAgentProviderAccess: (type: string, provider: string, models?: readonly string[]): void => {
         const key = provider.trim();
         if (!key) return;
-        this.config.modelRouting.enabled = true;
-        this.config.modelRouting.enabledProviders = [...new Set([
-          ...this.config.modelRouting.enabledProviders,
-          key,
-        ])];
-        this.writeAgentProviderAccess(type, key, models);
-        this.persist();
+        this.commit(config => {
+          config.modelRouting.enabled = true;
+          config.modelRouting.enabledProviders = [...new Set([
+            ...config.modelRouting.enabledProviders,
+            key,
+          ])];
+          this.writeAgentProviderAccess(config, type, key, models);
+        });
       },
       /** Remove one provider rule from every agent, including unavailable agent types. */
       deleteProviderRules: (provider: string): void => {
-        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
-          delete this.config.modelRouting.agentAccess[type].providers[provider];
-          this.pruneAgentAccess(type);
-        }
-        this.persist();
+        this.commit(config => {
+          for (const type of Object.keys(config.modelRouting.agentAccess)) {
+            delete config.modelRouting.agentAccess[type].providers[provider];
+            this.pruneAgentAccess(config, type);
+          }
+        });
       },
       /** Remove exact unavailable IDs only; all-model rules are untouched. */
-      cleanUnavailableModels: (provider: string, modelIds: readonly string[]): void => {
-        const stale = new Set(modelIds);
-        for (const type of Object.keys(this.config.modelRouting.agentAccess)) {
-          const rule = ownValue(this.config.modelRouting.agentAccess[type].providers, provider);
-          if (!rule?.models) continue;
-          rule.models = rule.models.filter((modelId) => !stale.has(modelId));
-          if (rule.models.length === 0) delete this.config.modelRouting.agentAccess[type].providers[provider];
-          this.pruneAgentAccess(type);
-        }
-        this.persist();
+      cleanUnavailableModels: (modelsByProvider: ReadonlyMap<string, ReadonlySet<string>>): void => {
+        this.commit(config => {
+          for (const [provider, stale] of modelsByProvider) {
+            for (const type of Object.keys(config.modelRouting.agentAccess)) {
+              const rule = ownValue(config.modelRouting.agentAccess[type].providers, provider);
+              if (!rule?.models) continue;
+              rule.models = rule.models.filter((modelId) => !stale.has(modelId));
+              if (rule.models.length === 0) delete config.modelRouting.agentAccess[type].providers[provider];
+              this.pruneAgentAccess(config, type);
+            }
+          }
+        });
       },
       clearAll: (): void => {
-        this.config.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} };
-        this.persist();
+        this.commit(config => { config.modelRouting = { enabled: false, enabledProviders: [], agentAccess: {} }; });
       },
     },
     agent: {
       setForceBackground: (enabled: boolean): void => {
-        this.config.agent.forceBackground = enabled;
-        this.persist();
+        this.commit(config => { config.agent.forceBackground = enabled; });
       },
       setShowCost: (enabled: boolean): void => {
-        this.config.agent.showCost = enabled;
-        this.persist();
+        this.commit(config => { config.agent.showCost = enabled; });
         this.syncStatsVisibility();
       },
       setGraceTurns: (n: number): void => {
-        this.config.agent.graceTurns = n;
-        this.persist();
+        this.commit(config => { config.agent.graceTurns = validateGraceTurns(n); });
       },
       setSystemPromptMode: (mode: SystemPromptMode): void => {
-        this.config.agent.systemPromptMode = mode;
-        this.persist();
+        this.commit(config => { config.agent.systemPromptMode = mode; });
       },
       setIncludeContextFiles: (enabled: boolean): void => {
-        this.config.agent.includeContextFiles = enabled;
-        this.persist();
+        this.commit(config => { config.agent.includeContextFiles = enabled; });
       },
       setDefaultThinking: (level: ThinkingLevel | undefined): void => {
-        if (level === undefined) {
-          delete this.config.agent.defaultThinking;
-        } else {
-          this.config.agent.defaultThinking = level;
-        }
-        this.persist();
+        this.commit(config => {
+          if (level === undefined) {
+            delete config.agent.defaultThinking;
+          } else {
+            config.agent.defaultThinking = level;
+          }
+        });
       },
       setLoadSkillsImplicitly: (value: boolean): void => {
-        this.config.agent.loadSkillsImplicitly = value;
-        this.persist();
+        this.commit(config => { config.agent.loadSkillsImplicitly = value; });
       },
       setLoadExtensionsImplicitly: (value: boolean): void => {
-        this.config.agent.loadExtensionsImplicitly = value;
-        this.persist();
+        this.commit(config => { config.agent.loadExtensionsImplicitly = value; });
       },
       setDisableDefaultAgents: (value: boolean): void => {
-        this.config.agent.disableDefaultAgents = value;
-        this.persist();
+        this.commit(config => { config.agent.disableDefaultAgents = value; });
       },
       setExpandListByDefault: (value: boolean): void => {
-        this.config.agent.expandListByDefault = value;
-        this.persist();
+        this.commit(config => { config.agent.expandListByDefault = value; });
       },
       setShowTools: (enabled: boolean) => this.setAgentVisibility("showTools", enabled),
       setShowTurns: (enabled: boolean) => this.setAgentVisibility("showTurns", enabled),
@@ -269,33 +264,35 @@ export class ConfigStore {
     },
     concurrency: {
       setDefault: (n: number): void => {
-        this.config.concurrency.default = n;
-        this.persist();
+        this.commit(config => { config.concurrency.default = normalizeConcurrencyLimit(n); });
         this.applyConcurrency();
       },
       setProvider: (key: string, n: number): void => {
-        this.config.concurrency.providers = { ...(this.config.concurrency.providers ?? {}), [key]: n };
-        this.persist();
+        this.commit(config => {
+          config.concurrency.providers = { ...(config.concurrency.providers ?? {}), [key]: normalizeConcurrencyLimit(n) };
+        });
         this.applyConcurrency();
       },
       setModel: (key: string, n: number): void => {
-        this.config.concurrency.models = { ...(this.config.concurrency.models ?? {}), [key]: n };
-        this.persist();
+        this.commit(config => {
+          config.concurrency.models = { ...(config.concurrency.models ?? {}), [key]: normalizeConcurrencyLimit(n) };
+        });
         this.applyConcurrency();
       },
       removeProvider: (key: string): void => {
-        if (this.config.concurrency.providers) delete this.config.concurrency.providers[key];
-        this.persist();
+        this.commit(config => {
+          if (config.concurrency.providers) delete config.concurrency.providers[key];
+        });
         this.applyConcurrency();
       },
       removeModel: (key: string): void => {
-        if (this.config.concurrency.models) delete this.config.concurrency.models[key];
-        this.persist();
+        this.commit(config => {
+          if (config.concurrency.models) delete config.concurrency.models[key];
+        });
         this.applyConcurrency();
       },
       reset: (): void => {
-        this.config.concurrency = { ...DEFAULT_CONCURRENCY };
-        this.persist();
+        this.commit(config => { config.concurrency = { ...DEFAULT_CONCURRENCY }; });
         this.applyConcurrency();
       },
     },
@@ -324,32 +321,35 @@ export class ConfigStore {
 
   // ── Private helpers ────────────────────────────────────────────
 
-  private persist(): void {
-    this.io.save(this.config);
+  private commit(update: (candidate: SubagentsConfig) => void): void {
+    const candidate = structuredClone(this.config);
+    update(candidate);
+    this.io.save(candidate);
+    this.config = candidate;
   }
 
-  private writeAgentProviderAccess(type: string, provider: string, models?: readonly string[]): void {
+  private writeAgentProviderAccess(config: SubagentsConfig, type: string, provider: string, models?: readonly string[]): void {
     const typeKey = type.trim();
     const providerKey = provider.trim();
     if (!typeKey || !providerKey) return;
     const normalized = models === undefined
       ? undefined
       : [...new Set(models.map((model) => model.trim()).filter(Boolean))];
-    const existing = ownValue(this.config.modelRouting.agentAccess, typeKey);
+    const existing = ownValue(config.modelRouting.agentAccess, typeKey);
     if (normalized?.length === 0) {
       if (existing) delete existing.providers[providerKey];
-      this.pruneAgentAccess(typeKey);
+      this.pruneAgentAccess(config, typeKey);
       return;
     }
     const agent = existing ?? { providers: {} };
-    if (!existing) setOwn(this.config.modelRouting.agentAccess, typeKey, agent);
+    if (!existing) setOwn(config.modelRouting.agentAccess, typeKey, agent);
     setOwn(agent.providers, providerKey, normalized ? { models: normalized } : {});
   }
 
-  private pruneAgentAccess(type: string): void {
-    const access = ownValue(this.config.modelRouting.agentAccess, type);
+  private pruneAgentAccess(config: SubagentsConfig, type: string): void {
+    const access = ownValue(config.modelRouting.agentAccess, type);
     if (access && Object.keys(access.providers).length === 0) {
-      delete this.config.modelRouting.agentAccess[type];
+      delete config.modelRouting.agentAccess[type];
     }
   }
 
@@ -369,10 +369,9 @@ export class ConfigStore {
     });
   }
 
-  /** Update a stats visibility flag: mutate config → persist → sync navigator. */
+  /** Publish a stats visibility flag before synchronizing the navigator. */
   private setAgentVisibility(key: "showTools" | "showTurns" | "showInput" | "showOutput" | "showContext" | "showTime", value: boolean): void {
-    this.config.agent[key] = value;
-    this.persist();
+    this.commit(config => { config.agent[key] = value; });
     this.syncStatsVisibility();
   }
 

@@ -12,7 +12,8 @@ let inputInstances: any[] = [];
 let selectListInstances: any[] = [];
 let wrapperCalls: any[] = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SettingsList: class MockSettingsList {
     items: any[];
     filteredItems: any[];

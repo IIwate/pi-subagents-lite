@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { join, resolve } from "node:path";
 import { makeSkill, mockLoadSkills, mockLoadSkillsFromDir } from "../../support/skills.js";
 import { loadAllSkills, loadSkillMeta } from "../../../src/prompt/skill-loader.js";
+import { createTestHarness } from "../../support/harness.js";
+import { homedir } from "node:os";
 
 vi.mock("node:fs", async importOriginal => ({
   ...await importOriginal<typeof import("node:fs")>(),
@@ -12,6 +14,18 @@ vi.mock("node:fs", async importOriginal => ({
 const tmpDir = resolve("skill-fixture");
 
 describe("loadAllSkills", () => {
+  it("uses the Pi directory override while retaining the OS home skills root", async () => {
+    const harness = createTestHarness();
+    try {
+      const directory = harness.createTempDir();
+      vi.stubEnv("PI_CODING_AGENT_DIR", directory);
+      loadAllSkills(tmpDir);
+      expect(mockLoadSkills).toHaveBeenCalledWith(expect.objectContaining({ agentDir: directory }));
+      expect(mockLoadSkillsFromDir).toHaveBeenCalledWith(expect.objectContaining({ dir: join(homedir(), ".agents", "skills") }));
+    } finally {
+      await harness.dispose();
+    }
+  });
   it("loads from .pi/skills via loadSkills (Pi defaults)", () => {
     const tddSkill = makeSkill("tdd", "TDD workflow", join(tmpDir, ".pi", "skills", "tdd", "SKILL.md"));
     mockLoadSkills.mockReturnValue({ skills: [tddSkill], diagnostics: [] });

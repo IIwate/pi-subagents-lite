@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { DeliverySelectorComponent } from "../../../src/ui/delivery-selector.js";
 import type { DeliverableMessage } from "../../../src/prompt/subagent-delivery.js";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 const mockTheme = {
   bold: (t: string) => `*${t}*`,
@@ -232,23 +233,45 @@ describe("DeliverySelectorComponent", () => {
 });
 
 describe("DeliverySelectorComponent boundaries", () => {
-  it("renders smoothly on extremely narrow terminals (e.g. width = 30) without crash", () => {
+  it.each([20, 30, 50, 80])("bounds every line and preserves body height at %s columns", width => {
     const component = new DeliverySelectorComponent({
       record: makeRecord(),
       messages: [
         { role: "user", content: "Short query" },
-        { role: "assistant", content: "Short reply" },
+        { role: "assistant", content: "Long reply with wide symbols 🧪\n".repeat(40) },
       ],
       theme: mockTheme as any,
       onConfirm: vi.fn(),
       onCancel: vi.fn(),
     });
 
-    const lines = component.render(30);
-    expect(lines.length).toBeGreaterThan(0);
+    const lines = component.render(width);
     for (const line of lines) {
-      expect(typeof line).toBe("string");
+      expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
+    expect(lines.join("\n")).toContain("Esc");
+    component.handleInput("\x1b[A");
+    const short = component.render(width);
+    expect(short).toHaveLength(lines.length);
+    expect(short.every(line => visibleWidth(line) <= width)).toBe(true);
+  });
+
+  it("sanitizes source controls before styling without changing the message payload", () => {
+    const content = "Safe\x07\x1b]0;source-title\x07\x1b[31m text\r\nNext line";
+    const record = makeRecord();
+    record.display.type = "Explore\x07\x1b]0;source-type\x07\r\nAgent";
+    const messages: DeliverableMessage[] = [{ role: "assistant", content }];
+    const component = new DeliverySelectorComponent({
+      record, messages,
+      theme: { fg: (_color: string, text: string) => `\x1b[32m${text}\x1b[0m`, bold: (text: string) => text } as any,
+      onConfirm: vi.fn(), onCancel: vi.fn(),
+    });
+    const rendered = component.render(80).join("\n");
+    expect(rendered).not.toMatch(/[\x07\r]/);
+    expect(rendered).not.toContain("\x1b]0;");
+    expect(rendered).not.toContain("\x1b[31m");
+    expect(rendered).toContain("\x1b[32m");
+    expect(messages[0].content).toBe(content);
   });
 
   it("handles large message collections (50+ items) with proper window scrolling", () => {

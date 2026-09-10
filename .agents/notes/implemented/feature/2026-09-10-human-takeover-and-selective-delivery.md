@@ -16,8 +16,8 @@ running 输入走 steer; session 尚未就绪时暂存 pendingSteers. settled �
 
 ```ts type-equiv: DeliverableMessage from src/prompt/subagent-delivery.ts
 export interface DeliverableMessage {
-  role: "user" | "assistant";
-  content: string;
+  readonly role: "user" | "assistant";
+  readonly content: string;
 }
 ```
 
@@ -25,18 +25,18 @@ export interface DeliverableMessage {
 
 当前 Alt+S 仅在列表聚焦时响应, 目标是 highlighted taken-over record. confirm 不切换活动子屏或 Main, 关闭后列表保持聚焦. selector 的居中 overlay 固定本次视口的 body 行数, preview 截断/补齐以免光标移动改变整体高度; 终端 resize 可重新计算高度. 该入口不是全局持久结果抽屉.
 
-每次确认生成独立 deliveryId, 将选择格式化为 Delivered Output 或含角色的 Delivered Transcript, 先保存再请求 wake. 旧自动交付或更早的显式交付不被删除或覆盖. 格式化正文中的 completed 标签不是实时执行状态; inbox metadata 仍保存 record 的实际 status, 允许对 running 会话选择已有消息. 对账 ACK 只证明父日志收到这次交付.
+每次新选择生成独立 deliveryId, 将打开时的消息快照格式化为 Delivered Output 或含角色的 Delivered Transcript, 先保存再请求 wake. 保存失败保留同一 ID 重试, 旧自动交付或更早的显式交付不被删除或覆盖. 格式化正文标注 selected messages; inbox metadata 保存确认时 record 的实际 status, 允许对 running/error 会话选择已有消息. [快照与重试身份](../bug-fix/2026-09-10-delivery-selection-snapshot-identity.md) 负责确认结果和失效目标. 对账 ACK 只证明父日志收到这次交付.
 
 ## Alternatives considered
 
 - **保持人工继续后自动汇报.** 错误恢复后主模型能自然接棒, 但用户多轮调试会不断触发父回合. 当前选择显式回传, 接受多一步交付操作.
-- **在选择器内放 Continue/重试.** 一处完成恢复和发送, 但把任务派发混入既有消息选择, 且预订自动交付无法代表后续每轮人工意图. editor 负责任意指令, selector 只处理已存在内容.
+- **在选择器内放 Continue/模型重试.** 一处完成恢复和发送, 但把任务派发混入既有消息选择, 且预订自动交付无法代表后续每轮人工意图. editor 负责任意指令, selector 只处理已存在内容及其保存重试.
 - **选择交付替换旧 inbox 条目.** 看起来可避免重复输出, 但旧结果可能已经形成独立 receipt, 覆盖后失去可追溯性. 每次确认有自己的 deliveryId.
 - **自动保存所有人工终态但保持静默.** 可防止 reload 丢掉未选择成果, 同时不打扰 Main; 需要明确快照保留、发现和交付身份的新产品契约. 未合入 `6e2b40c` 具有相关设计, 当前实现不能被描述为已满足该保证.
 
 ## Consequences
 
-人工调试和父会话执行解耦, 代价是用户需要主动交付, 且未选择内容不持久. 单纯打开 selector 不改变工作目标, 但当前 finally 固定列表焦点, 不是任意入口下的通用光标原位保证. 消息筛选只表达文本选择, 不提供内容安全过滤或完整 Markdown/XML 封装. preview 的终端控制字符缺口见 [渲染提案](../../proposed/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md); confirm 重新读取索引导致的消息漂移见 [快照身份提案](../../proposed/bug-fix/2026-09-10-delivery-selection-snapshot-identity.md).
+人工调试和父会话执行解耦, 代价是用户需要主动交付, 且未选择内容不持久. 单纯打开 selector 不改变工作目标, 但当前 finally 固定列表焦点, 不是任意入口下的通用光标原位保证. 消息筛选只表达文本选择, 不提供内容安全过滤或完整 Markdown/XML 封装. [预览显示](../bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md) 清洗终端控制字符, 原始交付快照保留源文本.
 
 ## Evidence
 

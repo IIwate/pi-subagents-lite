@@ -6,7 +6,8 @@ import { getStatusNote } from "../status-note.js";
  * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
  */
 
-import { type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
 
 import type { AgentRecord } from "../types.js";
 import { SHORT_ID_LENGTH } from "../types.js";
@@ -106,7 +107,7 @@ export async function executeAgentTool(
     // Not found in registry — try scanning filesystem for agents added during the session.
     // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
     const worktreeDir = validatedWorktreePath && ctx.isProjectTrusted?.() !== false
-      ? `${validatedWorktreePath}/.pi/agents`
+      ? join(validatedWorktreePath, CONFIG_DIR_NAME, "agents")
       : undefined;
     await discoverNewAgents(worktreeDir);
     resolvedType = resolveType(type);

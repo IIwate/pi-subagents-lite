@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { join } from "node:path";
 import { fakeCtx } from "../../support/fixtures.js";
 
 /* ------------------------------------------------------------------ */
@@ -591,7 +592,7 @@ describe("executeAgentTool — worktree_path discovery integration", () => {
 
     // Should have called discoverNewAgents with the worktree's .pi/agents dir
     expect(mockDiscoverNewAgents).toHaveBeenCalledTimes(1);
-    expect(mockDiscoverNewAgents).toHaveBeenCalledWith("/wt/feature/.pi/agents");
+    expect(mockDiscoverNewAgents).toHaveBeenCalledWith(join("/wt/feature", ".pi", "agents"));
   });
 
   it("calls discoverNewAgents without worktree dir when type is not known and worktree_path omitted", async () => {

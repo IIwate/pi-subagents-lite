@@ -10,7 +10,7 @@ Status: proposed
 
 ## Proposal
 
-推荐在获批后按能力逐段收敛, 最终以显式 runtime 组装策略和 host 适配. 当前 implemented Notes 的补录、源码锚点和验证可独立交付; 本提案不作为它们的前置, 各 bug-fix proposal 也不依赖全量重构.
+推荐在获批后按能力逐段收敛, 最终以显式 runtime 组装策略和 host 适配. implemented Notes、源码锚点和具体缺陷修复可独立交付, 本提案不作为它们的前置.
 
 目标职责如下, 目录数量由实际边界决定, 不为每个模块强制创建空 core/application/ports/contracts:
 
@@ -46,7 +46,7 @@ ExtensionRuntime 在激活时创建, registerTools/setupEventListeners 通过闭
 - `44f0a6a`, `391ed92`, `c411cb4`, `06152cf`, `98b7dc9`, `d21b3da`: model/prompt public 边界和配置写入口.
 - `1268def`, `39c3feb`, `7171974`, `35b5c5c`, `5255777`: scheduler/session-driver/delivery 分工及迟到关闭/reload fallback.
 - `1fc260a`, `f8284b5`, `28bc9bc`, `be463b8`, `1380b21`, `74fe9a1`, `476454b`: renderer-independent navigation/settings, 保留 custom footer 与 Pi document/dock ownership.
-- `e5443f0`, `e8bee67`, `22d9f3c`, `4b7cb33`, `fe86d58`: fragment transaction、operational precedence、host 路径/信任和配置层修复. 具体主线缺口可按 [配置](../bug-fix/2026-09-10-configuration-commit-and-validation.md) 和 [资源](../bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md) 提案单独处理.
+- `e5443f0`, `e8bee67`, `22d9f3c`, `4b7cb33`, `fe86d58`: fragment transaction、operational precedence、host 路径/信任和配置层修复. 主线的 [配置提交](../../implemented/bug-fix/2026-09-10-configuration-commit-and-validation.md) 和 [资源目录](../../implemented/bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md) 在现有模块内独立实现.
 - `95bcc64`, `165fbee`, `2c942b6`: process-state 与闭包 root, 删除并存 facade.
 - `3f73968`, `b98947a`, `f040a7f`, `3f21f3d`, `a8e9625`, `5db0c90`: 边界漏检、Pi 数据投影、刷新热路径与 snapshot copy 的反例. 这些提交说明全序列化/全校验并非没有代价.
 - `148c846`, `e96fb65`, `1c60f98`, `6f3363b`, `0cd6164`, `65a9ea8`: import guards、公用 seams 和 mock 改造. 当前 [unit/scenario 分层](../../implemented/testing/2026-09-09-test-layers-and-scenario-harness.md) 可保留, 不机械照搬全库禁止所有 internal mock、行数阈值或以测试标题含 REQ ID 证明覆盖的规则.

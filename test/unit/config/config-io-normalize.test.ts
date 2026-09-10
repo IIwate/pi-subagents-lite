@@ -1,15 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import { createTestHarness, type TestHarness } from "../../support/harness.js";
+
+vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof import("node:fs")>() }));
 
 const files = new Map<string, string>();
-vi.mock("node:fs", () => ({
-  readFileSync: (path: string) => {
-    if (!files.has(path)) throw new Error("ENOENT");
-    return files.get(path);
-  },
-  writeFileSync: (path: string, data: string) => { files.set(path, data); },
-  renameSync: (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
-  mkdirSync: () => {},
-}));
 
 import { CONFIG_PATH, loadConfig, saveConfigAtomic } from "../../../src/config/config-io.js";
 
@@ -18,7 +13,50 @@ function writeConfig(value: unknown): void {
 }
 
 describe("config-io model access normalization", () => {
-  beforeEach(() => files.clear());
+  let harness: TestHarness;
+  beforeEach(() => {
+    harness = createTestHarness();
+    files.clear();
+    const descriptors = new Map<number, string>();
+    vi.spyOn(fs, "readFileSync").mockImplementation(file => {
+      if (!files.has(String(file))) throw new Error("ENOENT");
+      return files.get(String(file))!;
+    });
+    vi.spyOn(fs, "openSync").mockImplementation(file => {
+      const fd = descriptors.size + 1;
+      descriptors.set(fd, String(file));
+      return fd;
+    });
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, data) => {
+      files.set(typeof file === "number" ? descriptors.get(file)! : String(file), String(data));
+    });
+    vi.spyOn(fs, "closeSync").mockImplementation(() => {});
+    vi.spyOn(fs, "unlinkSync").mockImplementation(file => { files.delete(String(file)); });
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      files.set(String(to), files.get(String(from))!);
+      files.delete(String(from));
+    });
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+  });
+  afterEach(async () => { await harness.dispose(); });
+
+  it("bounds non-finite and malformed ceilings from external JSON", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    files.set(CONFIG_PATH, '{"agent":{"graceTurns":1e999},"concurrency":{"default":1e999,"providers":{"test":1e999},"models":{"test/model":"invalid","test/fraction":1.5,"test/zero":0}}}');
+    expect(loadConfig()).toMatchObject({
+      agent: { graceTurns: 6 },
+      concurrency: { default: 4, providers: { test: 1 }, models: { "test/model": 1, "test/fraction": 2, "test/zero": 1 } },
+    });
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("concurrency.models.test/model"));
+  });
+
+  it.each([-1, 1.5, "8", null])("recovers an invalid grace budget: %s", graceTurns => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    writeConfig({ agent: { graceTurns } });
+    expect(loadConfig().agent.graceTurns).toBe(6);
+    writeConfig({ agent: { graceTurns: 0 } });
+    expect(loadConfig().agent.graceTurns).toBe(0);
+  });
 
   it("drops the retired background delivery policy from canonical settings", () => {
     writeConfig({ agent: { backgroundDelivery: "next-turn", graceTurns: 9 } });

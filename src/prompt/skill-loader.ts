@@ -6,7 +6,7 @@
  * Roots, in precedence order (first match wins by name):
  *   1. Ancestor .agents/skills (cwd → git root, root .md files filtered out)
  *   2. ~/.agents/skills (root .md files filtered out)
- *   3. ~/.pi/agent/skills (Pi's user default)
+ *   3. <Pi agent directory>/skills
  *   4. <cwd>/.pi/skills (Pi's project default)
  *
  * Pi's loadSkills handles: .gitignore/.ignore/.fdignore, symlinks (follow +
@@ -23,6 +23,7 @@ import { join, resolve } from "node:path";
 import {
   loadSkills,
   loadSkillsFromDir,
+  getAgentDir,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { isUnsafeName } from "../utils.js";
@@ -49,7 +50,7 @@ export interface SkillMeta {
  * Precedence (first match wins by name):
  *   1. Ancestor .agents/skills directories (cwd → git root)
  *   2. ~/.agents/skills
- *   3. Pi defaults: ~/.pi/agent/skills, <cwd>/.pi/skills
+ *   3. Pi defaults: <Pi agent directory>/skills, <cwd>/.pi/skills
  *
  * Deduplication: by canonical path (symlink dedup) and by name (first match wins).
  */
@@ -69,10 +70,10 @@ export function loadAllSkills(cwd: string): Skill[] {
     join(homedir(), ".agents", "skills"),
   );
 
-  // Pi defaults: ~/.pi/agent/skills and <cwd>/.pi/skills
+  // Pi defaults share the child session's configured agent directory.
   const defaultsResult = loadSkills({
     cwd: resolvedCwd,
-    agentDir: join(homedir(), ".pi", "agent"),
+    agentDir: getAgentDir(),
     skillPaths: [],
     includeDefaults: true,
   });
@@ -191,5 +192,3 @@ export function loadSkillMeta(skillNames: string[], cwd: string): SkillMeta[] {
     };
   });
 }
-
-

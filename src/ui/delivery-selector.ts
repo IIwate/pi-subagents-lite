@@ -11,6 +11,7 @@ import {
 import type { AgentRecord } from "../types.js";
 import type { DeliverableMessage } from "../prompt/subagent-delivery.js";
 import type { Theme } from "./types.js";
+import { displayText } from "./format.js";
 
 export interface DeliverySelectorOptions {
   record: AgentRecord;
@@ -48,6 +49,7 @@ interface MessageItem {
   content: string;
 }
 
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md
 export class DeliverySelectorComponent implements Component {
   private record: AgentRecord;
   private items: MessageItem[];
@@ -55,6 +57,8 @@ export class DeliverySelectorComponent implements Component {
   private tui?: TUI;
   private onConfirm: (selectedIndices: number[]) => void;
   private onCancel: () => void;
+  private notice = "";
+  private selectionLocked = false;
 
   cursorIndex: number = 0;
   selectedIndices: Set<number> = new Set();
@@ -74,13 +78,14 @@ export class DeliverySelectorComponent implements Component {
       const isUser = m.role === "user";
       const number = isUser ? ++userCount : ++assistantCount;
       const label = `[${isUser ? "User" : "Assistant"} #${number}]`;
-      const firstLine = m.content.trim().split("\n")[0] ?? "";
+      const content = displayText(m.content);
+      const firstLine = content.trim().split("\n")[0] ?? "";
       return {
         index: i,
         role: m.role,
         label,
         summary: firstLine,
-        content: m.content,
+        content,
       };
     });
 
@@ -99,6 +104,12 @@ export class DeliverySelectorComponent implements Component {
     } else if (this.items.length > 0) {
       this.cursorIndex = 0;
     }
+  }
+
+  setNotice(message: string, selectionLocked: boolean): void {
+    this.notice = message;
+    this.selectionLocked = selectionLocked;
+    this.tui?.requestRender();
   }
 
   handleInput(data: string): void {
@@ -124,6 +135,7 @@ export class DeliverySelectorComponent implements Component {
     }
 
     if (data === " ") {
+      if (this.selectionLocked) return;
       if (this.selectedIndices.has(this.cursorIndex)) {
         this.selectedIndices.delete(this.cursorIndex);
       } else {
@@ -148,7 +160,8 @@ export class DeliverySelectorComponent implements Component {
   }
 
   render(width: number): string[] {
-    const totalWidth = Math.max(50, width);
+    if (width < 20) return [truncateToWidth("Esc Cancel", Math.max(0, width))];
+    const totalWidth = width;
     const innerW = totalWidth - 2;
     const borderV = this.theme.fg("accent", "│");
     const topBorder = this.theme.fg("accent", `╭${"─".repeat(innerW)}╮`);
@@ -167,7 +180,7 @@ export class DeliverySelectorComponent implements Component {
 
     // Title bar
     const title = ` ${this.theme.bold(this.theme.fg("accent", "Deliver to Parent Session"))}`
-      + this.theme.fg("dim", ` · ${this.record.display.type} (${this.record.id.slice(0, 8)})`);
+      + this.theme.fg("dim", ` · ${displayText(this.record.display.type).replace(/\n/g, " ")} (${this.record.id.slice(0, 8)})`);
     lines.push(topBorder);
     lines.push(row(title));
     lines.push(midBorder);
@@ -182,13 +195,14 @@ export class DeliverySelectorComponent implements Component {
 
     // Geometry calculation: 1 space padding on both sides, 38% left, 62% right
     const contentWidth = innerW - 2;
+    const narrow = width < 50;
     const leftWidth = Math.max(26, Math.min(36, Math.floor(contentWidth * 0.38)));
     const divider = ` ${this.theme.fg("dim", "│")} `;
     const dividerWidth = 3;
-    const rightWidth = Math.max(10, contentWidth - leftWidth - dividerWidth);
+    const rightWidth = narrow ? contentWidth : contentWidth - leftWidth - dividerWidth;
 
     // Visible window for left list
-    const maxVisibleRows = Math.max(6, Math.min(14, (this.tui?.terminal?.rows ?? 24) - 8));
+    const maxVisibleRows = Math.max(1, Math.min(14, (this.tui?.terminal?.rows ?? 24) - 8));
     let windowStart = 0;
     if (this.items.length > maxVisibleRows) {
       const half = Math.floor(maxVisibleRows / 2);
@@ -230,7 +244,10 @@ export class DeliverySelectorComponent implements Component {
       : "";
 
     let rightRows: string[] = [];
-    if (previewHeader) rightRows.push(previewHeader, "");
+    if (narrow && currentItem) {
+      const checked = this.selectedIndices.has(currentItem.index) ? "x" : " ";
+      rightRows.push(`[${checked}] ${currentItem.label}`, `${this.cursorIndex + 1}/${this.items.length} · ${this.selectedIndices.size} selected`, "");
+    } else if (previewHeader) rightRows.push(previewHeader, "");
     if (currentItem?.content) {
       const mdTheme = typeof getMarkdownTheme === "function"
         ? getMarkdownTheme()
@@ -244,8 +261,17 @@ export class DeliverySelectorComponent implements Component {
     // and stop line-count shrinkage from triggering terminal clearOnShrink (\x1b[3J) redraws.
     const bodyHeight = maxVisibleRows;
     for (let r = 0; r < bodyHeight; r++) {
-      const left = leftRows[r] ?? pad("", leftWidth);
-      const right = rightRows[r] ?? "";
+      if (r === 0 && this.notice) {
+        lines.push(row(this.theme.fg("warning", displayText(this.notice).replace(/\n/g, " "))));
+        continue;
+      }
+      const index = this.notice ? r - 1 : r;
+      const left = leftRows[index] ?? pad("", leftWidth);
+      const right = rightRows[index] ?? "";
+      if (narrow) {
+        lines.push(row(` ${pad(right, contentWidth)} `));
+        continue;
+      }
       const paddedLeft = pad(left, leftWidth);
       const paddedRight = pad(right, rightWidth);
       lines.push(row(` ${paddedLeft}${divider}${paddedRight} `));
@@ -257,7 +283,12 @@ export class DeliverySelectorComponent implements Component {
     const deliverHint = selectedCount > 0
       ? `Enter Deliver (${selectedCount} selected)`
       : "Enter Deliver (select at least 1)";
-    const footer = ` ↑↓ Move · Space Toggle · ${deliverHint} · Esc Cancel`;
+    let footer = this.selectionLocked
+      ? " Enter Retry · Esc Close"
+      : ` ↑↓ Move · Space Toggle · ${deliverHint} · Esc Cancel`;
+    if (visibleWidth(footer) > innerW) {
+      footer = this.selectionLocked ? "Enter Retry Esc" : "↑↓ Space Enter Esc";
+    }
     lines.push(row(this.theme.fg("dim", footer)));
     lines.push(botBorder);
 

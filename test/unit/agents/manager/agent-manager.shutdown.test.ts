@@ -41,6 +41,41 @@ describe("AgentManager — Shutdown & Teardown", () => {
 
   afterEach(async () => { await harness.dispose(); });
 
+  it("shares setup cleanup with manager shutdown before a session is ready", async () => {
+    manager = new AgentManager(onComplete);
+    const session = mockAgentSession();
+    const shuttingDown = makeResolvablePromise();
+    const finishShutdown = makeResolvablePromise();
+    harness.onDispose(() => finishShutdown.resolve(undefined));
+    session.extensionRunner.emit.mockImplementation(() => {
+      shuttingDown.resolve(undefined);
+      return finishShutdown.promise;
+    });
+    mockModules.mockRunAgent.mockImplementationOnce(async (_ctx, _type, _prompt, options) => {
+      options.onSessionSetupStarted();
+      try {
+        const first = options.closeSession(session);
+        expect(options.closeSession(session)).toBe(first);
+        await first;
+        throw new Error("Extension setup failed");
+      } finally {
+        options.onSessionSetupFinished();
+      }
+    });
+    const id = manager.spawn(fakePi(), fakeCtx(), "general-purpose", "task", fakeOptions());
+    const record = manager.getRecord(id)!;
+    await shuttingDown.promise;
+    expect(record.execution.session).toBeUndefined();
+    const disposal = manager.dispose();
+    expect(session.dispose).not.toHaveBeenCalled();
+    finishShutdown.resolve(undefined);
+    await disposal;
+    await record.execution.promise;
+    expect(shutdownEvents(session)).toHaveLength(1);
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(record.error).toBe("Extension setup failed");
+  });
+
   it("emits session_shutdown before disposing a cleared agent's session", async () => {
     manager = new AgentManager(onComplete);
     const session = mockAgentSession();

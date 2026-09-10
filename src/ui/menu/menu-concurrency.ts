@@ -12,6 +12,7 @@ import {
   buildModelOptions,
   createDelegatingComponent,
   createSearchableSelect,
+  saveSetting,
 } from "./helpers.js";
 import { createConfirmSubmenu } from "./submenus/confirm.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
@@ -90,7 +91,7 @@ function editOrRemoveSubmenu(options: {
         })(String(options.limit), done));
         return;
       }
-      options.onRemove();
+      if (!saveSetting(options.ctx, options.onRemove)) return;
       options.onRebuild();
       done();
     };
@@ -299,7 +300,7 @@ export async function showConcurrencySettingsMenu(ctx: ExtensionCommandContext):
             message: "Reset all concurrency limits?",
             theme,
             onConfirm: () => {
-              store.mutate.concurrency.reset();
+              if (!saveSetting(ctx, () => store.mutate.concurrency.reset())) return false;
               ctx.ui.notify("Concurrency reset", "info");
               triggerRebuild();
             },

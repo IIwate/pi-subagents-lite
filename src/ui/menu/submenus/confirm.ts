@@ -12,7 +12,7 @@ import { buildListTheme } from "../helpers.js";
 export interface MultilineConfirmOptions {
   message: string;
   theme: Theme;
-  onConfirm: () => void;
+  onConfirm: () => void | boolean;
   onCancel?: () => void;
   done: (selectedValue?: string) => void;
 }
@@ -25,7 +25,9 @@ export function createMultilineConfirmComponent(options: MultilineConfirmOptions
     buildListTheme(options.theme),
   );
   list.onSelect = (item) => {
-    if (item.value === "Yes") options.onConfirm(); else options.onCancel?.();
+    if (item.value === "Yes") {
+      if (options.onConfirm() === false) return;
+    } else options.onCancel?.();
     options.done(item.value === "Yes" ? "Yes" : undefined);
   };
   list.onCancel = () => {
@@ -53,7 +55,7 @@ export interface ConfirmSubmenuOptions {
   /** Theme from pi-coding-agent (fg, bold) */
   theme: Theme;
   /** Called when user confirms (selects Yes) */
-  onConfirm: () => void;
+  onConfirm: () => void | boolean;
 }
 
 /**
@@ -73,7 +75,7 @@ export function createConfirmSubmenu(
 
     list.onSelect = (item) => {
       if (item.value === "Yes") {
-        options.onConfirm();
+        if (options.onConfirm() === false) return;
         done("Yes");
       } else {
         done();

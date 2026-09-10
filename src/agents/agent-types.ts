@@ -228,16 +228,19 @@ export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
   return count;
 }
 
-/** Resolve a type name case-insensitively. Also matches displayName. Returns the canonical key or undefined. */
+/** Prefer canonical names to aliases and reject ambiguity within either tier. */
 export function resolveType(name: string): string | undefined {
   if (!name) return undefined;
   if (agents.has(name)) return name;
   const lower = name.toLowerCase();
-  for (const [key, config] of agents.entries()) {
-    if (key.toLowerCase() === lower) return key;
-    if ((config.displayName ?? '').toLowerCase() === lower) return key;
+  const canonical = [...agents.keys()].filter(key => key.toLowerCase() === lower);
+  const matches = canonical.length > 0 ? canonical : [...agents.entries()]
+    .filter(([, config]) => config.displayName?.toLowerCase() === lower)
+    .map(([key]) => key);
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous agent type ${JSON.stringify(name)}: ${matches.sort().join(", ")}. Use an exact canonical name.`);
   }
-  return undefined;
+  return matches[0];
 }
 
 /** Get the agent config for a type (case-insensitive). */

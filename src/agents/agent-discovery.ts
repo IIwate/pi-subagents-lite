@@ -1,9 +1,7 @@
 /**
  * agent-discovery.ts — Agent file discovery, parsing, and config merging.
  *
- * Scans:
- *   ~/.pi/agent/agents/*.md   (user agents)
- *   <project>/.pi/agents/*.md (project agents)
+ * Scans the configured Pi user and trusted project Agent directories.
  *
  * Parses YAML frontmatter, extracts all fields, produces AgentConfig objects.
  * Merges with per-field precedence: default < user < project.
@@ -11,6 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "./types.js";
 import { parseThinkingLevel } from "../utils.js";
 
@@ -36,93 +35,6 @@ export interface AgentConfigFromMd {
   hidden?: boolean;
   systemPrompt: string;
   source: "user" | "project";
-}
-
-/* ------------------------------------------------------------------ */
-/*  Simple frontmatter parser                                          */
-/* ------------------------------------------------------------------ */
-
-/**
- * Naive YAML frontmatter splitter.
- *
- * Handles triple-dash delimited frontmatter blocks. Does NOT parse nested
- * YAML structures or complex types — only flat key: value pairs and
- * YAML array syntax (lines starting with "- ").
- *
- * Returns { frontmatter: Record<string, unknown>, body: string }.
- */
-function parseFrontmatter(
-  content: string,
-): { frontmatter: Record<string, unknown>; body: string } {
-  if (!content) {
-    return { frontmatter: {}, body: "" };
-  }
-
-  // Check for triple-dash delimited frontmatter
-  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
-    return { frontmatter: {}, body: content };
-  }
-
-  // Find closing ---
-  const endIdx = content.indexOf("\n---\n", 4);
-  if (endIdx === -1) {
-    return { frontmatter: {}, body: content };
-  }
-
-  const fmRaw = content.slice(4, endIdx);
-  const body = content.slice(endIdx + 5).trim();
-
-  const frontmatter: Record<string, unknown> = {};
-  let currentKey: string | null = null;
-  let currentValues: string[] | null = null;
-
-  for (const line of fmRaw.split("\n")) {
-    const trimmed = line.trim();
-
-    // Skip empty lines
-    if (!trimmed) continue;
-
-    // Array item (continuation of previous key)
-    if (trimmed.startsWith("- ")) {
-      if (currentKey) {
-        if (!currentValues) currentValues = [];
-        currentValues.push(trimmed.slice(2).trim());
-      }
-      continue;
-    }
-
-    // Flush previous array before processing a new key
-    if (currentKey && currentValues) {
-      frontmatter[currentKey] = currentValues;
-      currentValues = null;
-    }
-
-    const colonIdx = trimmed.indexOf(":");
-    if (colonIdx === -1) {
-      currentKey = trimmed;
-      continue;
-    }
-
-    currentKey = trimmed.slice(0, colonIdx).trim();
-    const rawValue = trimmed.slice(colonIdx + 1).trim();
-
-    if (!rawValue) {
-      // Might be followed by array items
-      currentValues = [];
-      continue;
-    }
-
-    // Strip surrounding quotes if present (YAML convention)
-    frontmatter[currentKey] = rawValue.replace(/^['"]|['"]$/g, '');
-    currentValues = null;
-  }
-
-  // Flush trailing array items
-  if (currentKey && currentValues) {
-    frontmatter[currentKey] = currentValues;
-  }
-
-  return { frontmatter, body };
 }
 
 /* ------------------------------------------------------------------ */
@@ -158,15 +70,17 @@ export function parseExtensions(
     return splitCommaList(raw);
   }
   if (Array.isArray(raw)) {
-    return raw.map(String);
+    if (raw.every(value => typeof value === "string")) return raw;
+    throw new Error("Agent extensions and skills lists must contain only strings.");
   }
-  return undefined;
+  if (raw === undefined) return undefined;
+  throw new Error("Agent extensions and skills must be a boolean, string, or string array.");
 }
 
 /**
  * Parse the preload_skills field from frontmatter.
- * Unlike parseExtensions, does NOT accept true/"true"/"all" —
- * preload requires an explicit list of skill names.
+ * Boolean true cannot enable implicit loading; preload requires explicit
+ * skill names or false.
  */
 function parsePreloadSkills(
   raw: unknown,
@@ -178,9 +92,11 @@ function parsePreloadSkills(
     return splitCommaList(raw);
   }
   if (Array.isArray(raw)) {
-    return raw.map(String);
+    if (raw.every(value => typeof value === "string")) return raw;
+    throw new Error("Agent preload_skills must contain only strings.");
   }
-  return undefined; // true/"true"/"all" not supported
+  if (raw === undefined) return undefined;
+  throw new Error("Agent preload_skills must be false or an explicit skill list.");
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,6 +109,9 @@ function parseString(
   key: string,
 ): string | undefined {
   const v = frontmatter[key];
+  if (v !== undefined && typeof v !== "string") {
+    throw new Error(`Agent field ${key} must be a string; quote numeric or boolean text.`);
+  }
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
@@ -203,12 +122,14 @@ function parseStringArray(
 ): string[] | undefined {
   const v = frontmatter[key];
   if (Array.isArray(v)) {
-    return v.map(String);
+    if (v.every(value => typeof value === "string")) return v;
+    throw new Error(`Agent field ${key} must contain only strings.`);
   }
   if (typeof v === "string" && v.length > 0) {
     return splitCommaList(v);
   }
-  return undefined;
+  if (v === undefined || v === "") return undefined;
+  throw new Error(`Agent field ${key} must be a string or string array.`);
 }
 
 /** Extract a boolean from frontmatter (true/false or "true"/"false"). */
@@ -219,7 +140,8 @@ function parseBoolean(
   const v = frontmatter[key];
   if (v === true || v === "true") return true;
   if (v === false || v === "false") return false;
-  return undefined;
+  if (v === undefined) return undefined;
+  throw new Error(`Agent field ${key} must be a boolean.`);
 }
 
 /** Extract a number from frontmatter (number or numeric string). */
@@ -228,12 +150,10 @@ function parseNumber(
   key: string,
 ): number | undefined {
   const v = frontmatter[key];
-  if (typeof v === "number") return v;
-  if (typeof v === "string" && v.length > 0) {
-    const n = Number(v);
-    if (!Number.isNaN(n)) return n;
-  }
-  return undefined;
+  if (v === undefined) return undefined;
+  const n = typeof v === "string" && v.trim() ? Number(v) : v;
+  if (typeof n === "number" && Number.isFinite(n)) return n;
+  throw new Error(`Agent field ${key} must be a finite number.`);
 }
 
 /**
@@ -254,11 +174,15 @@ function compactDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
 /**
  * Parse a single agent .md file into AgentConfigFromMd.
  */
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md
 export function parseAgentFile(
   content: string,
   source: "user" | "project",
 ): AgentConfigFromMd {
-  const { frontmatter, body } = parseFrontmatter(content);
+  const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+  if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
+    throw new Error("Agent frontmatter must be a mapping.");
+  }
 
   return {
     name: parseString(frontmatter, "name"),
@@ -300,19 +224,21 @@ export async function scanAgentFilesInDir(
   const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
   const mdFiles = entries.filter(
     (e) => e.isFile() && e.name.endsWith(".md"),
-  );
+  ).map(entry => entry.name).sort();
 
   const agents: AgentConfigFromMd[] = [];
-  for (const entry of mdFiles) {
-    const filePath = path.join(dirPath, entry.name);
+  for (const fileName of mdFiles) {
+    const filePath = path.join(dirPath, fileName);
     try {
       const content = await fs.promises.readFile(filePath, "utf-8");
       const info = parseAgentFile(content, source);
       if (info.name) {
         agents.push(info);
       }
-    } catch {
-      // Skip files that can't be read
+    } catch (error) {
+      // One unreadable or malformed definition must not block unrelated agents.
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[subagents] Skipping agent file ${JSON.stringify(filePath)}: ${JSON.stringify(message)}`);
     }
   }
   return agents;

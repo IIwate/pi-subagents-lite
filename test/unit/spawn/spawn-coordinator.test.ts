@@ -343,8 +343,12 @@ describe("SpawnCoordinator", () => {
         { role: "assistant", content: "All foreign keys have indexes." },
       ],
     } as any;
-
-    const delivered = coordinator.deliverSelectedMessages(result.agentId, [1, 2]);
+    const deliveredSelection = coordinator.deliverSelectedMessages(
+      result.agentId, coordinator.getDeliverableMessages(result.agentId).filter((_, index) => [1, 2].includes(index)),
+    );
+    expect(deliveredSelection.status).toBe("saved");
+    if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered = deliveredSelection.delivery;
     expect(delivered).toBeDefined();
     expect(delivered?.status).toBe("running");
     expect(delivered?.result).toContain("### Delivered Output");
@@ -361,7 +365,12 @@ describe("SpawnCoordinator", () => {
     expect(mockPi.sendMessage).toHaveBeenCalled();
 
     // Stage 2 delivery generates a new deliveryId
-    const stage2 = coordinator.deliverSelectedMessages(result.agentId, [0, 1]);
+    const stage2Selection = coordinator.deliverSelectedMessages(
+      result.agentId, coordinator.getDeliverableMessages(result.agentId).filter((_, index) => [0, 1].includes(index)),
+    );
+    expect(stage2Selection.status).toBe("saved");
+    if (stage2Selection.status === "rejected") throw new Error("Selection was rejected");
+    const stage2 = stage2Selection.delivery;
     expect(stage2).toBeDefined();
     expect(stage2?.deliveryId).not.toBe(delivered?.deliveryId);
     expect(stage2?.result).toContain("### Delivered Transcript");

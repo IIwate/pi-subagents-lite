@@ -12,7 +12,7 @@ Status: implemented
 
 记录自动清理每分钟检查一次, 仅适用于 terminal、未 pin 且 `resultPersisted` 或 `resultConsumed` 为真的记录. 到期时间是完成时间加 10 分钟及 pin 暂停累计时间. running/queued 不因任务耗时被清理; pin 不阻止显式 Clear. 人工输入自动 pin 的规则见 [接管](../feature/2026-09-10-human-takeover-and-selective-delivery.md). 保留的 session 是进程内资源, 不代表可跨进程恢复.
 
-每个 session 通过 WeakSet 领取一次关闭权. 正常关闭先等待 `session.abort()`, 再向子扩展发送 `session_shutdown`, 最后调用 `session.dispose()`. 这一步不能由父会话的 shutdown 代替: 子扩展是另一组实例, 而 Pi 的 session dispose 不代发这个事件. abort 与 shutdown 合用 15 秒等待窗口, 超时仍执行 dispose. 超时限制等待时间, 不保证被挂起的外部操作已物理终止.
+每个 session 通过 WeakMap 共享一次关闭 Promise, 在调用可重入 hook 前登记. 正常关闭先等待 `session.abort()`, 再向子扩展发送 `session_shutdown`, 最后调用 `session.dispose()`. 这一步不能由父会话的 shutdown 代替: 子扩展是另一组实例, 而 Pi 的 session dispose 不代发这个事件. abort 与 shutdown 合用 15 秒等待窗口, 超时仍执行 dispose. 超时限制等待时间, 不保证被挂起的外部操作已物理终止.
 
 Manager dispose 先设关闭标记并中止初始化/执行, 结算 queued 前台等待, 清空队列, 关闭已有 session, 再有界等待初始化和已登记的关闭任务. 后到的 `onSessionCreated` 检查关闭标记、记录身份和停止状态, 关闭迟到 session. 重入 dispose 直接返回, 避免子 shutdown handler 递归等待自身. [组合根](2026-09-09-composition-root-and-shell-singleton.md) 在 UI 清理失败时仍继续 manager/coordinator 清理.
 
@@ -26,7 +26,7 @@ Manager dispose 先设关闭标记并中止初始化/执行, 结算 queued 前�
 
 记录从 UI 消失不删除已保存的 [父信箱结果](2026-09-09-parent-result-delivery-and-ack.md). Clear 和 shutdown 后的迟到完成不重新建立记录或新交付. 已保存结果可恢复, 尚未入信箱的活动执行和人工输出没有进程退出保证.
 
-15 秒是每个收尾阶段的边界, 不是整个应用退出的硬时限. 正常初始化失败时、Manager 接管 session 之前的释放存在独立缺口, 见 [初始化资源所有权提案](../../proposed/bug-fix/2026-09-10-session-setup-resource-ownership.md); 本文的既有关闭规则不依赖该提案实施.
+15 秒是每个收尾阶段的边界, 不是整个应用退出的硬时限. [初始化资源交接](../bug-fix/2026-09-10-session-setup-resource-ownership.md) 使创建者在就绪前也通过本关闭操作释放 session, 并保留原始 setup 错误. 可交互的 session 在工具和扩展配置完成后才公开.
 
 ## Evidence
 

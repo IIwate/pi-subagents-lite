@@ -55,7 +55,7 @@ describe("formatSubagentDelivery", () => {
     });
 
     expect(formatted).toBe(
-      `[Subagent Result: Explore (completed)]\n`
+      `[Subagent Result: Explore (selected messages)]\n`
       + `Task Origin: "Analyze auth flow"\n\n`
       + `---\n\n`
       + `### Delivered Output\n\n`
@@ -76,7 +76,7 @@ describe("formatSubagentDelivery", () => {
 
     expect(formatted).toContain("### Delivered Output");
     expect(formatted).toContain("Part 1 summary.\n\n---\n\nPart 2 details.");
-    expect(formatted).toMatch(/^\[Subagent Result: general-purpose \(completed\)\]/);
+    expect(formatted).toMatch(/^\[Subagent Result: general-purpose \(selected messages\)\]/);
   });
 
   it("formats mixed user and assistant messages as Delivered Transcript", () => {
@@ -90,7 +90,7 @@ describe("formatSubagentDelivery", () => {
     });
 
     expect(formatted).toBe(
-      `[Subagent Result: general-purpose (completed)]\n`
+      `[Subagent Result: general-purpose (selected messages)]\n`
       + `Task Origin: "Refactor database query"\n\n`
       + `---\n\n`
       + `### Delivered Transcript\n\n`
@@ -121,7 +121,7 @@ describe("formatSubagentDelivery", () => {
     });
 
     expect(formatted).toBe(
-      `[Subagent Result: Explore (completed)]\n`
+      `[Subagent Result: Explore (selected messages)]\n`
       + `Task Origin: "No messages selected"\n\n`
       + `---\n\n`
       + `### Delivered Output\n\n`
@@ -186,7 +186,7 @@ describe("delivery content boundaries", () => {
       ],
     });
 
-    expect(formatted).toContain("[Subagent Result: general-purpose (completed)]");
+    expect(formatted).toContain("[Subagent Result: general-purpose (selected messages)]");
     expect(formatted).toContain('Task Origin: "Edge task with "quotes" and <xml> tags"');
     expect(formatted).toContain("### Delivered Output");
     expect(formatted).toContain(maliciousPrompt);

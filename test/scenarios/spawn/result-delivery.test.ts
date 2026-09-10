@@ -116,7 +116,12 @@ describe("durable result delivery integration", () => {
     });
     await expect(scenario.coordinator.interact(id, "continue")).resolves.toEqual({ accepted: true });
     await record.execution.promise;
-    const delivered = scenario.coordinator.deliverSelectedMessages(id, [0]);
+    const deliveredSelection = scenario.coordinator.deliverSelectedMessages(
+      id, scenario.coordinator.getDeliverableMessages(id).filter((_, index) => [0].includes(index)),
+    );
+    expect(deliveredSelection.status).toBe("saved");
+    if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered = deliveredSelection.delivery;
     expect(delivered).toBeDefined();
 
     expect(record.execution).toMatchObject({
@@ -148,7 +153,12 @@ describe("durable result delivery integration", () => {
     await expect(scenario.coordinator.interact(spawned.agentId, "continue"))
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
-    const delivered = scenario.coordinator.deliverSelectedMessages(spawned.agentId, [0]);
+    const deliveredSelection = scenario.coordinator.deliverSelectedMessages(
+      spawned.agentId, scenario.coordinator.getDeliverableMessages(spawned.agentId).filter((_, index) => [0].includes(index)),
+    );
+    expect(deliveredSelection.status).toBe("saved");
+    if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered = deliveredSelection.delivery;
     expect(delivered).toBeDefined();
 
     expect(spawned.record.execution.resultSessionId).toBe(scenario.parent.getSessionId());
@@ -189,7 +199,12 @@ describe("durable result delivery integration", () => {
     await expect(scenario.coordinator.interact(spawned.agentId, "resume"))
       .resolves.toEqual({ accepted: true });
     await spawned.record.execution.promise;
-    const delivered = scenario.coordinator.deliverSelectedMessages(spawned.agentId, [0]);
+    const deliveredSelection = scenario.coordinator.deliverSelectedMessages(
+      spawned.agentId, scenario.coordinator.getDeliverableMessages(spawned.agentId).filter((_, index) => [0].includes(index)),
+    );
+    expect(deliveredSelection.status).toBe("saved");
+    if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered = deliveredSelection.delivery;
     expect(delivered).toBeDefined();
 
     expect(spawned.record.lifecycle.status).toBe("completed");

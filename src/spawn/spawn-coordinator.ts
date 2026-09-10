@@ -46,6 +46,12 @@ export interface SpawnResult {
   detached?: boolean;
 }
 
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-delivery-selection-snapshot-identity.md
+export type SelectionDeliveryResult =
+  | { status: "saved"; delivery: PendingResult }
+  | { status: "pending"; delivery: PendingResult }
+  | { status: "rejected"; reason: "unavailable" | "empty" };
+
 function storedResult(record: AgentRecord): PendingResult | undefined {
   const result = formatResultContent(record).trim() || "(no output)";
   const parentSessionId = record.execution.resultSessionId;
@@ -218,9 +224,13 @@ export class SpawnCoordinator {
     return [];
   }
 
-  deliverSelectedMessages(agentId: string, messageIndices: number[]): PendingResult | undefined {
+  deliverSelectedMessages(agentId: string, messages: readonly DeliverableMessage[]): SelectionDeliveryResult {
     const record = this.manager.getRecord(agentId);
-    if (!record || this.disposed) return undefined;
+    if (!record || !this.isActive()
+      || (record.execution.resultSessionId && record.execution.resultSessionId !== this.sessionId)) {
+      return { status: "rejected", reason: "unavailable" };
+    }
+    if (messages.length === 0) return { status: "rejected", reason: "empty" };
 
     if (!record.execution.resultSessionId) {
       const ctx = getSessionCtx();
@@ -231,14 +241,10 @@ export class SpawnCoordinator {
       }
     }
 
-    const deliverable = this.getDeliverableMessages(agentId);
-    const selected = messageIndices.map(i => deliverable[i]).filter((m): m is DeliverableMessage => Boolean(m));
-    if (selected.length === 0) return undefined;
-
     const formatted = formatSubagentDelivery({
       taskOrigin: record.display.description,
       type: record.display.type,
-      messages: selected,
+      messages,
     });
 
     const deliveryId = randomUUID();
@@ -258,13 +264,25 @@ export class SpawnCoordinator {
 
     this.fallbackResults.set(result.deliveryId, result);
     record.execution.resultDeliveryId = result.deliveryId;
+    return this.retrySelectedDelivery(deliveryId);
+  }
+
+  /** Retry an existing selection without creating another inbox entry. */
+  retrySelectedDelivery(deliveryId: string): SelectionDeliveryResult {
+    const result = this.fallbackResults.get(deliveryId)
+      ?? this.pendingResults.get(deliveryId)
+      ?? [...this.latestResults.values()].find(result => result.deliveryId === deliveryId);
+    if (!this.isActive() || !result || result.parentSessionId !== this.sessionId
+      || !this.manager.getRecord(result.agentId)) {
+      return { status: "rejected", reason: "unavailable" };
+    }
     this.flushFallbackResults();
     if (this.fallbackResults.has(result.deliveryId)) {
       getNavigator()?.update();
-      return undefined;
+      return { status: "pending", delivery: result };
     }
     this.requestParentWake();
-    return result;
+    return { status: "saved", delivery: result };
   }
 
   /** Persist a background completion and let that completion request a wake-up. */

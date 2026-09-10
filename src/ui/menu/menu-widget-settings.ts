@@ -2,7 +2,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildListTheme } from "./helpers.js";
+import { buildListTheme, saveSetting } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { getStore } from "../../shell.js";
 
@@ -23,11 +23,15 @@ function buildDisplayConfig(store: ReturnType<typeof getStore>) {
 export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
   const displayConfig = buildDisplayConfig(store);
+  let settingsList: SettingsList;
 
   const onChange = (id: string, newValue: string) => {
     const setting = displayConfig.get(id);
     if (!setting) return;
-    setting.set(newValue === "ON");
+    if (!saveSetting(ctx, () => setting.set(newValue === "ON"))) {
+      settingsList.updateValue(id, setting.get() ? "ON" : "OFF");
+      return;
+    }
     const reloadHint = id === "expandListByDefault" ? " · /reload to apply now" : "";
     ctx.ui.notify(`${setting.label} ${newValue}${reloadHint}`, "info");
   };
@@ -41,7 +45,7 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
       description: cfg.description,
     }));
 
-    const settingsList = new SettingsList(items, 10, buildListTheme(theme), onChange, () => done(undefined));
+    settingsList = new SettingsList(items, 10, buildListTheme(theme), onChange, () => done(undefined));
     return new SettingsListWrapper(settingsList, { title: "Display Settings", theme, onCancel: () => done(undefined) });
   });
 }

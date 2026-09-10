@@ -23,8 +23,9 @@ let settingsListWrapperCalls: Array<{
   options: any;
 }> = [];
 
-vi.mock("@earendil-works/pi-tui", () => {
+vi.mock("@earendil-works/pi-tui", async importOriginal => {
   return {
+    ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
     SettingsList: class MockSettingsList { constructor() {} },
     SelectList: class MockSelectList {
       items: any[];

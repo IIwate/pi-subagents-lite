@@ -6,6 +6,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Input, type Component } from "@earendil-works/pi-tui";
+import { saveSetting } from "../helpers.js";
 
 /**
  * Returns a `(initialValue, done) => submenu` function wired to
@@ -43,20 +44,20 @@ export function createNumericSubmenu(
           return;
         }
         if (opts.default != null) {
-          opts.onValid?.(opts.default);
+          if (!saveSetting(ctx, () => opts.onValid?.(opts.default!))) return;
           done(String(opts.default));
         } else {
-          onEmpty?.();
+          if (!saveSetting(ctx, () => onEmpty?.())) return;
           done("(not set)");
         }
         return;
       }
-      const parsed = parseInt(trimmed, 10);
-      if (isNaN(parsed) || parsed < min) {
-        onError(`Invalid value \u2014 must be a number ${fmtLabel(min)}`);
+      const parsed = Number(trimmed);
+      if (!Number.isSafeInteger(parsed) || parsed < min) {
+        onError(`Invalid value \u2014 must be an integer ${fmtLabel(min)}`);
         return;
       }
-      opts.onValid?.(parsed);
+      if (!saveSetting(ctx, () => opts.onValid?.(parsed))) return;
       done(String(parsed));
     };
     input.onEscape = () => done();

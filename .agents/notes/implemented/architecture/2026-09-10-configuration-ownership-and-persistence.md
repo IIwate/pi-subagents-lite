@@ -14,20 +14,20 @@ Status: implemented
 
 模型分配时代的 `allowCrossProvider`, `allowedProviders`, `agentModels`, 动态 `agent[type]` 和 `agent.default` 不迁移. 加载只投影当前格式, 下一次显式保存写 canonical shape; 没有后台迁移. provider 暂时不可用时保留休眠授权, 具体策略由 [model access](2026-09-09-model-routing-and-access-policy.md) 负责.
 
-保存使用同目录 `.tmp` 写入后 rename, 避免通常情况下读到半份目标文件. 当前 mutation 先改变内存, `saveConfigAtomic` 捕获错误并输出 console.error, 返回类型为 void. 因此它不是“持久化成功才发布内存”的事务; 菜单仍可能提示成功, 依赖仍可能收到未保存配置. 也没有 fsync、多进程锁或并发修订号.
+mutation 在候选副本上修改, 同目录独占临时文件写入并 rename 成功后才发布有效配置和副作用. 写入失败保留旧值并向菜单报告. [配置提交](../bug-fix/2026-09-10-configuration-commit-and-validation.md) 负责失败恢复、批量 mutation 和 UI 显示一致性.
 
-当前标量验证并不一致: systemPromptMode 有闭集检查, 部分布尔值通过显式比较解析, grace/concurrency 等字段仍可由 hand-edited JSON 带入异常值. 这是现存缺口, 不是可信内部 API 的保证. [事务保存与输入验证提案](../../proposed/bug-fix/2026-09-10-configuration-commit-and-validation.md) 独立记录改进方向.
+systemPromptMode 使用闭集检查, 部分布尔值通过显式比较解析. grace/concurrency 在外部 JSON 和 mutation 入口执行 [字段数值规则](../bug-fix/2026-09-10-configuration-commit-and-validation.md), 非有限值不能进入 scheduler 的容量比较.
 
 ## Alternatives considered
 
 - **保留可变配置导出及调用点自行 save/sync.** 文件少、调用直接, 但每个 writer 都需记住持久化及 UI/scheduler 副作用, reload 还会产生陈旧引用. 具名 mutation 收拢这份职责.
 - **读时自动迁移任意旧配置.** 升级更平滑, 但旧 assignment 与当前授权不是等价语义, 自动映射可能意外开权限. 当前只接受 canonical routing, 不暗中转换.
 - **用 JSON clone/类型断言代替字典入口检查.** 写法短, 但无法区分空名单和全名单, 也无法防止继承键进入授权. 校验留在外部数据入口.
-- **全量 generic fragment/revision 配置框架.** 可服务多个独立 capability 和共享文档 writer, 未合入 `origin/re` 的实现有此价值. 当前单 store 不需要先迁入该框架才能修复保存失败; 最小事务方案可独立评审.
+- **全量 generic fragment/revision 配置框架.** 可服务多个独立 capability 和共享文档 writer, 未合入 `origin/re` 的实现有此价值. 当前单 store 的候选提交边界已表达保存失败与发布语义.
 
 ## Consequences
 
-store 给调用者统一默认值和副作用入口, 但并非所有 getter 都返回深拷贝: routing 是复制快照, concurrency 的 map 仍共享内部对象. 文件写失败、malformed 文件被下次保存覆盖、多个进程争用 `.tmp` 都是现有边界. 路径由 HOME 推导, Pi 自定义 agent directory 的偏差见 [资源提案](../../proposed/bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md).
+store 给调用者统一默认值和副作用入口, 但并非所有 getter 都返回深拷贝: routing 是复制快照, concurrency 的 map 仍共享内部对象, 内部读取者不得修改. malformed 文件会被下次显式保存覆盖; 独占临时文件不提供 fsync 或跨进程更新合并. 路径统一使用 [Pi 资源目录](../bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md).
 
 ## Evidence
 
@@ -38,4 +38,4 @@ store 给调用者统一默认值和副作用入口, 但并非所有 getter 都�
 
 ## Verification
 
-[ConfigStore tests](../../../../test/unit/config/config-store.test.ts) 验证 mutation、副作用和 routing copy; [config normalization](../../../../test/unit/config/config-io-normalize.test.ts) 验证磁盘形状与特殊键; [model access](../../../../test/unit/models/model-access.test.ts) 验证权限不扩大. 保存失败和非法标量的拟议契约单独列在 proposed, 不以现有测试通过宣称缺口已消失.
+[ConfigStore tests](../../../../test/unit/config/config-store.test.ts) 验证候选发布、副作用和 routing copy; [config normalization](../../../../test/unit/config/config-io-normalize.test.ts) 验证磁盘形状、数值与特殊键; [真实文件场景](../../../../test/scenarios/config-persistence.test.ts) 验证保存失败和 scheduler 边界; [model access](../../../../test/unit/models/model-access.test.ts) 验证权限不扩大.

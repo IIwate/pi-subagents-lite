@@ -12,7 +12,8 @@ let selectListInstances: Array<{
   handleInput: (d: string) => void;
 }> = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SelectList: class MockSelectList {
     items: any[];
     onSelect?: (item: any) => void;

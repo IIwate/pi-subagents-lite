@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildListTheme } from "./helpers.js";
+import { buildListTheme, saveSetting } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SystemPromptMode } from "../../agents/types.js";
 import { getStore } from "../../shell.js";
@@ -50,7 +50,7 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
         label: "Include AGENTS.md",
         currentValue: store.agent.includeContextFiles ? "ON" : "OFF",
         values: ["ON", "OFF"],
-        description: "Load project and ~/.pi/agent AGENTS.md as shared <project_context>.",
+        description: "Load project and global AGENTS.md as shared <project_context>.",
       },
       {
         id: "loadSkillsImplicitly",
@@ -74,35 +74,41 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
   let rebuild: ((newItems: SettingItem[]) => void) | null = null;
 
   const onChange = (id: string, newValue: string) => {
-    switch (id) {
-      case "systemPromptMode":
-        store.mutate.agent.setSystemPromptMode(newValue as SystemPromptMode);
-        ctx.ui.notify(`System prompt mode set to ${newValue}`, "info");
-        // Rebuild: "custom" adds the create prompt file item, other modes remove it.
-        items = buildItems();
-        rebuild?.(items);
-        break;
-      case "createPromptFile":
-        try {
-          fs.mkdirSync(path.dirname(CUSTOM_PROMPT_PATH), { recursive: true });
-          fs.writeFileSync(CUSTOM_PROMPT_PATH, "You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously", "utf-8");
-          ctx.ui.notify(`Created prompt file: ${CUSTOM_PROMPT_PATH}`, "info");
-        } catch (err: any) {
-          ctx.ui.notify(`Failed to create prompt file: ${err.message}`, "error");
-        }
-        return;
-      case "includeContextFiles":
-        store.mutate.agent.setIncludeContextFiles(newValue === "ON");
-        ctx.ui.notify(`Include AGENTS.md set to ${newValue}`, "info");
-        break;
-      case "loadSkillsImplicitly":
-        store.mutate.agent.setLoadSkillsImplicitly(newValue === "ON");
-        ctx.ui.notify(`Load skills implicitly set to ${newValue}`, "info");
-        break;
-      case "loadExtensionsImplicitly":
-        store.mutate.agent.setLoadExtensionsImplicitly(newValue === "ON");
-        ctx.ui.notify(`Load extensions implicitly set to ${newValue}`, "info");
-        break;
+    const saved = saveSetting(ctx, () => {
+      switch (id) {
+        case "systemPromptMode":
+          store.mutate.agent.setSystemPromptMode(newValue as SystemPromptMode);
+          ctx.ui.notify(`System prompt mode set to ${newValue}`, "info");
+          // Rebuild: "custom" adds the create prompt file item, other modes remove it.
+          items = buildItems();
+          rebuild?.(items);
+          break;
+        case "createPromptFile":
+          try {
+            fs.mkdirSync(path.dirname(CUSTOM_PROMPT_PATH), { recursive: true });
+            fs.writeFileSync(CUSTOM_PROMPT_PATH, "You are a Pi, an expert coding sub-agent.\nYou have been invoked to handle a specific task autonomously", "utf-8");
+            ctx.ui.notify(`Created prompt file: ${CUSTOM_PROMPT_PATH}`, "info");
+          } catch (err: any) {
+            ctx.ui.notify(`Failed to create prompt file: ${err.message}`, "error");
+          }
+          return;
+        case "includeContextFiles":
+          store.mutate.agent.setIncludeContextFiles(newValue === "ON");
+          ctx.ui.notify(`Include AGENTS.md set to ${newValue}`, "info");
+          break;
+        case "loadSkillsImplicitly":
+          store.mutate.agent.setLoadSkillsImplicitly(newValue === "ON");
+          ctx.ui.notify(`Load skills implicitly set to ${newValue}`, "info");
+          break;
+        case "loadExtensionsImplicitly":
+          store.mutate.agent.setLoadExtensionsImplicitly(newValue === "ON");
+          ctx.ui.notify(`Load extensions implicitly set to ${newValue}`, "info");
+          break;
+      }
+    });
+    if (!saved) {
+      items = buildItems();
+      rebuild?.(items);
     }
   };
 

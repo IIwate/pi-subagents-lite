@@ -39,7 +39,7 @@ setConcurrency 保留运行计数并 drain, 上限调小不杀已有任务. 已�
 
 ## Consequences
 
-计数表示 manager 接受的活跃执行, 不等同 GPU 显存监控或跨进程 API 限流. 变更上限和 Clear 需保留单次释放不变式. hand-edited 非有限/非数值配置的现存漏洞由 [配置验证提案](../../proposed/bug-fix/2026-09-10-configuration-commit-and-validation.md) 单独处理.
+计数表示 manager 接受的活跃执行, 不等同 GPU 显存监控或跨进程 API 限流. 变更上限和 Clear 需保留单次释放不变式. hand-edited 配置由 [数值入口](../bug-fix/2026-09-10-configuration-commit-and-validation.md) 归一化, 非法显式限额保留有限的保守容量; 保存成功后才同步新的上限.
 
 ## Evidence
 

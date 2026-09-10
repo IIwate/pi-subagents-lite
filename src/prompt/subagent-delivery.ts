@@ -1,7 +1,7 @@
 // Note: see .agents/notes/implemented/feature/2026-09-10-human-takeover-and-selective-delivery.md
 export interface DeliverableMessage {
-  role: "user" | "assistant";
-  content: string;
+  readonly role: "user" | "assistant";
+  readonly content: string;
 }
 
 export interface FormatSubagentDeliveryParams {
@@ -50,7 +50,7 @@ export function extractDeliverableMessages(messages: readonly unknown[]): Delive
  */
 export function formatSubagentDelivery(params: FormatSubagentDeliveryParams): string {
   const { taskOrigin, type, messages } = params;
-  const header = `[Subagent Result: ${type} (completed)]\nTask Origin: "${taskOrigin}"\n\n---`;
+  const header = `[Subagent Result: ${type} (selected messages)]\nTask Origin: "${taskOrigin}"\n\n---`;
 
   if (messages.length === 0) {
     return `${header}\n\n### Delivered Output\n\n(no output)\n\n---`;

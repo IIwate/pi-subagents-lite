@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createTestHarness } from "../../support/harness.js";
 import { ConfigStore, type ConfigIO } from "../../../src/config/config-store.js";
 import type { SubagentsConfig } from "../../../src/config/types.js";
 
@@ -163,7 +164,7 @@ describe("ConfigStore routing mutations", () => {
       },
     };
     const store = new ConfigStore(memIO(config).io);
-    store.mutate.routing.cleanUnavailableModels("openai", ["retired"]);
+    store.mutate.routing.cleanUnavailableModels(new Map([["openai", new Set(["retired"])]]));
     expect(store.routing.agentAccess).toEqual({
       Explore: { providers: { openai: { models: ["gpt-5"] } } },
       planner: { providers: { openai: {} } },
@@ -195,6 +196,43 @@ describe("ConfigStore routing mutations", () => {
 });
 
 describe("ConfigStore non-routing behavior", () => {
+  it("keeps effective state and dependencies unchanged until a candidate is saved", async () => {
+    const harness = createTestHarness();
+    const { store, memIO } = harness;
+    try {
+      const setConcurrency = vi.fn();
+      const setStatsVisibility = vi.fn();
+      store.setDeps({ manager: { setConcurrency } as any, navigator: { setStatsVisibility } as any });
+      const before = { agent: store.agent, routing: store.routing, concurrency: store.concurrency };
+      const failure = new Error("Config rename failed");
+      const save = vi.spyOn(memIO.io, "save").mockImplementation(() => {
+        expect({ agent: store.agent, routing: store.routing, concurrency: store.concurrency }).toEqual(before);
+        throw failure;
+      });
+      for (const update of [
+        () => store.mutate.agent.setForceBackground(true),
+        () => store.mutate.agent.setShowTools(false),
+        () => store.mutate.routing.configureAgentProviderAccess("Explore", "test", ["model"]),
+        () => store.mutate.concurrency.setDefault(8),
+      ]) {
+        expect(update).toThrow(failure);
+        expect({ agent: store.agent, routing: store.routing, concurrency: store.concurrency }).toEqual(before);
+      }
+      expect(memIO.saves).toHaveLength(0);
+      expect(setConcurrency).toHaveBeenCalledOnce();
+      expect(setStatsVisibility).toHaveBeenCalledOnce();
+
+      save.mockRestore();
+      store.mutate.concurrency.setDefault(1.5);
+      expect(store.concurrency.default).toBe(2);
+      expect(memIO.saves).toHaveLength(1);
+      expect(setConcurrency).toHaveBeenCalledTimes(2);
+      expect(setConcurrency).toHaveBeenLastCalledWith({ default: 2 });
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it("persists Agent and concurrency settings", () => {
     const { io, saves } = memIO();
     const store = new ConfigStore(io);

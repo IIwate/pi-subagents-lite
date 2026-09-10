@@ -15,7 +15,8 @@ import type { AgentConfig } from "../../../src/agents/types.js";
 import type { EnvInfo } from "../../../src/types.js";
 
 // Stub only formatSkillsForPrompt — do not importActual the full pi package (multi-second tax).
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-coding-agent")>(),
   // Return only <skill> elements — buildAgentPrompt extracts these with regex
   // and adds its own intro text and <available_skills> wrapper.
   formatSkillsForPrompt: vi.fn((skills: any[]) => {

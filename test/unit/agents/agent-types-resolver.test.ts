@@ -6,7 +6,8 @@
  * no-sub-subagent exclude policy.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createTestHarness, type TestHarness } from "../../support/harness.js";
 
 // Import the module under test
 import {
@@ -20,9 +21,38 @@ import {
   getConfig,
   registerAgents,
   resolveAcceptedRunPolicy,
+  resolveType,
 } from "../../../src/agents/agent-types.js";
 import { DEFAULT_AGENTS } from "../../../src/agents/default-agents.js";
 import type { AgentConfig } from "../../../src/agents/types.js";
+
+describe("resolveType name precedence", () => {
+  let harness: TestHarness;
+  beforeEach(() => { harness = createTestHarness(); });
+  afterEach(async () => { await harness.dispose(); });
+
+  it.each([false, true])("prefers canonical names with reversed registration %s", reverse => {
+    const entries: [string, AgentConfig][] = [
+      ["alias-owner", { name: "alias-owner", displayName: "probe", description: "", systemPrompt: "Alias" }],
+      ["Probe", { name: "Probe", description: "", systemPrompt: "Canonical" }],
+    ];
+    registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
+    expect(resolveType("Probe")).toBe("Probe");
+    expect(resolveType("probe")).toBe("Probe");
+    expect(resolveType("alias-owner")).toBe("alias-owner");
+  });
+
+  it.each([false, true])("reports sorted ambiguities with reversed registration %s", reverse => {
+    const entries: [string, AgentConfig][] = [
+      ["Probe", { name: "Probe", displayName: "shared", description: "", systemPrompt: "First" }],
+      ["PROBE", { name: "PROBE", displayName: "shared", description: "", systemPrompt: "Second" }],
+    ];
+    registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
+    expect(resolveType("Probe")).toBe("Probe");
+    expect(() => resolveType("probe")).toThrow('Ambiguous agent type "probe": PROBE, Probe.');
+    expect(() => resolveType("shared")).toThrow('Ambiguous agent type "shared": PROBE, Probe.');
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */

@@ -352,7 +352,8 @@ describe("AgentNavigator — Interaction", () => {
   it("restores queued steering messages back into the editor on Alt+Up (dequeue)", () => {
     const record = makeRecord();
     const manager = makeManager([record]);
-    manager.dequeueMessages = vi.fn().mockReturnValue(["queued steer 1", "queued steer 2"]);
+    const queued = "queued\x07 steer\x1b]0;source-title\x07 1\r\nnext line";
+    manager.dequeueMessages = vi.fn().mockReturnValue([queued, "queued steer 2"]);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);
@@ -375,7 +376,7 @@ describe("AgentNavigator — Interaction", () => {
 
     expect(manager.dequeueMessages).toHaveBeenCalledWith(record.id);
     expect(parentDequeue).not.toHaveBeenCalled();
-    expect(ui.baseEditor.getText()).toBe("queued steer 1\n\nqueued steer 2\n\nexisting draft");
+    expect(ui.baseEditor.getText()).toBe(`${queued}\n\nqueued steer 2\n\nexisting draft`);
     expect(ui.ctx.notify).toHaveBeenCalledWith("Restored 2 queued messages to editor", "info");
   });
 

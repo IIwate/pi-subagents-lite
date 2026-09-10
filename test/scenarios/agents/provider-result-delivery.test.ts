@@ -66,6 +66,30 @@ describe("provider errors and continued result delivery", () => {
     expect(scenario.pi.sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("shuts down a real Pi session when setup fails before extension binding", async () => {
+    const create = scenario.createAgentSession.getMockImplementation()!;
+    let child!: Awaited<ReturnType<typeof create>>["session"];
+    scenario.createAgentSession.mockImplementationOnce(async options => {
+      const result = await create(options);
+      child = result.session;
+      vi.spyOn(child, "bindExtensions").mockRejectedValueOnce(new Error("Extension setup failed"));
+      vi.spyOn(child.extensionRunner, "emit");
+      vi.spyOn(child, "dispose");
+      return result;
+    });
+    await executeAgentTool("setup-error", params("setup failure"), undefined, undefined, scenario.ctx);
+    const record = scenario.manager.listAgents()[0];
+    await record.execution.promise;
+
+    expect(record.lifecycle.status).toBe("error");
+    expect(record.error).toBe("Extension setup failed");
+    expect(record.execution.session).toBeUndefined();
+    expect(child.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
+    expect(child.dispose).toHaveBeenCalledOnce();
+    expect(scenario.providers[0].state.callCount).toBe(0);
+    expect(readResultEntries(scenario.ctx).pending.size).toBe(1);
+  });
+
   it("continues a delivered Error without replacing its first delivery", async () => {
     scenario.store.mutate.routing.clearAll();
     scenario.providers[0].setResponses([
@@ -82,7 +106,12 @@ describe("provider errors and continued result delivery", () => {
     expect(readResultEntries(scenario.ctx).pending.get(firstDeliveryId!)?.error).toBe("content_filter");
     await expect(scenario.coordinator.interact(record.id, "continue")).resolves.toEqual({ accepted: true });
     await record.execution.promise;
-    const delivered = scenario.coordinator.deliverSelectedMessages(record.id, [0]);
+    const deliveredSelection = scenario.coordinator.deliverSelectedMessages(
+      record.id, scenario.coordinator.getDeliverableMessages(record.id).filter((_, index) => [0].includes(index)),
+    );
+    expect(deliveredSelection.status).toBe("saved");
+    if (deliveredSelection.status === "rejected") throw new Error("Selection was rejected");
+    const delivered = deliveredSelection.delivery;
     expect(delivered).toBeDefined();
     const secondDeliveryId = delivered!.deliveryId;
 

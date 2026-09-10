@@ -34,7 +34,7 @@ Alt+Up delegates app.message.dequeue to the selected child. It drains pending pr
 
 ## Consequences
 
-The UI distinguishes accepted-but-queued input, retry delay and committed transcript. It still depends on Pi queue events and retry APIs; it does not guarantee network latency or provider recovery. Raw pending text currently bypasses displayText, a separate [rendering proposal](../../proposed/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md) records that gap. [Human takeover](../feature/2026-09-10-human-takeover-and-selective-delivery.md) independently controls automatic parent delivery.
+The UI distinguishes accepted-but-queued input, retry delay and committed transcript. It still depends on Pi queue events and retry APIs; it does not guarantee network latency or provider recovery. Both pending render paths sanitize and flatten source text through [displayText](2026-09-10-terminal-preview-and-queue-sanitization.md), while dequeue preserves the original text. [Human takeover](../feature/2026-09-10-human-takeover-and-selective-delivery.md) independently controls automatic parent delivery.
 
 ## Evidence
 

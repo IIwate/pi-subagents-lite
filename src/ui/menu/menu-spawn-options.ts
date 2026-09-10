@@ -11,7 +11,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildListTheme } from "./helpers.js";
+import { buildListTheme, saveSetting } from "./helpers.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { ThinkingLevel } from "../../types.js";
@@ -56,28 +56,36 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
     },
   ];
 
+  let settingsList: SettingsList;
   const onChange = (id: string, newValue: string) => {
-    switch (id) {
-      case "forceBackground":
-        store.mutate.agent.setForceBackground(newValue === "ON");
-        ctx.ui.notify(`Force background set to ${newValue}`, "info");
-        break;
-      case "defaultThinking":
-        store.mutate.agent.setDefaultThinking(newValue === "inherit" ? undefined : newValue as ThinkingLevel);
-        ctx.ui.notify(`Default thinking level set to ${newValue}`, "info");
-        break;
-      case "disableDefaultAgents": {
-        const disabled = newValue === "ON";
-        store.mutate.agent.setDisableDefaultAgents(disabled);
-        setDefaultAgentsDisabled(disabled);
-        ctx.ui.notify(`Default agents ${disabled ? "disabled" : "enabled"}`, "info");
-        break;
+    const saved = saveSetting(ctx, () => {
+      switch (id) {
+        case "forceBackground":
+          store.mutate.agent.setForceBackground(newValue === "ON");
+          ctx.ui.notify(`Force background set to ${newValue}`, "info");
+          break;
+        case "defaultThinking":
+          store.mutate.agent.setDefaultThinking(newValue === "inherit" ? undefined : newValue as ThinkingLevel);
+          ctx.ui.notify(`Default thinking level set to ${newValue}`, "info");
+          break;
+        case "disableDefaultAgents": {
+          const disabled = newValue === "ON";
+          store.mutate.agent.setDisableDefaultAgents(disabled);
+          setDefaultAgentsDisabled(disabled);
+          ctx.ui.notify(`Default agents ${disabled ? "disabled" : "enabled"}`, "info");
+          break;
+        }
       }
+    });
+    if (!saved) {
+      settingsList.updateValue("forceBackground", store.agent.forceBackground ? "ON" : "OFF");
+      settingsList.updateValue("defaultThinking", store.agent.defaultThinking ?? "inherit");
+      settingsList.updateValue("disableDefaultAgents", store.agent.disableDefaultAgents ? "ON" : "OFF");
     }
   };
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const settingsList = new SettingsList(items, 10, buildListTheme(theme), onChange, () => done(undefined));
+    settingsList = new SettingsList(items, 10, buildListTheme(theme), onChange, () => done(undefined));
     return new SettingsListWrapper(settingsList, { title: "Spawn Options", theme, onCancel: () => done(undefined) });
   });
 }

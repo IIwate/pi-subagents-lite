@@ -12,7 +12,8 @@ let inputInstances: Array<{
   getValue: () => string;
 }> = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SettingsList: class MockSettingsList { constructor() {} },
   Input: class MockInput {
     value = "";

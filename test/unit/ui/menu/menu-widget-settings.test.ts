@@ -13,7 +13,8 @@ let settingsListCalls: Array<{
   options?: any;
 }> = [];
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async importOriginal => ({
+  ...await importOriginal<typeof import("@earendil-works/pi-tui")>(),
   SettingsList: class MockSettingsList {
     items: any[];
     constructor(items: any[], maxVisible: number, theme: any, onChange: any, onCancel: any, options?: any) {

@@ -614,7 +614,9 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("renders queued steering messages immediately in the subagent view", () => {
     const record = makeRecord();
     const session = record.execution.session;
-    session.getSteeringMessages = vi.fn().mockReturnValue(["Change direction to grep", "Avoid reading large files"]);
+    const queued = "Change\x07 direction\x1b]0;source-title\x07\x1b[31m to grep\r\nNext line";
+    session.getSteeringMessages = vi.fn().mockReturnValue([queued]);
+    record.execution.pendingSteers = [{ message: "Avoid\x07 reading\r\nlarge files" }];
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(makeManager([record]));
     navigator.setUICtx(ui.ctx as any);
@@ -625,9 +627,14 @@ describe("AgentNavigator — Transcript & Footer", () => {
 
     const pendingContainer = tui.children[1];
     const pendingLines = pendingContainer.render(120).join("\n");
-    expect(pendingLines).toContain("Steering: Change direction to grep");
+    expect(pendingLines).toContain("Steering: Change direction to grep Next line");
     expect(pendingLines).toContain("Steering: Avoid reading large files");
     expect(pendingLines).toContain("↳ Alt+Up to edit all queued messages");
+    expect(pendingLines).not.toMatch(/[\x07\r]/);
+    expect(pendingLines).not.toContain("\x1b]0;");
+    expect(pendingLines).not.toContain("\x1b[31m");
+    expect(session.getSteeringMessages()).toEqual([queued]);
+    expect(record.execution.pendingSteers[0].message).toBe("Avoid\x07 reading\r\nlarge files");
   });
 
   it("renders retry countdown status indicator and header badge when an auto-retry is active", () => {

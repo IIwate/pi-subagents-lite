@@ -1184,17 +1184,30 @@ export class AgentNavigator {
     this.isDeliverySelectorOpen = true;
     try {
       await uiCtx.custom<boolean>((tui, theme, _kb, done) => {
-        return new DeliverySelectorComponent({
+        let pendingDeliveryId: string | undefined;
+        const selector = new DeliverySelectorComponent({
           record: highlighted,
           messages,
           theme,
           tui,
           onConfirm: (selectedIndices) => {
-            coordinator.deliverSelectedMessages(highlighted.id, selectedIndices);
-            done(true);
+            const result = pendingDeliveryId
+              ? coordinator.retrySelectedDelivery(pendingDeliveryId)
+              : coordinator.deliverSelectedMessages(highlighted.id, selectedIndices.map(index => messages[index]));
+            if (result.status === "saved") {
+              done(true);
+            } else if (result.status === "pending") {
+              pendingDeliveryId = result.delivery.deliveryId;
+              selector.setNotice("Save failed. Selection retained for retry.", true);
+            } else {
+              selector.setNotice(result.reason === "empty"
+                ? "Select at least one message."
+                : "Agent or parent session is unavailable.", Boolean(pendingDeliveryId));
+            }
           },
           onCancel: () => done(false),
         });
+        return selector;
       }, {
         overlay: true,
         overlayOptions: {
@@ -1431,7 +1444,7 @@ export class AgentNavigator {
 
     const lines: string[] = [""];
     for (const message of queued) {
-      lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
+      lines.push(truncateToWidth(theme.fg("dim", `Steering: ${displayText(message).replace(/\n/g, " ")}`), width));
     }
     lines.push(truncateToWidth(theme.fg("dim", "↳ Alt+Up to edit all queued messages"), width));
     return lines;
@@ -1555,7 +1568,7 @@ export class AgentNavigator {
         ...((record.execution.pendingSteers ?? []).map(s => s.message)),
       ];
       for (const message of queued) {
-        lines.push(truncateToWidth(theme.fg("dim", `Steering: ${message}`), width));
+        lines.push(truncateToWidth(theme.fg("dim", `Steering: ${displayText(message).replace(/\n/g, " ")}`), width));
       }
       if (queued.length > 0) {
         lines.push(truncateToWidth(theme.fg("dim", "↳ Alt+Up to edit all queued messages"), width));

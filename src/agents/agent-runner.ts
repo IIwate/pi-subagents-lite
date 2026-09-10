@@ -40,12 +40,16 @@ import { debugFaultMessage, type DebugFaultKind } from "./debug-fault.js";
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
 function normalizeMaxTurns(n: number | undefined): number | undefined {
   if (n == null || n === 0) return undefined;
-  return Math.max(1, n);
+  if (!Number.isFinite(n)) throw new Error("Agent maxTurns must be finite.");
+  return Math.max(1, Math.ceil(n));
 }
 
 /** Info about a tool event in the subagent. */
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-session-setup-resource-ownership.md
 interface RunOptions extends RunTunables, RunCallbacks {
   acceptedPolicy: AcceptedRunPolicy;
+  /** Manager-owned, idempotent teardown for sessions that fail before handoff. */
+  closeSession: (session: AgentSession) => Promise<void>;
   /** ExtensionAPI instance — used for pi.exec() for git detection. */
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
@@ -512,9 +516,7 @@ async function initSession(
     // Use the exact scope snapshot validated against the initial model above.
     scopedModels,
   };
-  const result = await createAgentSession(sessionOpts);
-  enableTransientTransportErrorRetry(result.session);
-  return result;
+  return createAgentSession(sessionOpts);
 }
 
 /**
@@ -531,63 +533,68 @@ async function createAndConfigureSession(
   const policy = options.acceptedPolicy;
   const agentConfig = policy.definition;
   const { session } = await initSession(ctx, options, cwd, loader);
-  const baseName = agentConfig.name ?? type;
-  session.setSessionName(
-    options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
-  );
-  let setupAborted = options.signal?.aborted === true;
-  let abortDisposal: Promise<void> | undefined;
-  const disposeOnAbort = () => {
-    setupAborted = true;
-    if (abortDisposal) return;
-    try {
-      abortDisposal = Promise.resolve(session.dispose()).catch(() => {});
-    } catch {
-      abortDisposal = Promise.resolve();
+  let closing: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    closing ??= Promise.resolve().then(() => options.closeSession(session)).catch(error => {
+      // Preserve the setup failure even if the owner's teardown fails.
+      console.error(`[subagents] Session setup cleanup failed: ${error}`);
+    });
+    return closing;
+  };
+  const checkAbort = () => {
+    if (options.signal?.aborted) {
+      throw new Error("Agent session setup aborted");
     }
   };
-  if (setupAborted) disposeOnAbort();
-  else options.signal?.addEventListener("abort", disposeOnAbort, { once: true });
+  const onAbort = () => { void close(); };
   try {
+    checkAbort();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    enableTransientTransportErrorRetry(session);
+    const baseName = agentConfig.name ?? type;
+    session.setSessionName(
+      options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName,
+    );
+    checkAbort();
     await session.bindExtensions({});
-  } catch (error) {
-    if (!setupAborted) throw error;
-  } finally {
-    options.signal?.removeEventListener("abort", disposeOnAbort);
-  }
-  if (setupAborted) {
-    await abortDisposal;
-    throw new Error("Agent session setup aborted");
-  }
-  const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
-  const rawActive = typeof (session as any).getActiveToolNames === "function"
-    ? (session as any).getActiveToolNames()
-    : undefined;
-  const currentActiveTools = Array.isArray(rawActive)
-    ? rawActive
-    : session.getAllTools().map(tool => tool.name);
-  const filteredTools = resolveVisibleTools({
-    activeTools: Array.isArray(policy.tools) ? session.getAllTools().map(tool => tool.name) : currentActiveTools,
-    tools: policy.tools,
-    excludeTools: agentConfig.excludeTools,
-    extToolMap,
-    notify,
-  });
-  if (filteredTools) session.setActiveToolsByName(filteredTools);
-
-  if (!Array.isArray(policy.tools) && process.platform === "win32" && !isBashAvailable()) {
-    const active = typeof (session as any).getActiveToolNames === "function"
+    checkAbort();
+    const extToolMap = buildExtToolMap(loader.getExtensions().extensions);
+    const rawActive = typeof (session as any).getActiveToolNames === "function"
       ? (session as any).getActiveToolNames()
       : undefined;
-    if (Array.isArray(active) && active.includes("bash") && !active.includes("powershell")) {
-      const substituted = active
-        .map((name: string) => name === "bash" ? "powershell" : name)
-        .filter((name: string) => !agentConfig.excludeTools?.includes(name));
-      session.setActiveToolsByName(substituted);
+    const currentActiveTools = Array.isArray(rawActive)
+      ? rawActive
+      : session.getAllTools().map(tool => tool.name);
+    const filteredTools = resolveVisibleTools({
+      activeTools: Array.isArray(policy.tools) ? session.getAllTools().map(tool => tool.name) : currentActiveTools,
+      tools: policy.tools,
+      excludeTools: agentConfig.excludeTools,
+      extToolMap,
+      notify,
+    });
+    if (filteredTools) session.setActiveToolsByName(filteredTools);
+
+    if (!Array.isArray(policy.tools) && process.platform === "win32" && !isBashAvailable()) {
+      const active = typeof (session as any).getActiveToolNames === "function"
+        ? (session as any).getActiveToolNames()
+        : undefined;
+      if (Array.isArray(active) && active.includes("bash") && !active.includes("powershell")) {
+        const substituted = active
+          .map((name: string) => name === "bash" ? "powershell" : name)
+          .filter((name: string) => !agentConfig.excludeTools?.includes(name));
+        session.setActiveToolsByName(substituted);
+      }
     }
+    checkAbort();
+    await options.onSessionCreated?.(session);
+    checkAbort();
+    return session;
+  } catch (error) {
+    await close();
+    throw error;
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
   }
-  await options.onSessionCreated?.(session);
-  return session;
 }
 
 /**
