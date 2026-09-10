@@ -14,11 +14,12 @@ DeepSeek 官方数据表明：近 5 个版本中，Note 新增 48 篇，但发�
 | 场景 | 操作动作 | 典型范式 |
 |---|---|---|
 | **代码重构、改名、移包、改默认参数** | **原地更新现有 Note 事实** | 保持 Decision 核心理由不变，直接更新涉及的文件路径、类名或默认值（不追加变更流水账） |
-| **提出全新的架构尝试或技术选型** | **新建 `proposed/`** | 动手编码前写清动机、≥2 个备选与验收指标 |
-| **完成开发并准备合入主干** | **转为 `implemented/`** | 改为现在时描述，与代码原子提交（同 PR/commit），并在源码入口留反向注释 |
+| **单轮闭环交付 / 缺陷修复 / 局部架构收敛** | **直接新建 `implemented/`** | 跳过 proposed 阶段，直接以现在时事实编写决策、备选与代价，与代码原子提交（杜绝仪式性搬迁） |
+| **跨会话架构尝试 / 等待人类评审 / 分期工程立项** | **新建 `proposed/`** | 动手编码前写清动机、≥2 个备选与验收指标，待评审确认或后续排期施工 |
+| **异步提案评审通过并完成代码开发** | **转为 `implemented/`** | 改为现在时描述，与代码原子提交（同 PR/commit），并在源码主宿主留反向注释 |
 | **方案在评审中被否决** | **移入 `rejected/` 或删除** | 仅当其理由能避免未来重蹈覆辙时保留并写清原因；否则彻底删除 |
 | **新架构完全取代了旧架构** | **执行 Supersession（完全取代）** | 将旧 Note 的核心价值搬迁至新 Note，归档旧 Note 并修复全部入站链接 |
-| **版本封版打标、依赖小补丁、排版** | **免除（Not Applicable）** | 直接提交代码，无需任何 Note |
+| **纯文档修改（README、使用手册、API 说明、排版）、注释润色、单测补充、常规依赖升级、版本打标** | **免除（Not Applicable）** | 直接修改并提交，严禁新建 Note；文档本身即承载说明事实，绝不为文档再造元文档 |
 
 ---
 
@@ -49,16 +50,30 @@ DeepSeek 官方数据表明：近 5 个版本中，Note 新增 48 篇，但发�
 
 ---
 
-## 4. 源码入口反向注释规范
+## 4. 源码入口反向注释规范（单一主宿主规则）
 
-每篇 `implemented` 状态的 Note，都必须在源码物理层面具备反向追溯点：
+每篇 `implemented` 状态的 Note，在源码物理层面遵循**单一主宿主（Single Primary Host）**原则保留反向追溯点，原则上**一 Note 一锚点**，杜绝全库散弹式散落：
 
-```typescript
-// Note: 会话持久化采用文件句柄管理，避免并发写冲突 — 见 .agents/notes/implemented/architecture/2026-08-27-handle-based-session-persistence.md
-export class SessionFileHandlePool {
-  // ...
-}
-```
+1. **第一优先级（核心类型优先）**：
+   - 若决策包含核心数据结构（Interface / Type Alias / Class / Schema），反向锚点**必须且仅保留在核心类型定义正上方**（与 `type-equiv` 保持一致）：
+   ```typescript
+   // Note: 会话持久化采用文件句柄管理，避免并发写冲突 — 见 .agents/notes/implemented/architecture/2026-08-27-handle-based-session-persistence.md
+   export interface SessionFileHandleConfig {
+     engine: "sqlite" | "file";
+     handlePoolSize: number;
+   }
+   ```
+2. **第二优先级（顶层门面入口）**：
+   - 若变更属纯流程、算法、状态机或时序流转修复（无新增/修改核心类型），反向锚点**唯一锚定在该特性的顶层门面方法或状态机分发入口上方**：
+   ```typescript
+   // Note: Agent 重试策略采用带抖动的指数退避，阻断级联雪崩 — 见 .agents/notes/implemented/bug-fix/2026-09-08-backoff-retry-jitter.md
+   export async function dispatchAgentRetry(task: AgentTask): Promise<void> {
+     // ...
+   }
+   ```
+3. **禁止项（Anti-patterns）**：
+   - 严禁在一次提交所涉及的每个文件、每个类或每个辅助工具函数中散弹式重复贴注释；
+   - 严禁在底层参数透传处或非导出私有方法处打标。
 
 **为什么这至关重要？**
-未来的 AI Agent 在重构该类时，首先读到的是这段注释。它会沿着路径读取 Note，从而立即获知该类的不可侵犯约束与被否决备选方案，彻底阻断盲目优化。
+未来的 AI Agent 在重构该类时，首先读到的是这段注释。它会沿着路径读取 Note，从而立即获知该类的不可侵犯约束与被否决备选方案，彻底阻断盲目优化；而单一主宿主避免了 Note 迁移时引发大范围代码注释死链。

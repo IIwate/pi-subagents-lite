@@ -1,48 +1,68 @@
-# Development and verification
+# AGENTS.md
 
-**Package manager:** bun (`bun install`, `bun add`, `bun add -d`).
+pi-subagents-lite is a Pi extension for isolated subagent sessions, model access, and parent result delivery. [README.md](README.md) owns product usage; [CONTEXT.md](CONTEXT.md) owns terminology and product boundaries.
 
-**Typecheck:** `bun run typecheck` for production code; `bun run typecheck:test` covers all tests, shared fixtures, and Vitest configuration.
+## Repository layout
 
-**Tests:** `bun run test:unit` runs module invariants in `test/unit/`. `bun run test:scenarios` runs cross-module, filesystem, reload, and real Pi session checks in `test/scenarios/`. Scenarios use offline providers; they do not exercise a physical terminal or live model API. Shared fixtures live in `test/support/` and own cleanup through `createTestHarness`.
+| Location | Responsibility |
+|---|---|
+| [src/index.ts](src/index.ts), [registration.ts](src/registration.ts), [events.ts](src/events.ts) | Extension entry, tool/shortcut registration, and service lifecycle assembly. |
+| [src/shell.ts](src/shell.ts) | Current service references and process-local handoff across reloads. |
+| [src/agents/](src/agents/) | Agent definitions, tool handlers, child execution, concurrency, cancellation, and teardown. |
+| [src/spawn/](src/spawn/) | Spawn coordination, parent-session result storage, delivery, receipt reconciliation, and worktree validation. |
+| [src/models/](src/models/), [src/config/](src/config/) | Model authorization and thinking resolution; configuration loading, persistence, and applied settings. |
+| [src/prompt/](src/prompt/) | Context extraction, skills, deterministic guidance, and selected-message formatting. |
+| [src/ui/](src/ui/) | Input routing, transcript rendering, navigation, delivery selection, and settings views. |
+| [test/](test/) | Module tests, cross-module scenarios, and shared resource fixtures; see [development](docs/development.md#test-layers). |
+| [.agents/notes/](.agents/notes/README.md) | Decision rationale, trade-offs, and verification obligations. |
 
-`bun run test` is the official full suite, includes both Vitest projects, and uses `--maxWorkers=4`. `bun run test:parallel` runs both projects without that cap. Use `bun run test:watch --project unit` for unit watch mode. CI checks both layers in normal and fixed-seed shuffled execution on Linux and Windows; publishing runs the full suite.
+## Runtime invariants
 
-During implementation, run the narrowest tests that cover the change. Run selected evidence once for an unchanged tree; do not repeat it merely because a commit or push follows.
+- **Execution records and durable results have separate owners.** `AgentManager` owns live sessions and execution resources; the result inbox owns saved deliveries. Never reconstruct executable records from inbox entries or apply the UI retention timer to durable results ([delivery](.agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md)).
+- **ACK requires a durable receipt.** Verify the matching delivery in the parent session log before acknowledging it; sending a message, rendering it, or completing a model turn is insufficient. Preserve results when persistence or acknowledgement fails.
+- **Delivery retains its origin.** Automatic delivery requires the original parent session and active origin branch; explicit `AgentStatus` reads are session-wide. Reload handoffs remain isolated by parent session ID.
+- **Human takeover leaves subsequent output for explicit selection.** The editor sends instructions; the delivery selector selects existing messages. A taken-over terminal run does not automatically create a parent inbox entry or wake Main ([takeover](.agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md)).
+- **Accepted work keeps its policy.** Running and queued agents retain the accepted configuration. Every run respects both Model and Provider ceilings; each reservation releases at most once, and a blocked settled-session continuation returns a local rejection ([concurrency](.agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md)).
+- **Model routing grants access.** Omitted `model` selects the exact parent model; rejected explicit choices must fail visibly. Alternate access uses Pi availability and active scope, while dormant saved rules remain intact ([model access](.agents/notes/implemented/architecture/2026-09-09-model-routing-and-access-policy.md)).
+- **Tool registration stays stable.** Register Agent tools once; dynamic access belongs in `before_agent_start` system guidance. Equal effective state produces byte-stable guidance; result messages and tool cards retain the existing silent presentation ([registration](.agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md), [guidance](.agents/notes/implemented/architecture/2026-09-09-byte-stable-guidance-contract.md)).
+- **Resolve services and release resources through their owners.** Read current services through Shell getters at call time. Timers, subscriptions, child sessions, and UI replacements need matching teardown; retain cancellation and shutdown ordering ([lifecycle](.agents/notes/implemented/architecture/2026-09-09-composition-root-and-shell-singleton.md)).
+- **Terminal output and focus are explicit.** Pass model/tool text through [displayText](src/ui/format.ts) before rendering. Preserve [navigator](src/ui/agent-navigator.ts) cursor ownership, including removal of editor cursor markers while the list is focused, and restore the host components owned by a screen swap.
 
-Before committing, run `git diff --cached --check`. Run the full suite locally only for an explicit user request, CI failure diagnosis, or a repository-wide change with no credible narrower evidence. The Test workflow owns mandatory full-suite execution on Linux and Windows for every push and pull request.
+## Engineering conventions
 
-**Worktrees:** When creating a worktree, link reusable dependency directories such as `node_modules` to the main checkout; do not copy, reinstall, or move the main checkout's `node_modules`. Keep the main checkout and worktree on the same filesystem side (both Windows or both WSL/Linux); do not cross-link Win<->WSL. **Windows:** `cmd /c mklink /J <worktree>/node_modules <main>/node_modules`; unlink with `cmd /c rmdir <worktree>/node_modules` (do not recursively delete a junction). **WSL/Linux:** `ln -s <main>/node_modules <worktree>/node_modules`; unlinking the symlink must remove only the link. After merge, unlink first, then remove the worktree and leftover branches.
+- Respond in Simplified Chinese. Code comments, JSDoc, test names/descriptions/assertions, commits, and PR descriptions use English.
+- Match surrounding style. Comments explain non-obvious behavior, ownership, failure limits, and trade-offs.
+- Keep changes scoped; avoid speculative abstractions, fallback behavior, compatibility layers, and migration shims. Persisted-format or public-contract breaks require an explicit migration/version decision.
+- Validate configuration, model/tool JSON, and persisted input at entry. Trust values already established by typed internal APIs.
+- An intentionally ignored error names the expected failure and why no further action is needed; keep the protected operation narrow.
+- Use English Conventional Commits, with concise `- ` bullets for non-trivial commits and no AI attribution. Follow the [release procedure](docs/releasing.md) before tagging or publishing; release tags are immutable.
 
-# Language, code, and Git
+## Verification and test standards
 
-- Agent responses use Simplified Chinese.
-- Code comments, JSDoc, test names, test descriptions, assertion messages, commits, and PR descriptions use English.
-- Comments explain why, trade-offs, failure boundaries, and revisit conditions; they do not restate visible control flow.
-- Follow KISS: no unrequested compatibility layer, migration shim, duplicate implementation, speculative fallback, or scope expansion. Because releases exist, any persisted-format or public-contract break requires an explicit migration/version decision.
-- Match surrounding naming, comment density, and idiom.
-- Commits use English Conventional Commits. Non-trivial commits add concise `- ` bullets and never include AI attribution.
+Use Bun for package management. The [development guide](docs/development.md) owns commands, test execution, and worktree setup.
 
-# Release
+- **Evidentiary value and anti-mirror rule:** Tests verify observable behavior, system boundaries, and failure invariants. Never write mirror tests that merely duplicate internal implementation logic or assert facts already guaranteed by TypeScript types, the runtime, or upstream frameworks.
+- **Minimal runnable proof:** Add one focused check for non-trivial logic. Trivial changes, pure refactors, and formatting need no extra test.
+- **Layer discipline:** Prefer `test/unit/` for pure logic and single-module invariants. Keep `test/scenarios/` focused and restrained to cross-module lifecycle, filesystem persistence, and Pi session reconciliation.
+- **Determinism and hygiene:** Never rely on arbitrary sleeps or polling; coordinate via deterministic events or fake clocks. All resources, subscriptions, and temporary directories must register with `createTestHarness` for deterministic teardown.
+- **Local testing is strictly bounded:** Run only the narrowest test covering the changed behavior (e.g. `bun run test:unit <path>`). Complete logic and typecheck before running tests; never run tests in speculative, fragmented rerun loops. Once the narrow test passes, converge and proceed to delivery immediately.
+- **CI owns the full suite — no pre-commit test ritual:** CI owns exhaustive full-suite execution across operating systems. **Never run the full test suite (`bun run test`) locally during routine development or before committing.** Run the full suite locally only for: (1) an explicit user request, (2) CI failure diagnosis, or (3) repository-wide changes with no narrower evidence.
+- **Never repeat passing checks:** If evidence already passed on the unchanged working tree, do not rerun tests merely because a commit, tag, or push follows.
+- Run `npm run verify-notes` for affected Notes and their references. Before committing, run `git diff --cached --check`.
 
-**Version source:** `package.json`. Release tags must be annotated and match it exactly as `v<version>`.
+## Documentation ownership
 
-**Release notes:** Summarize final user-visible features and breaking changes. Fold intermediate fixes, tests, and superseded implementations into the feature they completed.
+Keep root rules self-contained in one to three sentences and link their detailed owner. Contributor procedures belong in [docs/](docs/); keep detailed facts in one place, and preserve conditions and failure limits when condensing them.
 
-**Publishing:** `.github/workflows/publish.yml` runs only for pushed `v*` tags and publishes through npm Trusted Publishing. Do not run routine releases with a local `npm publish` or a long-lived `NPM_TOKEN`.
+<!-- BEGIN WRITE-NOTES GUARDRAILS -->
+## 架构决策留痕与防撞规范（脚手架受管区，请勿手工编辑）
 
-**Before tagging:** ensure the release commit is on `origin/main`, the working tree is clean, the changelog is approved, and the normal Test workflow passes. The publish workflow rechecks the tag/version match, installs with the lockfile, runs typecheck and the full test suite, and performs an npm package dry run before publishing.
-
-**Tagging:** `git tag -a v<version> -m "v<version>" && git push origin v<version>`. Never move or force-push a release tag. Rerun a failed workflow only when npm has not published that version; code fixes require a new version and tag.
-
-**Trusted Publisher setup:** npm package settings must authorize GitHub Actions for owner `IIwate`, repository `pi-subagents-lite`, workflow `publish.yml`, and the `npm publish` action. The workflow uses GitHub-hosted runners with `id-token: write` and a pinned Trusted Publishing-compatible npm CLI; no npm token secret is required.
-
-## 架构决策留痕与防撞规范
-
-在进行任何非平凡变更（技术选型、架构重构、接口约定变更、缺陷复盘、特性裁撤）前：
+在进行涉及系统设计决策与架构基线的非平凡变更（技术选型、核心模块重构、破坏性接口变更、系统级缺陷复盘、特性裁撤）前：
 1. 遵循 [.agents/skills/write-notes/SKILL.md](.agents/skills/write-notes/SKILL.md)。
 2. 既有模块重构优先就地更新对应 Note 的事实部分，严禁只改代码不改 Note，严禁追加流水账。
-3. 新路线先在 `.agents/notes/proposed/` 编写提案；交付时随同次代码提交移入 `implemented/` 并改写为现在时。
+3. 路径分流：单轮闭环交付（随代码同批合入）直接在 `.agents/notes/implemented/` 以现在时编写事实；仅跨会话异步评审/分期立项才走 `.agents/notes/proposed/`。
 4. 必须包含 `## Alternatives considered` 章节，且必须包含维持现状选项与对手方案的最强论据。
-5. 核心代码入口保留反向追溯注释：`// Note: 见 .agents/notes/...`。
-6. Note 中的代码片段与核心类型声明必须通过 `npm run verify-notes` 门禁检查。
+5. 源码反向锚点遵循“单一主宿主”原则（类型优先，流程次之，一 Note 一锚点，禁止全库散弹式打标）。
+6. 代码块分级防护：核心契约用 `type-equiv`，普通行为逻辑用标准 ts 编译检查，严禁为凑门禁虚构无意义类型。
+7. 免除范围（严禁建 Note）：纯文档修改（README/Wiki/使用指南/API 文档）、注释调整、单测增补、常规依赖升级与非架构性日常日常修复，直接提交即可，严禁新建任何 Note。
+<!-- END WRITE-NOTES GUARDRAILS -->

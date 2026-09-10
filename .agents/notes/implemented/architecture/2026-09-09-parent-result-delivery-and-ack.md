@@ -17,8 +17,9 @@ Status: implemented
 
 1. **信箱解耦与会话日志落盘先行（Durable Mailbox Architecture）**：
    - 彻底将底层通信协议的可靠性与大模型认知的不确定性解耦；
-   - 任何后台任务终态（无论是 `completed`、`aborted`、`turn_limited` 还是 `error`）均首先作为 Custom Entry（`subagents-lite:pending-result`）直接写入父会话持久化 JSONL 日志中，内存中的 `AgentManager` 记录仅作为瞬时 UI 缓存；
-   - **物理送达即盖章（Ingestion-based ACK）**：ACK 仅代表“交付信件已物理落入父会话日志（Durable Ingestion）”。一旦交付凭据落盘，系统立即追加 `subagents-lite:result-ack`，后续父模型推理是成功、报错还是被中断，均不阻塞也不撤销 ACK。
+   - 仍在当前 `AgentManager` 中、具有父会话交付目标且未被人工接管的后台任务, 其终态结果先作为 Custom Entry (`subagents-lite:pending-result`) 写入父会话 JSONL 日志, 再请求交付. 人工接管会话仅在用户显式选择消息时创建父信箱条目; 主动移除记录或管理器关闭后的完成回调不重新入队.
+   - `AgentManager` 管理真实子会话、并发配额和取消资源; 父会话日志独立保存结果. 内存记录清理不删除已落盘结果, 恢复信箱不重建可执行会话, 结果保存不受 UI 保留计时器限制.
+   - **持久交付凭据确认 (Ingestion-based ACK)**: ACK 表示交付凭据已写入父会话日志. 对账确认凭据后追加 `subagents-lite:result-ack`; 父模型后续成功、报错或中断不改变这一事实. ACK 追加失败时保留可供再次对账的结果和凭据.
 
 2. **双向凭证核验与对账自愈（Receipt Reconciliation）**：
    - 在会话启动、恢复（`session_start`）或执行任意交付前，`reconcileDeliveryState()` 自动扫描父会话磁盘 JSONL 日志；
@@ -26,7 +27,7 @@ Status: implemented
 
 3. **生命周期分期的四种交付路径（Four Delivery Paths）**：
    - **空闲立即拍醒（Idle Wake）**：当父会话处于空闲状态（`isIdle`）时，调用 `pi.sendMessage(message, { triggerTurn: true })` 新起推理回合通知模型；
-   - **运行中静默排队（Running Queue）**：当父会话正处于推理中或结算中（`running`/`settling`）时，调用 `pi.sendMessage(message, { deliverAs: "followUp" })` 将信件排入后继队列，**绝不粗暴打断正在生成的模型**；
+   - **运行中排队 (Running Queue)**: 父会话运行中使用 `pi.sendMessage(message, { deliverAs: "followUp" })`, 消息消费时机由 Pi 调度. `preflight` 和 `settling` 阶段暂停新唤醒请求, 分别由预检注入和结算后的完成事件判定处理.
    - **预检顺带注入（Preflight Piggyback）**：针对断电或异常遗留的真正未消费孤儿结果，在用户下一次发起自然提问时，通过 `before_agent_start` 预检拦截并自然合并入当前提问上下文，消除突兀的单独唤醒；
    - **主动拉取消费（Explicit Lookup）**：模型或用户显式调用 `AgentStatus({ agent_id })` 时，工具直接返回落盘结果并附带 `deliveryIds` 凭据，落盘后同步完成 ACK 闭环。
 
@@ -35,9 +36,10 @@ Status: implemented
    - 仅当父轮次期间**确实有新的子代理完成事件到达**时，才允许在结算后触发唤醒。主线程在当前轮次仅调用 `Agent` 启动新子代理而无新完成时，全程保持绝对静默，避免工具调用期间的未邀打扰。
 
 5. **人工介入静默与手动选择性交付（Human Takeover & Selective Delivery）**：
-   - **介入切断自动唤醒**：用户在 TUI 中向子代理发送消息交互时，立即标记 `takenOver = true`，自动触发前台解绑（`detach()` 释放主会话等待）与自动置顶（`Auto-Pin`，免疫 15 分钟 TTL GC 淘汰）；
-   - 接管后的子代理执行完毕时，`onAgentComplete` 识别其为接管状态，**彻底剥夺自动唤醒权（Silent Completion）**，保持完全静默以保护人类调试上下文；
-   - **快捷键 Alt+S 手动剪裁交付**：用户在 TUI 列表中按下 `Alt+S` 打开 `DeliverySelector` 对话框，由人类手动勾选高价值消息。选择器以居中模态浮层（`overlay: true`）呈现，且渲染主体高度保持恒定（锁定 `maxVisibleRows`，右侧预览超出截断、不足留白补齐），消除长短消息切换时的动态行数抖动，杜绝差量渲染器行数缩水触发的清屏清回滚（`\x1b[3J`）。协调器生成**全新派生的 `deliveryId`**，将定制摘要以 `### Delivered Output` 格式写入信箱投递，支持多阶段按需交付。
+   - 用户向保留的子会话发送输入时, `AgentManager.interact` 标记 `takenOver = true`, 调用 `detach()` 释放前台等待, 并自动 pin 该记录以暂停自动清理. 打开视图本身不触发接管.
+   - 接管后的 `onAgentComplete` 在创建父信箱条目前返回, 因而终态既不自动保存到父信箱, 也不请求唤醒 Main. 子会话使用 `SessionManager.inMemory`; 未显式交付的输出仅在当前运行时中保留, 不提供跨 `/reload` 或进程退出的恢复保证. 错误后的人工继续同样遵守这一规则.
+   - 用户从聚焦的子代理列表打开 `Alt+S` 选择器. 选择器负责浏览和勾选既有消息; 标准编辑器负责指令和继续执行. 每次确认选择后, 协调器创建新的 `deliveryId`, 将 `### Delivered Output` 内容先写入信箱再请求交付, 保留先前条目.
+   - 选择器以居中模态浮层 (`overlay: true`) 呈现, 主体锁定 `maxVisibleRows`, 预览超出截断、不足补齐, 避免消息切换引起渲染高度变化.
 
 6. **树分支敏感交付（Branch-aware Local Delivery）**：
    - 每个 pending 结果均绑定派生时的入口条目 ID（`originEntryId`）；
@@ -73,16 +75,17 @@ export interface PendingResult {
 ## Consequences
 
 - **收益**：
-  - 彻底杜绝了后台执行结果的丢失风险，消除了幽灵子代理完成导致的模型认知幻觉；
-  - 将并发完成平滑收敛为有序单次唤醒，且在父会话忙碌时自动降级为 Follow-up 排队，不抢占正在生成的对话；
+  - 成功落盘的结果可供恢复和回执对账, 不随内存执行记录清理而删除.
+  - 并发完成共用一次父会话唤醒请求, 后续结果保留在信箱并合并交付; 运行中的父会话通过 Pi 的 Follow-up 队列接收消息.
   - 接入人工介入（Takeover）与手动选择性交付（Alt+S），实现人类对交付内容的降噪剪裁与多阶段回传；
   - 会话崩溃或断电重启具备确定性的双向凭证对账能力；多分支导航时上下文保持绝对隔离。
 - **代价与已知上限**：
-  - 会话日志为只追加文件，需要在 Preflight 阶段异步解析最新 JSONL 条目（得益于操作系统页面缓存，开销处于微秒到毫秒级，远低于 LLM 启动时延）；
-  - 状态机需横跨 `before_agent_start`、`agent_start`、`agent_end`、`agent_settled` 与 `session_tree` 多个生命周期事件，内部状态转换严密且需要持久化单调版本号防护。
+  - 会话日志为只追加文件, Preflight 对账需要异步读取和解析 JSONL; 成本随会话大小变化.
+  - 状态机跨越 `before_agent_start`、`agent_start`、`agent_end`、`agent_settled` 与 `session_tree` 事件, 使用内存中的生命周期与完成版本计数防止过时回调请求交付.
 
 ## Verification
 
 - 交付持久化、唤醒合并、幽灵消灭与 ACK 对账逻辑经集成测试全面覆盖：[test/scenarios/spawn/durable-inbox.test.ts](../../../../test/scenarios/spawn/durable-inbox.test.ts)、[test/scenarios/spawn/result-delivery.test.ts](../../../../test/scenarios/spawn/result-delivery.test.ts) 与 [test/unit/spawn/spawn-coordinator.test.ts](../../../../test/unit/spawn/spawn-coordinator.test.ts)。
 - 选择器长短消息光标切换行数恒定与模态浮层边界经单测验证：[test/unit/ui/delivery-selector.test.ts](../../../../test/unit/ui/delivery-selector.test.ts)。
+- 人工接管静默、显式选择持久化和独立交付 ID 由 [human-takeover-delivery.test.ts](../../../../test/scenarios/agents/human-takeover-delivery.test.ts) 覆盖.
 - 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。

@@ -20,16 +20,18 @@
 3. **`verify-doc-refs`**（`scripts/verify-doc-refs.ts`）
    - 静态扫描全库源码（`.ts`, `.py`, `.go`, `.rs`, `.java` 等）中的注释与字符串引用；
    - 确保 `// Note: ... 见 .agents/notes/...` 形式的反向追溯注释全部指向真实存在的 Note；
+   - 配合“单一主宿主（Single Primary Host）”纪律，杜绝全库散弹式打标；
    - 一旦 Note 被重命名、移动或删除而代码注释未同步更新，CI 强行拦截报错，从物理机制上终结事实漂移。
 
 4. **`verify-doc-typecheck`**（`scripts/verify-doc-typecheck.ts`）
    - 提取全库 Note 与文档中的所有 ````ts```` / ````typescript```` 代码块；
    - 载入宿主项目的 `tsconfig.json` 并调用真实 TypeScript 编译器进行类型检查；
    - 杜绝代码重构后文档中的 API 示例过时腐烂；
+   - 适用场景：纯行为逻辑、调用示范、算法说明及无跨模块契约变更的代码块；
    - 豁免机制：纯伪代码、概念草稿可显式标注 ````ts ignore-check```` 跳过检查。
 
 5. **`verify-type-equiv`**（`scripts/verify-type-equiv.ts`）
-   - 针对架构决策中定义的关键数据结构与协议契约；
+   - **按需启用（Opt-in）**：仅针对架构决策中定义的关键数据结构、持久化模型与跨模块协议契约；
    - 标记语法：
      ````markdown
      ```ts type-equiv: <SymbolName> from <SourceFilePath>
@@ -37,7 +39,8 @@
      ```
      ````
    - 解析代码块与真实源文件的 TypeScript AST 抽象语法树；
-   - 规范化比对字段与结构，一旦源码改动而 Note 未同步，立刻在 CI 中报错，确保架构文档与代码契约绝对一致。
+   - 规范化比对字段与结构，一旦源码改动而 Note 未同步，立刻在 CI 中报错，确保架构文档与代码契约绝对一致；
+   - **防异味铁律**：若本次变更纯属算法、状态机时序或内部逻辑修复（无新增/修改核心数据结构），使用标准 ````ts```` 走真实类型编译检查即可，**严禁为凑 AST 门禁而凭空捏造无意义类型**（全库无 type-equiv 标记时门禁自动安全放行）。
 
 ## 辅助与运维工具
 

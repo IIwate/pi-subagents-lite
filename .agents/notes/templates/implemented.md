@@ -1,8 +1,10 @@
 <!--
   【维护提醒】
-  1. 现行法律契约：此文件在代码重构、改名或路径变更时，必须同批原子就地更新事实。
-  2. 源码物理绑定：请在受此决定保护的核心代码入口处标注：
-     // Note: <简述> — 见 .agents/notes/implemented/<class>/<filename>.md
+  1. 现行法律契约：此文件在代码重构、改名或路径变更时，必须同批原子就地更新事实。单轮闭环任务直接在此以现在时编写，免去先 proposed 后搬迁的仪式性摩擦。
+  2. 源码单一主宿主：请在核心代码入口处保留唯一一行反向注释（一 Note 一锚点，禁止全库散弹式打标）：
+     - 结构优先：若有核心类型/Schema，唯一放在该定义正上方：
+       // Note: <简述> — 见 .agents/notes/implemented/<class>/<filename>.md
+     - 流程次之：若为纯行为/算法/状态机修复，唯一放在顶层门面入口方法上方。
   3. 时态门禁：严禁出现 ## Proposal、## Plan、## Acceptance criteria 等计划态标题。
 -->
 
@@ -19,9 +21,10 @@ Status: implemented
 <已落地事实，全篇使用现在时描述。可插入 Package 拓扑 / 契约 / Schema 等业务自由小节>
 
 <!--
-  代码块说明：
-  1. 普通 ```ts 代码块默认参与编译器真实类型检查，确保示例不腐烂；若为纯伪代码请标注 ```ts ignore-check。
-  2. 核心架构契约可用 ```ts type-equiv: <SymbolName> from <SourceFilePath> 与真实源码进行 AST 镜像对齐。
+  代码块分级说明：
+  1. 核心契约（强校验）：跨模块接口、持久化模型或 Schema 使用 ```ts type-equiv: <SymbolName> from <SourceFilePath> 进行 AST 等价对齐。
+  2. 行为示例（真实编译）：纯算法、流程或调用范例使用普通 ```ts，自动参与编译器真实类型检查；严禁为凑 AST 门禁而捏造伪类型。
+  3. 概念草稿：纯伪代码请标注 ```ts ignore-check。
 -->
 
 ## Alternatives considered
