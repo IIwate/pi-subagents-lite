@@ -700,6 +700,7 @@ export async function continueAgentSession(
 
 // ── main entry ─────────────────────────────────────────────────────
 
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-assistant-outcomes-retries-and-turn-budgets.md
 export async function runAgent(
   ctx: ExtensionContext,
   type: SubagentType,

@@ -1,8 +1,6 @@
 /**
  * worktree-validator.ts — Validate, resolve, and label a worktree path.
  *
- * Note: see .agents/notes/implemented/architecture/2026-09-09-worktree-path-parameter-naming.md
- *
  * Pure async functions that validate a `worktree_path` value against the parent's
  * git repository. Depends on `pi.exec` for git commands.
  *
@@ -107,6 +105,7 @@ function normalizeGitPath(gitPath: string, cwd: string): string {
  * @param parentCwd - The parent session's working directory
  * @returns Validation result with resolved path + label, or error
  */
+// Note: see .agents/notes/implemented/architecture/2026-09-09-worktree-path-parameter-naming.md
 export async function validateWorktreePath(
   pi: PiExec,
   worktreePath: string,

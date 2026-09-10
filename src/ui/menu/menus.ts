@@ -51,6 +51,7 @@ async function runSelectMenu(
   }
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-10-menu-modal-lifecycle.md
 export async function showAgentsMenu(
   ctx: ExtensionCommandContext,
 ): Promise<void> {

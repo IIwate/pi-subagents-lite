@@ -19,7 +19,6 @@ const SILENT_TOOL_RENDERING = {
 // Agent tool registration helper — stable schema for the runtime lifetime
 // ============================================================================
 
-// Note: see .agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md
 /** Register the Agent tool once; per-run guidance lists current Agent types. */
 export function registerAgentTool(pi: ExtensionAPI): void {
   const agentParam = Type.Optional(Type.String());
@@ -55,6 +54,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
 // ============================================================================
 
 /** Register all tools, commands, and message renderers. */
+// Note: see .agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md
 export function registerTools(pi: ExtensionAPI): void {
   // Agent tool — stable stealth schema; dynamic state lives in per-run guidance
   registerAgentTool(pi);

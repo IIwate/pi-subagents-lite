@@ -108,8 +108,8 @@ export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promis
 // ============================================================================
 
 /** Register all pi.on() event listeners. */
+// Note: see .agents/notes/implemented/architecture/2026-09-09-dynamic-guidance-injection.md
 export function setupEventListeners(pi: ExtensionAPI): void {
-  // Note: see .agents/notes/implemented/architecture/2026-09-09-dynamic-guidance-injection.md
   pi.on("before_agent_start", async (event, ctx) => {
     const resultMessage = await getCoordinator()?.prepareBeforeAgentStart();
     if (!event.systemPromptOptions.selectedTools?.includes("Agent")) {

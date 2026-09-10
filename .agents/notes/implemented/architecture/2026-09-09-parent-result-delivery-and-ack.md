@@ -1,51 +1,14 @@
-# Agent Note: 会话持久化先行与可靠 ACK 的后台结果交付机制
+# Agent Note: 父会话结果信箱、持久回执与交付调度
 
 Status: implemented
 
 ## Problem
 
-在多 Agent 异步协作体系中，后台运行的子代理任务（Background Agent）在执行完毕后必须将其输出或错误结果安全、准确地汇报回父会话。传统直接向父模型发送消息的“发后即忘（Fire-and-forget）”模式与早期的确认机制存在严重的工程隐患：
-
-1. **结果易丢失**：子代理完成时若直接将内存中的结果推给父会话并标记为“已消费”，一旦父会话恰好遭遇网络中断、组织配额耗尽（Quota Error）或进程意外崩溃，该子代理耗费大量时间与 Token 计算出的成果将永久丢失；
-2. **并发唤醒风暴**：当多个后台任务在相近时间内并发完成时，若每个结果都向父会话发送一条独立的消息请求，会导致父模型被频繁打断并触发多次重复推理轮次，在网络或凭证异常时演变为自发性重试风暴；
-3. **上下文错乱与分支越界**：在用户通过 `/tree` 进行会话分支切换时，若不进行分支来源隔离，原本属于分支 A 的子代理结果会被错误注入到分支 B 的对话上下文中，造成严重的上下文污染；
-4. **幽灵子代理（Ghost Subagent）与确认机制失步**：若将结果确认（ACK）强绑定于父模型后续推理轮次的成功完成（Model-gated Turn Outcome），一旦模型在生成回复时遭遇网络抖动、429 限流、安全审查拦截或用户手动中止（Ctrl+C），结果虽然已物理落入会话历史，却未能打上 ACK 标记。系统重启或开启新轮次时，未确认的旧记录被误判为未决任务再次唤醒主线程。主线程刚派发新任务或刚结束回合，突然收到早已淘汰的子代理完成报告（且 TUI 列表中无该代理），导致主模型产生严重的虚假完成幻觉。
+子任务完成时父模型可能正在运行、重试或退出. 直接发送后就丢弃唯一结果会丢数据; 以父模型是否生成成功回复作为 ACK 条件, 又会重放已经写入父历史的结果. UI 活体记录清理与磁盘结果寿命不同, 必须分别记录执行、保存和接收事实.
 
 ## Decision
 
-系统在 `src/spawn/spawn-coordinator.ts` 与 `src/spawn/result-inbox.ts` 中建立了一套持久化优先（Durable Persistence First）、信箱解耦、生命周期分期与树分支敏感的可靠交付机制：
-
-1. **信箱解耦与会话日志落盘先行（Durable Mailbox Architecture）**：
-   - 彻底将底层通信协议的可靠性与大模型认知的不确定性解耦；
-   - 仍在当前 `AgentManager` 中、具有父会话交付目标且未被人工接管的后台任务, 其终态结果先作为 Custom Entry (`subagents-lite:pending-result`) 写入父会话 JSONL 日志, 再请求交付. 人工接管会话仅在用户显式选择消息时创建父信箱条目; 主动移除记录或管理器关闭后的完成回调不重新入队.
-   - `AgentManager` 管理真实子会话、并发配额和取消资源; 父会话日志独立保存结果. 内存记录清理不删除已落盘结果, 恢复信箱不重建可执行会话, 结果保存不受 UI 保留计时器限制.
-   - **持久交付凭据确认 (Ingestion-based ACK)**: ACK 表示交付凭据已写入父会话日志. 对账确认凭据后追加 `subagents-lite:result-ack`; 父模型后续成功、报错或中断不改变这一事实. ACK 追加失败时保留可供再次对账的结果和凭据.
-
-2. **双向凭证核验与对账自愈（Receipt Reconciliation）**：
-   - 在会话启动、恢复（`session_start`）或执行任意交付前，`reconcileDeliveryState()` 自动扫描父会话磁盘 JSONL 日志；
-   - 系统核验日志中是否已存在带有该 `deliveryId` 的交付凭据（即隐藏自定义消息 `subagent-result`，或显式 `AgentStatus` 查询的 `toolResult`）。若证实信件早已进入历史上下文，代码自动补齐缺失的 `result-ack` 并在内存中销毁其 pending 态，**从根源上消灭会话中断引发的幽灵二次唤醒**。
-
-3. **生命周期分期的四种交付路径（Four Delivery Paths）**：
-   - **空闲立即拍醒（Idle Wake）**：当父会话处于空闲状态（`isIdle`）时，调用 `pi.sendMessage(message, { triggerTurn: true })` 新起推理回合通知模型；
-   - **运行中排队 (Running Queue)**: 父会话运行中使用 `pi.sendMessage(message, { deliverAs: "followUp" })`, 消息消费时机由 Pi 调度. `preflight` 和 `settling` 阶段暂停新唤醒请求, 分别由预检注入和结算后的完成事件判定处理.
-   - **预检顺带注入（Preflight Piggyback）**：针对断电或异常遗留的真正未消费孤儿结果，在用户下一次发起自然提问时，通过 `before_agent_start` 预检拦截并自然合并入当前提问上下文，消除突兀的单独唤醒；
-   - **主动拉取消费（Explicit Lookup）**：模型或用户显式调用 `AgentStatus({ agent_id })` 时，工具直接返回落盘结果并附带 `deliveryIds` 凭据，落盘后同步完成 ACK 闭环。
-
-4. **增量版本门禁（Completion Version Gating）**：
-   - 维护单调递增的 `completionVersion` 与当前轮次快照 `parentWakeCompletionVersion`；
-   - 仅当父轮次期间**确实有新的子代理完成事件到达**时，才允许在结算后触发唤醒。主线程在当前轮次仅调用 `Agent` 启动新子代理而无新完成时，全程保持绝对静默，避免工具调用期间的未邀打扰。
-
-5. **人工介入静默与手动选择性交付（Human Takeover & Selective Delivery）**：
-   - 用户向保留的子会话发送输入时, `AgentManager.interact` 标记 `takenOver = true`, 调用 `detach()` 释放前台等待, 并自动 pin 该记录以暂停自动清理. 打开视图本身不触发接管.
-   - 接管后的 `onAgentComplete` 在创建父信箱条目前返回, 因而终态既不自动保存到父信箱, 也不请求唤醒 Main. 子会话使用 `SessionManager.inMemory`; 未显式交付的输出仅在当前运行时中保留, 不提供跨 `/reload` 或进程退出的恢复保证. 错误后的人工继续同样遵守这一规则.
-   - 用户从聚焦的子代理列表打开 `Alt+S` 选择器. 选择器负责浏览和勾选既有消息; 标准编辑器负责指令和继续执行. 每次确认选择后, 协调器创建新的 `deliveryId`, 将 `### Delivered Output` 内容先写入信箱再请求交付, 保留先前条目.
-   - 选择器以居中模态浮层 (`overlay: true`) 呈现, 主体锁定 `maxVisibleRows`, 预览超出截断、不足补齐, 避免消息切换引起渲染高度变化.
-
-6. **树分支敏感交付（Branch-aware Local Delivery）**：
-   - 每个 pending 结果均绑定派生时的入口条目 ID（`originEntryId`）；
-   - 自动交付仅在当前父会话的活跃分支包含该入口条目时生效。当用户通过 `/tree` 切换到无关历史分支时，结果保持静默挂起；切回原分支后自动重新激活交付。
-
-持久化条目核心数据结构定义如下：
+[result-inbox](../../../../src/spawn/result-inbox.ts) 使用父 Pi session 的 custom entries 保存 pending-result/result-ack, 不另建数据库. 未接管、仍属于当前 manager 且有父目标的后台 terminal completion 创建新 deliveryId. 先尝试 append pending, 再调度隐藏 subagent-result 消息. 人工会话只有显式选择才建立 inbox 条目, 见 [接管规则](../feature/2026-09-10-human-takeover-and-selective-delivery.md). 已 Clear 或 manager shutdown 删除的记录不会因迟到完成重新入队.
 
 ```ts type-equiv: PendingResult from src/spawn/result-inbox.ts
 export interface PendingResult {
@@ -66,26 +29,44 @@ export interface PendingResult {
 }
 ```
 
+AgentManager 拥有 session/取消/并发资源, inbox 拥有结果 payload. 自动清理执行记录不删持久结果, inbox 恢复也不重建假 AgentRecord. 空的可交付状态文本存为 `(no output)`, 不改变 [runner 空完成守卫](../bug-fix/2026-09-10-assistant-outcomes-retries-and-turn-budgets.md). 持久格式保留全部正文, 自动注入每条最多 4000 字符加 AgentStatus 提示; metadata 保留 deliveryId, display=false.
+
+## Receipt reconciliation
+
+ACK 表示父日志中存在匹配的接收凭据, 不表示用户阅读、父模型理解或回复成功. 凭据是有非空内容、parentSessionId 和 deliveryIds 的隐藏 subagent-result, 或 Pi 落盘的成功 AgentStatus toolResult. 只有 saved 集合中存在的 deliveryId 可据此确认. 同一结果的 ACK 补写失败时保留 payload/receipt, 下次对账继续, 不要求重跑子任务.
+
+对账直接读取 JSONL, 检查 session header、ID 和末尾换行. 文件不存在、读取失败、尾行未写完时返回无法对账, 不依据内存镜像补 ACK. getEntries 中存在而磁盘未见的 pending 移回 fallback, 避免 Pi 失败 append 留下的内存条目被当成 durable. 同步 append 返回只是 Pi 接受调用; 本扩展没有 fsync 保证.
+
+message_end handler 用 setImmediate 延后对账, 因 Pi 在 extension handler 返回后才持久化消息. concurrent reconcile 共用 Promise 并记录再次扫描需要, pendingAtRead 区分读取前已有结果与期间新完成, lifecycleVersion/isActive 排除会话/分支切换后的迟到异步动作.
+
+## Delivery opportunities
+
+[SpawnCoordinator](../../../../src/spawn/spawn-coordinator.ts) 区分 idle、preflight、running、settling. idle 使用 triggerTurn; running 或 host 非 idle 使用 followUp, 消费时机由 Pi 决定. preflight/settling 不新发 wake. before_agent_start 对账后可携带 pending, agent_settled 后只有本轮发生新 completion 才安排后续 wake. completionVersion 及其快照是内存计数, 不是持久协议版本.
+
+parentWakeActive 合并并发请求, inFlightDeliveryIds 避免同一轮重复派发. 发送失败不自建无限重试; 新完成、正常父输入或 restore/tree 提供后续机会. restorePending 仍会激活 eligible pending, 自然输入仍可夹带历史 pending. 当前没有通用“旧结果必须显式选择”门禁, 不能把 receipt 修复写成彻底禁止旧结果唤醒.
+
+自动交付只接受原 parentSessionId 且 originEntryId 在当前 branch 的结果. spawn 在本轮及时加入新 leaf, 因 getBranch 的快照可能尚未包含刚发生的 Agent 调用. session_tree 刷新 ancestry 并重新对账. fork/new session 不因复制历史而接管其他父 ID 的结果.
+
+AgentStatus 无参数只列活体记录; 精确 agent_id 可以查当前记录或最近保存结果, 是 session-wide 读取, 不限当前 branch. 查询/停止使用完整记录 ID, UI 的短 ID/类型名称不是另一种模糊查找协议. 只有正文匹配所引用 snapshot 时才附 receipt. 它没有按 deliveryId 浏览所有历史快照的公共参数. pending UI 只显示未 in-flight 且失败/fallback 的异常状态, 不代表全量 inbox 数量, 不从磁盘伪造执行列表.
+
 ## Alternatives considered
 
-- **以父模型推理成功为条件的确认机制（Model-gated ACK）** — 该方案认为只有等父模型真正基于子代理结果生成了完整回复，才算被人类和系统“认知消费”，否则应允许重试。然而，这强行将充满偶发异常（网络断开、429 限流、安全过滤、Ctrl+C 中断）的 AI 推理层绑架为通信协议终结符，导致信件物理进入上下文却迟迟无法确认，是引发幽灵子代理与重复唤醒死循环的技术根源。通信协议必须在物理落盘层就地闭环。
-- **维持现状：发后即忘的内存级投递（Fire-and-forget）** — 只要父模型在消费结果瞬间遭遇凭证失效、配额耗尽或断电崩溃，子代理所有成果直接永久蒸发，容错率为零。
-- **独立外置数据库存储结果（SQLite / Redis）** — 虽具备成熟事务机制，但增加了原生二进制编译依赖与跨平台部署负担，且破坏了 Pi 原生会话单一 JSONL 文件的离线自包含设计。
+- **保留发后即忘.** 不需要磁盘对账, 但消息失败时可能丢掉唯一 payload. 先保存和可重试 ACK 将数据保存从父推理成功解耦.
+- **父模型成功结算才 ACK.** 更接近“模型消费”的直觉, 但 provider error/用户中断会重放已经落入父日志的结果. ACK 只确认可验证的接收事实.
+- **机械 TTL 删除 pending 或重建 AgentRecord.** 前者限制旧结果积压, 后者让 UI 看起来完整; 但前者可丢掉长任务结果, 后者伪造没有真实 session 的执行资源. 持久 payload 与活体 UI 必须分开.
+- **每个完成独立 wake 或固定延时 debounce.** 低延迟或易实现, 但固定时间不能表达父生命周期, 多结果可造成重复父轮次. 当前由 in-flight 和 phase 合并.
+- **独立数据库/全程静默快照抽屉.** 数据库适合索引和事务, 抽屉适合显式控制历史交付; 两者都改变产品/存储面. 当前复用 Pi JSONL, 未合入 `6e2b40c` 只能作为另一交互路线, 不混写为当前行为.
 
 ## Consequences
 
-- **收益**：
-  - 成功落盘的结果可供恢复和回执对账, 不随内存执行记录清理而删除.
-  - 并发完成共用一次父会话唤醒请求, 后续结果保留在信箱并合并交付; 运行中的父会话通过 Pi 的 Follow-up 队列接收消息.
-  - 接入人工介入（Takeover）与手动选择性交付（Alt+S），实现人类对交付内容的降噪剪裁与多阶段回传；
-  - 会话崩溃或断电重启具备确定性的双向凭证对账能力；多分支导航时上下文保持绝对隔离。
-- **代价与已知上限**：
-  - 会话日志为只追加文件, Preflight 对账需要异步读取和解析 JSONL; 成本随会话大小变化.
-  - 状态机跨越 `before_agent_start`、`agent_start`、`agent_end`、`agent_settled` 与 `session_tree` 事件, 使用内存中的生命周期与完成版本计数防止过时回调请求交付.
+成功写入磁盘的结果不受 UI 保留 timer 影响. append 失败可用 [进程内 fallback](2026-09-09-composition-root-and-shell-singleton.md) 跨 reload 交接, 不能抵御进程退出. ACK 不代表完整长结果全部进入当前模型上下文, 因自动消息可截断且 parent 后续可压缩历史. 对账读全文件有 I/O 成本, 没有增量索引或跨进程恰好一次保证.
+
+## Evidence
+
+`2731650`, `7e584da`, `e5828bf`, `974f157`, `e85741a` 记录 foreground/background 通知、followUp 与失败反馈的早期路径. `3926adf`, `9f53ead`, `19ed1dd` 确立 inbox、调度收敛和 session-keyed fallback. `d7c2b05`, `2ecc093` 确立人工选择与独立 deliveryId. `4e5ac95` 保留全文并截断自动注入; `7d93c05` 加入新完成版本门禁; `4c6858a` 明确从模型结算 ACK 改为 durable receipt ACK.
+
+`7005a8b`, `8caab79` 记录 AgentStatus 与 ID/类型展示区分; `f40fc66`, `ee2837b` 记录子结果来源标签和实际 lifecycle status, 防止被父模型误当用户输入或一律成功.
 
 ## Verification
 
-- 交付持久化、唤醒合并、幽灵消灭与 ACK 对账逻辑经集成测试全面覆盖：[test/scenarios/spawn/durable-inbox.test.ts](../../../../test/scenarios/spawn/durable-inbox.test.ts)、[test/scenarios/spawn/result-delivery.test.ts](../../../../test/scenarios/spawn/result-delivery.test.ts) 与 [test/unit/spawn/spawn-coordinator.test.ts](../../../../test/unit/spawn/spawn-coordinator.test.ts)。
-- 选择器长短消息光标切换行数恒定与模态浮层边界经单测验证：[test/unit/ui/delivery-selector.test.ts](../../../../test/unit/ui/delivery-selector.test.ts)。
-- 人工接管静默、显式选择持久化和独立交付 ID 由 [human-takeover-delivery.test.ts](../../../../test/scenarios/agents/human-takeover-delivery.test.ts) 覆盖.
-- 契约结构体与源码 AST 100% 同步，由 `npm run verify-type-equiv` 自动门禁校验。
+[inbox unit tests](../../../../test/unit/spawn/result-inbox.test.ts)、[coordinator](../../../../test/unit/spawn/spawn-coordinator.test.ts)、[durable inbox scenarios](../../../../test/scenarios/spawn/durable-inbox.test.ts)、[result delivery](../../../../test/scenarios/spawn/result-delivery.test.ts)、[session fallback](../../../../test/scenarios/spawn/session-fallback.test.ts) 和 [AgentStatus](../../../../test/unit/agents/agent-status.test.ts) 覆盖尾行/磁盘失败、丢 ACK、并发完成、branch/session 隔离和全文查询. 离线真实 Pi 日志场景证明保存/receipt 边界, 不证明实时 provider 可用.

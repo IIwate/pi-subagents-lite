@@ -76,6 +76,7 @@ function stripScaffolding(prompt: string): string {
  * @param extras   Optional extra sections to inject (skills, parent/custom prompts).
  * @param mode     System prompt mode (replace, inherit, custom).
  */
+// Note: see .agents/notes/implemented/architecture/2026-09-10-child-prompt-and-skill-context.md
 export function buildAgentPrompt(
   config: AgentConfig,
   cwd: string,

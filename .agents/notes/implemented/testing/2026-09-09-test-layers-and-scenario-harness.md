@@ -20,6 +20,10 @@ Pure delivery formatting, selector navigation, and manager/coordinator lifecycle
 - **Classify by filename suffix or a line-count threshold.** This minimizes moves and is easy to automate, but sends pure assertions into the slow layer and leaves multi-module scenarios mislabeled when their names or sizes differ.
 - **Convert every scenario into isolated mocks.** This offers short execution and local failures, but cannot prove Pi retry behavior, durable writes, or lifecycle composition. These boundaries retain focused integration scenarios with explicit resource ownership.
 
+## Evidence
+
+`cba0940` and `636307e` establish concern-aligned test layout; `4edb1d6`, `7316eb5` and `574737c` record fixture reuse and tests at observable boundaries. `df1d5e6` and `0272b4f` address serialized overhead, isolated resources and parallel execution. `5dff016`, `d9b0cb3` and `c7d3c80` record Windows/Linux assumptions, cross-platform fixtures, and the current unit/scenario projects. The executable documentation gates have their own [process Note](../process/2026-09-10-note-verification-boundaries.md).
+
 ## Verification
 
 - `bun run typecheck` and `bun run typecheck:test` check production, tests, fixtures, and project configuration.

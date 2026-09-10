@@ -1,7 +1,5 @@
 /**
  * result-inbox.ts — Session-local durable storage and receipt tracking for background agent results.
- *
- * Note: see .agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md
  */
 
 import { readFile } from "node:fs/promises";
@@ -25,6 +23,7 @@ export interface ResultInboxState {
   latest: Map<string, PendingResult>;
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md
 export interface PendingResult {
   /** Unique completion identity. A continuation gets a new deliveryId. */
   deliveryId: string;

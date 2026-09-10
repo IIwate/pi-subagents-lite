@@ -33,6 +33,7 @@ export interface AgentNote {
   date: string
 }
 
+// Note: see .agents/notes/implemented/process/2026-09-10-note-verification-boundaries.md
 export function walkAgentNoteTree(): { notes: AgentNote[]; errors: string[] } {
   const notes: AgentNote[] = []
   const errors: string[] = []

@@ -8,6 +8,7 @@ export interface GuidanceAgent {
   maxTurns?: number;
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-09-byte-stable-guidance-contract.md
 export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
   parentModelKey: string;
@@ -16,7 +17,6 @@ export interface AgentGuidanceOptions {
   scopedKeys: ReadonlySet<string> | null;
 }
 
-// Note: see .agents/notes/implemented/architecture/2026-09-09-byte-stable-guidance-contract.md
 /** Deterministic per-run guidance for the schema-stealth Agent tool. */
 export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string {
   const { parentModelKey, routing, availableKeys, scopedKeys } = options;

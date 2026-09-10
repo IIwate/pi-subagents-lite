@@ -73,7 +73,7 @@ export const DEFAULT_FALLBACK_TOOLS: string[] = [
   "find",
 ];
 
-/** Names of tools that subagents must NOT inherit (no sub-subagent policy, see .agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md). */
+/** Tool names excluded from child sessions to prevent recursive delegation. */
 export const EXCLUDED_TOOL_NAMES = ["Agent"];
 
 /**

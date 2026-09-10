@@ -6,7 +6,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
 
-// Note: see .agents/notes/implemented/testing/2026-09-09-test-layers-and-scenario-harness.md
 const { notes, errors } = walkAgentNoteTree();
 const repoRoot = resolve(agentNoteRoot, "../..");
 

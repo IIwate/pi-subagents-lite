@@ -24,6 +24,7 @@ const MAX_DEFAULT_STRING_DISPLAY_LENGTH = 200;
 export const STATS_SEP = " · ";
 
 /** Sanitize source text before adding UI-owned ANSI styles or truncating sequences. */
+// Note: see .agents/notes/implemented/bug-fix/2026-09-10-terminal-control-sanitization.md
 export function displayText(text: string): string {
   return stripVTControlCharacters(text)
     .replace(/\r\n?/g, "\n")

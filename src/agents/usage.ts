@@ -7,6 +7,7 @@
  * the cumulative cached prefix re-read on that one call — summing across
  * turns counts the prefix N times. See issue #38.
  */
+// Note: see .agents/notes/implemented/architecture/2026-09-10-lifetime-usage-accounting.md
 export type LifetimeUsage = { input: number; output: number; cacheWrite: number; cost: number };
 
 /** Add a usage delta into a target accumulator (mutates target). */

@@ -1,62 +1,36 @@
-# Agent Note: 运行时 Shell 模块单例与 Composition Root 设计
+# Agent Note: Shell 服务所有权与跨 reload 交接
 
 Status: implemented
 
 ## Problem
 
-在 Pi 扩展的运行时生命周期与依赖管理中，早期架构面临四大结构性缺陷：
-1. **宿主回调签名固定**：Pi 运行时的工具执行（`execute`）及事件监听器（`before_agent_start`、`session_start` 等）以固定的函数签名调用，不允许传递自定义依赖上下文，依赖项必须能从模块级作用域中被触达；
-2. **Jiti 动态加载与 ESM 可变导出（Live-binding）失效**：Pi 运行时通过 Jiti 加载扩展且禁用模块缓存。如果使用模块级可变 `let` 变量并重新导出（例如每次 `setConfig()` 时重新赋值 `let __config`），ESM 的实时绑定重新赋值机制无法在非缓存模块间可靠广播，极易引发不同文件读取到陈旧配置对象的致命指针陷阱；
-3. **跨模块热重载的状态灭失与交接冲突**：用户在运行中执行 `/reload` 或修改配置触发 Jiti 重新编译时，所有普通模块级状态当场销毁。若此时恰有正在完成、尚未落盘的子代理结果，会导致数据交接中断；早期单槽位暂存又极易引发多会话间的数据踩踏；
-4. **子代理递归分形派发的死锁风险**：若子代理在自己的独立会话中再次被赋予了 `Agent` 工具，缺乏调用栈防护的系统可能陷入递归生成孙代理的无休止资源爆炸。
+Pi 通过 Jiti 加载扩展, 子 session 还会再次加载同一扩展. 导出可重新赋值的模块变量会让调用方持有陈旧引用; 子扩展重新初始化又可能覆盖父服务. reload 期间未成功保存的结果需要交接, 但不能让一个父会话覆盖另一个的结果.
 
 ## Decision
 
-系统在 `src/shell.ts` 中建立模块级 Holder 单例模式与进程级状态容器，作为轻量级的 Composition Root：
+[src/shell.ts](../../../../src/shell.ts) 用一个稳定的 holder 保存 Pi API、当前 context、ConfigStore 和 manager/coordinator/navigator 引用. 工具/事件通过 getter 在调用时读取当前值; 不把可变服务重新导出为 let. ConfigStore 在模块构造时建立, session_start reload; 其余服务按需构造, session_shutdown 释放. Shell 不是业务状态的第二份副本, 也不提供并行多个独立 activation 的隔离保证.
 
-1. **单例获取器与消除可变导出**：
-   - 彻底废除散落的 `let` 重新导出，统一收敛至 `src/shell.ts`：通过 `getStore()`、`getManager()`、`getCoordinator()`、`getNavigator()` 及 `setSessionCtx()` 等明确的 Getter/Setter 访问当前活跃依赖；
-   - 保证所有业务闭包在执行时永远读取到当前最新的有效实例。
+跨 Jiti 重载的状态仅放在 `globalThis[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")]`: 按 parentSessionId 分桶的 fallbackResults 和 `AsyncLocalStorage<boolean>` child-spawn 标记. fallback 仅保存父日志 append 失败的 payload, 新 coordinator 取走本会话桶, 不恢复 AgentSession. 当前保留已运行进程中单槽位 handoff 的一次转换; 不据此承诺跨版本持久格式迁移.
 
-2. **会话级生命周期精准对齐（Session Lifecycle Alignment）**：
-   - Shell 本身极其轻量，不持有任何具体业务领域状态；
-   - 所有会话级服务（`ConfigStore`、`AgentManager`、`SpawnCoordinator`、`AgentNavigator`）统一在 `session_start`（`src/events.ts`）时初始化构建并挂载到 Shell，并在 `session_shutdown` 时显式调用析构释放。
+`withSubagentSpawn` 包住 child setup/run 异步链. index 在该作用域中直接返回, 使子实例不注册本扩展服务, 同时不阻止无关父会话 reload. 工具层还排除 Agent, 详见 [子资源门禁](2026-09-10-isolated-child-resources-and-tool-gates.md). 标记是同进程递归防线, 不是跨进程全局并发控制.
 
-3. **跨 Jiti 重载的进程级状态容器（`process-state-v2`）**：
-   - 通过 `globalThis[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")]` 锚定跨越 Jiti 重新执行周期的物理进程内存；
-   - **会话级隔离交接桶（`fallbackResults`）**：结构采用 `Map<string, PendingResult[]>`，以 `parentSessionId` 严格隔离。当父会话文件因极端错误不可写或处于重载间隙时，未完成落盘的结果暂存在对应会话的桶中，由重载后的新协调器精准接管，彻底杜绝跨会话串扰，并平滑兼容历史单槽位快照。
-
-4. **基于 `AsyncLocalStorage` 的调用链追踪与防递归死锁**：
-   - 容器内置 `subagentSpawn: AsyncLocalStorage<boolean>`；
-   - 子代理派发与执行被包裹在 `withSubagentSpawn` 作用域内。系统通过该异步上下文在调用链上实施安全门禁，物理阻止子代理再次调用 `Agent` 派发孙代理，根除递归分形派发的雪崩隐患。
-
-```ts ignore-check
-// src/shell.ts 中的进程级状态容器与单例范式
-interface ProcessState {
-  fallbackResults: Map<string, PendingResult[]>;
-  subagentSpawn: AsyncLocalStorage<boolean>;
-}
-
-const processState = ((globalThis as any)[Symbol.for("@iiwate/pi-subagents-lite/process-state-v2")] ??= {
-  fallbackResults: new Map<string, PendingResult[]>(),
-  subagentSpawn: new AsyncLocalStorage<boolean>(),
-}) as ProcessState;
-```
+shutdown 逐项尝试通知、navigator、manager、coordinator、store 清理, 保留第一个错误供 Pi 记录. UI 失败不阻断真实 session 的关闭; manager 先于 coordinator 关闭, 让后者有机会处理已暂存结果的最终 flush/handoff. 关闭细节由 [session teardown](2026-09-10-agent-lifecycle-and-session-teardown.md) 负责.
 
 ## Alternatives considered
 
-- **依赖标准 ESM 模块缓存跨重载共享状态** — 方案最纯粹，无需接触全局 `globalThis`。但 Pi 宿主环境基于 Jiti 动态加载并显式启用了无缓存模式，模块每次热重载都会被当成全新文件执行，普通模块级变量无法存活。
-- **保留单槽位全局 Handoff（v1 设计）** — 早期使用单个变量暂存热重载中的 pending 结果，在用户快速切换或多会话并发交替时，后一个会话的结果会直接覆盖并抹除前一个会话的交接数据，必须使用按 `sessionId` 隔离的 Map。
-- **基于请求上下文的纯依赖注入（Request-scoped DI）** — 理论最优雅，但 Pi 宿主环境的回调函数签名不支持传入自定义 Context，没有外部注入通道。
-- **保留 `state.ts` 散落全局可变命名空间** — 存在 `let` 重新导出的陈旧指针 bug，单测需要 Mock 十几个模块，且读写约定完全缺乏硬性约束。
+- **普通可变 ESM 导出或父子共享初始化.** 依赖标准模块缓存时直接简洁, 但当前 Jiti/child load 边界不提供所需稳定性, 可覆盖父上下文或保留旧 API.
+- **单槽位全局 fallback.** 数据结构最小, 但多个 session reload 可以覆盖彼此结果. session-keyed Map 保留来源, 代价是进程存活期间持有尚未取走的桶.
+- **显式闭包捕获 ExtensionRuntime.** 固定的 Pi 回调签名并不阻止注册时闭包注入; 这是可行替代, 不是“宿主不支持 DI”. 未合入 `165fbee` 提供实现证据, 有利于隔离多个 runtime 和减少 Shell mocks. 迁移需同时处理所有入口, 因而 [模块边界提案](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md) 独立评审, 不影响当前事实维护.
+- **把活体 session 和全部配置也放入 globalThis.** reload 后表面上可继续访问, 但句柄可能绑定失效 ExtensionRunner, 所有权和销毁边界不明确. 仅有真实跨 reload 需求的两类状态进入 process container.
 
 ## Consequences
 
-- **收益**：彻底消除了 ESM 可变导出的陈旧引用缺陷；服务生命周期边界清晰受控；跨 Jiti 重载时未落盘数据零丢失且按会话严格隔离；杜绝了子代理递归调用的死锁风险；单测可对 `shell.js` 进行单一模块替身置换。
-- **代价与已知上限**：使用了 `Symbol.for` 在进程全局注册命名空间，需维护版本标识（`process-state-v2`）以防旧版加载冲突；极少数在 `session_start` 之前触发的偶发初始化逻辑无法访问服务。
+同一 runtime 内可读取最新服务, fallback 按 session 隔离. process-local handoff 无法抵御进程崩溃, 必须与 [durable inbox](2026-09-09-parent-result-delivery-and-ack.md) 区分, 不宣称零丢失. Shell 依赖也会隐藏模块间耦合, 当前测试既有 Shell stub 的单元层, 也有真实装配场景.
+
+## Evidence
+
+`5b3de8d`, `8aed07b`, `4681a36`, `c143c34` 记录共享状态/holder 的问题与尝试; `cc82391`, `e3636fa`, `4678b95` 确立组合根、注册/事件拆分和 coordinator. `fb02e28`, `7de96d1`, `7bc6759`, `2791388` 记录 stale Pi API 回调问题. `19ed1dd` 确立分桶交接; `2ce56bc`, `6b0ea12` 记录清理顺序. `165fbee`, `95bcc64` 是 origin/re 的替代设计, 不是主线实现.
 
 ## Verification
 
-- 服务生命周期初始化由 [test/scenarios/events.test.ts](../../../../test/scenarios/events.test.ts) 验证, 管理器销毁边界由 [test/unit/agents/manager/agent-manager.shutdown.test.ts](../../../../test/unit/agents/manager/agent-manager.shutdown.test.ts) 验证.
-- 跨重载交接与会话隔离由 [test/scenarios/shell-reload.test.ts](../../../../test/scenarios/shell-reload.test.ts) 和 [test/scenarios/spawn/session-fallback.test.ts](../../../../test/scenarios/spawn/session-fallback.test.ts) 验证.
-- 单元测试通过 `shellMock`([test/support/fixtures.ts](../../../../test/support/fixtures.ts)) 提供局部依赖. 交付场景通过 [test/support/agent-scenario.ts](../../../../test/support/agent-scenario.ts) 装配真实 Shell 服务, 资源清理边界由 [test/scenarios/harness.test.ts](../../../../test/scenarios/harness.test.ts) 验证.
+[shell](../../../../test/unit/shell.test.ts)、[index](../../../../test/unit/index.test.ts)、[events scenarios](../../../../test/scenarios/events.test.ts)、[reload](../../../../test/scenarios/shell-reload.test.ts) 和 [fallback scenarios](../../../../test/scenarios/spawn/session-fallback.test.ts) 检查当前服务、递归隔离及本会话 handoff. [manager shutdown](../../../../test/unit/agents/manager/agent-manager.shutdown.test.ts) 检查真实执行资源的清理边界.

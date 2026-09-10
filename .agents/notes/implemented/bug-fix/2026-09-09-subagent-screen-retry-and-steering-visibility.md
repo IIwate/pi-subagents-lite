@@ -1,22 +1,14 @@
-# Agent Note: Subagent screen retry awareness and steering visibility
+# Agent Note: Subagent retry awareness and queued input visibility
 
 Status: implemented
 
 ## Problem
 
-When a user took over a subagent session and typed while the subagent encountered an auto-retryable error, the user experienced an apparent input freeze:
-1. Entering text cleared the editor, but the subagent transcript displayed nothing until the subagent's retry delay expired, the retry attempt ran, and the subsequent turn pulled queued steering messages into `session.messages`.
-2. The subagent view completely hid auto-retry countdown status indicators (`auto_retry_start`/`auto_retry_end`), leaving the user blind to the fact that backoff sleep was in progress.
-3. Pressing `Esc` while taking over a subagent unconditionally invoked `manager.abort()`, terminating the entire subagent instead of cancelling backoff delay via `session.abortRetry()` as native Pi interactive mode does.
+A steering message accepted while Pi waits in retry backoff may not enter session.messages until a later turn. Clearing the editor without another visible queue surface looks like lost input. Hiding retry state makes that delay unexplained, while aborting the whole child on every Esc discards the distinction between cancelling retry sleep and stopping the task.
 
 ## Decision
 
-Subagent screen behavior aligns with native Pi interactive mode:
-1. `AgentRecord.execution.retryState` tracks active retry status via session lifecycle events (`auto_retry_start`, `auto_retry_end`).
-2. Queued steering messages (`session.getSteeringMessages?.()` and `record.execution.pendingSteers`) render in the subagent view (`pendingContainer` and transcript fallback) immediately upon submission, with a `↳ Alt+Up to edit all queued messages` footer hint.
-3. Pressing `Alt+Up` (`app.message.dequeue`) in subagent view drains queued steering messages via `manager.dequeueMessages()` and restores them into the editor for revision without affecting Main agent queues.
-4. An active auto-retry delay countdown displays via `childStatusRender` in `statusContainer` and the transcript header badge.
-5. Pressing `Esc` in subagent view checks `abortActiveRetry()` first; if active, it cancels retry sleep via `session.abortRetry()` and immediately yields execution to pending input rather than terminating the subagent.
+AgentRecord.execution.retryState reflects auto_retry_start/auto_retry_end. Manager subscribes once when adopting the session; Pi session disposal releases those lifecycle listeners. Per-prompt usage/outcome subscriptions have a separate finally cleanup owned by the [runner](2026-09-10-assistant-outcomes-retries-and-turn-budgets.md).
 
 ```ts type-equiv: AgentRetryState from src/types.ts
 export interface AgentRetryState {
@@ -28,23 +20,26 @@ export interface AgentRetryState {
 }
 ```
 
+The active child pending area displays session.getSteeringMessages and pendingSteers retained before session creation. A transcript fallback displays the same information when the dock swap is inactive. Retry countdown state participates in the render signature; queue_update and manager progress restart rendering after an idle period. Displaying queued text does not append a second user message to the transcript.
+
+Enter queues input without automatically cancelling backoff. Esc first asks manager.abortRetry for the selected running child, then falls back to child abort, then normal editor handling. abortRetry calls Pi's abortRetry and clears the UI retry state; Pi owns whether the current run settles or queued work executes next. This call alone does not promise a completed continuation or final report to Main.
+
+Alt+Up delegates app.message.dequeue to the selected child. It drains pending pre-session steers and Pi steering/followUp queues, combines returned text with any existing draft, and reports the restored count. In Main the original handler remains active. This is a text-returning API; it does not claim to reconstruct image attachments. The visible hint is `Alt+Up to edit all queued messages`.
+
 ## Alternatives considered
 
-- **Do nothing / Status quo** — The user had to wait out the exponential backoff sleep without visible feedback. Rejected because human takeover specifically requires responsive steering and clear visibility into subagent state.
-- **Aggressively abort retry on input submission** — Automatically call `session.abortRetry()` whenever input is sent to a retrying subagent. Strongest argument: provides instantaneous turn execution without waiting for user to press `Esc`. Rejected because it diverges from native Pi semantics where `Enter` queues steering messages and `Esc` cancels backoff sleep; implicit cancellation would violate the principle of least surprise.
+- **Keep only committed transcript messages.** This gives one display source, but acknowledged steering remains invisible during retry sleep and session setup. A separate pending surface represents that intermediate state.
+- **Cancel retry whenever Enter is pressed.** This reduces waiting for some inputs, but silently changes Pi's queue semantics. Explicit Esc preserves the user's choice between queueing and cancelling backoff.
+- **Terminate the child on every Esc or edit Main's queue.** Both reuse existing controls, but act on the wrong lifecycle or target while a child view is active. The selected child owns its retry and input queue.
 
 ## Consequences
 
-- **Benefits**: Subagent screen provides immediate feedback on user input submission, renders transparent retry countdowns, and preserves subagent continuity on `Esc`.
-- **Costs & upper bounds**: Additional session event listeners wired at creation; cleared on teardown.
+The UI distinguishes accepted-but-queued input, retry delay and committed transcript. It still depends on Pi queue events and retry APIs; it does not guarantee network latency or provider recovery. Raw pending text currently bypasses displayText, a separate [rendering proposal](../../proposed/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md) records that gap. [Human takeover](../feature/2026-09-10-human-takeover-and-selective-delivery.md) independently controls automatic parent delivery.
+
+## Evidence
+
+`19ede8c` establishes retry state, immediate pending display and retry-first Esc. `c4e6441` adds child queue dequeue and its hint. `aa69dca` establishes event-driven timer restart and continuation statistics. These are UI/queue changes, not a new retry loop.
 
 ## Verification
 
-Run unit and integration suites:
-```bash ignore-check
-bun run test test/unit/ui/navigator/ test/unit/agents/manager/
-```
-Verify agent note integrity and type alignment:
-```bash ignore-check
-bun run verify-notes
-```
+[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts), [interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts), [transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts), and [manager interaction](../../../../test/unit/agents/manager/agent-manager.interaction.test.ts) verify routing, immediate queue display, retry cancellation calls and dequeue. [Pi session scenarios](../../../../test/scenarios/agents/pi-session.test.ts) separately exercise Pi's actual retry loop with offline providers. These tests do not constitute physical-terminal input-latency measurements.

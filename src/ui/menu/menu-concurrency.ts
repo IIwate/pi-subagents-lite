@@ -1,5 +1,4 @@
 /** Concurrency settings with active-inventory filtering and dormant-limit preservation. */
-// Note: see .agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type SettingItem } from "@earendil-works/pi-tui";

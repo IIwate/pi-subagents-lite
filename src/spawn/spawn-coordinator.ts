@@ -1,7 +1,5 @@
 /**
  * spawn-coordinator.ts — Coordinates spawn lifecycles and durable parent result delivery.
- *
- * Note: see .agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md
  */
 
 import { randomUUID } from "node:crypto";

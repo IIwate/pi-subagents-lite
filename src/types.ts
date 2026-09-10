@@ -21,7 +21,7 @@ export interface RunTunables {
   graceTurns?: number;
 }
 
-// Note: 见 .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
+// Note: see .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
 export interface AgentRetryState {
   attempt: number;
   maxAttempts: number;
@@ -30,6 +30,7 @@ export interface AgentRetryState {
   errorMessage?: string;
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-10-agent-lifecycle-and-session-teardown.md
 export interface AgentRecord {
   id: string;
   result?: string;
@@ -61,6 +62,7 @@ export interface RunCallbacks {
   onCompaction?: () => void;
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-10-isolated-child-resources-and-tool-gates.md
 export interface AcceptedRunPolicy {
   /** Deep-copied definition resolved when the Agent call is accepted. */
   definition: AgentConfig;

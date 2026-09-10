@@ -19,6 +19,7 @@ import { parseThinkingLevel } from "../utils.js";
 /* ------------------------------------------------------------------ */
 
 /** Raw agent config as parsed from .md frontmatter. */
+// Note: see .agents/notes/implemented/architecture/2026-09-10-agent-catalogue-and-project-trust.md
 export interface AgentConfigFromMd {
   name?: string;
   display_name?: string;

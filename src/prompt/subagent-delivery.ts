@@ -1,3 +1,4 @@
+// Note: see .agents/notes/implemented/feature/2026-09-10-human-takeover-and-selective-delivery.md
 export interface DeliverableMessage {
   role: "user" | "assistant";
   content: string;

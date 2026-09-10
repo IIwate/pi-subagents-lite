@@ -56,6 +56,7 @@ function isTerminalStatus(status: AgentStatus): boolean {
 }
 
 /** Configuration for per-model concurrency limits. */
+// Note: see .agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md
 export interface ConcurrencyConfig {
   /** Per-model ceiling used when no explicit model override exists. */
   default: number;
@@ -232,7 +233,6 @@ export class AgentManager {
     return counts.get(key) ?? 0;
   }
 
-  // Note: see .agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md
   /** Provider and model ceilings are independent; every run must satisfy both. */
   private hasConcurrencyCapacity(modelKey: string): boolean {
     const modelLimit = this.modelLimits.get(modelKey) ?? this.defaultConcurrency;

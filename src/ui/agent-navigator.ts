@@ -478,6 +478,7 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
   }
 }
 
+// Note: see .agents/notes/implemented/architecture/2026-09-10-navigator-screen-and-input-ownership.md
 export class AgentNavigator {
   private uiCtx: NavigatorUICtx | undefined;
   /** Agent whose transcript and input routing are active. Null means parent. */
@@ -617,7 +618,6 @@ export class AgentNavigator {
     return this.highlightedAgentId;
   }
 
-  // Note: 见 .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
   /** Cancel active retry backoff sleep for the currently selected subagent if retrying. */
   abortActiveRetry(): boolean {
     const id = this.selectedId();
@@ -1647,6 +1647,7 @@ export class AgentNavigator {
   }
 
   /** Contain host UI failures from event handlers and polling callbacks. */
+  // Note: see .agents/notes/implemented/bug-fix/2026-09-10-navigator-rendering-and-cache.md
   update(): void {
     try {
       this.updateNavigator();
