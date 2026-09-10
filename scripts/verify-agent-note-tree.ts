@@ -1,13 +1,12 @@
 /**
- * Verify tree: lifecycle/class/filename/INDEX and repository-relative markdown links.
+ * Verify tree: lifecycle/class/filename/INDEX and internal relative markdown links.
  * Run: npx tsx scripts/verify-agent-note-tree.ts
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
 
 const { notes, errors } = walkAgentNoteTree();
-const repoRoot = resolve(agentNoteRoot, "../..");
 
 // Check relative markdown links inside active notes
 const LINK_REGEX = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -32,8 +31,8 @@ for (const note of notes) {
 
     const resolvedTarget = resolve(dirname(noteFullPath), fileTarget);
 
-    // Notes link to test and source files as well as other decisions.
-    if (resolvedTarget !== repoRoot && !resolvedTarget.startsWith(repoRoot + sep)) {
+    // Only verify internal links within agentNoteRoot
+    if (!resolvedTarget.startsWith(agentNoteRoot)) {
       continue;
     }
 

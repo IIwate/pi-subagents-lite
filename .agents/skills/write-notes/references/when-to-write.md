@@ -77,3 +77,26 @@ DeepSeek 官方数据表明：近 5 个版本中，Note 新增 48 篇，但发�
 
 **为什么这至关重要？**
 未来的 AI Agent 在重构该类时，首先读到的是这段注释。它会沿着路径读取 Note，从而立即获知该类的不可侵犯约束与被否决备选方案，彻底阻断盲目优化；而单一主宿主避免了 Note 迁移时引发大范围代码注释死链。
+
+---
+
+## 5. 指针式宪法架构：Note 与根目录 AGENTS.md 的指针协同（Pointer Architecture）
+
+并非所有决策都需要写进根目录 `AGENTS.md`。整个体系采用**双层指针式宪法架构（Two-Tier Pointer Architecture）**：
+
+### 5.1 职责分工与核心心智
+
+- **根目录 `AGENTS.md`（极高密度系统宪法）**：
+  - **核心准则**：*Keep root rules self-contained in one to three sentences and link their detailed owner.*（根规则必须保持在 1 到 3 句话以内，自包含陈述，并在末尾链接其详细所有者）。
+  - **地位**：AI 每次进入上下文的第一现场。仅承载顶层不可侵犯的运行时不变量（Runtime Invariants）与架构地图（Repository Layout）。
+- **`.agents/notes/`（立法释义与被否决档案库）**：
+  - **地位**：承载决策背景、深层动机、≥2 个被否决备选方案的最强论据与反驳、代价分析与测试靶场（Verification Harness）。
+
+### 5.2 严格的决策分流门槛（什么进 AGENTS.md？）
+
+严禁 AI 误以为“每写一篇 Note 就必须去修改一次根目录 `AGENTS.md`”（这会导致根目录迅速被细节污染膨胀）：
+
+| 决策层级 | 是否进 `AGENTS.md` | 落地机制 | 典型范例 |
+|---|---|---|---|
+| **系统级中枢基石 / 全局所有权划分** | **提炼写入 `AGENTS.md`** | 在 `## Runtime invariants` 中以 1~2 句话提炼断言式事实，文末挂超链接指针指向 Note。 | 结果持久化与执行分离、模型访问路由策略、子代理资源释放顺序。 |
+| **模块级局部决策 / 算法时序 / 缺陷修复** | **严禁写入 `AGENTS.md`** | **仅留在 `.agents/notes/` 中**。依靠 Note 正文内的 Markdown 相对链接（锁定源码与测试）以及定向测试靶场形成防撞闭环。 | 网络断开重试状态机、空白流判定、本地 UI 交互防抖、具体参数优化。 |

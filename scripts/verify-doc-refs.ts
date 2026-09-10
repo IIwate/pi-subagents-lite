@@ -29,7 +29,7 @@ const repoRoot = findRepoRoot(process.cwd());
 
 /** Source file extensions to scan for reverse-anchor documentation comments */
 const SOURCE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs", ".cjs",
+  ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
   ".py", ".go", ".rs", ".java", ".c", ".cpp",
   ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
   ".kt", ".scala", ".sh", ".bash", ".zsh",

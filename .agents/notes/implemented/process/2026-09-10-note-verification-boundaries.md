@@ -14,7 +14,7 @@ Status: implemented
 
 [verify-notes workflow](../../../../.github/workflows/verify-notes.yml) 在 main/master 的 push/PR 用 Node 24 与 Bun lockfile 执行五个检查:
 
-- tree 检查 active lifecycle/class/文件名和仓库内相对链接目标存在.
+- tree 检查 active lifecycle/class/文件名和 Note 目录树内部相对链接目标存在, 保持对外部源码和测试路径的解耦.
 - format 检查固定头部、必需章节和 implemented 的提案式标题.
 - doc refs 检查扫描到的源码中 Note/docs 路径存在.
 - doc typecheck 编译普通 ts/typescript code fences; ignore-check 明确排除草稿, type-equiv 交给专门检查.
@@ -24,6 +24,7 @@ archive 命令移动 implemented 文档并写 SHA-256 manifest. 当前五项检�
 
 ## Alternatives considered
 
+- **扩大 tree 脚本强校验外部源码与测试路径.** 曾在 `c7d3c80` 尝试将树校验扩展到全仓, 最强论据是能静态捕获 Note 中引用的过时测试文件; 但该做法违背了单一职责原则, 造成文档门禁与日常测试重构的脆弱强耦合, 测试文件重构或改名即导致文档门禁意外失败. 现已全面收敛回归原版解耦模式, 仅校验 Note 树内部引用.
 - **保持普通 ADR 和人工维护链接.** 工具成本最低, 但源码移动/类型改变后的死链更难及时暴露. 现有门禁提供可机械判断的底线.
 - **每个提交都写 Note, 每个文件都加反向注释.** 看似覆盖充分, 但形成提交流水账和重复事实. 当前以非平凡决定为单位, 行为不变的 rename、依赖常规升级和纯文档编辑不另建决策.
 - **只检查代码块的字符串或语法.** 快速, 但无法发现引用 API 的参数和类型已变化. 普通 code fences 用真实编译, 核心模型按需使用 AST 等价.
@@ -39,4 +40,4 @@ archive 命令移动 implemented 文档并写 SHA-256 manifest. 当前五项检�
 
 ## Verification
 
-`npm run verify-notes` 执行这些门禁. [note-links scenario](../../../../test/scenarios/notes/note-links.test.ts) 用临时仓库运行实际 tree 脚本, 验证缺失的 test 路径失败、恢复后成功. 该测试不宣称覆盖 archive、语义审核或所有 Markdown 语法.
+`npm run verify-notes` 执行这些门禁. [note-links scenario](../../../../test/scenarios/notes/note-links.test.ts) 用临时仓库运行实际 tree 脚本, 验证 Note 内部死链拦截, 并确保对外部测试路径保持解耦放行. 该测试不宣称覆盖 archive、语义审核或所有 Markdown 语法.

@@ -6,8 +6,8 @@
 
 路径格式严格遵循：`{lifecycle}/{class}/yyyy-mm-dd-topic.md`
 
-- `proposed/`：实施前的提案与权衡，待评审确认。模板见 [templates/proposed.md](templates/proposed.md)。
-- `implemented/`：已落地的决策事实，与代码原子提交并就地同步。模板见 [templates/implemented.md](templates/implemented.md)，纪律见 [implemented/AGENTS.md](implemented/AGENTS.md)。
+- `proposed/`：仅用于跨轮次/需异步评审的方案与权衡，待评审确认后施工。模板见 [templates/proposed.md](templates/proposed.md)。
+- `implemented/`：已落地的决策事实，与代码原子提交并就地同步。单轮闭环任务直接在此以现在时编写。模板见 [templates/implemented.md](templates/implemented.md)，纪律见 [implemented/AGENTS.md](implemented/AGENTS.md)。
 - `rejected/`：经讨论否决的方案，永久保留作为防翻案依据。模板见 [templates/rejected.md](templates/rejected.md)。
 - `archived/`：已被后续新决策完全取代的历史记录，永久冻结。约束见 [archived/AGENTS.md](archived/AGENTS.md)。
 
