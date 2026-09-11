@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[task](../../../../src/domain/task.ts)、[policy](../../../../src/domain/policy.ts) 和 [quota](../../../../src/domain/quota.ts) 构成内存中的领域 API. 它们仅依赖同目录的类型与函数, 不导入宿主 SDK. 当前公开 Agent 工具仍由 AgentManager 装配; 领域 API 的实现与验证不表示 v3 Driver 已接入该入口.
+[task](../../../../src/domain/task.ts)、[policy](../../../../src/domain/policy.ts) 和 [quota](../../../../src/domain/quota.ts) 构成内存中的领域 API. 它们仅依赖同目录的类型与函数, 不导入宿主 SDK. [TaskEngine 与原生 Adapter](2026-09-11-native-execution-and-parent-delivery-adapters.md) 使用这些值控制执行准入与交付. 当前产品 Agent 注册入口仍由 AgentManager 装配.
 
 Task 的 taskId 在续聊期间稳定, operationId 标识一次运行. createTask 接受已解析的执行策略并建立所属快照. reduceTask 返回只读状态, 不执行 I/O 或控制 Driver.
 

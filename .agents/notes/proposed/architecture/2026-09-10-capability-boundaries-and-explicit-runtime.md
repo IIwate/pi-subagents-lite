@@ -14,7 +14,7 @@ v3 的实现与修改范围限于 pi-subagents-lite 仓库. ExtensionRuntime 是
 
 ExecutionDriver/LaneDriver 在扩展内部调度原生 `@earendil-works/pi-agent-core`. ParentDeliveryAdapter 接入官方父会话 API, UI Adapter 复用现有 Pi TUI 视图与键盘机制. catalogue、配置、任务和 UI 状态属于 Runtime 实例, 不使用全局服务定位器.
 
-阶段 1 的 [Task/Policy/Quota 领域 API](../../implemented/architecture/2026-09-11-task-policy-and-quota-domain.md) 已建立独立模块和定向验证. 完整 v3 装配及官方宿主上的交付闭环按下述阶段交付; 本提案在实际实现完成后以事实毕业至 implemented.
+阶段 1 的 [Task/Policy/Quota 领域 API](../../implemented/architecture/2026-09-11-task-policy-and-quota-domain.md) 与阶段 2 的 [原生执行/父交付 Adapter](../../implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md) 已建立独立模块和定向场景. TaskEngine 可从官方扩展工具入口运行子任务并验证父接收. 产品 UI 和 ExtensionRuntime 装配按后续阶段交付; 本提案在实际实现完成后以事实毕业至 implemented.
 
 ## Host adapters and facet boundaries
 
@@ -30,6 +30,8 @@ ExecutionDriver/LaneDriver 在扩展内部调度原生 `@earendil-works/pi-agent
 - Runtime 释放自己持有的资源, 不关闭宿主父会话或其他 Runtime 的任务.
 
 跨两个 Session 不具备一个原生事务. 父交付需要明确保存顺序、稳定身份、重试和实际消费边界; Adapter 本身不能代替这些证明. 这些边界在本仓库内实现和验证, 不以宿主修改或 experimental 扩展点为前置.
+
+当前 HarnessDriver 为每个任务持有独立子 Session/Harness 和具名 Lane, 使 Harness 级工具实现、hooks 与 cwd 保持隔离. TaskStore 使用原生应用 values 保存任务和 outbox. PiDeliveryChannel 在父空闲时同步追加并核验正文, 忙碌期间不向不可撤回的父队列发送结果. 父日志校验通过官方 parser 收拢在 Adapter 内, 不宣称当前宿主可以免除磁盘 receipt 验证.
 
 ## State ownership
 
@@ -100,7 +102,7 @@ v3 作为标准 npm 插件运行于未经修改的官方 Pi. 只管理按 v3 契
 
 [Native Harness scenarios](../../../../test/scenarios/agents/harness-lanes.test.ts) 使用公开入口、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源. 它们覆盖真实并行与 Steer 消费、分支写入和重复交付反例, 以及官方 JSONL 后端关闭重开后继续原 operation 并保存结果.
 
-这些证据不代表父交付 Adapter、完整 Driver 或真实终端已经接入. 相应验证随各自的公共使用路径交付, 不无故重复已通过且未受改动影响的检查.
+[执行 Adapter 场景](../../../../test/scenarios/agents/execution-adapters.test.ts) 与 [父交付场景](../../../../test/scenarios/spawn/delivery-channel.test.ts) 覆盖原生 Driver、TaskEngine 和真实官方父会话. 当前产品注册仍使用 AgentManager/SpawnCoordinator; UI 与激活级 Runtime 切换在阶段 3、4 交付. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
 
 origin/re@5db0c90 仅为局部设计参考. a8e9625 修复 UI tick 复制 accepted policy 的问题, 表明无关 SDK 数据的重复投影具有实际成本. 不整批迁入该分支的产品策略.
 

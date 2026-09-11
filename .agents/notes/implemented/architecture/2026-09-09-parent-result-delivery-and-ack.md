@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+本 Note 描述当前 AgentManager/SpawnCoordinator 产品入口. [原生执行与父交付 Adapter](2026-09-11-native-execution-and-parent-delivery-adapters.md) 拥有独立的 v3 TaskEngine 交付契约, 使用子 Session values 保存结果、父空闲写入和持久 receipt. 两个入口没有持久格式互转.
+
 [result-inbox](../../../../src/spawn/result-inbox.ts) 使用父 Pi session 的 custom entries 保存 pending-result/result-ack, 不另建数据库. 未接管、仍属于当前 manager 且有父目标的后台 terminal completion 创建新 deliveryId. 先尝试 append pending, 再调度隐藏 subagent-result 消息. 人工会话只有显式选择才建立 inbox 条目, 见 [接管规则](../feature/2026-09-10-human-takeover-and-selective-delivery.md). 已 Clear 或 manager shutdown 删除的记录不会因迟到完成重新入队.
 
 ```ts type-equiv: PendingResult from src/spawn/result-inbox.ts
