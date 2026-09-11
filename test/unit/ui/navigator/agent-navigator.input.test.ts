@@ -168,7 +168,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
 
     expect(inputSpy).toHaveReturnedWith(undefined);
     expect(navigator.isListFocused()).toBe(false);
-    expect(routeInput).toHaveBeenCalledWith("agent-1", "Fix this bug");
+    expect(routeInput).toHaveBeenCalledWith({ type: "steer", taskId: "agent-1", operationId: "agent-1", input: { text: "Fix this bug" } });
     expect(parentSubmit).not.toHaveBeenCalled();
   });
 

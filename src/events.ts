@@ -4,6 +4,7 @@ import { getAgentConfig, getAvailableTypes, registerAgents, setAgentScanDirs, sc
 import { getDeliveryReceipt } from "./spawn/result-inbox.js";
 import { AgentManager } from "./agents/agent-manager.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
+import { AgentPresentation } from "./agents/agent-presentation.js";
 import { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
 import { modelKey, scopedModelKeys } from "./models/model-scope.js";
 import { buildCurrentAgentGuidance } from "./prompt/agent-guidance.js";
@@ -52,9 +53,8 @@ export function ensureManagerAndNavigator(): void {
 
   if (!currentNavigator) {
     const newNavigator = new AgentNavigator(
-      getManager()!,
-      async (agentId, text) => getCoordinator()?.interact(agentId, text)
-        ?? { accepted: false, reason: "unavailable" },
+      new AgentPresentation(getManager()!, getCoordinator()!),
+      undefined,
       () => getCoordinator()?.pendingResultCount(),
       () => {
         const session = getSessionCtx();
@@ -145,15 +145,7 @@ export function setupEventListeners(pi: ExtensionAPI): void {
       || text.startsWith("!")
     ) return;
 
-    const navigator = getNavigator();
-    const requestId = navigator?.beginInteraction(selectedAgentId) ?? -1;
-    const result = await getCoordinator()?.interact(
-      selectedAgentId,
-      event.text,
-      event.images,
-    ) ?? { accepted: false as const, reason: "unavailable" as const };
-    navigator?.completeInteraction(requestId, selectedAgentId, event.text, result);
-    return { action: "handled" as const };
+    if (getNavigator()?.handleEditorSubmit(event.text, "steer", event.images)) return { action: "handled" as const };
   });
 
   pi.on("agent_start", () => {

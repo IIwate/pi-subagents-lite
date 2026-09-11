@@ -5,6 +5,8 @@
 import { vi } from "vitest";
 import { ScrollView, VStack } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../../src/agents/agent-manager.js";
+import { AgentPresentation } from "../../src/agents/agent-presentation.js";
+import { getCoordinator } from "../../src/shell.js";
 
 export interface MockEditor {
   getText: () => string;
@@ -31,6 +33,7 @@ export function makeRecord(id = "agent-12345678", status = "running"): any {
       startedAt: Date.now(),
     },
     execution: {
+      operationId: id,
       session: {
         model: { id: "gpt-test", provider: "openai-test", reasoning: true },
         thinkingLevel: "high",
@@ -64,15 +67,30 @@ export function makeRecord(id = "agent-12345678", status = "running"): any {
   };
 }
 
-export function makeManager(records: any[]): AgentManager {
-  return {
+export function makeManager(records: any[]) {
+  const manager = {
     listAgents: () => records,
     getRecord: (id: string) => records.find(record => record.id === id),
     togglePinned: vi.fn(),
     abort: vi.fn(),
     abortRetry: vi.fn(() => false),
     dequeueMessages: vi.fn(() => []),
+    clear: vi.fn(() => false),
+    sendInput: vi.fn(async () => ({ accepted: true })),
+    interact: vi.fn(async () => ({ accepted: true })),
+    takeOver: vi.fn((id: string) => {
+      const record = records.find(record => record.id === id);
+      if (!record) return false;
+      record.lifecycle.takenOver = true;
+      return true;
+    }),
   } as unknown as AgentManager;
+  const source = new AgentPresentation(manager, getCoordinator() ?? undefined);
+  const names = ["togglePinned", "abort", "abortRetry", "dequeueMessages", "clear", "sendInput", "takeOver"] as const;
+  for (const name of names) Object.defineProperty(source, name, {
+    configurable: true, get: () => manager[name], set: handler => { Object.assign(manager, { [name]: handler }); },
+  });
+  return source as AgentPresentation & Pick<AgentManager, typeof names[number]>;
 }
 
 export function stripAnsi(text: string): string {
@@ -283,11 +301,11 @@ export function makeUI(editorText: { value: string }) {
   };
 }
 
-export function mountSelector(ui: ReturnType<typeof makeUI>, tui = makeTui()): any {
+export function mountSelector(ui: ReturnType<typeof makeUI>, tui = makeTui(), keybindings: unknown = {}): any {
   const selectorFactory = ui.widgets.get("agent-navigator-selector");
   if (!selectorFactory) throw new Error("agent-navigator-selector widget is not mounted");
   const selector = selectorFactory(tui, ui.theme);
-  const editor = ui.editorFactory(tui, {}, {});
+  const editor = ui.editorFactory(tui, {}, keybindings);
   const editorContainer = tui.children[tui.editorIndex];
   if (editorContainer?.children) editorContainer.children = [editor];
   const below = tui.children[tui.belowIndex];

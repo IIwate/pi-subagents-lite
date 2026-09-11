@@ -23,7 +23,7 @@ export interface ConcurrencyConfig {
 
 modelRunning/providerRunning 与可变 limits 分开. reservedModelKeys 以 agentId 记录一次 reservation, release 先删除所有权再递减两层, Clear 与迟到 finally 只能释放一次. 普通 abort 保留 slot 直到执行 Promise 结算, 防止旧 run 尚在停机就启动新 run. 显式 Clear 则立即删除记录、释放逻辑 slot 并 drain; 物理 session 关闭是异步的, 不应将该路径描述成硬件资源已同步释放.
 
-新 Agent 无容量进入 queue. drain 按接受顺序遍历, 可跳过某 model/provider 下暂时阻塞的项, 启动其他有容量的项, 因而不是整个系统严格 head-of-line FIFO. queued foreground Promise 在开始和结算后返回, queued stop/dispose 也必须结算等待. 终态 session 的人工继续不排队: 无容量返回 `concurrency` 拒绝, 不改变其原执行结果; 接管/pin 侧效果见 [人工接管](../feature/2026-09-10-human-takeover-and-selective-delivery.md).
+新 Agent 无容量进入 queue. drain 按接受顺序遍历, 可跳过某 model/provider 下暂时阻塞的项, 启动其他有容量的项, 因而不是整个系统严格 head-of-line FIFO. queued foreground Promise 在开始和结算后返回, queued stop/dispose 也必须结算等待. 终态 session 的继续不排队: 无容量返回 `concurrency` 拒绝, 不改变其原执行结果; 接管/pin 由 [显式人工接管](../feature/2026-09-10-human-takeover-and-selective-delivery.md) 独立决定. [TaskEngine](2026-09-11-native-execution-and-parent-delivery-adapters.md) 在接受原生 continuation 前同样预留 Quota, 拒绝时不创建新 operation.
 
 setConcurrency 保留运行计数并 drain, 上限调小不杀已有任务. 已接受任务的模型、thinking 和资源策略由 [调用快照](2026-09-10-isolated-child-resources-and-tool-gates.md) 固定, 不随排队期间设置改变. 上限本身仍热更新, 不是快照的一部分.
 

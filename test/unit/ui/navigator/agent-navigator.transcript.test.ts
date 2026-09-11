@@ -306,7 +306,12 @@ describe("AgentNavigator — Transcript & Footer", () => {
     const text = transcript.render(120).join("\n");
     expect(text).toContain("Synthetic compacted history 0");
     expect(text).not.toContain("I found the project structure.");
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    if (replacement === "session") expect(unsubscribe).toHaveBeenCalledOnce();
+    else expect(unsubscribe).not.toHaveBeenCalled();
+    const active = record.execution.session;
+    active.messages[0].summary = "Updated compacted history";
+    active.subscribe.mock.calls.at(-1)[0]({ type: "message_end", message: active.messages[0] });
+    expect(transcript.render(120).join("\n")).toContain("Updated compacted history");
   });
 
   it("preserves a same-named custom footer while a subagent is selected", () => {

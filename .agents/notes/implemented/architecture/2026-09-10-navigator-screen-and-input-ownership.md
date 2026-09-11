@@ -8,15 +8,15 @@ Pi regular/fullscreen renderer 共用 document 和 dock 组件, 直接替换 TUI
 
 ## Decision
 
-[AgentNavigator](../../../../src/ui/agent-navigator.ts) 保留 selectedAgentId、highlightedAgentId 和 listFocused 三种状态. 空 editor 的 Down 进入列表; Up/Down 只移动候选, Enter 确认切换. 有草稿且目标未变时 Enter 交还 editor 提交, 切换到不同目标时该 Enter 只切换并保留草稿. 普通文字、Unicode 批量输入和 bracketed paste 释放列表焦点后传递给 editor.
+[AgentNavigator](../../../../src/ui/agent-navigator.ts) 是消费 NavigationSource 的交互 Controller, 保留 selectedAgentId、highlightedAgentId 和 listFocused 三种状态. [声明式导航与 Action](2026-09-11-declarative-navigation-and-input-actions.md) 定义只读展示和执行动作边界. 空 editor 的 Down 进入列表; Up/Down 只移动候选, Enter 确认切换. 有草稿且目标未变时 Enter 交还 editor 提交, 切换到不同目标时该 Enter 只切换并保留草稿. 普通文字、Unicode 批量输入和 bracketed paste 释放列表焦点后传递给 editor.
 
-AgentNavigationEditor 包裹宿主已有 editor, 不另建一套输入实现. 它转发 focused、提交、change、autocomplete、图片、Ctrl+D、扩展快捷键和 actionHandlers, 包括 Pi 在包装之后注册的 followUp/dequeue handler. 子屏普通提交在 Main 排队前路由, `app.message.followUp` 走同一子输入目标, `app.message.dequeue` 只操作当前子会话. slash 和 `!` 命令仍由 Pi 处理. retry Esc 与子任务 abort 的优先级见 [retry UI](../bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md).
+[PiScreen](../../../../src/ui/pi-screen.ts) 的 AgentNavigationEditor 包裹宿主已有 editor, 不另建一套输入实现. 它转发 focused、提交、change、autocomplete、图片、Ctrl+D、扩展快捷键和 actionHandlers, 包括 Pi 在包装之后注册的 followUp/dequeue handler. 子屏普通提交在 Main 排队前派发 Steer Action, `app.message.followUp` 使用独立的 FollowUp Action, `app.message.dequeue` 只操作当前子任务. 按键匹配使用宿主提供的键位表并保留 Alt+Up 撤回别名, Alt+T 显式接管. slash 和 `!` 命令仍由 Pi 处理. retry Esc 与子任务 abort 的优先级见 [retry UI](../bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md).
 
 异步交互使用 requestId 与 selectedAgentId 校验回调. 旧回调不能改变新选中会话的提示或草稿; 拒绝只在当前 editor 为空时恢复原输入, 不覆盖用户新写的内容. Ctrl+D 仅清理非活动子记录且需要 Enter 确认; Ctrl+C 取消确认并向上透传, 不切断宿主中断/退出链.
 
 ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内 3 个 children, chat 位于 document index 2, editor 和 below-editor selector 的容器关系也必须匹配. 切换仅替换 document 的 chat 槽和 pending/status/footer 的 render 方法, 保留 dock 容器实例, 因而两种 renderer 读取同一组对象. 布局未知或被其他扩展占用时拒绝激活并提示, 不做部分替换.
 
-恢复逐项检查当前引用仍是自己的 replacement, 不覆盖其他扩展后来安装的 chat/render. Footer 每次从当前容器读取, 只裁减 Pi builtin footer 的重复行, 保留自定义 footer. 切屏清 scrollback 并 full render; 这一显示副作用不改变 session messages 或 result inbox. context replacement/dispose 还原 editor、组件和 clearOnShrink 设置.
+恢复逐项检查当前引用仍是自己的 replacement, 不覆盖其他扩展后来安装的 chat/render/editor. Footer 每次从当前容器读取, 只裁减 Pi builtin footer 的重复行, 保留自定义 footer. 切屏清 scrollback 并 full render; 这一显示副作用不改变 session messages 或 result inbox. context replacement/dispose 还原 editor、组件和 clearOnShrink 设置; dispose 自身不直接写终端控制序列.
 
 ## Alternatives considered
 

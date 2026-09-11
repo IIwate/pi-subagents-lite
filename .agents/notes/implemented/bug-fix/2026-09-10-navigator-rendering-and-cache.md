@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[navigator update](../../../../src/ui/agent-navigator.ts) 在首次有记录或异常 pending 状态时注册一个稳定的 below-editor widget. 零记录或折叠只返回空 render, 保留组件身份; dispose 才注销. 在拥有该 UI 期间开启 Pi 原生 clearOnShrink, 结束时还原原值. terminal transition 触发 full render, parent agent_end 用下一事件循环的 reflow 等待 Working 行移除, 并保留 hostTui 引用供最后一次布局清理.
+[navigator update](../../../../src/ui/agent-navigator.ts) 通过 [PiScreen](../../../../src/ui/pi-screen.ts) 在首次有记录或异常 pending 状态时注册一个稳定的 below-editor widget. 零记录或折叠只返回空 render, 保留组件身份; dispose 才注销. 在拥有该 UI 期间开启 Pi 原生 clearOnShrink, 结束时还原原值. terminal transition 触发 full render, parent agent_end 用下一事件循环的 reflow 等待 Working 行移除, 并保留 hostTui 引用供最后一次布局清理.
 
 展开列表以 Main 为固定摘要行, 子记录窗口容量为 `min(6, max(3, floor(rows / 5)))`, 实际条数再受记录数约束. 3~6 是子记录槽位范围, 不是整个 widget 总高度; command 和 hidden indicators 另占行. 不按 editor/footer 的经验高度减成 0 行. 状态列与统计通过宽度预算降级, 身份与父模型完全相同则省略, 自定义 footer 仍保留. 默认展开设置只决定新 navigator 的初值.
 
@@ -16,7 +16,7 @@ Manager list 顺序为 attention(error/aborted/turn_limited)、running、queued�
 
 刷新 timer 为一秒. 初次 spawn、统计进展和被接受的人工继续通过 ensureTimer 重启, 当前无选中子屏且无 running/queued/unsettled 时停止. UI 失败由 update/render 边界截住, 停止 timer 并最多提示一次, 后续实际事件仍可重试. 清理依次尝试所有 restoration, 不让一个 host UI 异常阻止其他资源释放.
 
-transcriptCache 以 session、messages 数组身份、theme 和 width 为上下文, 使用 WeakMap 缓存每条 message 的折行. message_start/update/end 逐条失效; 切 session、数组替换(包括 compaction)、主题、宽度或退出子屏时释放缓存订阅. streamingMessage 单独参与绘制, 空 thinking 不产生空 Assistant 标题. list signature 使用已累计统计, 不在每秒列表渲染中扫描 session 历史计算 contextPercent.
+[声明式展示](../architecture/2026-09-11-declarative-navigation-and-input-actions.md) 把缓存分为消息投影和折行. AgentPresentation 对 message_start/update/end 失效对应投影, 换 session 释放旧订阅; 同一 session 替换历史保留订阅, 新消息对象具有新投影. Native Driver 按不可变 Entry ID 复用投影. TranscriptView 使用只读消息对象、theme 和 width 缓存折行, 不再订阅会话. streaming 单独绘制, 空 thinking 不产生空 Assistant 标题. 列表使用已准备的统计, 不在每秒渲染中扫描 session 历史计算 contextPercent.
 
 ## Alternatives considered
 
@@ -27,7 +27,7 @@ transcriptCache 以 session、messages 数组身份、theme 和 width 为上下�
 
 ## Consequences
 
-列表不维护第二份 Agent 业务状态或 LiveView. clearOnShrink/full render 可能清掉终端 scrollback, 这是布局纠错代价, 与持久日志无关. 缓存仍需遍历当前消息并输出行, 不是常量时间渲染. list signature 使用分隔字符串而非结构化序列化, 自由文本包含分隔符时没有无碰撞保证, 不能把测试结果写成性能或正确性的绝对证明.
+列表不维护第二份 Agent 执行状态机. Source 的只读展示投影由执行事实更新. clearOnShrink/full render 可能清掉终端 scrollback, 这是布局纠错代价, 与持久日志无关. 缓存仍需遍历当前消息并输出行, 不是常量时间渲染. 列表按当前 View 输出与 footer 文本比较是否需要请求绘制, transcript 更新通过所属订阅另外触发重绘.
 
 ## Evidence
 

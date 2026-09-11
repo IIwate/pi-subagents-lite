@@ -11,6 +11,7 @@ import type {
 } from "../engine/contracts.js";
 import { extractText } from "../prompt/context.js";
 import { NativeTaskStore } from "./native-task-store.js";
+import { projectMessage } from "./message-projection.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -28,11 +29,6 @@ export interface HarnessDriverOptions {
 function textOf(message: AgentMessage): string {
   if (!("content" in message)) return "";
   return typeof message.content === "string" ? message.content : Array.isArray(message.content) ? extractText(message.content) : "";
-}
-
-function messages(entries: readonly Entry[]): ExecutionMessage[] {
-  return entries.flatMap(entry => entry.type === "message"
-    ? [Object.freeze({ entryId: entry.id, role: entry.message.role, text: textOf(entry.message) })] : []);
 }
 
 function turns(entries: readonly Entry[]): number {
@@ -57,6 +53,7 @@ export class HarnessDriver implements ExecutionDriver {
   private turnCount = 0;
   private currentOperationId?: string;
   private warned = false;
+  private readonly messageCache = new Map<string, ExecutionMessage>();
 
   private constructor(
     readonly store: NativeTaskStore,
@@ -176,11 +173,28 @@ export class HarnessDriver implements ExecutionDriver {
     const state = watch.snapshot;
     watch.unsubscribe();
     return Object.freeze({
-      operation: state.operation ? Object.freeze({ operationId: state.operation.id, cancelling: state.operation.status === "aborting" }) : undefined,
+      operation: state.operation ? Object.freeze({ operationId: state.operation.id, cancelling: state.operation.status === "aborting", startedAt: state.operation.startedAt }) : undefined,
       lastResult: state.lastResult ? await this.result(state.lastResult) : undefined,
-      messages: Object.freeze(messages(state.transcript)),
+      messages: Object.freeze(state.transcript.flatMap(entry => {
+        if (entry.type === "custom") return [];
+        let message = this.messageCache.get(entry.id);
+        if (!message) {
+          message = projectMessage(entry.id, entry.type === "message" ? entry.message
+            : { role: entry.type === "compaction" ? "compactionSummary" : "branchSummary", summary: entry.summary });
+          this.messageCache.set(entry.id, message);
+        }
+        return [message];
+      })),
+      streaming: state.operation?.streamingMessage ? projectMessage("streaming", state.operation.streamingMessage) : undefined,
+      stats: Object.freeze({ input: state.stats.usage.input, output: state.stats.usage.output, cost: state.stats.usage.cost.total,
+        toolUses: state.transcript.filter(entry => entry.type === "message" && entry.message.role === "toolResult").length,
+        turnCount: turns(operationEntries(state)), compactions: state.transcript.filter(entry => entry.type === "compaction").length,
+        contextPercent: null }),
+      retry: state.operation?.retry ? Object.freeze({ ...state.operation.retry }) : undefined,
       queued: Object.freeze(state.queues.map(item => Object.freeze({
         entryId: item.entryId, kind: item.kind, text: item.type === "message" ? textOf(item.message) : "",
+        images: item.type === "message" && item.message.role === "user" && Array.isArray(item.message.content)
+          ? item.message.content.filter(part => part.type === "image").map(part => ({ ...part })) : undefined,
       }))),
       faulted: state.faulted,
     });
@@ -225,7 +239,7 @@ export class HarnessDriver implements ExecutionDriver {
       status: this.store.binding.policy.limits.maxTurns !== undefined && turns(entries) >= this.store.binding.policy.limits.maxTurns ? "turn_limited" : "completed",
       result: text,
     };
-    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), completedAt: record.endedAt,
+    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), completedAt: record.endedAt, startedAt: record.startedAt,
       sourceEntryIds: Object.freeze(assistant ? [assistant.id] : []) });
   }
 

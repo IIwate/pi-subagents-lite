@@ -122,6 +122,11 @@ describe("Execution adapters", () => {
     expect(options[1]).toMatchObject({ reasoning: "high", maxTokens: 73 });
     expect(await tasks.cancelQueued("second", queued)).toBe("already_consumed");
     expect(tasks.get("second").control).toBe("autonomous");
+    const settledOperation = tasks.get("second").operationId;
+    tasks.setLimits({ default: 1, providers: { workers: 1 } });
+    await expect(tasks.continue("second", { text: "Blocked continuation" })).rejects.toThrow("Concurrency limit reached");
+    expect(tasks.get("second").operationId).toBe(settledOperation);
+    expect((await second.snapshot()).operation).toBeUndefined();
     release.resolve();
     await Promise.all([tasks.wait("first"), tasks.wait("third")]);
   });

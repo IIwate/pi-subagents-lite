@@ -147,6 +147,7 @@ interface AgentDisplayInfo {
  * Used by agent-manager (session lifecycle), tool-execution (steering, nudge).
  */
 interface AgentExecutionState {
+  operationId?: string;
   session?: AgentSession;
   abortController?: AbortController;
   promise?: Promise<string>;
@@ -164,7 +165,7 @@ interface AgentExecutionState {
   /** Debug fault assigned after the real child session is configured. */
   debugFaultKind?: DebugFaultKind;
   /** Steering messages queued before the session was ready. */
-  pendingSteers?: Array<{ message: string; images?: ImageContent[] }>;
+  pendingSteers?: Array<{ message: string; images?: ImageContent[]; kind?: "steer" | "followUp" }>;
   /** Active backoff delay state when an auto-retry is in progress. */
   retryState?: AgentRetryState;
   /** Callback to immediately detach foreground execution into background. */

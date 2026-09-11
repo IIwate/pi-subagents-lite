@@ -153,24 +153,20 @@ describe("AgentNavigator — Rendering", () => {
   });
 
   it("preserves the user's collapsed choice while the record list is empty", () => {
-    let records = [makeRecord()];
+    const records = [makeRecord()];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator({
-      listAgents: () => records,
-      getRecord: (id: string) => records.find(r => r.id === id),
-      togglePinned: vi.fn(),
-    } as any);
+    navigator = new AgentNavigator(makeManager(records));
     navigator.setUICtx(ui.ctx as any);
     mountSelector(ui);
 
     navigator.toggleList();
     expect(ui.statuses.get("subagents-lite")).toContain("Alt+A expand");
 
-    records = [];
+    records.length = 0;
     navigator.update();
     expect(ui.statuses.size).toBe(0);
 
-    records = [makeRecord("agent-2")];
+    records.push(makeRecord("agent-2"));
     navigator.update();
     expect(ui.statuses.get("subagents-lite")).toContain("Alt+A expand");
   });

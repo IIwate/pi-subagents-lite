@@ -92,7 +92,7 @@ describe("AgentNavigator — Interaction", () => {
     editor.onSubmit = parentSubmit;
     ui.baseEditor.onSubmit?.("continue the child");
 
-    expect(routeInput).toHaveBeenCalledWith(record.id, "continue the child");
+    expect(routeInput).toHaveBeenCalledWith({ type: "steer", taskId: record.id, operationId: record.id, input: { text: "continue the child" } });
     expect(ui.baseEditor.addToHistory).toHaveBeenCalledWith("continue the child");
     expect(parentSubmit).not.toHaveBeenCalled();
 
@@ -100,7 +100,7 @@ describe("AgentNavigator — Interaction", () => {
     editor.actionHandlers.set("app.message.followUp", parentFollowUp);
     ui.baseEditor.setText("follow up the child");
     ui.baseEditor.actionHandlers.get("app.message.followUp")?.();
-    expect(routeInput).toHaveBeenCalledWith(record.id, "follow up the child");
+    expect(routeInput).toHaveBeenCalledWith({ type: "followUp", taskId: record.id, operationId: record.id, input: { text: "follow up the child" } });
     expect(parentFollowUp).not.toHaveBeenCalled();
     expect(ui.baseEditor.getText()).toBe("");
 
@@ -353,6 +353,7 @@ describe("AgentNavigator — Interaction", () => {
     const record = makeRecord();
     const manager = makeManager([record]);
     const queued = "queued\x07 steer\x1b]0;source-title\x07 1\r\nnext line";
+    record.execution.session.getSteeringMessages = () => [queued, "queued steer 2"];
     manager.dequeueMessages = vi.fn().mockReturnValue([queued, "queued steer 2"]);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
@@ -401,7 +402,7 @@ describe("AgentNavigator — Interaction", () => {
     const dequeueHandler = editor.actionHandlers?.get("app.message.dequeue");
     dequeueHandler?.();
 
-    expect(manager.dequeueMessages).toHaveBeenCalledWith(record.id);
+    expect(manager.dequeueMessages).not.toHaveBeenCalled();
     expect(parentDequeue).not.toHaveBeenCalled();
     expect(ui.ctx.notify).toHaveBeenCalledWith("No queued messages to restore", "info");
   });

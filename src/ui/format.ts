@@ -7,8 +7,6 @@
  */
 
 import { stripVTControlCharacters } from "node:util";
-import { getConfig } from "../agents/agent-types.js";
-import type { SubagentType } from "../agents/types.js";
 import type { Theme } from "./types.js";
 import { formatTokens, formatCost } from "../agents/usage.js";
 
@@ -237,11 +235,6 @@ export function buildStatsParts(
   if (visible?.showCost !== false && args.cost != null && args.cost > 0) parts.push(formatCost(args.cost));
   if (visible?.showTime !== false && args.durationMs != null) parts.push(formatMs(args.durationMs));
   return parts;
-}
-
-/** Get display name for any agent type (built-in or custom). */
-export function getDisplayName(type: SubagentType): string {
-  return displayText(getConfig(type).displayName).replace(/\n/g, " ");
 }
 
 /**

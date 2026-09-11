@@ -32,7 +32,7 @@ export interface DeliveryChannel {
 }
 ```
 
-这些入口是当前可调用的执行与交付能力. 标准扩展工厂场景从真实父工具调用 TaskEngine 并验证父接收. 产品注册入口仍由 AgentManager、SpawnCoordinator 和现有 Navigator 装配; [v3 RFC](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md) 的 UI 和 ExtensionRuntime 阶段负责产品入口切换. 当前实现不加载旧 inbox 作为原生任务, [旧父交付](2026-09-09-parent-result-delivery-and-ack.md) 仍记录该注册入口的行为.
+这些入口是当前可调用的执行与交付能力. 标准扩展工厂场景从真实父工具调用 TaskEngine 并验证父接收. 产品执行注册仍由 AgentManager/SpawnCoordinator 装配, Navigator 通过 [只读 Source 与 Action](2026-09-11-declarative-navigation-and-input-actions.md) 同时接入当前执行所有者和原生 TaskEngine. [v3 RFC](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md) 的 ExtensionRuntime 阶段负责执行入口切换. 当前实现不加载旧 inbox 作为原生任务, [旧父交付](2026-09-09-parent-result-delivery-and-ack.md) 仍记录该注册入口的行为.
 
 ## Native execution ownership
 
@@ -40,7 +40,7 @@ export interface DeliveryChannel {
 
 模型身份、thinking、工具白名单、system prompt 与预算来自已接受策略. Driver 为模型建立一次局部请求视图, 固定 getModel 结果并传递 maxTokens; 其他 Models 方法绑定回原对象, 同时支持公开的 ModelRuntime 类实例. 宿主目录和模型对象不被修改. 默认原生 read/bash/edit/write 使用任务自己的 ExecutionEnv; 调用方可提供已解析的原生工具和资源. 任意 coding-agent 扩展工厂不自动获得 Harness hook 语义.
 
-accept 只持久接受 prompt, drive 才执行. TaskEngine 在双层 Quota 准入后驱动, 同一次占用只释放一次. wait 的 signal 仅结束观察. 原生 drive 的真实 Promise 返回之后才释放占用, 包括已持久保存的 waiting; waiting 可由显式 resume 重新准入. restore 读取原生状态, 不自动启动模型请求. 已结算任务通过 continue 创建新 operation.
+accept 只持久接受 prompt, drive 才执行. TaskEngine 在双层 Quota 准入后驱动, 同一次占用只释放一次. wait 的 signal 仅结束观察. 原生 drive 的真实 Promise 返回之后才释放占用, 包括已持久保存的 waiting; waiting 可由显式 resume 重新准入. restore 读取原生状态, 不自动启动模型请求. 已结算任务通过 continue 创建新 operation; 先预留配额, 无容量返回 QuotaUnavailable, 保留旧 operation 和结果.
 
 requestAbort 先提交原生取消请求, 再更新领域投影. 未获准入的取消通过已封闭 effect gate 的原生 reconciliation 结算, 不占用 provider slot. close 在调用宿主关闭和工具取消回调前登记共享 Promise, 封闭 Harness 并等待已接纳的 drive/工具返回后释放环境; 它不伪造 terminal result. 不响应取消的第三方工具会延长关闭等待. 关闭后的未知工具效果由原生 replay 策略裁决, replay=never 不重放.
 
@@ -66,7 +66,7 @@ export interface TaskDelivery {
 }
 ```
 
-自动 deliveryId 由 taskId 和 terminal operationId 稳定构成. 重复保存使用原生 mutation barrier 判重, 相同 ID 不允许覆盖不同正文. 人工选择具有新 UUID, 保存调用方选定的现有消息文本和 entryId, 不重新读取更新中的 transcript. 完整正文存入 outbox 和父消息, receipt 保存真实父 Entry ID.
+自动 deliveryId 由 taskId 和 terminal operationId 稳定构成. 重复保存使用原生 mutation barrier 判重, 相同 ID 不允许覆盖不同正文. 人工选择具有新 UUID, 保存调用方选定的现有消息文本、entryId、operation、状态和时间, 不重新读取更新中的 transcript. 选择器可在尝试保存前保留该身份, 应对提交成功但响应丢失. 完整正文存入 outbox 和父消息, receipt 保存真实父 Entry ID. deliverSelection 返回表示 outbox 已保存, 后续父交付失败不抹掉该事实.
 
 TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入失败时, 原生 terminal record 仍可重开读取并重建交付. 父接收后子侧 ACK 写入失败时, outbox 仍未确认, 重试查询既有父 receipt 而不再次发送正文. native Session 关闭重开后保留任务、队列、各 operation 的结果及独立交付身份.
 
@@ -92,7 +92,7 @@ TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入�
 
 执行、准入和父接收可单独替换并用真实离线 Provider 验证. 源码不需要同进程 DTO 深克隆或 RPC 层. 占用、取消、持久状态与显示状态具有不同责任.
 
-每个任务具有独立原生 Session, 需要组合根管理仓库发现、模型授权和资源准备. 原生工具与旧 coding-agent 扩展 hooks 的配置映射仍属于资源接入责任. 父文件 receipt 校验是低频同步读取, 会增加大父日志上的交付成本. 当前 UI、配置断代、完整 ExtensionRuntime 和旧路径删除仍由分阶段 RFC 管理.
+每个任务具有独立原生 Session, 需要组合根管理仓库发现、模型授权和资源准备. 原生工具与旧 coding-agent 扩展 hooks 的配置映射仍属于资源接入责任. 父文件 receipt 校验是低频同步读取, 会增加大父日志上的交付成本. UI 的只读展示和 Action 已建立, 配置断代、完整 ExtensionRuntime 和旧执行路径删除仍由分阶段 RFC 管理.
 
 ## Verification
 

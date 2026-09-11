@@ -5,6 +5,7 @@ import { mockAgentSession, mockRunResult, fakeOptions } from "../../support/mana
 import { makeResolvablePromise } from "../../support/fixtures.js";
 import { executeAgentTool } from "../../../src/agents/tool-execution.js";
 import { AgentNavigator } from "../../../src/ui/agent-navigator.js";
+import { AgentPresentation } from "../../../src/agents/agent-presentation.js";
 import type { DeliverySelectorComponent } from "../../../src/ui/delivery-selector.js";
 import { makeTui, makeUI } from "../../support/navigator.js";
 import * as shell from "../../../src/shell.js";
@@ -37,12 +38,13 @@ describe("human takeover and selective delivery integration", () => {
   it.each(["append", "replace", "compact"])("retries the displayed snapshot after session messages %s", async mutation => {
     const id = scenario.manager.spawn(scenario.pi, scenario.ctx, "Explore", "Inspect", fakeOptions());
     const record = scenario.manager.getRecord(id)!;
+    scenario.manager.takeOver(id);
     await scenario.coordinator.interact(id, "Review results");
     await record.execution.promise;
     const previewed = "Previewed report\x07";
     session.messages = [{ role: "user", content: "Original instruction" }, { role: "assistant", content: previewed }];
 
-    const navigator = new AgentNavigator(scenario.manager);
+    const navigator = new AgentNavigator(new AgentPresentation(scenario.manager, scenario.coordinator));
     scenario.onDispose(() => navigator.dispose());
     const ui = makeUI({ value: "" });
     const modal = Promise.withResolvers<boolean>();
@@ -92,6 +94,7 @@ describe("human takeover and selective delivery integration", () => {
   it.each(["removed", "parent changed", "empty"])("rejects an invalid selection target: %s", async invalid => {
     const id = scenario.manager.spawn(scenario.pi, scenario.ctx, "Explore", "Inspect", fakeOptions());
     const record = scenario.manager.getRecord(id)!;
+    scenario.manager.takeOver(id);
     await scenario.coordinator.interact(id, "Review results");
     await record.execution.promise;
     const messages = scenario.coordinator.getDeliverableMessages(id);
@@ -109,7 +112,7 @@ describe("human takeover and selective delivery integration", () => {
     expect(scenario.pi.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("detaches foreground subagent immediately on interact and frees main session", async () => {
+  it("detaches foreground subagent immediately on explicit takeover and frees main session", async () => {
     const runDeferred = makeResolvablePromise();
     scenario.onDispose(() => runDeferred.resolve(mockRunResult({ session, aborted: true })));
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -130,6 +133,7 @@ describe("human takeover and selective delivery integration", () => {
     expect(record).toBeDefined();
 
     // User takes over in child view
+    scenario.manager.takeOver(record.id);
     const interactResult = await scenario.coordinator.interact(record.id, "I will take over here");
     expect(interactResult).toEqual({ accepted: true });
 
@@ -168,6 +172,7 @@ describe("human takeover and selective delivery integration", () => {
       ...fakeOptions(), description: "Investigate memory leak", },
     );
     const agentRecord = scenario.manager.getRecord(record)!;
+    scenario.manager.takeOver(record);
     expect(await scenario.coordinator.interact(record, "Review the available results")).toEqual({ accepted: true });
     await agentRecord.execution.promise;
 

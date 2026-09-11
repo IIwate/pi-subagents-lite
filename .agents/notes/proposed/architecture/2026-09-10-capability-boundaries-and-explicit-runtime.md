@@ -14,7 +14,7 @@ v3 的实现与修改范围限于 pi-subagents-lite 仓库. ExtensionRuntime 是
 
 ExecutionDriver/LaneDriver 在扩展内部调度原生 `@earendil-works/pi-agent-core`. ParentDeliveryAdapter 接入官方父会话 API, UI Adapter 复用现有 Pi TUI 视图与键盘机制. catalogue、配置、任务和 UI 状态属于 Runtime 实例, 不使用全局服务定位器.
 
-阶段 1 的 [Task/Policy/Quota 领域 API](../../implemented/architecture/2026-09-11-task-policy-and-quota-domain.md) 与阶段 2 的 [原生执行/父交付 Adapter](../../implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md) 已建立独立模块和定向场景. TaskEngine 可从官方扩展工具入口运行子任务并验证父接收. 产品 UI 和 ExtensionRuntime 装配按后续阶段交付; 本提案在实际实现完成后以事实毕业至 implemented.
+阶段 1 的 [Task/Policy/Quota 领域 API](../../implemented/architecture/2026-09-11-task-policy-and-quota-domain.md)、阶段 2 的 [原生执行/父交付 Adapter](../../implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md) 和阶段 3 的 [声明式导航/输入 Action](../../implemented/architecture/2026-09-11-declarative-navigation-and-input-actions.md) 已建立独立模块和定向场景. TaskEngine 可从官方扩展工具入口运行子任务并验证父接收, 同一套 UI 也可由原生任务快照驱动. ExtensionRuntime 装配按后续阶段交付; 本提案在实际实现完成后以事实毕业至 implemented.
 
 ## Host adapters and facet boundaries
 
@@ -102,7 +102,7 @@ v3 作为标准 npm 插件运行于未经修改的官方 Pi. 只管理按 v3 契
 
 [Native Harness scenarios](../../../../test/scenarios/agents/harness-lanes.test.ts) 使用公开入口、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源. 它们覆盖真实并行与 Steer 消费、分支写入和重复交付反例, 以及官方 JSONL 后端关闭重开后继续原 operation 并保存结果.
 
-[执行 Adapter 场景](../../../../test/scenarios/agents/execution-adapters.test.ts) 与 [父交付场景](../../../../test/scenarios/spawn/delivery-channel.test.ts) 覆盖原生 Driver、TaskEngine 和真实官方父会话. 当前产品注册仍使用 AgentManager/SpawnCoordinator; UI 与激活级 Runtime 切换在阶段 3、4 交付. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
+[执行 Adapter 场景](../../../../test/scenarios/agents/execution-adapters.test.ts)、[父交付场景](../../../../test/scenarios/spawn/delivery-channel.test.ts) 和 [原生 UI 场景](../../../../test/scenarios/ui/task-navigation.test.ts) 覆盖 Driver、TaskEngine、真实官方父会话以及 UI 输入/选择闭环. 当前产品执行注册仍使用 AgentManager/SpawnCoordinator, UI 已通过 NavigationSource 读取展示值并派发 Action. 阶段 4 负责激活级 Runtime 与执行入口切换. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
 
 origin/re@5db0c90 仅为局部设计参考. a8e9625 修复 UI tick 复制 accepted policy 的问题, 表明无关 SDK 数据的重复投影具有实际成本. 不整批迁入该分支的产品策略.
 

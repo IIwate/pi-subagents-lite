@@ -99,13 +99,8 @@ export function registerTools(pi: ExtensionAPI): void {
     description: "Return to Main agent",
     handler: () => getNavigator()?.activateMain(),
   });
-  pi.registerShortcut("alt+s", {
-    description: "Deliver selected subagent messages",
-    handler: (ctx) => {
-      const navigator = getNavigator();
-      if (navigator?.isListFocused()) {
-        void navigator.openDeliverySelector(ctx.ui);
-      }
-    },
+  pi.registerShortcut("alt+t", {
+    description: "Take over the selected subagent",
+    handler: () => { getNavigator()?.takeOverActive(); },
   });
 }

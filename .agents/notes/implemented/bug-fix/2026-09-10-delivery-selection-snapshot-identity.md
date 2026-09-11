@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[navigator](../../../../src/ui/agent-navigator.ts) 在打开选择器时提取只读文本快照. confirm 在该数组上按原顺序解析选中索引, 将实际 DeliverableMessage 交给 [coordinator](../../../../src/spawn/spawn-coordinator.ts). coordinator 不再按实时 transcript 索引查找. 重新打开选择器才刷新消息集合.
+[navigator](../../../../src/ui/agent-navigator.ts) 从 NavigationSource 在打开选择器时取得只读文本快照. confirm 在该数组上按原顺序解析选中索引, 派发 deliver Action. 当前 Manager 的 AgentPresentation 将实际 DeliverableMessage 交给 [coordinator](../../../../src/spawn/spawn-coordinator.ts), 不按实时 transcript 索引查找. 原生 TaskNavigationSource 同时保留 operation、状态和时间, 见 [声明式导航](../architecture/2026-09-11-declarative-navigation-and-input-actions.md). 重新打开选择器才刷新消息集合.
 
 ```ts type-equiv: SelectionDeliveryResult from src/spawn/spawn-coordinator.ts
 import type { PendingResult } from "../../../../src/spawn/result-inbox.js";

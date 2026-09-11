@@ -61,7 +61,7 @@ describe("AgentManager — Interaction", () => {
     deferred.resolve(mockRunResult({ session }));
   });
 
-  it("marks takeover and pins the first interaction without changing the pin on later messages", async () => {
+  it("keeps steering autonomous and pins only an explicit takeover", async () => {
     manager = new AgentManager(onComplete);
     const deferred = makeResolvablePromise();
     const session = mockAgentSession();
@@ -81,6 +81,9 @@ describe("AgentManager — Interaction", () => {
 
     await manager.interact(id, "steer input");
 
+    expect(record.lifecycle.takenOver).toBeUndefined();
+    expect(record.lifecycle.pinnedAt).toBeUndefined();
+    expect(manager.takeOver(id)).toBe(true);
     expect(record.lifecycle.takenOver).toBe(true);
     expect(typeof record.lifecycle.pinnedAt).toBe("number");
 
@@ -183,7 +186,7 @@ describe("AgentManager — Interaction", () => {
     secondDeferred.resolve(mockRunResult({ session: secondSession }));
   });
 
-  it("rejects interaction for queued agents", async () => {
+  it("keeps queued input pending without taking over the task", async () => {
     manager = new AgentManager(onComplete, {
       default: 1,
       models: { "test/model": 1 },
@@ -200,7 +203,9 @@ describe("AgentManager — Interaction", () => {
       modelKey: "test/model",
     }));
 
-    await expect(manager.interact(queuedId, "hello")).resolves.toEqual({ accepted: false, reason: "queued" });
+    await expect(manager.interact(queuedId, "hello")).resolves.toEqual({ accepted: true });
+    expect(manager.getRecord(queuedId)?.execution.pendingSteers).toEqual([{ message: "hello", images: undefined, kind: "steer" }]);
+    expect(manager.getRecord(queuedId)?.lifecycle.takenOver).toBeUndefined();
     deferred.resolve(mockRunResult());
   });
 

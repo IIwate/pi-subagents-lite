@@ -23,25 +23,38 @@ export interface ExecutionMessage {
   readonly entryId: string;
   readonly role: string;
   readonly text: string;
+  readonly parts?: readonly (
+    | { readonly type: "text"; readonly text: string }
+    | { readonly type: "thinking"; readonly thinking: string }
+    | { readonly type: "toolCall"; readonly name: string; readonly arguments?: Readonly<Record<string, unknown>> }
+    | { readonly type: "image" }
+  )[];
+  readonly toolName?: string;
+  readonly isError?: boolean;
 }
 
 export interface QueuedInput {
   readonly entryId: string;
   readonly kind: "steer" | "followUp" | "nextRun" | "write";
   readonly text: string;
+  readonly images?: TaskInput["images"];
 }
 
 export interface ExecutionResult {
   readonly operationId: string;
   readonly outcome: TaskOutcome;
   readonly completedAt: number;
+  readonly startedAt: number;
   readonly sourceEntryIds: readonly string[];
 }
 
 export interface ExecutionSnapshot {
-  readonly operation?: { readonly operationId: string; readonly cancelling: boolean };
+  readonly operation?: { readonly operationId: string; readonly cancelling: boolean; readonly startedAt: number };
   readonly lastResult?: ExecutionResult;
   readonly messages: readonly ExecutionMessage[];
+  readonly streaming?: ExecutionMessage;
+  readonly stats: { readonly input: number; readonly output: number; readonly cost: number; readonly toolUses: number; readonly turnCount: number; readonly compactions: number; readonly contextPercent: number | null };
+  readonly retry?: { readonly attempt: number; readonly maxAttempts: number; readonly nextAttemptAt: number };
   readonly queued: readonly QueuedInput[];
   readonly faulted: boolean;
 }

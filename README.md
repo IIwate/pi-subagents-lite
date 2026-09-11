@@ -8,7 +8,7 @@ Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent
 - **Background & Foreground Execution**: Spawn background agents that report back when finished, or foreground agents that block the current turn.
 - **Model Routing & Thinking Access**: Inherit the parent model by default, or authorize alternate providers and models with fine-grained thinking budgets.
 - **TUI Below-Editor Navigator**: Monitor running, queued, and completed agents directly below the editor with responsive terminal layouts.
-- **Human Takeover & Selective Delivery**: Step into any subagent to steer its execution, and selectively deliver message snapshots (`Alt+S`) back to the parent session.
+- **Steering & Explicit Takeover**: Send corrections without interrupting autonomous delivery. Use `Alt+T` to take control, then selectively deliver message snapshots (`Alt+S`) back to the parent session.
 - **Hierarchical Concurrency**: Enforce model- and provider-level concurrency limits with automatic queuing.
 - **Cross-Platform**: Seamless support for macOS, Linux, and Windows (with native PowerShell tool adaptation).
 
@@ -42,12 +42,15 @@ When the list is expanded and the editor is empty, press `↓` to focus the list
 | `↑` / `↓` | Navigate between subagents |
 | `Enter` | Activate and inspect the selected subagent session |
 | `Space` | Pin / unpin subagent (pins protect from automatic cleanup) |
-| `Alt+S` | Open delivery selector to choose message snapshots to return to Main |
+| `Alt+T` | Explicitly take over the highlighted or active subagent; detach a foreground wait |
+| `Alt+S` | While the list is focused, select existing messages from a taken-over subagent to return to Main |
 | `Alt+M` | Return to Main session from any subagent |
 | `Alt+A` | Toggle subagent list expanded / collapsed |
 | `Alt+Up` | Pull queued steering messages back into the editor for editing |
 | `Ctrl+D` | Remove a completed or stopped subagent |
 | `Esc` | Return focus to the editor, or interrupt an active foreground agent |
+
+In an active child editor, ordinary submissions queue steering input and retain the task's foreground/background mode. Pi's FollowUp action queues a follow-up instead; its default is `Ctrl+Q` on Windows/WSL and `Alt+Enter` elsewhere. The host dequeue binding also works (`Alt+Q` on Windows/WSL), alongside `Alt+Up`. Input containing images remains queued when the editor cannot restore its attachments. Submitting to a settled task starts another operation with the accepted policy; a concurrency rejection keeps the draft available.
 
 ## Tools for LLM
 

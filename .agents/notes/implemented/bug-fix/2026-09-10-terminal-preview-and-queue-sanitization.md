@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[DeliverySelectorComponent](../../../../src/ui/delivery-selector.ts) 在构建显示项时使用 [displayText](2026-09-10-terminal-control-sanitization.md) 清洗消息正文和摘要; 标题的 Agent type 也先清洗并展平换行. 来源文本的转换先于 Markdown、UI ANSI 和宽度截断. [navigator](../../../../src/ui/agent-navigator.ts) 的 child pending 与 transcript fallback 均清洗并展平 queued steering 文本.
+[DeliverySelectorComponent](../../../../src/ui/delivery-selector.ts) 在构建显示项时使用 [displayText](2026-09-10-terminal-control-sanitization.md) 清洗消息正文和摘要; 标题的 Agent type 也先清洗并展平换行. 来源文本的转换先于 Markdown、UI ANSI 和宽度截断. [NavigatorView](../../../../src/ui/navigator-view.ts) 的 child pending 与 [TranscriptView](../../../../src/ui/transcript.ts) 的 fallback 均清洗并展平 queued input 文本.
 
 显示项是独立数据, session、交付快照与待 Alt+Up 重新编辑的队列保留原始文本. UI 自有 ANSI 和 [CURSOR_MARKER 焦点](../architecture/2026-09-10-navigator-screen-and-input-ownership.md) 继续由各自 renderer 管理.
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Quota, type QuotaLimits } from "../domain/quota.js";
-import { createTask, reduceTask, type Task } from "../domain/task.js";
+import { createTask, reduceTask, type Task, type TaskOutcome } from "../domain/task.js";
 import type { DeliveryChannel, ExecutionDriver, ExecutionMessage, ExecutionResult, TaskDelivery, TaskInput } from "./contracts.js";
 
 interface TrackedTask {
@@ -9,8 +9,13 @@ interface TrackedTask {
   scheduled: boolean;
   driving?: Promise<void>;
   continuing?: boolean;
+  reservation?: () => void;
   fault?: unknown;
   deliveryError?: unknown;
+}
+
+export class QuotaUnavailable extends Error {
+  constructor(readonly modelKey: string) { super(`Concurrency limit reached: ${modelKey}`); }
 }
 
 /** Owns admission and control; execution and durable completion remain driver facts. */
@@ -79,6 +84,8 @@ export class TaskEngine {
     return { task: record.task, execution: await record.driver.snapshot(), fault: record.fault, deliveryError: record.deliveryError };
   }
 
+  observe(taskId: string, listener: () => void): Promise<() => void> { return this.require(taskId).driver.observe(listener); }
+
   subscribe(listener: () => void): () => void {
     this.assertOpen();
     this.listeners.add(listener);
@@ -105,14 +112,20 @@ export class TaskEngine {
     const record = this.require(taskId);
     if (record.continuing || record.task.state.status !== "settled") throw new Error("Task must settle before continuation");
     if (record.fault) throw record.fault;
+    const reservation = this.quota.tryAcquire(record.task.policy.model);
+    if (!reservation) throw new QuotaUnavailable(`${record.task.policy.model.provider}/${record.task.policy.model.id}`);
     record.continuing = true;
     try {
       const operationId = await record.driver.accept(input);
       this.assertOpen();
       record.task = reduceTask(record.task, { type: "continue", operationId });
+      record.reservation = reservation;
       record.scheduled = true;
       this.drain();
       return record.task;
+    } catch (error) {
+      reservation();
+      throw error;
     } finally {
       record.continuing = false;
     }
@@ -172,19 +185,20 @@ export class TaskEngine {
     });
   }
 
-  async deliverSelection(taskId: string, selected: readonly ExecutionMessage[]): Promise<string> {
+  async deliverSelection(taskId: string, selected: readonly ExecutionMessage[], identity?: { deliveryId: string; operationId: string; createdAt: number; status: TaskOutcome["status"] }): Promise<string> {
     this.assertOpen();
     const record = this.require(taskId);
     const text = selected.map(message => `[${message.role}]\n${message.text}`).join("\n\n").trim();
     if (!text || selected.length === 0) throw new Error("Select at least one existing message");
     const delivery: TaskDelivery = {
-      deliveryId: `selection:${randomUUID()}`, taskId, operationId: record.task.operationId,
+      deliveryId: identity?.deliveryId ?? `selection:${randomUUID()}`, taskId, operationId: identity?.operationId ?? record.task.operationId,
       parent: record.driver.store.binding.parent, kind: "selection",
-      status: record.task.state.status === "settled" ? record.task.state.outcome.status : "completed",
-      text, sourceEntryIds: selected.map(message => message.entryId), createdAt: Date.now(),
+      status: identity?.status ?? (record.task.state.status === "settled" ? record.task.state.outcome.status : "completed"),
+      text, sourceEntryIds: selected.map(message => message.entryId), createdAt: identity?.createdAt ?? Date.now(),
     };
     await record.driver.store.saveDelivery(delivery);
-    await this.flushDeliveries();
+    // Selection success means the snapshot is durable. Parent delivery failures remain on the outbox.
+    void this.flushDeliveries().catch(() => {});
     return delivery.deliveryId;
   }
 
@@ -245,8 +259,9 @@ export class TaskEngine {
     for (const record of this.records.values()) {
       if (!record.scheduled || record.driving || record.fault || record.task.state.status === "settled") continue;
       // A durable abort seals provider/tool admission; reconciliation itself needs no provider slot.
-      const release = record.task.state.status === "cancelling" ? () => {} : this.quota.tryAcquire(record.task.policy.model);
+      const release = record.reservation ?? (record.task.state.status === "cancelling" ? () => {} : this.quota.tryAcquire(record.task.policy.model));
       if (!release) continue;
+      record.reservation = undefined;
       record.scheduled = false;
       const operationId = record.task.operationId;
       record.task = reduceTask(record.task, { type: "started", operationId });

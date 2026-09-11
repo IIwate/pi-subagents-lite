@@ -4,6 +4,7 @@ import { createAgentScenario, type AgentScenario } from "../../support/agent-sce
 import { mockAgentSession, mockRunResult, fakeOptions } from "../../support/manager.js";
 import { makeResolvablePromise } from "../../support/fixtures.js";
 import { AgentNavigator } from "../../../src/ui/agent-navigator.js";
+import { AgentPresentation } from "../../../src/agents/agent-presentation.js";
 import { setNavigator } from "../../../src/shell.js";
 import { createDefaultConfig } from "../../support/harness.js";
 
@@ -17,7 +18,7 @@ describe("human takeover lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     scenario = createAgentScenario({ initialConfig: createDefaultConfig({ concurrency: { default: 1, models: { "worker/model": 1 } } }) });
-    navigator = new AgentNavigator(scenario.manager);
+    navigator = new AgentNavigator(new AgentPresentation(scenario.manager, scenario.coordinator));
     setNavigator(navigator);
     scenario.onDispose(() => navigator.dispose());
     session = mockAgentSession();
@@ -63,8 +64,10 @@ describe("human takeover lifecycle", () => {
       expect(secondRecord.execution.detach).toBeDefined();
 
       // User interacts in child view while still queued
+      scenario.manager.takeOver(secondRecord.id);
       const interactRes = await scenario.coordinator.interact(secondRecord.id, "Steering while queued");
-      expect(interactRes).toEqual({ accepted: false, reason: "queued" });
+      expect(interactRes).toEqual({ accepted: true });
+      expect(secondRecord.execution.pendingSteers?.[0].message).toBe("Steering while queued");
 
       // Foreground spawn immediately returns with detached = true
       const spawnResult = await foregroundSpawnPromise;
@@ -102,6 +105,7 @@ describe("human takeover lifecycle", () => {
       const record = spawnResult.record;
 
       // User takes over
+      scenario.manager.takeOver(record.id);
       await scenario.coordinator.interact(record.id, "Takeover before crash");
       expect(record.lifecycle.takenOver).toBe(true);
 
@@ -120,9 +124,10 @@ describe("human takeover lifecycle", () => {
         description: "Completed inspect",
       });
       const record = scenario.manager.getRecord(id)!;
+      scenario.manager.takeOver(id);
       expect(await scenario.coordinator.interact(id, "Review the result")).toEqual({ accepted: true });
       await record.execution.promise;
-      expect(navigator.canDeliverRecord(record)).toBe(true);
+      expect(navigator.canDeliverRecord(new AgentPresentation(scenario.manager).getRecord(record.id))).toBe(true);
       expect(scenario.coordinator.getDeliverableMessages(id)).toEqual([
         { role: "assistant", content: "default agent response" },
       ]);
@@ -164,6 +169,7 @@ describe("human takeover lifecycle", () => {
       const cont1 = makeResolvablePromise();
       scenario.onDispose(() => cont1.resolve(mockRunResult({ session, aborted: true })));
       vi.mocked(continueAgentSession).mockReturnValue(cont1.promise);
+      scenario.manager.takeOver(record.id);
       await scenario.coordinator.interact(record.id, "1st continuation");
       expect(record.lifecycle.takenOver).toBe(true);
 
@@ -175,6 +181,7 @@ describe("human takeover lifecycle", () => {
       const cont2 = makeResolvablePromise();
       scenario.onDispose(() => cont2.resolve(mockRunResult({ session, aborted: true })));
       vi.mocked(continueAgentSession).mockReturnValue(cont2.promise);
+      scenario.manager.takeOver(record.id);
       await scenario.coordinator.interact(record.id, "2nd continuation");
       expect(record.lifecycle.status).toBe("running");
 
@@ -207,6 +214,7 @@ describe("human takeover lifecycle", () => {
           { role: "user", content: "Step 3 question" },
           { role: "assistant", content: "Step 3 answer" },
       ];
+      scenario.manager.takeOver(recordId);
       expect(await scenario.coordinator.interact(recordId, "Review results")).toEqual({ accepted: true });
       await record.execution.promise;
 

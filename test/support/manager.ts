@@ -9,9 +9,11 @@ export function mockAgentSession(): any {
   return {
     subscribe: vi.fn(() => vi.fn()),
     messages: [],
+    agent: { state: {} },
     isStreaming: false,
     dispose: vi.fn(),
     steer: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     extensionRunner: { emit: vi.fn().mockResolvedValue(undefined) },
   };

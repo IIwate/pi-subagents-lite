@@ -8,9 +8,9 @@ Status: implemented
 
 ## Decision
 
-[AgentManager.interact](../../../../src/agents/agent-manager.ts) 对存在的记录设置 takenOver, 首次交互自动 pin, 并调用前台 detach. 打开视图本身不触发接管. 这些标记先于 queued/concurrency/unavailable 检查, 所以交互被拒绝的记录也可能已经被接管和 pin. 前台 [coordinator](../../../../src/spawn/spawn-coordinator.ts) 以执行 Promise 与 detach Promise 竞争, detach 使工具立即返回人工接管说明; 子任务继续使用原记录.
+[AgentManager.takeOver](../../../../src/agents/agent-manager.ts) 对存在的记录设置 takenOver、pin 并调用前台 detach. [输入 Action](../architecture/2026-09-11-declarative-navigation-and-input-actions.md) 将 Alt+T 作为显式接管入口, 普通输入和打开视图不接管任务. 前台 [coordinator](../../../../src/spawn/spawn-coordinator.ts) 以执行 Promise 与 detach Promise 竞争, detach 使工具立即返回人工接管说明; 子任务继续使用原记录.
 
-running 输入走 steer; session 尚未就绪时暂存 pendingSteers. settled 且不 streaming 的 session 可用新的 prompt 继续, 沿用其工具/模型会话; 并发不足同步拒绝, 不形成隐藏继续队列. 标准 editor 和 interactive input hook 负责输入, slash/`!` 命令保留宿主处理. [子屏焦点](../architecture/2026-09-10-navigator-screen-and-input-ownership.md) 负责避免输入落入 Main.
+running 和 queued 的普通输入走 steer, 宿主 FollowUp 动作走 followUp; session 尚未就绪时保留对应队列类别. 两者保持原控制与交付模式. settled 且不 streaming 的 session 可用新的 prompt 继续, 沿用其工具/模型会话; 并发不足拒绝, 不形成隐藏继续队列. 标准 editor 和 interactive input hook 负责输入, slash/`!` 命令保留宿主处理. [子屏焦点](../architecture/2026-09-10-navigator-screen-and-input-ownership.md) 负责避免输入落入 Main.
 
 接管后的 onAgentComplete 在创建父 inbox 条目前返回, 只更新 navigator. 这意味着终态不会自动落盘到父信箱, 也不会自动 wake Main. 未交付输出依赖 in-memory child session; pin 仅暂停清理, 不提供 reload/退出恢复. 未接管后台任务仍走 [自动交付](../architecture/2026-09-09-parent-result-delivery-and-ack.md).
 
@@ -36,7 +36,7 @@ export interface DeliverableMessage {
 
 ## Consequences
 
-人工调试和父会话执行解耦, 代价是用户需要主动交付, 且未选择内容不持久. 单纯打开 selector 不改变工作目标, 但当前 finally 固定列表焦点, 不是任意入口下的通用光标原位保证. 消息筛选只表达文本选择, 不提供内容安全过滤或完整 Markdown/XML 封装. [预览显示](../bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md) 清洗终端控制字符, 原始交付快照保留源文本.
+人工调试和父会话执行解耦, 代价是用户需要主动交付. 本 Note 的 Manager 运行时仍把未选择内容保存在内存; 原生 TaskEngine 的持久执行由 [Adapter 契约](../architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md) 负责. 单纯打开 selector 不改变工作目标, 关闭后仅在同一 UI/交互代次中恢复列表焦点. 消息筛选只表达文本选择, 不提供内容安全过滤或完整 Markdown/XML 封装. [预览显示](../bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md) 清洗终端控制字符, 原始交付快照保留源文本.
 
 ## Evidence
 

@@ -303,6 +303,7 @@ export class AgentManager {
         invocation: options.invocation,
       },
       execution: {
+        operationId: randomUUID(),
         abortController,
         promise: queuedPromise,
         settled: false,
@@ -425,7 +426,7 @@ export class AgentManager {
         // Flush any steers that arrived before the session was ready
         if (record.execution.pendingSteers?.length) {
           for (const pending of record.execution.pendingSteers) {
-            session.steer(pending.message, pending.images).catch(() => {
+            session[pending.kind ?? "steer"](pending.message, pending.images).catch(() => {
               // Steer is advisory — a failure here (e.g. session already aborting)
               // is fine; the user can re-send if needed.
             });
@@ -586,26 +587,35 @@ export class AgentManager {
    * Send a steering message to a running agent.
    * If the session hasn't been created yet, the message is queued.
    */
-  private async steer(id: string, message: string, images?: ImageContent[]): Promise<boolean> {
+  async sendInput(id: string, message: string, images?: ImageContent[], kind: "steer" | "followUp" = "steer"): Promise<InteractionResult> {
     const record = this.agents.get(id);
-    if (!record) return false;
+    if (!record) return { accepted: false, reason: "unavailable" };
 
-    if (record.lifecycle.status !== "running") return false;
+    if (record.lifecycle.status !== "running" && record.lifecycle.status !== "queued") return { accepted: false, reason: "unavailable" };
 
     if (!record.execution.session) {
       // Session not yet created — queue the steer
       if (!record.execution.pendingSteers) record.execution.pendingSteers = [];
-      record.execution.pendingSteers.push({ message, images });
-      return true;
+      record.execution.pendingSteers.push({ message, images, kind });
+      return { accepted: true };
     }
 
     try {
-      await record.execution.session.steer(message, images);
-      return true;
+      await record.execution.session[kind](message, images);
+      return { accepted: true };
     } catch {
       // steer failures are surfaced to the caller via the boolean return value
-      return false;
+      return { accepted: false, reason: "unavailable" };
     }
+  }
+
+  takeOver(id: string): boolean {
+    const record = this.agents.get(id);
+    if (!record || this.disposing) return false;
+    record.lifecycle.pinnedAt ??= Date.now();
+    record.lifecycle.takenOver = true;
+    record.execution.detach?.();
+    return true;
   }
 
   /**
@@ -620,19 +630,7 @@ export class AgentManager {
     const record = this.agents.get(id);
     if (!record) return { accepted: false, reason: "unavailable" };
 
-    if (record.lifecycle.pinnedAt == null) {
-      record.lifecycle.pinnedAt = Date.now();
-    }
-    record.lifecycle.takenOver = true;
-    record.execution.detach?.();
-
-    if (record.lifecycle.status === "queued") return { accepted: false, reason: "queued" };
-
-    if (record.lifecycle.status === "running") {
-      return await this.steer(id, message, images)
-        ? { accepted: true }
-        : { accepted: false, reason: "unavailable" };
-    }
+    if (record.lifecycle.status === "running" || record.lifecycle.status === "queued") return this.sendInput(id, message, images);
 
     const session = record.execution.session;
     if (!session || !record.execution.settled || session.isStreaming) {
@@ -653,6 +651,7 @@ export class AgentManager {
     abortController.signal.addEventListener("abort", abortSession, { once: true });
 
     record.execution.abortController = abortController;
+    record.execution.operationId = randomUUID();
     record.execution.settled = false;
     record.lifecycle.status = "running";
     record.lifecycle.startedAt = Date.now();

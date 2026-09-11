@@ -10,6 +10,8 @@ Status: implemented
 
 [AgentManager](../../../../src/agents/agent-manager.ts) 拥有活体记录、取消控制器和子会话. `AgentRecord` 将生命周期、显示信息、执行资源和统计分开; `stopped` 可以早于 `execution.settled`, 因而继续执行还要求 Promise 已结算且 session 未 streaming. 外部停止状态不被迟到的成功或错误回调覆盖. [并发 Note](2026-09-09-hierarchical-concurrency-ceilings.md) 负责 slot 的释放时机.
 
+每次 spawn/continuation 有独立 operationId, [展示 Action](2026-09-11-declarative-navigation-and-input-actions.md) 使用该身份拒绝旧操作的迟到控制请求. AgentPresentation 只投影数据和管理展示订阅, 不取得会话销毁权.
+
 记录自动清理每分钟检查一次, 仅适用于 terminal、未 pin 且 `resultPersisted` 或 `resultConsumed` 为真的记录. 到期时间是完成时间加 10 分钟及 pin 暂停累计时间. running/queued 不因任务耗时被清理; pin 不阻止显式 Clear. 人工输入自动 pin 的规则见 [接管](../feature/2026-09-10-human-takeover-and-selective-delivery.md). 保留的 session 是进程内资源, 不代表可跨进程恢复.
 
 每个 session 通过 WeakMap 共享一次关闭 Promise, 在调用可重入 hook 前登记. 正常关闭先等待 `session.abort()`, 再向子扩展发送 `session_shutdown`, 最后调用 `session.dispose()`. 这一步不能由父会话的 shutdown 代替: 子扩展是另一组实例, 而 Pi 的 session dispose 不代发这个事件. abort 与 shutdown 合用 15 秒等待窗口, 超时仍执行 dispose. 超时限制等待时间, 不保证被挂起的外部操作已物理终止.

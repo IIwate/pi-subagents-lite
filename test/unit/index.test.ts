@@ -291,8 +291,8 @@ describe("shortcut registration", () => {
         description: "Return to Main agent",
       }),
       expect.objectContaining({
-        shortcut: "alt+s",
-        description: "Deliver selected subagent messages",
+        shortcut: "alt+t",
+        description: "Take over the selected subagent",
       }),
     ]);
   });
@@ -303,7 +303,7 @@ describe("shortcut registration", () => {
       toggleList: vi.fn(),
       activateMain: vi.fn(),
       isListFocused: vi.fn(() => true),
-      openDeliverySelector: vi.fn(),
+      takeOverActive: vi.fn(),
     };
     shell.setNavigator(navigator as any);
     try {
@@ -312,7 +312,7 @@ describe("shortcut registration", () => {
       await api.shortcuts[2]!.handler({});
       expect(navigator.toggleList).toHaveBeenCalledOnce();
       expect(navigator.activateMain).toHaveBeenCalledOnce();
-      expect(navigator.openDeliverySelector).toHaveBeenCalledOnce();
+      expect(navigator.takeOverActive).toHaveBeenCalledOnce();
     } finally {
       shell.setNavigator(null);
     }

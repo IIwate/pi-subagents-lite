@@ -8,13 +8,12 @@ import {
   type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
-import type { AgentRecord } from "../types.js";
 import type { DeliverableMessage } from "../prompt/subagent-delivery.js";
 import type { Theme } from "./types.js";
 import { displayText } from "./format.js";
 
 export interface DeliverySelectorOptions {
-  record: AgentRecord;
+  record: { readonly id: string; readonly display: { readonly type: string } };
   messages: readonly DeliverableMessage[];
   theme: Theme;
   tui?: TUI;
@@ -51,7 +50,7 @@ interface MessageItem {
 
 // Note: see .agents/notes/implemented/bug-fix/2026-09-10-terminal-preview-and-queue-sanitization.md
 export class DeliverySelectorComponent implements Component {
-  private record: AgentRecord;
+  private record: DeliverySelectorOptions["record"];
   private items: MessageItem[];
   private theme: Theme;
   private tui?: TUI;

@@ -69,7 +69,6 @@ vi.mock("../../src/ui/searchable-select.js", () => ({
 
 vi.mock("../../src/ui/format.js", async importOriginal => ({
   ...await importOriginal<typeof import("../../src/ui/format.js")>(),
-  getDisplayName: vi.fn((type: string) => type),
 }));
 
 vi.mock("../../src/config/config-io.js", async (importOriginal) => {
