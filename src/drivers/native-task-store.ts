@@ -1,6 +1,6 @@
 import type { TaskOutcome } from "../domain/task.js";
 import { extractText } from "../prompt/context.js";
-import { BACKGROUND_CONTEXT, laneState, operationResult, setValue, value, type OperationResultRecord, type Session } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT, deleteValue, laneState, operationResult, setValue, value, type OperationResultRecord, type Session, type Write } from "@earendil-works/pi-agent-core";
 import { isDeepStrictEqual } from "node:util";
 import { freezePolicy, type TaskPolicy } from "../domain/policy.js";
 import type { ExecutionResult, DeliveryReceipt, ParentOrigin, StoredDelivery, TaskBinding, TaskDelivery, TaskStore } from "../engine/contracts.js";
@@ -8,6 +8,7 @@ import type { ExecutionResult, DeliveryReceipt, ParentOrigin, StoredDelivery, Ta
 const namespace = "subagents-lite.v3";
 const taskAddress = value<unknown>(namespace, "task");
 const deliveryAddress = (id = "") => value<unknown>(namespace, `delivery/${id}`);
+const stopAddress = (operationId: string) => value<unknown>(namespace, `stop/${operationId}`);
 const context = BACKGROUND_CONTEXT;
 
 function object(input: unknown): Record<string, unknown> {
@@ -27,6 +28,11 @@ function strings(input: unknown): string[] {
 
 function number(input: unknown, minimum = 0): number {
   if (typeof input !== "number" || !Number.isSafeInteger(input) || input < minimum) throw new Error("Invalid task data number");
+  return input;
+}
+
+function stopInitiator(input: unknown): "user" | "agent" | undefined {
+  if (input !== undefined && input !== "user" && input !== "agent") throw new Error("Invalid task stop initiator");
   return input;
 }
 
@@ -121,8 +127,7 @@ export class NativeTaskStore implements TaskStore {
     }, context)).filter(entry => entry.id !== record.fromTipId);
     const assistant = entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
     const text = assistant?.type === "message" && "content" in assistant.message ? typeof assistant.message.content === "string" ? assistant.message.content.trim() : extractText(assistant.message.content).trim() : "";
-    const stoppedBy = (await this.session.getValue(value<unknown>(namespace, `stop/${record.operationId}`), context))?.value;
-    if (stoppedBy !== undefined && stoppedBy !== "user" && stoppedBy !== "agent") throw new Error("Invalid task stop initiator");
+    const stoppedBy = stopInitiator((await this.session.getValue(stopAddress(record.operationId), context))?.value);
     let outcome: TaskOutcome;
     if (record.status === "failed") outcome = { status: "error", error: record.error?.message ?? "Native operation failed", result: text };
     else if (record.status === "aborted") outcome = { status: stoppedBy ? "stopped" : "aborted", result: text, stoppedBy };
@@ -132,14 +137,31 @@ export class NativeTaskStore implements TaskStore {
       status: this.current.policy.limits.maxTurns !== undefined && entries.filter(entry => entry.type === "message" && entry.message.role === "assistant" && !["error", "aborted", "pending", "deferred"].includes(entry.message.stopReason)).length >= this.current.policy.limits.maxTurns ? "turn_limited" : "completed",
       result: text,
     };
-    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), completedAt: record.endedAt, startedAt: record.startedAt,
+    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), stopRequestedBy: stoppedBy, completedAt: record.endedAt, startedAt: record.startedAt,
       sourceEntryIds: Object.freeze(assistant ? [assistant.id] : []) });
   }
 
   get binding(): TaskBinding { return this.current; }
 
-  recordStop(operationId: string, initiator: "user" | "agent"): Promise<void> {
-    return this.session.setValue(value(namespace, `stop/${operationId}`), initiator, context);
+  async recordStop(operationId: string, initiator: "user" | "agent"): Promise<void> {
+    await this.session.mutate(async writer => {
+      const address = stopAddress(operationId);
+      const previous = stopInitiator((await writer.getValue(address, context))?.value);
+      const stoppedBy = previous === "user" ? previous : initiator;
+      const writes: Write[] = [setValue(address, stoppedBy)];
+      if (stoppedBy === "user") {
+        const automatic = deliveryAddress(`automatic:${this.current.taskId}:${operationId}`);
+        const saved = await writer.getValue(automatic, context);
+        if (saved) {
+          const stored = parseStoredDelivery(saved.value);
+          this.checkDelivery(stored.delivery);
+          if (stored.delivery.kind !== "automatic" || stored.delivery.operationId !== operationId) throw new Error("Automatic delivery operation mismatch");
+          // A stop and revocation share the same commit; source messages and durable receipts retain their owners.
+          if (!stored.receipt) writes.push(deleteValue(automatic));
+        }
+      }
+      await writer.commit(writes, context);
+    }, context);
   }
 
   async takeOver(): Promise<void> {
@@ -149,7 +171,7 @@ export class NativeTaskStore implements TaskStore {
     this.current = next;
   }
 
-  async saveDelivery(delivery: TaskDelivery): Promise<void> {
+  async saveDelivery(delivery: TaskDelivery, eligible: () => boolean = () => true): Promise<void> {
     this.checkDelivery(delivery);
     await this.session.mutate(async writer => {
       const address = deliveryAddress(delivery.deliveryId);
@@ -160,6 +182,9 @@ export class NativeTaskStore implements TaskStore {
         }
         return;
       }
+      const stoppedBy = delivery.kind === "automatic"
+        ? stopInitiator((await writer.getValue(stopAddress(delivery.operationId), context))?.value) : undefined;
+      if (stoppedBy === "user" || !eligible()) return;
       await writer.commit([setValue(address, { delivery })], context);
     }, context);
   }

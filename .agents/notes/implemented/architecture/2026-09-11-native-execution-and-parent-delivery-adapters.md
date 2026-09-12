@@ -44,6 +44,8 @@ accept 只持久接受 prompt, drive 才执行. TaskEngine 在双层 Quota 准�
 
 requestAbort 先提交原生取消请求, 再更新领域投影. 未获准入的取消通过已封闭 effect gate 的原生 reconciliation 结算, 不占用 provider slot. close 在调用宿主关闭和工具取消回调前登记共享 Promise, 先封闭 Harness, 保留 Driver 所有的 Session writer 供子扩展 shutdown 保存状态, 等待已接纳的 drive/工具返回后关闭 Session 并释放环境; 它不伪造 terminal result. 不响应取消的第三方工具会延长关闭等待. 关闭后的未知工具效果由原生 replay 策略裁决, replay=never 不重放.
 
+用户停止以 operationId 为作用域, 保持任务的 autonomous/manual 控制模式. TaskEngine 在异步取消前登记该次运行的发送拦截, Driver 先保存 stop 发起者再请求原生取消. 原生取消结算为 stoppedBy=user; 如果同一 operation 已在取消前完成, Driver 接受原生的已完成事实, ExecutionResult.stopRequestedBy 仍携带用户停止意图. 普通前台观察等待实际结算, Alt+T 才通过接管解除等待. 后续 operation 保留原控制模式并独立判断交付资格.
+
 运行中 steer/followUp 与等待准入时的输入使用原生队列. 撤回直接返回 cancelled/already_consumed/not_found. 已结算 Lane 的未消费输入仍可查询, 不隐式发起下一次 operation. Takeover 独立持久保存 manual 控制模式并解除前台等待, 不执行 abort. 前台任务的普通 Steer 不建立后台交付.
 
 turn_end 的预算计数是可从当前 operation 的 transcript 重建的投影. 软限制追加原生 Steer, 硬限制在下一次请求前提交 abort. 事件回调不等待另一条会产生事件的 Lane 写操作, 避免上游串行事件总线重入死锁. Driver 把原生 OperationResultRecord 的 fromTipId/tipId 范围内最终 assistant 正文投影成结果, 不从前一个 operation 借用输出, 不追加另一种完成标记.
@@ -68,7 +70,9 @@ export interface TaskDelivery {
 
 自动 deliveryId 由 taskId 和 terminal operationId 稳定构成. 重复保存使用原生 mutation barrier 判重, 相同 ID 不允许覆盖不同正文. 人工选择具有新 UUID, 保存调用方选定的现有消息文本、entryId、operation、状态和时间, 不重新读取更新中的 transcript. 选择器可在尝试保存前保留该身份, 应对提交成功但响应丢失. 完整正文存入 outbox 和父消息, receipt 保存真实父 Entry ID. deliverSelection 返回表示 outbox 已保存, 后续父交付失败不抹掉该事实.
 
-TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入失败时, 原生 terminal record 仍可重开读取并重建交付. 父接收后子侧 ACK 写入失败时, outbox 仍未确认, 重试查询既有父 receipt 而不再次发送正文. native Session 关闭重开后保留任务、队列、各 operation 的结果及独立交付身份.
+自动 outbox 要求后台模式、自主控制且该 operation 没有用户停止意图, 写入发生在发布 terminal 领域状态前. NativeTaskStore.saveDelivery 在原生 mutation 内检查持久 stop 事实, 在最终 commit 前再次检查调用方的即时资格. 用户 stop 与撤销同一 operation 尚未确认的自动 outbox 共用一次原生提交, 因而自动写入先开始时也不会留下可发送的结果. 已确认 receipt 与子会话正文保留. stop 发起者中的 user 不被随后的 agent 停止覆盖; 选择性交付不受自动交付门禁影响.
+
+恢复读取原有 stop values, 不改写控制模式或伪造运行终态. 用户停止的已结算 operation 可以通过 Alt+S 选择已有片段; 当前 operation 变更后, 旧停止事实不授予新运行选择资格或阻止其自动交付. 结果写入失败时, 原生 terminal record 仍可重开读取并按资格重建交付. 停止持久化失败明确报告并阻止该活体记录继续交付. 父接收后子侧 ACK 写入失败时, outbox 仍未确认, 重试查询既有父 receipt 而不再次发送正文. native Session 关闭重开后保留任务、队列、各 operation 的结果及独立交付身份.
 
 ## Parent write boundary
 
@@ -80,6 +84,8 @@ TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入�
 
 接收正文后发送独立、无结果正文的隐藏 wake. 已有持久 wake 标记阻止恢复后的重复唤醒. 父模型失败不撤销已落盘 receipt. wake 的实际异步失败由宿主报告, 不能据 sendMessage 返回推断父推理成功. 父 receipt 的确认含义仍是“上下文已持久接收”, 不是模型已完成处理. 跨进程并发运行两个父 Session 写入器不属于这个同进程 Adapter 的保证.
 
+最终父写边界同时检查 operation 的即时停止资格, 覆盖 outbox 读取后才到达的用户停止. 已进入父会话同步写入的结果及其 wake 不能由后来的停止撤回; 原生 outbox 的撤销不是对父日志的修改.
+
 AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形成 receipt. 该路径不发送第二条结果消息或 wake. 人工选择的父消息标为 selected messages, 表示所选文本而非整项任务已经完成.
 
 ## Alternatives considered
@@ -87,6 +93,7 @@ AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形�
 - **继续只用 AgentSession runner 与父 inbox.** 已有丰富场景和扩展加载兼容, 改动面最小. 但原生 operation、队列和恢复仍无法成为独立执行事实来源, 不满足能力边界目标.
 - **所有任务共享一个子 Harness.** 共享树和模型资源直观, 可降低实例数量. 但当前工具实现、hooks、资源和 cwd 的隔离需要再造动态分派与同名工具冲突规则. 任务级 Harness 使用上游真实作用域表达现有隔离.
 - **忙碌时立即发送父 followUp.** 能在当前父轮次结束前提早交付. 但公开 API 没有按身份撤回已入队自定义消息的能力, 导航和 Takeover 无法再阻止正文消费. 保持 outbox 所有权直到空闲写边界.
+- **仅按 stopped 终态或在发送 wake 时过滤.** 判断局部且容易复用终结结果, 但原生完成可能先于取消, 自动 outbox 也可能已开始写入. 持久 stop 事实、存储提交处的检查与最终父写入处的即时资格分别覆盖这些顺序.
 - **仅凭原生完成或 sendMessage 返回确认交付.** 代码最少, 但实际父日志可写入失败, 或仅接受了延迟消息. 用可核验 receipt 确认, 执行成功与交付失败分开.
 - **复制父会话或修改宿主获得原生父 Lane.** 同树和单事务具有更强结构保证. 但扩展必须在未经修改的官方宿主中运行, 当前使用独立内部 Adapter 表达其真实边界.
 
@@ -101,3 +108,5 @@ AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形�
 [Execution adapter scenarios](../../../../test/scenarios/agents/execution-adapters.test.ts) 覆盖 Quota 与观察取消、队列和预算映射、显式 Takeover、选择快照、文件重开、operation 结果边界、关闭时的活体工具和不安全重放.
 
 [Parent delivery scenarios](../../../../test/scenarios/spawn/delivery-channel.test.ts) 使用官方扩展工厂、AgentSession、ModelRuntime 和真实文件, 覆盖父工具派发、子执行、父空闲接收、父错误后的 ACK、丢失响应/确认、导航/接管竞争及父 append 只更新内存的失败边界. 这些场景不验证物理终端或在线 Provider.
+
+[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 通过子屏 Escape 路由停止运行中的工具, 验证控制模式、前台观察等待、stoppedBy=user、空 outbox、父消息零发送、父模型调用数与日志不变. 文件重开后保留片段并支持 Alt+S, 后续运行按原控制模式自动交付. Agent 发起的停止场景保留自动交付. 父交付场景覆盖用户停止先于和后于自动提交, 旧 outbox 读取延迟至新 operation 后仍不能发送, 重开存储也不能重建已停止运行的自动结果.

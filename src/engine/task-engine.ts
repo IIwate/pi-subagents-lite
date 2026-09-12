@@ -7,6 +7,7 @@ interface TrackedTask {
   driver: ExecutionDriver;
   task: Task;
   scheduled: boolean;
+  userStops: Set<string>;
   driving?: Promise<void>;
   continuing?: boolean;
   reservation?: () => void;
@@ -166,7 +167,11 @@ export class TaskEngine {
     const record = this.require(taskId);
     const operationId = record.task.operationId;
     if (record.task.state.status === "settled") return;
-    await record.driver.requestAbort(operationId, stoppedBy);
+    if (stoppedBy === "user") record.userStops.add(operationId);
+    try { await record.driver.requestAbort(operationId, stoppedBy); } catch (error) {
+      if (stoppedBy === "user" && record.task.operationId === operationId) { record.fault = error; this.notify(); }
+      throw error;
+    }
     record.task = reduceTask(record.task, { type: "cancel_requested", operationId });
     record.scheduled = !record.driving;
     this.drain();
@@ -222,8 +227,7 @@ export class TaskEngine {
           try {
             for (const stored of await record.driver.store.deliveries()) {
               if (stored.receipt) continue;
-              const attempt = await this.delivery.deliver(stored.delivery, () => !this.closing && !record.fault
-                && (stored.delivery.kind === "selection" || record.task.control === "autonomous"));
+              const attempt = await this.delivery.deliver(stored.delivery, () => this.deliveryEligible(record, stored.delivery));
               if (attempt.status === "received") await record.driver.store.acknowledge(attempt.receipt);
               else if (attempt.reason !== "ineligible") pending++;
             }
@@ -261,7 +265,7 @@ export class TaskEngine {
     const binding = driver.store.binding;
     let task = createTask(binding.taskId, operationId, binding.policy);
     if (binding.control === "manual") task = reduceTask(task, { type: "takeover" });
-    return { driver, task, scheduled: false };
+    return { driver, task, scheduled: false, userStops: new Set() };
   }
 
   private drain(): void {
@@ -296,17 +300,24 @@ export class TaskEngine {
 
   private async complete(record: TrackedTask, result: ExecutionResult): Promise<void> {
     if (result.operationId !== record.task.operationId) return;
-    if (record.driver.store.binding.mode === "background" && record.task.control === "autonomous") {
+    if (result.stopRequestedBy === "user" || (result.outcome.status === "stopped" && result.outcome.stoppedBy === "user")) record.userStops.add(result.operationId);
+    if (record.driver.store.binding.mode === "background") {
       const outcome = result.outcome;
-      await record.driver.store.saveDelivery({
+      const delivery: TaskDelivery = {
         deliveryId: `automatic:${record.task.taskId}:${result.operationId}`, taskId: record.task.taskId,
         operationId: result.operationId, parent: record.driver.store.binding.parent, kind: "automatic", status: outcome.status,
         text: outcome.status === "error" ? `${outcome.error}${outcome.result ? `\n\n${outcome.result}` : ""}`
           : outcome.result || `Subagent ${outcome.status}.`,
         sourceEntryIds: result.sourceEntryIds, createdAt: result.completedAt,
-      });
+      };
+      if (this.deliveryEligible(record, delivery)) await record.driver.store.saveDelivery(delivery, () => this.deliveryEligible(record, delivery));
     }
     record.task = reduceTask(record.task, { type: "settled", operationId: result.operationId, outcome: result.outcome });
+  }
+
+  private deliveryEligible(record: TrackedTask, delivery: TaskDelivery): boolean {
+    return !this.closing && !record.fault && (delivery.kind === "selection"
+      || (record.task.control === "autonomous" && !record.userStops.has(delivery.operationId)));
   }
 
   private claim(driver: ExecutionDriver): void {

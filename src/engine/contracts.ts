@@ -45,6 +45,7 @@ export interface QueuedInput {
 export interface ExecutionResult {
   readonly operationId: string;
   readonly outcome: TaskOutcome;
+  readonly stopRequestedBy?: "user" | "agent";
   readonly completedAt: number;
   readonly startedAt: number;
   readonly sourceEntryIds: readonly string[];
@@ -92,7 +93,8 @@ export interface StoredDelivery {
 export interface TaskStore {
   readonly binding: TaskBinding;
   takeOver(): Promise<void>;
-  saveDelivery(delivery: TaskDelivery): Promise<void>;
+  /** Recheck eligibility at the storage commit boundary. */
+  saveDelivery(delivery: TaskDelivery, eligible?: () => boolean): Promise<void>;
   deliveries(): Promise<readonly StoredDelivery[]>;
   acknowledge(receipt: DeliveryReceipt): Promise<void>;
 }

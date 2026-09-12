@@ -58,6 +58,7 @@ export class PiResources {
   private abortSignal?: AbortSignal;
   private readonly stops: Array<() => void> = [];
   private activeTools: string[] = [];
+  private toolsReady = false;
   private readonly definitions = new Map<string, ToolDefinition<any, any>>();
   private readonly safeTools = new Set(["read", "grep", "find"]);
   private readonly customState = new Map<string, unknown>();
@@ -113,17 +114,16 @@ export class PiResources {
         }
         for (const [type, data] of resources.customState) resources.view.appendCustomEntry(type, data);
         await resources.runner.emit({ type: "session_start", reason: "new" });
+        resources.collectDefinitions();
+        const extTools = new Map(loaded.extensions.map(extension => [extensionName(extension.path), [...extension.tools.keys()]]));
+        const all = [...resources.definitions.keys()];
+        resources.activeTools = resolveVisibleTools({
+          activeTools: Array.isArray(policy!.tools) ? all : resources.activeTools,
+          tools: policy!.tools, excludeTools: policy!.definition.excludeTools, extToolMap: extTools,
+          notify: message => resources.warn(message),
+        }) ?? resources.activeTools;
+        resources.collectTools(resources.activeTools);
       }
-      resources.collectDefinitions();
-      const extTools = new Map(loaded.extensions.map(extension => [extensionName(extension.path), [...extension.tools.keys()]]));
-      const all = [...resources.definitions.keys()];
-      resources.activeTools = restored ? [...restored.policy.tools] : resolveVisibleTools({
-        activeTools: Array.isArray(policy!.tools) ? all : resources.activeTools,
-        tools: policy!.tools, excludeTools: policy!.definition.excludeTools, extToolMap: extTools,
-        notify: message => resources.warn(message),
-      }) ?? resources.activeTools;
-      for (const name of resources.activeTools) if (!resources.definitions.has(name)) throw new Error(`Accepted tool is unavailable: ${name}`);
-      resources.collectTools();
       return resources;
     } catch (error) { await resources.close(); throw error; }
   }
@@ -176,7 +176,7 @@ export class PiResources {
         this.activeTools = active;
         if (this.lane) this.enqueue(() => this.lane!.setActiveTools(active, context));
       },
-      refreshTools: () => { if (this.store) unsupported(); this.collectDefinitions(); }, getCommands: () => [],
+      refreshTools: () => { if (this.toolsReady) unsupported(); this.collectDefinitions(); }, getCommands: () => [],
       setModel: unsupported, getThinkingLevel: () => thinking, setThinkingLevel: unsupported,
     }, {
       getModel: () => model, getScopedModels: () => [{ model, thinkingLevel: thinking }],
@@ -194,13 +194,14 @@ export class PiResources {
       if (EXCLUDED_TOOL_NAMES.includes(tool.definition.name)) continue;
       this.safeTools.delete(tool.definition.name);
       this.definitions.set(tool.definition.name, tool.definition);
-      if (!this.options.policy?.restrictToRegisteredTools && !this.activeTools.includes(tool.definition.name)) this.activeTools.push(tool.definition.name);
+      if (!this.options.restored && !this.options.policy?.restrictToRegisteredTools && !this.activeTools.includes(tool.definition.name)) this.activeTools.push(tool.definition.name);
     }
   }
 
-  private collectTools(): void {
-    for (const name of this.activeTools) {
-      const tool = this.definitions.get(name)!;
+  private collectTools(names: readonly string[]): void {
+    for (const name of names) {
+      const tool = this.definitions.get(name);
+      if (!tool) throw new Error(`Accepted tool is unavailable: ${name}`);
       this.tools.push({
       name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
       executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
@@ -212,6 +213,7 @@ export class PiResources {
       },
       });
     }
+    this.toolsReady = true;
   }
 
   async attach(harness: AgentHarness<ExecutionToolContext>, lane: AgentLane, store: NativeTaskStore): Promise<void> {
@@ -245,7 +247,13 @@ export class PiResources {
       for (const [type, data] of this.customState) this.view.appendCustomEntry(type, data);
     };
     await refresh();
-    if (this.options.restored) await this.runner.emit({ type: "session_start", reason: "resume" });
+    if (this.options.restored) {
+      // Resume hooks need the saved child view and may register accepted tools before execution is admitted.
+      await this.runner.emit({ type: "session_start", reason: "resume" });
+      this.collectDefinitions();
+      this.collectTools(store.binding.policy.tools);
+      await harness.setTools([...this.tools], context);
+    }
     this.stops.push(harness.hooks.on("before_drive", async (_event, callContext) => { this.abortSignal = callContext.abortSignal; await refresh(); await this.flush(); }));
     this.stops.push(harness.hooks.on("before_run", async event => {
       const text = event.prompt.flatMap(message => "content" in message ? [typeof message.content === "string" ? message.content : extractText(message.content)] : []).join("\n");

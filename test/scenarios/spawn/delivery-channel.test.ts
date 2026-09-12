@@ -254,6 +254,73 @@ describe("Native task delivery to an official Pi parent", () => {
     expect((await second.driver.store.deliveries())[0].receipt).toBeUndefined();
   });
 
+  it.each(["before", "after"])("keeps a user stop silent %s automatic commit without suppressing a later operation", async position => {
+    const parent = await host();
+    const native = await child(parent);
+    const reached = Promise.withResolvers<void>();
+    const releaseSave = Promise.withResolvers<void>();
+    const delivering = Promise.withResolvers<void>();
+    const releaseDelivery = Promise.withResolvers<void>();
+    let stoppedDelivery!: TaskDelivery;
+    const tasks = engine({ deliver: async (delivery, eligible) => {
+      if (delivery.deliveryId === stoppedDelivery.deliveryId) {
+        delivering.resolve(); await releaseDelivery.promise;
+      }
+      return parent.channel.deliver(delivery, eligible);
+    } });
+    resources.onDispose(() => { releaseSave.resolve(); releaseDelivery.resolve(); });
+    const save = native.driver.store.saveDelivery.bind(native.driver.store);
+    vi.spyOn(native.driver.store, "saveDelivery").mockImplementationOnce(async (delivery, eligible) => {
+      stoppedDelivery = delivery;
+      if (position === "after") await save(delivery, eligible);
+      reached.resolve(); await releaseSave.promise;
+      if (position === "before") await save(delivery, eligible);
+    });
+    const sent = vi.spyOn(parent.api, "sendMessage");
+    const parentCalls = parent.provider.state.callCount;
+    const parentFile = parent.session.sessionManager.getSessionFile()!;
+    const parentLog = readFileSync(parentFile, "utf8");
+    parent.worker.setResponses([fauxAssistantMessage("Result at the stop boundary"), fauxAssistantMessage("Later operation result")]);
+    parent.provider.setResponses([fauxAssistantMessage("Later result received")]);
+    const task = await tasks.accept(native.driver, { text: "Work until stopped" });
+    await reached.promise;
+    expect((await native.driver.store.deliveries()).length).toBe(position === "after" ? 1 : 0);
+    let pendingDelivery: Promise<void> | undefined;
+    if (position === "after") {
+      pendingDelivery = tasks.flushDeliveries();
+      await delivering.promise;
+    }
+    await tasks.requestAbort(task.taskId, "user");
+    expect(native.driver.store.binding.control).toBe("autonomous");
+    expect(await native.driver.store.deliveries()).toEqual([]);
+    releaseSave.resolve(); await tasks.wait(task.taskId);
+    expect((await native.driver.snapshot()).lastResult).toMatchObject({ operationId: task.operationId, stopRequestedBy: "user", outcome: { status: "completed" } });
+    expect(sent).not.toHaveBeenCalled();
+    expect(readFileSync(parentFile, "utf8")).toBe(parentLog);
+
+    const next = await tasks.continue(task.taskId, { text: "Start another operation" });
+    await tasks.wait(task.taskId);
+    releaseDelivery.resolve(); await pendingDelivery;
+    await tasks.flushDeliveries(); await parent.session.waitForIdle();
+    const deliveries = await native.driver.store.deliveries();
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({ delivery: { operationId: next.operationId, kind: "automatic", text: "Later operation result" },
+      receipt: { parentSessionId: parent.ctx.sessionManager.getSessionId() } });
+    expect(receipts(parent)).toHaveLength(1);
+    expect(receipts(parent)[0]).toMatchObject({ content: expect.stringContaining("Later operation result") });
+    expect(parent.provider.state.callCount).toBe(parentCalls + 1);
+    await tasks.close();
+    const restored = await native.open(true);
+    const recovered = engine(parent.channel);
+    await recovered.restore(restored);
+    await restored.store.saveDelivery(stoppedDelivery);
+    await recovered.flushDeliveries(); await parent.session.waitForIdle();
+    expect(await restored.store.deliveries()).toEqual(deliveries);
+    expect((await restored.snapshot()).messages).toContainEqual(expect.objectContaining({ role: "assistant", text: "Result at the stop boundary" }));
+    expect(parent.provider.state.callCount).toBe(parentCalls + 1);
+    expect(parent.errors).toEqual([]);
+  });
+
   it("preserves a failed parent append and refuses to duplicate a result left only in memory", async () => {
     const parent = await host();
     const delivery: TaskDelivery = {

@@ -30,7 +30,11 @@ export interface AcceptedRunPolicy {
 
 extensions 的数组按扩展名过滤, tools 的数组支持 ext/* 展开; false 表达空集合, whitelist 优先于对应 blacklist. session_start 后收集延迟注册工具, 最终允许集合成为 Harness 的注册集合和 TaskPolicy.tools 授权上界. Agent 始终排除, 本扩展不参加子资源的 session_start, 因而没有递归 Runtime 初始化.
 
+新建资源通过 session_start(reason=new) 完成工具注册. 恢复时先附着原生 Lane, 建立已保存消息与 custom state 的同步投影, 再派发一次 session_start(reason=resume). 注册窗口覆盖该事件的异步处理, 完成后按已接受工具上界构造实现并交给 Harness.setTools, 最后校验工具可用性. 附着不授予执行权, 未结束任务仍等待显式输入; 事件完成后仍然缺少的已授权工具会阻止附着, 不从策略中静默删除.
+
 子扩展的 setActiveTools 只选择已接受工具集合内的名字, 未授权名字及内置排除工具被过滤. 当前 activeTools 独立于注册集合和冻结策略, 通过原生 Lane 配置持久化; reload 校验当前集合是授权上界的子集. before_agent_start 完成后先 flush 配置写入, 再由原生 checkpoint 捕获请求工具集合. 工具执行前再次检查当前可用集合, 覆盖请求发出后工具被隐藏的情况.
+
+恢复事件读取原生保存的 activeTools 子集, 重新注册实现本身不重新启用隐藏工具. 恢复事件中的工具选择仍受授权上界约束, 配置与扩展状态在附着返回前完成 flush.
 
 默认工具采用宿主 defaultTools 或内建默认集合. 内建 Explore 按 Windows Bash 可用性和宿主 PowerShell 偏好调整, 显式工具名单保留其含义. shell 工具本身具有文件写入能力, 提示中的只读职责不构成操作系统 sandbox.
 
@@ -43,6 +47,7 @@ ExtensionRunner 报告的普通 hook 异常携带扩展路径和事件名进入 
 - **出队重新读取当前定义和授权.** 可让撤销立即覆盖等待任务, 但改变已接受调用的模型、工具或 prompt 模式. 当前快照选择执行可预测性; 即时撤销需要独立产品决定.
 - **复制父 conversation 或 fork 完整 session.** 能继承充分上下文, 但违背独立委派, 增加 token 并可能重复处理父任务. 当前只继承扩展 custom state.
 - **始终固定 registry allowlist.** 能在 Pi 最底层限制工具, 但 wildcard 无法预知 `session_start` 新工具. 始终取消 gate 又会削弱明确受限 Agent; 当前按策略区分, bind 后再过滤.
+- **工具校验完成后才派发恢复事件.** 能尽早拒绝缺失资源, 但直到 session_start 才注册的工具永远无法通过前置校验. 原生附着与执行准入分离, 允许在恢复事件结束后完成同样严格的工具检查.
 - **拒绝任务接受后的全部工具选择变化.** 冻结实现简单, 可以阻止越权增加工具, 但也拒绝无 UI 时隐藏交互工具等常规扩展行为. 固定授权上界、原生可用子集和执行前检查分别承担权限与动态选择.
 - **将所有 hook 异常视为持久化失败.** 可以保守地停止后续工作, 但普通扩展异常并不证明状态写入失败, 共享故障标记会阻断其他正常工具. hook 诊断与原生写入失败各自遵循所属边界.
 - **维护一套扩展名注册表或无条件切换 PowerShell.** 前者需同步 Pi 安装布局, 后者会改写显式工具选择及 shell 语法. 当前复用已加载扩展信息和宿主能力.
@@ -60,4 +65,4 @@ prompt 正文、技能和上下文在任务发布前准备, 原生队列保存�
 
 ## Verification
 
-[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求工具过滤、可用子集恢复、hook 异常隔离和缺资源时的数据读取. 状态写入失败场景验证工具副作用被阻止且关闭仍报告 flush 失败.
+[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求工具过滤、可用子集恢复、hook 异常隔离和缺资源时的数据读取. 延迟注册恢复场景从真实原生文件重开运行中的任务, 验证 resume 读取子侧状态与消息且只派发一次, 任务保持 Waiting, 显式输入后模型能调用恢复的工具. 状态写入失败场景验证工具副作用被阻止且关闭仍报告 flush 失败.

@@ -44,7 +44,7 @@ FollowUp 使用宿主 KeybindingsManager 的 app.message.followUp 动作. 在 0.
 
 Alt+T 是显式 takeover: 控制模式持久变为 manual, 前台观察可 detach, 执行本身继续. TaskEngine 保存控制模式, Source 管理 pin, 前台观察在控制模式改变后解除等待. [接管与选择交付](../feature/2026-09-10-human-takeover-and-selective-delivery.md) 记录父交付行为.
 
-Alt+S 由聚焦列表的 Controller 处理, 只打开已接管任务的选择器. 它不是一个在 Main/editor 中无条件吞键的全局 shortcut. PiScreen 既转发宿主 actionHandlers, 也识别宿主提供的消息动作键位, 保留晚注册的 handler 和平台键位配置.
+Alt+S 由聚焦列表的 Controller 处理, 为人工控制或当前 operation 已结算且由用户请求停止的任务打开选择器. 选择资格不隐式改变控制模式. 它不是一个在 Main/editor 中无条件吞键的全局 shortcut. PiScreen 既转发宿主 actionHandlers, 也识别宿主提供的消息动作键位, 保留晚注册的 handler 和平台键位配置.
 
 Native continue 在 accept 新 operation 前预留 Quota. 无容量返回 QuotaUnavailable, 保留旧结果和 operationId; 成功预留的额度随真实 drive 释放. Controller 将拒绝显示为局部提示, 仅在 editor 仍为空时恢复原输入, 不覆盖更新的草稿.
 

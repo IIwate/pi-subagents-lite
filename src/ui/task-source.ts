@@ -106,7 +106,9 @@ export class TaskNavigationSource implements NavigationSource {
                 input: Object.freeze({ text: item.text, images: item.images }) }))),
               result: outcome?.result, error: state.fault ? String(state.fault) : state.deliveryError ? String(state.deliveryError)
                 : outcome?.status === "error" ? outcome.error : undefined,
-              canDeliver: current.control === "manual" && snapshot.messages.some(message => (message.role === "user" || message.role === "assistant") && message.text.trim().length > 0),
+              canDeliver: (current.control === "manual" || (current.state.status === "settled"
+                && snapshot.lastResult?.operationId === current.operationId && snapshot.lastResult.stopRequestedBy === "user"))
+                && snapshot.messages.some(message => (message.role === "user" || message.role === "assistant") && message.text.trim().length > 0),
             }));
             this.watchers.get(task.taskId)?.();
           } catch (error) {

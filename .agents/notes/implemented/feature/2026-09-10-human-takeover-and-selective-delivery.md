@@ -23,7 +23,7 @@ export interface DeliverableMessage {
 
 [选择器](../../../../src/ui/delivery-selector.ts) 从打开时快照选择非空 user/assistant 正文. thinking、工具调用、工具结果与图片不属于可选正文. 每次确认保留快照的 task、operation、来源 Entry、时间和独立 deliveryId; 同次失败重试沿用该身份, 不读取新 operation 的文本.
 
-Alt+S 只在列表聚焦时针对已接管任务打开 modal. 确认不切换活动任务; 同一交互代次关闭后恢复列表焦点. Parent 消息明确标注 selected messages, 不把运行中的部分输出描述成任务完成. 原始正文与终端清洗分离.
+Alt+S 在列表聚焦时针对人工控制的任务, 或当前 operation 已结算且由用户请求停止的任务打开 modal. 用户停止保留原控制模式, 其 operation 交付资格由 [执行与交付](../architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md) 管理. 确认不切换活动任务; 同一交互代次关闭后恢复列表焦点. Parent 消息明确标注 selected messages, 不把运行中的部分输出描述成任务完成. 原始正文与终端清洗分离.
 
 ## Alternatives considered
 

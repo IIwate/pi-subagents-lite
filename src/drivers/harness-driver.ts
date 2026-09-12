@@ -88,10 +88,6 @@ export class HarnessDriver implements ExecutionDriver {
       });
       env = new NodeExecutionEnv({ cwd: policy.cwd });
       const tools = options.tools ?? options.piResources?.tools ?? [createReadTool(), createBashTool(), createEditTool(), createWriteTool()];
-      const available = new Set(tools.map(tool => tool.name));
-      for (const name of policy.tools) {
-        if (!available.has(name)) throw new Error(`Accepted tool is unavailable: ${name}`);
-      }
       // The driver retains the session writer until extension shutdown has flushed application state.
       const executionSession = new Proxy(options.session, {
         get(target, key) {
@@ -125,6 +121,10 @@ export class HarnessDriver implements ExecutionDriver {
         || snapshot.queues.some(item => item.type === "message" && textOf(item.message) === reminder);
       driver.installPolicy();
       await options.piResources?.attach(harness, lane, store);
+      const available = new Set((await harness.getTools(context)).map(tool => tool.name));
+      for (const name of policy.tools) {
+        if (!available.has(name)) throw new Error(`Accepted tool is unavailable: ${name}`);
+      }
       return driver;
     } catch (error) {
       const cleanup = await Promise.allSettled([
@@ -170,7 +170,11 @@ export class HarnessDriver implements ExecutionDriver {
   async requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void> {
     this.assertOpen();
     if (stoppedBy) await this.store.recordStop(operationId, stoppedBy);
-    getOrThrow(await this.lane.requestAbort(operationId, context));
+    const requested = await this.lane.requestAbort(operationId, context);
+    // Native completion can precede the application's terminal projection and outbox commit.
+    if (!requested.ok && requested.error._tag === "OperationMismatch" && requested.error.currentOperationId === undefined
+      && requested.error.lastOperationId === operationId) return;
+    getOrThrow(requested);
   }
 
   async queue(kind: "steer" | "followUp", input: TaskInput): Promise<string> {

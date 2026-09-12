@@ -1,4 +1,4 @@
-import { existsSync, globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -10,7 +10,9 @@ import { executeAgentTool, executeStopAgentTool } from "../../src/agents/tool-ex
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
 import { PiResources } from "../../src/drivers/pi-resources.js";
 import { RESULT_MESSAGE_TYPE } from "../../src/drivers/pi-delivery-channel.js";
+import type { DeliverySelectorComponent } from "../../src/ui/delivery-selector.js";
 import { createTestHarness, type TestHarness } from "../support/harness.js";
+import { makeTui, makeUI, mountSelector } from "../support/navigator.js";
 
 describe("ExtensionRuntime ownership", () => {
   let harness: TestHarness;
@@ -70,12 +72,11 @@ describe("ExtensionRuntime ownership", () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     harness.onDispose(() => release.resolve());
-    const open = PiResources.open;
-    vi.spyOn(PiResources, "open").mockImplementation(async options => {
-      const resources = await open(options);
-      const read = resources.tools.find(tool => tool.name === "read")!;
+    const attach = PiResources.prototype.attach;
+    vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, childHarness, lane, store) {
+      await attach.call(this, childHarness, lane, store);
+      const read = this.tools.find(tool => tool.name === "read")!;
       read.execute = async () => { entered.resolve(); await release.promise; return { content: [{ type: "text", text: "Checkpoint released" }], details: {} }; };
-      return resources;
     });
     return { entered, release };
   }
@@ -211,6 +212,55 @@ describe("ExtensionRuntime ownership", () => {
     expect(replacement.engine.get(queued.taskId).operationId).toBe(queued.operationId);
   });
 
+  it("restores session-start tools with saved child state before resuming a native checkpoint", async () => {
+    const parent = await host("resume-tools", "tools: [read, probe/ffgrep]\nextensions: [probe]\nskills: false");
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `export default function (pi) {
+      pi.on("session_start", async (event, ctx) => {
+        const branch = ctx.sessionManager.getBranch();
+        const previous = branch.filter(entry => entry.type === "custom" && entry.customType === "probe.state").at(-1)?.data;
+        const state = { reasons: [...(previous?.reasons ?? []), event.reason], hasUser: branch.some(entry => entry.type === "message" && entry.message.role === "user") };
+        pi.appendEntry("probe.state", state);
+        await Promise.resolve();
+        pi.registerTool({ name: "ffgrep", label: "Search", description: "Inspect restored child state", parameters: { type: "object", properties: {} },
+          execute: async () => ({ content: [{ type: "text", text: JSON.stringify(state) }], details: {} }) });
+      });
+    }`);
+    parent.session.sessionManager.appendCustomEntry("probe.state", { reasons: ["parent"] });
+    const gate = holdRead();
+    parent.worker.setResponses([fauxAssistantMessage(fauxToolCall("read", { path: "wait" }), { stopReason: "toolUse" })]);
+    const task = await spawn(parent); await gate.entered.promise;
+    const ctx = parent.runtime.context;
+    const closing = parent.runtime.dispose(); gate.release.resolve(); await closing;
+    parent.session.sessionManager.appendCustomEntry("probe.state", { reasons: ["changed parent"] });
+    const calls = parent.worker.state.callCount;
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.engine.list()).toHaveLength(1);
+    expect(replacement.engine.get(task.taskId)).toMatchObject({ operationId: task.operationId, policy: task.policy, state: { status: "waiting" } });
+    expect(parent.worker.state.callCount).toBe(calls);
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("ffgrep", {}), { stopReason: "toolUse" }); },
+      request => { requests.push(request); return fauxAssistantMessage("Restored search result"); },
+    ]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Restored result received")]);
+    expect(await replacement.source!.dispatch({ type: "steer", taskId: task.taskId, operationId: task.operationId,
+      input: { text: "Continue searching with the restored tool" } })).toMatchObject({ accepted: true });
+    await settled(replacement, task.taskId);
+    await replacement.flushDeliveries(); await parent.session.waitForIdle();
+    expect(requests[0].tools?.map(tool => tool.name)).toEqual(["read", "ffgrep"]);
+    expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "ffgrep", isError: false,
+      content: [{ type: "text", text: JSON.stringify({ reasons: ["parent", "new", "resume"], hasUser: true }) }] }));
+    expect(replacement.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Restored search result" } });
+    expect(warnings).not.toHaveBeenCalled();
+    expect(diagnostics).not.toHaveBeenCalled();
+    expect(parent.errors).toEqual([]);
+  });
+
   it("waits for late resource preparation, rejects its publication, and continues cleanup after UI failure", async () => {
     const parent = await host("late");
     const prepared = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
@@ -286,13 +336,13 @@ describe("ExtensionRuntime ownership", () => {
     const taskRoot = join(parent.directory, "subagents-lite-v3", "sessions");
     const [taskFile] = globSync("**/*.jsonl", { cwd: taskRoot });
     expect(readFileSync(join(taskRoot, taskFile), "utf8")).toContain("probe.shutdown");
-    writeFileSync(extension, "throw new Error('Child extension unavailable');");
+    unlinkSync(extension);
     const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
     const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
     harness.onDispose(() => replacement.dispose());
     await replacement.start(ctx);
     expect(replacement.engine.list()).toEqual([]);
-    expect(diagnostics).toHaveBeenCalled();
+    expect(diagnostics).toHaveBeenCalledWith("[subagents]", expect.stringContaining("Extension path does not exist"));
     const result = await executeAgentStatusTool(replacement, "status", { agent_id: task.taskId }, undefined, undefined, ctx);
     expect(result.content[0].text).toContain("Persistent resource result");
   });
@@ -391,6 +441,93 @@ describe("ExtensionRuntime ownership", () => {
     await expect(parent.runtime.dispose()).rejects.toThrow("cleanup failed");
   });
 
+  it("keeps Escape stops silent across reload and delivers preserved fragments only through selection", async () => {
+    const parent = await host("user-stop"); const gate = holdRead();
+    const fragment = "Partial findings before the user stopped execution";
+    parent.worker.setResponses([fauxAssistantMessage([{ type: "text", text: fragment }, fauxToolCall("read", { path: "wait" })], { stopReason: "toolUse" })]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Selected findings received")]);
+    const sent = vi.spyOn(parent.api, "sendMessage");
+    const parentCalls = parent.parentProvider.state.callCount;
+    const parentFile = parent.session.sessionManager.getSessionFile()!;
+    const parentLog = readFileSync(parentFile, "utf8");
+    const task = await spawn(parent); await gate.entered.promise;
+    await parent.runtime.source!.refresh();
+    const stopUI = makeUI({ value: "" });
+    const navigator = parent.runtime.navigator!;
+    navigator.setUICtx(stopUI.ctx);
+    const screen = mountSelector(stopUI);
+    navigator.handleTerminalInput("\x1b[B"); navigator.handleTerminalInput("\x1b[B"); navigator.handleTerminalInput("\r");
+    expect(navigator.selectedId()).toBe(task.taskId);
+    const editor = screen.tui.children[screen.tui.editorIndex].children[0];
+    const parentEscape = vi.fn(); editor.onEscape = parentEscape;
+    const dispatched = vi.spyOn(parent.runtime.source!, "dispatch");
+    const observed = vi.fn();
+    const waiting = parent.runtime.engine.wait(task.taskId);
+    void waiting.then(observed, () => { /* Runtime teardown can end an unfinished observation. */ });
+    stopUI.baseEditor.onEscape?.();
+    await dispatched.mock.results[0].value;
+    expect(parentEscape).not.toHaveBeenCalled();
+    expect(parent.runtime.engine.get(task.taskId)).toMatchObject({ control: "autonomous", state: { status: "cancelling" } });
+    expect(observed).not.toHaveBeenCalled();
+    gate.release.resolve(); await settled(parent.runtime, task.taskId);
+    expect((await waiting).state).toMatchObject({ status: "settled", outcome: { status: "stopped", stoppedBy: "user" } });
+    await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+    expect(parent.runtime.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "stopped", stoppedBy: "user" } });
+    expect(await parent.runtime.engine.storedDeliveries(task.taskId)).toEqual([]);
+    expect(sent).not.toHaveBeenCalled();
+    expect(parent.parentProvider.state.callCount).toBe(parentCalls);
+    expect(readFileSync(parentFile, "utf8")).toBe(parentLog);
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.engine.get(task.taskId)).toMatchObject({ control: "autonomous", state: { status: "settled", outcome: { status: "stopped", stoppedBy: "user" } } });
+    expect(replacement.source!.getRecord(task.taskId)?.canDeliver).toBe(true);
+    expect(replacement.source!.getRecord(task.taskId)?.lifecycle.takenOver).toBe(false);
+    expect(replacement.source!.transcript(task.taskId).messages).toContainEqual(expect.objectContaining({ role: "assistant", text: fragment }));
+    expect(await replacement.engine.storedDeliveries(task.taskId)).toEqual([]);
+    expect(sent).not.toHaveBeenCalled();
+    expect(parent.parentProvider.state.callCount).toBe(parentCalls);
+    expect(readFileSync(parentFile, "utf8")).toBe(parentLog);
+
+    const modal = Promise.withResolvers<boolean>();
+    let selector!: DeliverySelectorComponent;
+    const selectUI = makeUI({ value: "" });
+    replacement.navigator!.setUICtx({ ...selectUI.ctx, custom: (factory: any) => {
+      selector = factory(makeTui(), selectUI.theme, undefined, (saved: boolean) => modal.resolve(saved));
+      return modal.promise;
+    } } as any);
+    mountSelector(selectUI);
+    replacement.navigator!.handleTerminalInput("\x1b[B"); replacement.navigator!.handleTerminalInput("\x1b[B");
+    const opening = vi.spyOn(replacement.navigator!, "openDeliverySelector");
+    expect(replacement.navigator!.handleTerminalInput("\x1bs")).toEqual({ consume: true });
+    const selection = opening.mock.results[0].value;
+    harness.onDispose(async () => { modal.resolve(false); await selection; });
+    expect(selector.render(120).join("\n")).toContain(fragment);
+    expect(sent).not.toHaveBeenCalled();
+    selector.handleInput("\r"); await selection;
+    await replacement.flushDeliveries(); await parent.session.waitForIdle();
+    const deliveries = await replacement.engine.storedDeliveries(task.taskId);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({ delivery: { kind: "selection", status: "stopped", text: `[assistant]\n${fragment}` },
+      receipt: { parentSessionId: parent.session.sessionManager.getSessionId() } });
+    expect(resultEntries(parent)).toHaveLength(1);
+    expect(parent.parentProvider.state.callCount).toBe(parentCalls + 1);
+    parent.worker.setResponses([fauxAssistantMessage("Autonomous continuation result")]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Continuation received")]);
+    await replacement.engine.continue(task.taskId, { text: "Continue the task" });
+    await replacement.engine.wait(task.taskId);
+    await replacement.flushDeliveries(); await parent.session.waitForIdle();
+    await replacement.source!.refresh();
+    expect(replacement.engine.get(task.taskId)).toMatchObject({ control: "autonomous", state: { status: "settled", outcome: { status: "completed" } } });
+    expect(replacement.source!.getRecord(task.taskId)?.canDeliver).toBe(false);
+    expect((await replacement.engine.storedDeliveries(task.taskId)).map(stored => stored.delivery.kind).sort()).toEqual(["automatic", "selection"]);
+    expect(resultEntries(parent)).toHaveLength(2);
+    expect(parent.parentProvider.state.callCount).toBe(parentCalls + 2);
+    expect(parent.errors).toEqual([]);
+  });
+
   it("persists an explicit stop separately from a turn-budget abort", async () => {
     const parent = await host("stop"); const gate = holdRead();
     parent.worker.setResponses([fauxAssistantMessage(fauxToolCall("read", { path: "wait" }), { stopReason: "toolUse" })]);
@@ -400,6 +537,9 @@ describe("ExtensionRuntime ownership", () => {
     expect(parent.runtime.engine.get(task.taskId).state.status).toBe("cancelling");
     gate.release.resolve(); await settled(parent.runtime, task.taskId);
     expect(parent.runtime.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "stopped", stoppedBy: "agent" } });
+    await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+    expect((await parent.runtime.engine.storedDeliveries(task.taskId)).map(stored => stored.delivery.kind)).toEqual(["automatic"]);
+    expect(resultEntries(parent)).toHaveLength(1);
   });
 
   it("continues after a provider failure and delivers the current operation result", async () => {
