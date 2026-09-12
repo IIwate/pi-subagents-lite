@@ -1,6 +1,7 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  mockModules,
+  mockEngine,
   resetSelectDialogInstances,
   selectDialogInstances,
   resetMenuStore,
@@ -76,7 +77,7 @@ function resetState(): void {
     modelRouting: { enabled: false, enabledProviders: [], agentAccess: {} },
     concurrency: { default: 4 },
   });
-  mockModules.mockManager.listAgents.mockReturnValue([]);
+  mockEngine.list.mockReturnValue([]);
   settingsListCalls = [];
   inputInstances = [];
   selectListInstances = [];
@@ -94,7 +95,7 @@ describe("showConcurrencySettingsMenu", () => {
 
   it("shows a pruned default menu without empty sections or reset noise", async () => {
     const ctx = createMockCtx();
-    await showConcurrencySettingsMenu(ctx);
+    await showConcurrencySettingsMenu(ctx, getMenuRuntime());
 
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(wrapperCalls[0].options.title).toBe("Concurrency");
@@ -112,12 +113,12 @@ describe("showConcurrencySettingsMenu", () => {
   it("shows a custom fallback without calling it Default and restores Default at four", async () => {
     resetMenuStore({ concurrency: { default: 8 } });
     const ctx = createMockCtx();
-    await showConcurrencySettingsMenu(ctx);
+    await showConcurrencySettingsMenu(ctx, getMenuRuntime());
     expect(items().find((item) => item.id === "defaultConcurrency").currentValue).toBe("8 slots");
     expect(items().map((item) => item.id)).toContain("resetAll");
 
     resetState();
-    await showConcurrencySettingsMenu(createMockCtx());
+    await showConcurrencySettingsMenu(createMockCtx(), getMenuRuntime());
     expect(items().find((item) => item.id === "defaultConcurrency").currentValue).toBe("4 slots · Default");
   });
 
@@ -129,7 +130,7 @@ describe("showConcurrencySettingsMenu", () => {
         models: { "anthropic/claude-sonnet-4-20250514": 1 },
       },
     });
-    await showConcurrencySettingsMenu(createMockCtx());
+    await showConcurrencySettingsMenu(createMockCtx(), getMenuRuntime());
 
     expect(items().find((item) => item.id === "provider:anthropic")).toMatchObject({
       label: "Provider · anthropic",
@@ -150,7 +151,7 @@ describe("showConcurrencySettingsMenu", () => {
         models: { "openai/gpt-4o": 1 },
       },
     });
-    await showConcurrencySettingsMenu(createMockCtx());
+    await showConcurrencySettingsMenu(createMockCtx(), getMenuRuntime());
 
     expect(items().find((item) => item.id === "provider:openai")).toBeUndefined();
     expect(items().find((item) => item.id === "model:openai/gpt-4o")).toBeUndefined();
@@ -177,7 +178,7 @@ describe("showConcurrencySettingsMenu", () => {
         models: { "openai/gpt-4o": 1 },
       },
     });
-    await showConcurrencySettingsMenu(createMockCtx());
+    await showConcurrencySettingsMenu(createMockCtx(), getMenuRuntime());
 
     expect(items().map((item) => item.id)).toContain("provider:openai");
     expect(items().map((item) => item.id)).toContain("model:openai/gpt-4o");
@@ -191,17 +192,17 @@ describe("showConcurrencySettingsMenu", () => {
         models: { "google/gemini-2.5-pro": 2 },
       },
     });
-    mockModules.mockManager.listAgents.mockReturnValue([
-      { execution: { modelKey: "google/gemini-2.5-pro" }, lifecycle: { status: "completed" } },
+    mockEngine.list.mockReturnValue([
+      { policy: { model: { provider: "google", id: "gemini-2.5-pro" } }, state: { status: "settled" } },
     ] as any);
-    await showConcurrencySettingsMenu(createMockCtx());
+    await showConcurrencySettingsMenu(createMockCtx(), getMenuRuntime());
 
     expect(items().map((item) => item.id)).toContain("model:google/gemini-2.5-pro");
   });
 
   it("filters Add Model choices to currently actionable models", async () => {
     const ctx = createMockCtx();
-    await showConcurrencySettingsMenu(ctx);
+    await showConcurrencySettingsMenu(ctx, getMenuRuntime());
     const add = items().find((item) => item.id === "addModelLimit");
     add.submenu("", vi.fn());
 
@@ -213,7 +214,7 @@ describe("showConcurrencySettingsMenu", () => {
   it("edits and removes an active override", async () => {
     const { store } = resetMenuStore({ concurrency: { default: 4, providers: { anthropic: 2 } } });
     const ctx = createMockCtx();
-    await showConcurrencySettingsMenu(ctx);
+    await showConcurrencySettingsMenu(ctx, getMenuRuntime());
     const row = items().find((item) => item.id === "provider:anthropic");
     const done = vi.fn();
     row.submenu("2 slots", done);
@@ -240,7 +241,7 @@ describe("showConcurrencySettingsMenu", () => {
       },
     });
     const ctx = createMockCtx();
-    await showConcurrencySettingsMenu(ctx);
+    await showConcurrencySettingsMenu(ctx, getMenuRuntime());
     const reset = items().find((item) => item.id === "resetAll");
     reset.submenu("", vi.fn());
     selectListInstances.at(-1)!.onSelect!({ value: "Yes" });

@@ -159,6 +159,7 @@ describe("Execution adapters", () => {
     const continuation = await tasks.continue("interactive", { text: "Continue" });
     expect(continuation.operationId).not.toBe(accepted.operationId);
     await settled(tasks, "interactive");
+    expect(tasks.get("interactive").state).toEqual({ status: "settled", outcome: { status: "completed", result: "Continued result" } });
     await tasks.deliverSelection("interactive", selected);
     const saved = await child.store.deliveries();
     expect(saved).toHaveLength(1);

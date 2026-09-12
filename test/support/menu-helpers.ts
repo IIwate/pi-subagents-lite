@@ -4,14 +4,13 @@ import { vi } from "vitest";
 
 /**
  * Select menu item by partial name match.
- * Maps short names to menu items: 'model', 'concurrency', 'display', 'debug'
+ * Maps short names to configuration menu labels.
  */
 export function selectByName(name: string): (title: string, items: string[]) => string | undefined {
   const nameMap: Record<string, string> = {
     model: "Model routing",
     concurrency: "Concurrency settings",
     display: "Display settings",
-    debug: "Debug",
     spawnoptions: "Spawn options",
   };
   const search = nameMap[name.toLowerCase()] ?? name;

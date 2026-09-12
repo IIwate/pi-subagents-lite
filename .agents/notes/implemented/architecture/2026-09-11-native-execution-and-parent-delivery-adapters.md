@@ -10,14 +10,14 @@ Status: implemented
 
 ## Decision
 
-[TaskEngine](../../../../src/engine/task-engine.ts) 通过 [ExecutionDriver / DeliveryChannel](../../../../src/engine/contracts.ts) 组合领域策略、原生执行和父接收. 模块通过构造器传参, 不读取 Shell. 实现以 pi-agent-core 和 coding-agent 0.85.1 的公开入口为依据, core 是生产 peer dependency.
+[TaskEngine](../../../../src/engine/task-engine.ts) 通过 [ExecutionDriver / DeliveryChannel](../../../../src/engine/contracts.ts) 组合领域策略、原生执行和父接收. 模块通过构造器传参. 实现以 pi-agent-core 和 coding-agent 0.85.1 的公开入口为依据, core 是生产 peer dependency.
 
 ```ts type-equiv: ExecutionDriver from src/engine/contracts.ts
 export interface ExecutionDriver {
   readonly store: TaskStore;
   accept(input: TaskInput): Promise<string>;
   drive(operationId: string): Promise<DriveResult>;
-  requestAbort(operationId: string): Promise<void>;
+  requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void>;
   queue(kind: "steer" | "followUp", input: TaskInput): Promise<string>;
   cancelQueued(entryId: string): Promise<"cancelled" | "already_consumed" | "not_found">;
   snapshot(): Promise<ExecutionSnapshot>;
@@ -32,7 +32,7 @@ export interface DeliveryChannel {
 }
 ```
 
-这些入口是当前可调用的执行与交付能力. 标准扩展工厂场景从真实父工具调用 TaskEngine 并验证父接收. 产品执行注册仍由 AgentManager/SpawnCoordinator 装配, Navigator 通过 [只读 Source 与 Action](2026-09-11-declarative-navigation-and-input-actions.md) 同时接入当前执行所有者和原生 TaskEngine. [v3 RFC](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md) 的 ExtensionRuntime 阶段负责执行入口切换. 当前实现不加载旧 inbox 作为原生任务, [旧父交付](2026-09-09-parent-result-delivery-and-ack.md) 仍记录该注册入口的行为.
+[ExtensionRuntime](2026-09-12-explicit-runtime-and-native-task-ownership.md) 将这些能力接入正式 Agent 工具、事件和设置入口. Navigator 通过 [只读 Source 与 Action](2026-09-11-declarative-navigation-and-input-actions.md) 接收 TaskEngine 的展示投影. 原生 task binding、operation 与 outbox 是任务发现和恢复的来源.
 
 ## Native execution ownership
 
@@ -42,7 +42,7 @@ export interface DeliveryChannel {
 
 accept 只持久接受 prompt, drive 才执行. TaskEngine 在双层 Quota 准入后驱动, 同一次占用只释放一次. wait 的 signal 仅结束观察. 原生 drive 的真实 Promise 返回之后才释放占用, 包括已持久保存的 waiting; waiting 可由显式 resume 重新准入. restore 读取原生状态, 不自动启动模型请求. 已结算任务通过 continue 创建新 operation; 先预留配额, 无容量返回 QuotaUnavailable, 保留旧 operation 和结果.
 
-requestAbort 先提交原生取消请求, 再更新领域投影. 未获准入的取消通过已封闭 effect gate 的原生 reconciliation 结算, 不占用 provider slot. close 在调用宿主关闭和工具取消回调前登记共享 Promise, 封闭 Harness 并等待已接纳的 drive/工具返回后释放环境; 它不伪造 terminal result. 不响应取消的第三方工具会延长关闭等待. 关闭后的未知工具效果由原生 replay 策略裁决, replay=never 不重放.
+requestAbort 先提交原生取消请求, 再更新领域投影. 未获准入的取消通过已封闭 effect gate 的原生 reconciliation 结算, 不占用 provider slot. close 在调用宿主关闭和工具取消回调前登记共享 Promise, 先封闭 Harness, 保留 Driver 所有的 Session writer 供子扩展 shutdown 保存状态, 等待已接纳的 drive/工具返回后关闭 Session 并释放环境; 它不伪造 terminal result. 不响应取消的第三方工具会延长关闭等待. 关闭后的未知工具效果由原生 replay 策略裁决, replay=never 不重放.
 
 运行中 steer/followUp 与等待准入时的输入使用原生队列. 撤回直接返回 cancelled/already_consumed/not_found. 已结算 Lane 的未消费输入仍可查询, 不隐式发起下一次 operation. Takeover 独立持久保存 manual 控制模式并解除前台等待, 不执行 abort. 前台任务的普通 Steer 不建立后台交付.
 
@@ -80,6 +80,8 @@ TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入�
 
 接收正文后发送独立、无结果正文的隐藏 wake. 已有持久 wake 标记阻止恢复后的重复唤醒. 父模型失败不撤销已落盘 receipt. wake 的实际异步失败由宿主报告, 不能据 sendMessage 返回推断父推理成功. 父 receipt 的确认含义仍是“上下文已持久接收”, 不是模型已完成处理. 跨进程并发运行两个父 Session 写入器不属于这个同进程 Adapter 的保证.
 
+AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形成 receipt. 该路径不发送第二条结果消息或 wake. 人工选择的父消息标为 selected messages, 表示所选文本而非整项任务已经完成.
+
 ## Alternatives considered
 
 - **继续只用 AgentSession runner 与父 inbox.** 已有丰富场景和扩展加载兼容, 改动面最小. 但原生 operation、队列和恢复仍无法成为独立执行事实来源, 不满足能力边界目标.
@@ -92,7 +94,7 @@ TaskEngine 在发布 terminal 领域状态前保存自动 outbox. 结果写入�
 
 执行、准入和父接收可单独替换并用真实离线 Provider 验证. 源码不需要同进程 DTO 深克隆或 RPC 层. 占用、取消、持久状态与显示状态具有不同责任.
 
-每个任务具有独立原生 Session, 需要组合根管理仓库发现、模型授权和资源准备. 原生工具与旧 coding-agent 扩展 hooks 的配置映射仍属于资源接入责任. 父文件 receipt 校验是低频同步读取, 会增加大父日志上的交付成本. UI 的只读展示和 Action 已建立, 配置断代、完整 ExtensionRuntime 和旧执行路径删除仍由分阶段 RFC 管理.
+每个任务具有独立原生 Session, Runtime 管理仓库发现、模型授权和资源准备. PiResources 把官方 Pi 工具和关键扩展 hook 接到原生 Harness. 父文件 receipt 校验是交付边界上的同步读取, 成本随父日志增长. v3 配置和任务数据由激活实例管理.
 
 ## Verification
 

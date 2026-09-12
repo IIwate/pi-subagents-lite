@@ -25,7 +25,7 @@ export class TranscriptView {
       this.invalidate(); this.theme = theme; this.width = width;
     }
     const lines = [
-      theme.fg("accent", theme.bold(`${displayText(record.display.name).replace(/\n/g, " ")}${record.execution.debugFaultKind ? " [DEBUG]" : ""} (${plainAgentStatus(record)})`)),
+      theme.fg("accent", theme.bold(`${displayText(record.display.name).replace(/\n/g, " ")} (${plainAgentStatus(record)})`)),
       theme.fg("dim", "─".repeat(Math.max(1, width))),
     ].map(line => truncateToWidth(line, width));
     if (!snapshot.ready && !record.error) {

@@ -8,7 +8,7 @@ A steering message accepted while Pi waits in retry backoff may not enter sessio
 
 ## Decision
 
-AgentRecord.execution.retryState reflects auto_retry_start/auto_retry_end. Manager subscribes once when adopting the session; Pi session disposal releases those lifecycle listeners. Per-prompt usage/outcome subscriptions have a separate finally cleanup owned by the [runner](2026-09-10-assistant-outcomes-retries-and-turn-budgets.md).
+ExecutionSnapshot carries the native retry attempt and deadline together with queued entry IDs. TaskNavigationSource derives the countdown and projects it with the selected task's transcript. The source owns its subscription, and dispose releases it without affecting another runtime.
 
 ```ts type-equiv: AgentRetryState from src/types.ts
 export interface AgentRetryState {
@@ -20,11 +20,9 @@ export interface AgentRetryState {
 }
 ```
 
-The active child pending area displays session.getSteeringMessages and pendingSteers retained before session creation. A transcript fallback displays the same information when the dock swap is inactive. Retry countdown state participates in the render signature; queue_update and manager progress restart rendering after an idle period. Displaying queued text does not append a second user message to the transcript.
+Pending input remains visible before checkpoint consumption. Enter adds steering without changing control mode or cancelling backoff. Esc targets the selected operation, including an operation waiting in retry. Its cancellation follows native operation ownership and retains actual quota until execution returns.
 
-Enter queues input without automatically cancelling backoff. Esc first asks manager.abortRetry for the selected running child, then falls back to child abort, then normal editor handling. abortRetry calls Pi's abortRetry and clears the UI retry state; Pi owns whether the current run settles or queued work executes next. This call alone does not promise a completed continuation or final report to Main.
-
-Alt+Up delegates app.message.dequeue to the selected child. It drains pending pre-session steers and Pi steering/followUp queues, combines returned text with any existing draft, and reports the restored count. In Main the original handler remains active. This is a text-returning API; it does not claim to reconstruct image attachments. The visible hint is `Alt+Up to edit all queued messages`.
+Alt+Up and the host dequeue binding withdraw queued entries by identity. Only successfully cancelled entries return to the original task's draft; consumed entries are not resubmitted. An editor that cannot restore image attachments leaves that input queued. Main keeps the host's own queue handler.
 
 ## Alternatives considered
 
@@ -42,4 +40,4 @@ The UI distinguishes accepted-but-queued input, retry delay and committed transc
 
 ## Verification
 
-[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts), [interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts), [transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts), and [manager interaction](../../../../test/unit/agents/manager/agent-manager.interaction.test.ts) verify routing, immediate queue display, retry cancellation calls and dequeue. [Pi session scenarios](../../../../test/scenarios/agents/pi-session.test.ts) separately exercise Pi's actual retry loop with offline providers. These tests do not constitute physical-terminal input-latency measurements.
+[Navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts), [interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts), [transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts), and [native navigation](../../../../test/scenarios/ui/task-navigation.test.ts) cover queue display, withdrawal identity, cancellation routing, and focus. These checks do not measure physical-terminal input latency.

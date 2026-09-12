@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-09-12
+
 ## Problem
 
 创建真实 session 和完成工具、扩展配置不是同一时点. 在 Manager 尚未接管时, setup 失败也必须释放资源; 过早公开实例则允许用户向工具边界尚未配置完成的会话输入.

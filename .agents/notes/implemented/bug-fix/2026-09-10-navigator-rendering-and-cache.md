@@ -16,7 +16,7 @@ Manager list 顺序为 attention(error/aborted/turn_limited)、running、queued�
 
 刷新 timer 为一秒. 初次 spawn、统计进展和被接受的人工继续通过 ensureTimer 重启, 当前无选中子屏且无 running/queued/unsettled 时停止. UI 失败由 update/render 边界截住, 停止 timer 并最多提示一次, 后续实际事件仍可重试. 清理依次尝试所有 restoration, 不让一个 host UI 异常阻止其他资源释放.
 
-[声明式展示](../architecture/2026-09-11-declarative-navigation-and-input-actions.md) 把缓存分为消息投影和折行. AgentPresentation 对 message_start/update/end 失效对应投影, 换 session 释放旧订阅; 同一 session 替换历史保留订阅, 新消息对象具有新投影. Native Driver 按不可变 Entry ID 复用投影. TranscriptView 使用只读消息对象、theme 和 width 缓存折行, 不再订阅会话. streaming 单独绘制, 空 thinking 不产生空 Assistant 标题. 列表使用已准备的统计, 不在每秒渲染中扫描 session 历史计算 contextPercent.
+[声明式展示](../architecture/2026-09-11-declarative-navigation-and-input-actions.md) 把缓存分为消息投影和折行. Native Driver 按不可变 Entry ID 复用投影. TranscriptView 使用只读消息对象、theme 和 width 缓存折行, 不再订阅会话. streaming 单独绘制, 空 thinking 不产生空 Assistant 标题. 列表使用已准备的统计, 不在每秒渲染中扫描 session 历史计算 contextPercent.
 
 ## Alternatives considered
 
@@ -35,8 +35,8 @@ Manager list 顺序为 attention(error/aborted/turn_limited)、running、queued�
 - `615cb8a`, `dbb4de1`, `8da2e96`: 3~6 槽位、原生 shrink 清理、Working 行结束后的 reflow.
 - `34a4f29`, `2ce56bc`, `afc9b34`, `aa69dca`: UI 失败隔离和重试后的刷新恢复.
 - `e98e224`, `f80768e`, `4e5ac95`, `911a9df`, `5f7ffb2`, `6d1c997`: transcript cache、空 thinking、排序、默认展开和响应式行布局.
-- `1f9356e`, `be978e3`, `26e5639`, `2688461`: 固定状态列、保留可见状态、provider-first 身份和只改显示的 Debug preview. `b6effc0`, `570fa4e`, `9fa3f2d` 记录定时刷新与旧 LiveView/spinner, 不另建第二份执行状态.
+- `1f9356e`, `be978e3`, `26e5639`: 固定状态列、保留可见状态和 provider-first 身份. `b6effc0`, `570fa4e`, `9fa3f2d` 记录定时刷新与旧 LiveView/spinner, 不另建第二份执行状态.
 
 ## Verification
 
-[render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts)、[transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts)、[lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 和 [manager ordering](../../../../test/unit/agents/manager/agent-manager.ordering.test.ts) 覆盖对应行为. 旧 output log、tree widget 和重复 footer 的选择依据由 [Stealth](../architecture/2026-09-09-stealth-tool-registration.md) 记录, 不要求恢复已删除实现来测试当前 UI.
+[render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts)、[transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts)、[lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 和 [manager ordering](../../../../test/scenarios/agents/execution-adapters.test.ts) 覆盖对应行为. 旧 output log、tree widget 和重复 footer 的选择依据由 [Stealth](../architecture/2026-09-09-stealth-tool-registration.md) 记录, 不要求恢复已删除实现来测试当前 UI.

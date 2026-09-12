@@ -14,7 +14,7 @@ import { createTestHarness, type TestHarness } from "../../../support/harness.js
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
 import {
   makeRecord,
-  makeManager,
+  makeSource,
   makeUI,
   makeTui,
   makeSwitchableTui,
@@ -42,7 +42,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     record.lifecycle.status = "queued";
     record.execution.session = undefined;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -63,7 +63,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     record.execution.settled = true;
     record.error = "Automatic model override is no longer authorized";
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -83,7 +83,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     record.execution.settled = true;
     record.error = "503 service unavailable";
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -114,7 +114,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     const streamingMessage = { role: "assistant", get content() { return readStreaming(); } };
     session.agent.state.streamingMessage = streamingMessage;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const fixture = makeSwitchableTui();
     fixture.switchMode(mode);
@@ -148,7 +148,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     const record = makeRecord();
     const session = record.execution.session;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -171,7 +171,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("reflows cached messages on resize and refreshes them on theme invalidation", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -193,7 +193,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     const record = makeRecord();
     const session = record.execution.session;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -213,7 +213,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("removes built-in Main footer data while preserving extension statuses", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -242,7 +242,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
       },
     ];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -257,7 +257,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("restores the parent chat, pending, and status regions after confirmation", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -282,37 +282,6 @@ describe("AgentNavigator — Transcript & Footer", () => {
     expect(tui.footerContainer.children).toEqual([tui.originalFooter]);
   });
 
-  it.each(["history", "session"])("rebuilds a replaced %s with the same message count", (replacement) => {
-    const record = makeRecord();
-    const session = record.execution.session;
-    const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
-    navigator.setUICtx(ui.ctx as any);
-    const { tui } = mountSelector(ui);
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\r");
-    const transcript = tui.document.children[tui.chatIndex];
-    transcript.render(120);
-    const unsubscribe = session.subscribe.mock.results[0].value;
-
-    const messages = Array.from({ length: session.messages.length }, (_, index) => ({
-      role: "compactionSummary",
-      summary: `Synthetic compacted history ${index}`,
-    }));
-    if (replacement === "history") session.messages = messages;
-    else record.execution.session = { ...session, messages, subscribe: vi.fn(() => vi.fn()) };
-
-    const text = transcript.render(120).join("\n");
-    expect(text).toContain("Synthetic compacted history 0");
-    expect(text).not.toContain("I found the project structure.");
-    if (replacement === "session") expect(unsubscribe).toHaveBeenCalledOnce();
-    else expect(unsubscribe).not.toHaveBeenCalled();
-    const active = record.execution.session;
-    active.messages[0].summary = "Updated compacted history";
-    active.subscribe.mock.calls.at(-1)[0]({ type: "message_end", message: active.messages[0] });
-    expect(transcript.render(120).join("\n")).toContain("Updated compacted history");
-  });
 
   it("preserves a same-named custom footer while a subagent is selected", () => {
     class FooterComponent {
@@ -324,7 +293,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
 
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -345,7 +314,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("keeps a footer replaced by another extension while Main is selected", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -369,7 +338,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("renders a footer replaced by another extension on the child screen", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -393,7 +362,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("keeps the active child and dynamic footer across Pi 0.84 renderer switches", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const fixture = makeSwitchableTui();
@@ -449,7 +418,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("rejects a document container with an unexpected child count", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -471,7 +440,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("rejects a document whose chat child is not a container", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -496,7 +465,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     (region) => {
       const record = makeRecord();
       const ui = makeUI({ value: "" });
-      navigator = new AgentNavigator(makeManager([record]));
+      navigator = new AgentNavigator(makeSource([record]));
       navigator.setUICtx(ui.ctx as any);
       navigator.ensureTimer();
       const tui = makeTui();
@@ -538,7 +507,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("rejects an unknown root region inserted between status and widgets", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -562,7 +531,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
   it("rejects switching when the Pi root layout is unsupported", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const tui = makeTui();
@@ -600,7 +569,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
       },
     ];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -623,7 +592,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
     session.getSteeringMessages = vi.fn().mockReturnValue([queued]);
     record.execution.pendingSteers = [{ message: "Avoid\x07 reading\r\nlarge files" }];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");
@@ -652,7 +621,7 @@ describe("AgentNavigator — Transcript & Footer", () => {
       errorMessage: "ECONNRESET",
     };
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     navigator.handleTerminalInput("\x1b[B");

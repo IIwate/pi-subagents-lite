@@ -14,7 +14,7 @@ import { createTestHarness, type TestHarness } from "../../../support/harness.js
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
 import {
   makeRecord,
-  makeManager,
+  makeSource,
   makeUI,
   makeTui,
   mountSelector,
@@ -35,7 +35,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("suppresses the editor cursor marker while list navigation owns focus", () => {
     const ui = makeUI({ value: "" });
     ui.baseEditor.render = () => [`Draft${CURSOR_MARKER}`];
-    navigator = new AgentNavigator(makeManager([makeRecord()]));
+    navigator = new AgentNavigator(makeSource([makeRecord()]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     const editor = tui.children[tui.editorIndex].children[0];
@@ -50,7 +50,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("requires Enter before changing the active agent", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);
@@ -72,7 +72,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("keeps the selected agent focused after confirmation", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -88,7 +88,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("Escape cancels a highlighted candidate without switching", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -105,7 +105,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("does not enter the selector when the editor contains text", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "draft text" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -118,7 +118,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   it("submits to Main when pressing Enter on active Main row with non-empty text", () => {
     const record = makeRecord("agent-1");
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -147,7 +147,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const record = makeRecord("agent-1");
     const ui = makeUI({ value: "" });
     const routeInput = vi.fn().mockResolvedValue({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -176,7 +176,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const record = makeRecord("agent-1");
     const ui = makeUI({ value: "" });
     const routeInput = vi.fn().mockResolvedValue({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -213,7 +213,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const record2 = makeRecord("agent-2");
     const ui = makeUI({ value: "" });
     const routeInput = vi.fn().mockResolvedValue({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record1, record2]), routeInput);
+    navigator = new AgentNavigator(makeSource([record1, record2]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -242,7 +242,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const record1 = makeRecord("agent-1");
     const record2 = makeRecord("agent-2");
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record1, record2]));
+    navigator = new AgentNavigator(makeSource([record1, record2]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -275,7 +275,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
   ])("routes paste and navigation escapes to the editor: $input", ({ input, focused }) => {
     const record = makeRecord("agent-1");
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -292,7 +292,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const r2 = makeRecord("agent-22222222");
     const records = [r1, r2];
     const ui = makeUI({ value: "" });
-    const manager = makeManager(records) as any;
+    const manager = makeSource(records) as any;
     manager.clear = vi.fn((id: string) => {
       const index = records.findIndex(record => record.id === id);
       if (index < 0) return false;
@@ -320,7 +320,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const record = makeRecord("agent-11111111");
     const secondRecord = makeRecord("agent-22222222");
     const ui = makeUI({ value: "" });
-    const manager = makeManager([record, secondRecord]) as any;
+    const manager = makeSource([record, secondRecord]) as any;
     manager.clear = vi.fn(() => true);
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);

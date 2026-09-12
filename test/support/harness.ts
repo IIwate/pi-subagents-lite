@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { vi } from "vitest";
 import { ConfigStore, type ConfigIO } from "../../src/config/config-store.js";
 import type { SubagentsConfig } from "../../src/config/types.js";
-import { registerAgents, setAgentScanDirs } from "../../src/agents/agent-types.js";
+import { AgentCatalogue } from "../../src/agents/agent-types.js";
 
 export function createDefaultConfig(overrides: Partial<SubagentsConfig> = {}): SubagentsConfig {
   return {
@@ -31,13 +31,8 @@ export function createMemoryConfigIO(initial: SubagentsConfig = createDefaultCon
 
 export type MemoryConfigIO = ReturnType<typeof createMemoryConfigIO>;
 
-export function resetAgentTypesRegistry(): void {
-  setAgentScanDirs("", "", false);
-  registerAgents(new Map());
-}
-
 export function createTestHarness(options: { initialConfig?: SubagentsConfig; sessionId?: string } = {}) {
-  resetAgentTypesRegistry();
+  const catalogue = new AgentCatalogue();
   const sessionId = options.sessionId ?? randomUUID();
   const memIO = createMemoryConfigIO(options.initialConfig);
   const store = new ConfigStore(memIO.io);
@@ -47,6 +42,7 @@ export function createTestHarness(options: { initialConfig?: SubagentsConfig; se
 
   return {
     sessionId,
+    catalogue,
     memIO,
     store,
     onDispose(action: () => void | Promise<void>): void {
@@ -67,11 +63,6 @@ export function createTestHarness(options: { initialConfig?: SubagentsConfig; se
         };
         while (disposables.length > 0) await cleanup(disposables.pop()!);
         await cleanup(() => store.dispose());
-        await cleanup(async () => {
-          const { takeFallbackResults } = await vi.importActual<typeof import("../../src/shell.js")>("../../src/shell.js");
-          takeFallbackResults(sessionId);
-        });
-        await cleanup(() => resetAgentTypesRegistry());
         await cleanup(() => { vi.restoreAllMocks(); });
         await cleanup(() => { vi.unstubAllEnvs(); });
         await cleanup(() => { vi.unstubAllGlobals(); });

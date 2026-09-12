@@ -8,18 +8,15 @@ Pi 的 `session.prompt()` 可以正常 resolve, 同时最后一条 assistant mes
 
 ## Decision
 
-[runner](../../../../src/agents/agent-runner.ts) 为每次初始执行和继续执行单独收集 `message_end` 中最后一条 assistant message. 只提取 `type: "text"` 内容. `stopReason: "error"` 优先抛出 provider 错误; 没有错误说明时使用明确的缺失说明错误. 非 aborted、非 turn-limited 的空文本抛错. 只有整段匹配 `call:<name>{...}` 的文本被判为未执行工具调用; 含普通解释的文字不因出现 `call:` 就被拒绝. thinking 和 toolCall 不能充当最终正文.
+[HarnessDriver](../../../../src/drivers/harness-driver.ts) 在原生 after_response hook 检查最终 assistant 正文. 空完成及整段伪工具调用文本转为明确错误. Native OperationResultRecord 决定 terminal status; [NativeTaskStore](../../../../src/drivers/native-task-store.ts) 仅从对应 operation 的消息区间提取最后 assistant 文本, 不回退到其他运行的旧结果.
 
-重试沿用 Pi 的次数、退避、队列和上下文回滚. 扩展仅按 session 包裹私有 `_isRetryableError`, 保留原判定及 `this`, 并通过 Symbol 避免重复包裹. 原判定为 false 时, 增补两类信号:
+原生分支查询从 operation 的 tipId 向前遍历, 在 fromTipId 停止并排除该节点. 停止边界按遍历顺序生效, 从最旧节点开始会截取此前运行的历史, 使继续执行的正文与回合计数失真.
 
-- error message 中的 stream/socket/network/transport 断开、EOF、ECONNRESET、ETIMEDOUT、EPIPE、无效 SSE JSON 和明确 upstream error.
-- 正常终态没有非空 text 且没有 toolCall/tool_use, 包括纯 thinking. 为此填充 `Empty assistant response received` 诊断. aborted 和原本的 error 不经过这个空白分支.
+重试、退避、恢复和未知工具效果由原生 Harness 承担. Adapter 使用公开 hooks, 不包裹宿主私有重试方法. 瞬态失败是否再次执行取决于原生分类和已配置 retry policy; 认证、权限和内容拒绝不通过补发另一 Agent 绕过.
 
-这是可恢复失败的分类启发式, 不能证明空白必然来自断网. 配额、认证、内容过滤等永久错误不因“无正文”被额外放宽为可重试. 私有方法缺失时使用 Pi 原行为, 最终空文本守卫仍生效. [retry compatibility test](../../../../test/unit/agents/pi-retry-compat.test.ts) 则在依赖升级时显式报告方法消失.
+maxTurns 未设置或为 0 表示不限, 接受边界解析为正整数预算. 达到软上限后以原生 steer 提醒停止工具调用并汇总, grace 默认为 6, 0 或 1 仍留一个汇总回合. before_request 达到 maxTurns + max(1, grace) 时请求原生 abort. policy work 的失败与真实 drive 一起收敛, 不让事件回调产生未处理 rejection.
 
-`maxTurns` 未设置或为 0 表示不限回合. `turn_end` 达到软上限时发送含剩余预算的 steer, 默认 grace 为 6. 后续 `turn_end` 达到硬上限时设 aborted 并请求 abort. grace 为 0 或 1 均实际留一个后续 turn, 因软上限分支和硬停止分支不在同一事件执行. `steer()`/`abort()` 的 Promise rejection 在事件回调中被处理, 避免逃逸为 unhandled rejection; 已设置的停止事实不因 abort reject 消失.
-
-继续执行的预算按本次 prompt 计算, 展示的 turnCount 累加此前执行. `max_tokens` 通过子会话 model 副本的原生 `maxTokens` 交给 Pi, 不修改父模型或 registry, 不再依赖 provider-specific payload 字段. [状态说明](../../../../src/status-note.ts) 区分预算硬停止、软截断和用户/模型主动停止, 防止将 partial output 当结论.
+继续执行建立新 operation 并重新计算回合预算; maxTokens 通过 Driver 的模型请求视图与原生 stream options 生效, 不修改父模型. 显式 StopAgent 或用户停止保存 operation 的 stoppedBy, 与预算 abort 区分. [状态说明](../../../../src/status-note.ts) 将停止后的文本标为部分输出.
 
 ## Alternatives considered
 
@@ -30,9 +27,7 @@ Pi 的 `session.prompt()` 可以正常 resolve, 同时最后一条 assistant mes
 
 ## Consequences
 
-正常完成要求本次执行有最终正文; budget/abort 仍可能没有正文, 由明确状态说明表达. 重试耗尽返回 terminal error, 不保证最终成功. 升级 Pi 时必须核对私有分类器、事件顺序和原生 maxTokens 的语义. 重试期间的人工输入与 Esc 见 [子屏交互](2026-09-09-subagent-screen-retry-and-steering-visibility.md).
-
-Debug fault 在真实 session 配置完成后、首次 prompt 前注入, 只消耗下一个实际启动的任务一次; 入队本身不消耗. 它验证可继续的失败路径, 不模拟真实 provider 网络. UI status preview 仅改展示, 不改变执行状态.
+终态和最终正文由本次原生 operation 决定. 重试耗尽仍是错误, 不保证最终成功或外部工具恰好执行一次. 错误后的显式继续建立独立 operation, 正文和交付身份仍以该次运行的持久事实为准.
 
 ## Evidence
 
@@ -40,8 +35,7 @@ Debug fault 在真实 session 配置完成后、首次 prompt 前注入, 只消�
 - `f87a115`, `9d03c06`, `4e5ac95`, `cef94ba`: Pi retry 扩展、传输错误及纯 thinking/空白分类.
 - `bda06c2`, `bf4c335`, `68d72f2`, `1e75d1a`: grace、软硬停止和停止发起者说明.
 - `cbbefae`, `65d1690`: output token 限制的 provider payload 方案与 Pi 原生模型参数方案.
-- `7e985ec`, `4d8a115`, `ab1e595`, `19ed1dd`: Debug 注入、诊断及即时 terminal error.
 
 ## Verification
 
-[runner outcomes](../../../../test/unit/agents/runner/agent-runner.outcomes.test.ts)、[limits](../../../../test/unit/agents/runner/agent-runner.limits.test.ts)、[setup](../../../../test/unit/agents/runner/agent-runner.setup.test.ts)、[Pi session scenarios](../../../../test/scenarios/agents/pi-session.test.ts) 和 [provider delivery](../../../../test/scenarios/agents/provider-result-delivery.test.ts) 分别验证终态、预算、模型副本和真实 Pi 离线重试链路. [manager lifecycle](../../../../test/unit/agents/manager/agent-manager.lifecycle.test.ts) 覆盖 Debug 消耗时机; [status-note tests](../../../../test/unit/status-note.test.ts) 覆盖状态说明.
+[原生执行场景](../../../../test/scenarios/agents/execution-adapters.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 与 [状态说明](../../../../test/unit/status-note.test.ts) 覆盖结果、预算、停止发起者、资源交接和独立执行.

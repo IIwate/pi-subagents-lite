@@ -16,11 +16,11 @@ import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { buildListTheme, saveSetting } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SystemPromptMode } from "../../agents/types.js";
-import { getStore } from "../../shell.js";
+import type { MenuRuntime } from "./helpers.js";
 import { CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
 
-export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promise<void> {
-  const store = getStore();
+export async function showSystemPromptMenu(ctx: ExtensionCommandContext, runtime: MenuRuntime): Promise<void> {
+  const store = runtime.store;
 
   const buildItems = (): SettingItem[] => {
     const items: SettingItem[] = [

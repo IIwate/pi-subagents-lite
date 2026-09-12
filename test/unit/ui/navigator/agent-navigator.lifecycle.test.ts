@@ -12,7 +12,7 @@ import { createTestHarness, type TestHarness } from "../../../support/harness.js
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
 import {
   makeRecord,
-  makeManager,
+  makeSource,
   makeUI,
   mountSelector,
 } from "../../../support/navigator.js";
@@ -32,7 +32,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
   it("clears the folded footer status when disposed", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]), undefined, undefined, undefined, false);
+    navigator = new AgentNavigator(makeSource([record]), undefined, undefined, undefined, false);
     navigator.setUICtx(ui.ctx as any);
     mountSelector(ui);
 
@@ -51,7 +51,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
       throw new Error("Session history must not be read during list rendering");
     });
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui, selector } = mountSelector(ui);
     tui.terminal.columns = 180;
@@ -71,7 +71,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     const record = makeRecord("agent-unsettled", "error");
     record.execution.settled = false;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
 
@@ -90,7 +90,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     vi.useFakeTimers();
     const activeRecord = makeRecord("agent-active", "running");
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([activeRecord]));
+    navigator = new AgentNavigator(makeSource([activeRecord]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
 
@@ -103,7 +103,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     const completedRecord = makeRecord("agent-completed", "completed");
     completedRecord.execution.settled = true;
     const ui2 = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([completedRecord]));
+    navigator = new AgentNavigator(makeSource([completedRecord]));
     navigator.setUICtx(ui2.ctx as any);
     const { tui: tui2 } = mountSelector(ui2);
 
@@ -117,7 +117,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     const record = makeRecord("agent-completed", "completed");
     record.execution.settled = true;
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
 
@@ -138,7 +138,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
   it("restores root components and unregisters widgets on dispose", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     mountSelector(ui);
 
@@ -151,7 +151,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     vi.useFakeTimers();
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { tui } = mountSelector(ui);
     ui.ctx.setWidget.mockImplementation((_key: string, content: unknown) => {
@@ -168,7 +168,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     vi.useFakeTimers();
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    const manager = makeManager([record]) as any;
+    const manager = makeSource([record]) as any;
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
@@ -188,7 +188,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     vi.useFakeTimers();
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    const manager = makeManager([record]) as any;
+    const manager = makeSource([record]) as any;
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
@@ -211,7 +211,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
     const remaining = makeRecord("agent-remaining", "completed");
     const records = [active, remaining];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -231,7 +231,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
   it("falls back to the main screen when the selected record disappears", () => {
     const records = [makeRecord()];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -252,7 +252,7 @@ describe("AgentNavigator — Lifecycle & Refresh", () => {
   it("restores root components without writing to the terminal during dispose", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui } = mountSelector(ui);

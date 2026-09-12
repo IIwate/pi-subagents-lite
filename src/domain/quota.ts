@@ -1,5 +1,6 @@
 import type { ModelIdentity } from "./policy.js";
 
+// Note: see .agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md
 export interface QuotaLimits {
   readonly default: number;
   readonly providers?: Readonly<Record<string, number>>;

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-09-12
+
 ## Problem
 
 停止请求、模型停止输出、执行 Promise 结算和释放子会话不是同一事件. 若在流仍活动时销毁 Pi ExtensionRunner, 后续 provider/context hook 会访问失效运行时; 若只丢弃 AgentRecord, 子扩展的进程、连接和 watcher 又没有机会关闭. 排队、初始化和人工继续使这些时序都可能与 Clear 或父会话关闭相遇.

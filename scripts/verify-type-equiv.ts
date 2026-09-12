@@ -55,7 +55,7 @@ function getMarkdownFiles(): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && entry.name !== ".git") {
+        if (entry.name !== "node_modules" && entry.name !== ".git" && resolve(full) !== resolve(agentNoteRoot, "archived")) {
           walk(full);
         }
       } else if (entry.isFile() && entry.name.endsWith(".md")) {

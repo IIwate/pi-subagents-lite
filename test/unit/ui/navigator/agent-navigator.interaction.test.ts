@@ -11,11 +11,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness, type TestHarness } from "../../../support/harness.js";
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
-import * as shell from "../../../../src/shell.js";
-import type { SpawnCoordinator } from "../../../../src/spawn/spawn-coordinator.js";
 import {
   makeRecord,
-  makeManager,
+  makeSource,
   makeUI,
   makeTui,
   mountSelector,
@@ -39,10 +37,7 @@ describe("AgentNavigator — Interaction", () => {
     const ui = makeUI({ value: "" });
     const gate = Promise.withResolvers<boolean>();
     const custom = vi.fn(() => gate.promise);
-    vi.spyOn(shell, "getCoordinator").mockReturnValue({
-      getDeliverableMessages: () => [{ role: "assistant", content: "Available result" }],
-    } as unknown as SpawnCoordinator);
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx({ ...ui.ctx, custom } as any);
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\x1b[B");
@@ -61,7 +56,7 @@ describe("AgentNavigator — Interaction", () => {
   it("decorates the editor and forwards printable input after leaving the list", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -79,7 +74,7 @@ describe("AgentNavigator — Interaction", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
     const routeInput = vi.fn().mockResolvedValue({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -111,7 +106,7 @@ describe("AgentNavigator — Interaction", () => {
   it("stops a running subagent when Escape is pressed in the editor while viewing it", () => {
     const record = makeRecord();
     record.lifecycle.status = "running";
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     manager.abort = vi.fn().mockReturnValue(true);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
@@ -141,7 +136,7 @@ describe("AgentNavigator — Interaction", () => {
   it("stops a running subagent when Escape is pressed while viewing it with list focused", () => {
     const record = makeRecord();
     record.lifecycle.status = "running";
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     manager.abort = vi.fn().mockReturnValue(true);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
@@ -168,7 +163,7 @@ describe("AgentNavigator — Interaction", () => {
       delayMs: 2000,
       startAt: Date.now(),
     };
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     manager.abortRetry = vi.fn().mockReturnValue(true);
     manager.abort = vi.fn().mockReturnValue(true);
     const ui = makeUI({ value: "" });
@@ -201,7 +196,7 @@ describe("AgentNavigator — Interaction", () => {
       delayMs: 2000,
       startAt: Date.now(),
     };
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     manager.abortRetry = vi.fn().mockReturnValue(true);
     manager.abort = vi.fn().mockReturnValue(true);
     const ui = makeUI({ value: "" });
@@ -231,7 +226,7 @@ describe("AgentNavigator — Interaction", () => {
         modelKey: "cliproxyapi/gpt-5.6-sol",
       })
       .mockResolvedValueOnce({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -267,7 +262,7 @@ describe("AgentNavigator — Interaction", () => {
         modelKey: "cliproxyapi/gpt-5.6-sol",
       })
       .mockResolvedValueOnce({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -302,7 +297,7 @@ describe("AgentNavigator — Interaction", () => {
     const routeInput = vi.fn()
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce({ accepted: true });
-    navigator = new AgentNavigator(makeManager([record]), routeInput);
+    navigator = new AgentNavigator(makeSource([record]), routeInput);
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -328,7 +323,7 @@ describe("AgentNavigator — Interaction", () => {
     const ui = makeUI({ value: "" });
     let resolveInteraction!: (result: any) => void;
     const pending = new Promise<any>((resolve) => { resolveInteraction = resolve; });
-    navigator = new AgentNavigator(makeManager([record]), vi.fn(() => pending));
+    navigator = new AgentNavigator(makeSource([record]), vi.fn(() => pending));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -351,7 +346,7 @@ describe("AgentNavigator — Interaction", () => {
 
   it("restores queued steering messages back into the editor on Alt+Up (dequeue)", () => {
     const record = makeRecord();
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     const queued = "queued\x07 steer\x1b]0;source-title\x07 1\r\nnext line";
     record.execution.session.getSteeringMessages = () => [queued, "queued steer 2"];
     manager.dequeueMessages = vi.fn().mockReturnValue([queued, "queued steer 2"]);
@@ -383,7 +378,7 @@ describe("AgentNavigator — Interaction", () => {
 
   it("notifies when no queued messages exist to restore on Alt+Up", () => {
     const record = makeRecord();
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     manager.dequeueMessages = vi.fn().mockReturnValue([]);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
@@ -409,7 +404,7 @@ describe("AgentNavigator — Interaction", () => {
 
   it("falls through to parent dequeue handler when no subagent is selected", () => {
     const record = makeRecord();
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);

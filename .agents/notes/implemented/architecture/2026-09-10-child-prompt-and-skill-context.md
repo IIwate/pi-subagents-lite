@@ -12,7 +12,7 @@ Status: implemented
 
 共享顺序为 header + 子工作目录环境 + project_context, 之后才放 active_agent、agent_instructions 和 skills. inherited/custom header 中 Pi 的 project_context、available_skills、Current date 和 Current working directory 段先剥离, 再由子环境重新组装. 该剥离依赖文本格式, 不是结构化 parser, 不保证识别未来 Pi 的所有 header 变化. 顺序有助于保持共享前缀, 不承诺任何 provider 的缓存命中率.
 
-includeContextFiles 控制 Pi `loadProjectContextFiles` 的补充上下文. inherited prompt 读取失败、自定义文件缺失/空/不可读时回退通用 header 并缓冲 warning; context 文件读取失败为非致命. loader 关闭自身的 context、prompt template、theme 和 appendSystemPrompt, 避免重复装配. 这一回退是当前可用性选择, 不保证保持原 persona.
+includeContextFiles 控制 Pi `loadProjectContextFiles` 的补充上下文. inherited prompt 读取失败、自定义文件缺失/空/不可读时回退通用 header 并报告 warning; context 文件读取失败为非致命. loader 关闭自身的 context、prompt template、theme 和 appendSystemPrompt, 避免重复装配. 这一回退是当前可用性选择, 不保证保持原 persona.
 
 [skill-loader](../../../../src/prompt/skill-loader.ts) 复用 Pi `loadSkills`/`loadSkillsFromDir`, 按 cwd 到 Git root 的祖先 `.agents/skills`、用户 `.agents/skills`、Pi global/project defaults 顺序收集. 路径以 realpath 尝试去重, 失败时保留原路径; 名字首次出现获胜. `.agents/skills` 顶层散落 `.md` 被过滤, 因 Pi 的对应内部模式没有公开导出. 没有 Git root 时祖先遍历到文件系统根.
 
@@ -20,7 +20,7 @@ skills whitelist 加载名称、描述和路径供按需读取; preload 读取�
 
 ## Warning timing
 
-setup 的互斥工具配置、缺失扩展和 prompt fallback warning 先进入数组, 在 child turn loop 和 outcome resolution 成功后才发给 UI/console. `9072477` 记录了 setup 即时通知插入 session tree、破坏 tool_use/tool_result 配对的故障依据. 当前测试证明通知延后, 不证明所有 Pi/provider 版本的父日志排序; setup 或 outcome 抛错时 warning 数组不会 flush. 不应把这一实现写成“任何失败都能显示 warning”.
+资源诊断仅通过所属父会话的 UI notify 或 console 发出, 不调用 sendMessage 插入父 conversation. Prompt 来源缺失时采用已有默认 header 并报告原因; 项目补充上下文不可读时报告警告, 不改变已解析的 Agent 指令. 资源与原生接受边界由 [Runtime](2026-09-12-explicit-runtime-and-native-task-ownership.md) 管理.
 
 ## Alternatives considered
 
@@ -41,4 +41,4 @@ setup 的互斥工具配置、缺失扩展和 prompt fallback warning 先进入�
 
 ## Verification
 
-[prompt tests](../../../../test/unit/prompt/prompts.test.ts)、[skill unit tests](../../../../test/unit/prompt/skill-loader.test.ts)、[filesystem skills](../../../../test/scenarios/prompt/skill-loader.test.ts) 和 [runner setup](../../../../test/unit/agents/runner/agent-runner.setup.test.ts) 覆盖正文顺序、技能去重、隐藏元数据、文件来源及 warning 时机.
+[prompt tests](../../../../test/unit/prompt/prompts.test.ts)、[skill unit tests](../../../../test/unit/prompt/skill-loader.test.ts)、[filesystem skills](../../../../test/scenarios/prompt/skill-loader.test.ts) 和 [PiResources setup](../../../../test/scenarios/runtime.test.ts) 覆盖正文顺序、技能去重、隐藏元数据、文件来源及诊断边界.

@@ -111,199 +111,15 @@ export function adaptExploreRegisteredTools(tools: string[], defaultTools?: stri
   return tools;
 }
 
-/** Unified runtime registry of all agents (defaults + user-defined). */
-const agents = new Map<string, AgentConfig>();
-
-/**
- * Directories and current default-agent policy used by on-demand discovery.
- * Initialized at session_start and updated when the setting changes.
- */
-let userAgentDir = "";
-let projectAgentDir = "";
-let defaultAgentsDisabled = false;
-
 /** Options for registerAgents. */
 export interface RegisterAgentsOptions {
   /** When true, skip built-in DEFAULT_AGENTS. */
   disableDefaultAgents?: boolean;
 }
 
-/**
- * Register agents into the unified registry.
- * Starts with DEFAULT_AGENTS, then overlays user agents (overrides defaults with same name).
- * When options.disableDefaultAgents is true, DEFAULT_AGENTS are skipped.
- * Hidden agents (hidden === true) are kept in the registry but excluded from spawning.
- */
-export function registerAgents(userAgents: Map<string, AgentConfig>, options?: RegisterAgentsOptions): void {
-  agents.clear();
-
-  // Start with defaults (unless disabled)
-  if (!options?.disableDefaultAgents) {
-    for (const [name, config] of DEFAULT_AGENTS) {
-      agents.set(name, config);
-    }
-  }
-
-  // Overlay user agents (overrides defaults with same name)
-  for (const [name, config] of userAgents) {
-    agents.set(name, config);
-  }
-}
-
-/**
- * Set the session's agent scan directories and default-agent policy.
- * Called during session_start alongside scanAndRegisterAgents.
- */
-export function setAgentScanDirs(
-  userDir: string,
-  projectDir: string,
-  disableDefaultAgents = false,
-): void {
-  userAgentDir = userDir;
-  projectAgentDir = projectDir;
-  defaultAgentsDisabled = disableDefaultAgents;
-}
-
 /** Built-ins have no source; every merged global/project definition has one. */
 function isBuiltinDefault(name: string, config: AgentConfig): boolean {
   return DEFAULT_AGENTS.has(name) && config.source === undefined;
-}
-
-/** Apply the default-agent policy to future agent lookups without stopping accepted work. */
-export function setDefaultAgentsDisabled(disabled: boolean): void {
-  defaultAgentsDisabled = disabled;
-  if (disabled) {
-    for (const [name, config] of agents) {
-      if (isBuiltinDefault(name, config)) agents.delete(name);
-    }
-    return;
-  }
-
-  for (const [name, config] of DEFAULT_AGENTS) {
-    if (!agents.has(name)) agents.set(name, { ...config });
-  }
-}
-
-/** Scan user and project agent directories, merge with defaults. Returns the merged Map. */
-export async function scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promise<Map<string, AgentConfig>> {
-  const [userAgents, projectAgents] = await Promise.all([
-    scanAgentFilesInDir(userAgentDir, "user"),
-    scanAgentFilesInDir(projectAgentDir, "project"),
-  ]);
-  const defaults = options?.disableDefaultAgents ? new Map<string, AgentConfig>() : DEFAULT_AGENTS;
-  return mergeAgents(defaults, userAgents, projectAgents);
-}
-/**
- * Scan the known agent directories and register any newly discovered agents
- * that aren't already in the registry. Returns the number of new agents added.
- *
- * @param worktreeDir - Optional absolute path to a worktree's `.pi/agents/` directory.
- *   When set, agents from this directory are also scanned and added to the registry.
- *   Worktree-local types use "project" source attribution and follow the same
- *   parsing and name-uniqueness rules as the parent's project scan.
- */
-export async function discoverNewAgents(worktreeDir?: string): Promise<number> {
-  const merged = await scanAndMerge({ disableDefaultAgents: defaultAgentsDisabled });
-
-  let count = 0;
-  for (const [name, config] of merged) {
-    if (!agents.has(name)) {
-      agents.set(name, config);
-      count++;
-    }
-  }
-
-  // Scan worktree-local agents (only when worktreeDir is provided)
-  if (worktreeDir) {
-    const worktreeAgents = await scanAgentFilesInDir(worktreeDir, "project");
-    const wtMerged = mergeAgents(new Map(), [], worktreeAgents);
-    for (const [name, config] of wtMerged) {
-      if (!agents.has(name)) {
-        agents.set(name, config);
-        count++;
-      }
-    }
-  }
-
-  return count;
-}
-
-/** Prefer canonical names to aliases and reject ambiguity within either tier. */
-export function resolveType(name: string): string | undefined {
-  if (!name) return undefined;
-  if (agents.has(name)) return name;
-  const lower = name.toLowerCase();
-  const canonical = [...agents.keys()].filter(key => key.toLowerCase() === lower);
-  const matches = canonical.length > 0 ? canonical : [...agents.entries()]
-    .filter(([, config]) => config.displayName?.toLowerCase() === lower)
-    .map(([key]) => key);
-  if (matches.length > 1) {
-    throw new Error(`Ambiguous agent type ${JSON.stringify(name)}: ${matches.sort().join(", ")}. Use an exact canonical name.`);
-  }
-  return matches[0];
-}
-
-/** Get the agent config for a type (case-insensitive). */
-export function getAgentConfig(name: string): AgentConfig | undefined {
-  const key = resolveType(name);
-  return key ? agents.get(key) : undefined;
-}
-
-/** Resolve and deep-copy every mutable policy input for an accepted call. */
-export function resolveAcceptedRunPolicy(
-  type: string,
-  defaults: {
-    loadSkillsImplicitly: boolean;
-    loadExtensionsImplicitly: boolean;
-    systemPromptMode: SystemPromptMode;
-    includeContextFiles: boolean;
-    parentModelKey: string;
-    defaultTools?: string[];
-  },
-): AcceptedRunPolicy | undefined {
-  const key = resolveType(type);
-  const config = key ? agents.get(key) : undefined;
-  if (!config) return undefined;
-
-  const definition = structuredClone(config);
-  const resolved = applyGlobalDefaults(
-    definition.skills,
-    definition.extensions,
-    defaults.loadSkillsImplicitly,
-    defaults.loadExtensionsImplicitly,
-  );
-
-  let registeredTools = definition.registeredTools?.length
-    ? [...definition.registeredTools]
-    : resolveDefaultRegisteredTools(defaults.defaultTools);
-
-  if (key === "Explore" && definition.source === undefined) {
-    registeredTools = adaptExploreRegisteredTools(registeredTools, defaults.defaultTools);
-  }
-
-  return {
-    definition,
-    registeredTools,
-    restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
-    tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
-    extensions: Array.isArray(resolved.extensions) ? [...resolved.extensions] : resolved.extensions,
-    skills: Array.isArray(resolved.skills) ? [...resolved.skills] : resolved.skills,
-    systemPromptMode: defaults.systemPromptMode,
-    includeContextFiles: defaults.includeContextFiles,
-    parentModelKey: defaults.parentModelKey,
-  };
-}
-
-/** Get all visible type names (for spawning and tool descriptions). */
-export function getAvailableTypes(): string[] {
-  return [...agents.entries()]
-    .filter(([_, config]) => config.hidden !== true)
-    .map(([name]) => name);
-}
-
-/** Get all type names including hidden (for UI listing). */
-export function getAllTypes(): string[] {
-  return [...agents.keys()];
 }
 
 /**
@@ -455,20 +271,6 @@ export function resolveSessionAllowedTools(opts: {
   return opts.registeredTools.filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
 }
 
-/** Get built-in tool names for a type (case-insensitive). */
-export function getToolNamesForType(type: string, defaultTools?: string[]): string[] {
-  const config = getAgentConfig(type);
-  let tools = config?.registeredTools?.length
-    ? config.registeredTools
-    : resolveDefaultRegisteredTools(defaultTools);
-
-  const key = resolveType(type);
-  if (key === "Explore" && config?.source === undefined) {
-    tools = adaptExploreRegisteredTools(tools, defaultTools);
-  }
-  return tools;
-}
-
 /** Resolved config shape returned by getConfig. */
 export interface ResolvedAgentConfig {
   displayName: string;
@@ -497,50 +299,220 @@ function applyGlobalDefaults(
   };
 }
 
-/** Find the first non-hidden config: resolved type, then general-purpose, then undefined. */
-function findActiveConfig(type: string): AgentConfig | undefined {
-  const key = resolveType(type);
-  const config = key ? agents.get(key) : undefined;
-  if (config?.hidden !== true) return config;
-  return agents.get("general-purpose");
-}
 
-/** Get config for a type (case-insensitive). Falls back to general-purpose. */
-export function getConfig(
-  type: string,
-  loadSkillsImplicitly: boolean = true,
-  loadExtensionsImplicitly: boolean = true,
-  defaultTools?: string[],
-): ResolvedAgentConfig {
-  const config = findActiveConfig(type);
-  if (config) {
-    const { skills, extensions, ...rest } = config;
-    const defaults = applyGlobalDefaults(skills, extensions, loadSkillsImplicitly, loadExtensionsImplicitly);
-    let registeredTools = rest.registeredTools?.length
-      ? rest.registeredTools
-      : resolveDefaultRegisteredTools(defaultTools);
+/** Activation-owned definitions and discovery roots. */
+export class AgentCatalogue {
+  private readonly agents = new Map<string, AgentConfig>();
+  private userAgentDir = "";
+  private projectAgentDir = "";
+  private defaultAgentsDisabled = false;
 
-    const key = resolveType(type);
-    if (key === "Explore" && config.source === undefined) {
-      registeredTools = adaptExploreRegisteredTools(registeredTools, defaultTools);
+  constructor() { this.registerAgents(new Map()); }
+
+  registerAgents(userAgents: Map<string, AgentConfig>, options?: RegisterAgentsOptions): void {
+    this.agents.clear();
+
+    // Start with defaults (unless disabled)
+    if (!options?.disableDefaultAgents) {
+      for (const [name, config] of DEFAULT_AGENTS) {
+        this.agents.set(name, structuredClone(config));
+      }
+    }
+
+    // Overlay user agents (overrides defaults with same name)
+    for (const [name, config] of userAgents) {
+      this.agents.set(name, structuredClone(config));
+    }
+  }
+
+  setAgentScanDirs(
+    userDir: string,
+    projectDir: string,
+    disableDefaultAgents = false,
+  ): void {
+    this.userAgentDir = userDir;
+    this.projectAgentDir = projectDir;
+    this.defaultAgentsDisabled = disableDefaultAgents;
+  }
+
+  setDefaultAgentsDisabled(disabled: boolean): void {
+    this.defaultAgentsDisabled = disabled;
+    if (disabled) {
+      for (const [name, config] of this.agents) {
+        if (isBuiltinDefault(name, config)) this.agents.delete(name);
+      }
+      return;
+    }
+
+    for (const [name, config] of DEFAULT_AGENTS) {
+      if (!this.agents.has(name)) this.agents.set(name, structuredClone(config));
+    }
+  }
+
+  async scanAndMerge(options?: { disableDefaultAgents?: boolean }): Promise<Map<string, AgentConfig>> {
+    const [userAgents, projectAgents] = await Promise.all([
+      scanAgentFilesInDir(this.userAgentDir, "user"),
+      scanAgentFilesInDir(this.projectAgentDir, "project"),
+    ]);
+    const defaults = options?.disableDefaultAgents ? new Map<string, AgentConfig>() : DEFAULT_AGENTS;
+    return mergeAgents(defaults, userAgents, projectAgents);
+  }
+
+  async discoverNewAgents(worktreeDir?: string): Promise<number> {
+    const merged = await this.scanAndMerge({ disableDefaultAgents: this.defaultAgentsDisabled });
+
+    let count = 0;
+    for (const [name, config] of merged) {
+      if (!this.agents.has(name)) {
+        this.agents.set(name, structuredClone(config));
+        count++;
+      }
+    }
+
+    // Scan worktree-local agents (only when worktreeDir is provided)
+    if (worktreeDir) {
+      const worktreeAgents = await scanAgentFilesInDir(worktreeDir, "project");
+      const wtMerged = mergeAgents(new Map(), [], worktreeAgents);
+      for (const [name, config] of wtMerged) {
+        if (!this.agents.has(name)) {
+          this.agents.set(name, structuredClone(config));
+          count++;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  resolveType(name: string): string | undefined {
+    if (!name) return undefined;
+    if (this.agents.has(name)) return name;
+    const lower = name.toLowerCase();
+    const canonical = [...this.agents.keys()].filter(key => key.toLowerCase() === lower);
+    const matches = canonical.length > 0 ? canonical : [...this.agents.entries()]
+      .filter(([, config]) => config.displayName?.toLowerCase() === lower)
+      .map(([key]) => key);
+    if (matches.length > 1) {
+      throw new Error(`Ambiguous agent type ${JSON.stringify(name)}: ${matches.sort().join(", ")}. Use an exact canonical name.`);
+    }
+    return matches[0];
+  }
+
+  getAgentConfig(name: string): AgentConfig | undefined {
+    const key = this.resolveType(name);
+    return key ? this.agents.get(key) : undefined;
+  }
+
+  resolveAcceptedRunPolicy(
+    type: string,
+    defaults: {
+      loadSkillsImplicitly: boolean;
+      loadExtensionsImplicitly: boolean;
+      systemPromptMode: SystemPromptMode;
+      includeContextFiles: boolean;
+      parentModelKey: string;
+      defaultTools?: string[];
+    },
+  ): AcceptedRunPolicy | undefined {
+    const key = this.resolveType(type);
+    const config = key ? this.agents.get(key) : undefined;
+    if (!config) return undefined;
+
+    const definition = structuredClone(config);
+    const resolved = applyGlobalDefaults(
+      definition.skills,
+      definition.extensions,
+      defaults.loadSkillsImplicitly,
+      defaults.loadExtensionsImplicitly,
+    );
+
+    let registeredTools = definition.registeredTools?.length
+      ? [...definition.registeredTools]
+      : resolveDefaultRegisteredTools(defaults.defaultTools);
+
+    if (key === "Explore" && definition.source === undefined) {
+      registeredTools = adaptExploreRegisteredTools(registeredTools, defaults.defaultTools);
     }
 
     return {
-      displayName: rest.displayName ?? rest.name,
-      description: rest.description,
+      definition,
       registeredTools,
-      tools: rest.tools,
-      ...defaults,
+      restrictToRegisteredTools: Boolean(definition.registeredTools?.length),
+      tools: Array.isArray(definition.tools) ? [...definition.tools] : definition.tools,
+      extensions: Array.isArray(resolved.extensions) ? [...resolved.extensions] : resolved.extensions,
+      skills: Array.isArray(resolved.skills) ? [...resolved.skills] : resolved.skills,
+      systemPromptMode: defaults.systemPromptMode,
+      includeContextFiles: defaults.includeContextFiles,
+      parentModelKey: defaults.parentModelKey,
     };
   }
 
-  // Absolute fallback — no config found at all
-  const defaults = applyGlobalDefaults(undefined, undefined, loadSkillsImplicitly, loadExtensionsImplicitly);
-  const generalPurpose = DEFAULT_AGENTS.get("general-purpose")!;
-  return {
-    displayName: generalPurpose.displayName ?? generalPurpose.name,
-    description: generalPurpose.description,
-    registeredTools: resolveDefaultRegisteredTools(defaultTools),
-    ...defaults,
-  };
+  getAvailableTypes(): string[] {
+    return [...this.agents.entries()]
+      .filter(([_, config]) => config.hidden !== true)
+      .map(([name]) => name);
+  }
+
+  getAllTypes(): string[] {
+    return [...this.agents.keys()];
+  }
+
+  getToolNamesForType(type: string, defaultTools?: string[]): string[] {
+    const config = this.getAgentConfig(type);
+    let tools = config?.registeredTools?.length
+      ? config.registeredTools
+      : resolveDefaultRegisteredTools(defaultTools);
+
+    const key = this.resolveType(type);
+    if (key === "Explore" && config?.source === undefined) {
+      tools = adaptExploreRegisteredTools(tools, defaultTools);
+    }
+    return tools;
+  }
+
+  findActiveConfig(type: string): AgentConfig | undefined {
+    const key = this.resolveType(type);
+    const config = key ? this.agents.get(key) : undefined;
+    if (config?.hidden !== true) return config;
+    return this.agents.get("general-purpose");
+  }
+
+  getConfig(
+    type: string,
+    loadSkillsImplicitly: boolean = true,
+    loadExtensionsImplicitly: boolean = true,
+    defaultTools?: string[],
+  ): ResolvedAgentConfig {
+    const config = this.findActiveConfig(type);
+    if (config) {
+      const { skills, extensions, ...rest } = config;
+      const defaults = applyGlobalDefaults(skills, extensions, loadSkillsImplicitly, loadExtensionsImplicitly);
+      let registeredTools = rest.registeredTools?.length
+        ? rest.registeredTools
+        : resolveDefaultRegisteredTools(defaultTools);
+
+      const key = this.resolveType(type);
+      if (key === "Explore" && config.source === undefined) {
+        registeredTools = adaptExploreRegisteredTools(registeredTools, defaultTools);
+      }
+
+      return {
+        displayName: rest.displayName ?? rest.name,
+        description: rest.description,
+        registeredTools,
+        tools: rest.tools,
+        ...defaults,
+      };
+    }
+
+    // Absolute fallback — no config found at all
+    const defaults = applyGlobalDefaults(undefined, undefined, loadSkillsImplicitly, loadExtensionsImplicitly);
+    const generalPurpose = DEFAULT_AGENTS.get("general-purpose")!;
+    return {
+      displayName: generalPurpose.displayName ?? generalPurpose.name,
+      description: generalPurpose.description,
+      registeredTools: resolveDefaultRegisteredTools(defaultTools),
+      ...defaults,
+    };
+  }
 }

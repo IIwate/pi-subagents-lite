@@ -1,7 +1,9 @@
-import { BACKGROUND_CONTEXT, setValue, value, type Session } from "@earendil-works/pi-agent-core";
+import type { TaskOutcome } from "../domain/task.js";
+import { extractText } from "../prompt/context.js";
+import { BACKGROUND_CONTEXT, laneState, operationResult, setValue, value, type OperationResultRecord, type Session } from "@earendil-works/pi-agent-core";
 import { isDeepStrictEqual } from "node:util";
 import { freezePolicy, type TaskPolicy } from "../domain/policy.js";
-import type { DeliveryReceipt, ParentOrigin, StoredDelivery, TaskBinding, TaskDelivery, TaskStore } from "../engine/contracts.js";
+import type { ExecutionResult, DeliveryReceipt, ParentOrigin, StoredDelivery, TaskBinding, TaskDelivery, TaskStore } from "../engine/contracts.js";
 
 const namespace = "subagents-lite.v3";
 const taskAddress = value<unknown>(namespace, "task");
@@ -53,7 +55,13 @@ function parseBinding(input: unknown): TaskBinding {
       maxTokens: limits.maxTokens === undefined ? undefined : number(limits.maxTokens, 1),
     },
   };
-  return Object.freeze({ taskId: string(data.taskId), policy: freezePolicy(accepted), parent: parent(data.parent), mode: data.mode, control: data.control });
+  const display = data.display === undefined ? undefined : object(data.display);
+  const resources = data.resources === undefined ? undefined : object(data.resources);
+  if (display && (typeof display.name !== "string" || typeof display.description !== "string")) throw new Error("Invalid task display text");
+  if (resources && typeof resources.trusted !== "boolean") throw new Error("Invalid task resource trust");
+  return Object.freeze({ taskId: string(data.taskId), policy: freezePolicy(accepted), parent: parent(data.parent), mode: data.mode, control: data.control,
+    display: display ? Object.freeze({ name: display.name as string, description: display.description as string }) : undefined,
+    resources: resources ? Object.freeze({ extensions: Object.freeze(strings(resources.extensions)), trusted: resources.trusted as boolean }) : undefined });
 }
 
 function parseStoredDelivery(input: unknown): StoredDelivery {
@@ -78,7 +86,7 @@ function parseStoredDelivery(input: unknown): StoredDelivery {
 }
 
 export class NativeTaskStore implements TaskStore {
-  private constructor(private readonly session: Session, private current: TaskBinding) {}
+  private constructor(readonly session: Session, private current: TaskBinding) {}
 
   static async open(session: Session, binding?: TaskBinding): Promise<NativeTaskStore> {
     const saved = await session.getValue(taskAddress, context);
@@ -96,7 +104,43 @@ export class NativeTaskStore implements TaskStore {
     return new NativeTaskStore(session, accepted);
   }
 
+  async latestResult(): Promise<ExecutionResult | undefined> {
+    const state = await this.session.getValue(laneState(this.current.taskId), context);
+    if (!state || state.value.currentOperationId || !state.value.lastOperationId) return;
+    const result = await this.session.getValue(operationResult(state.value.lastOperationId), context);
+    return result ? this.result(result.value) : undefined;
+  }
+
+  // Note: see .agents/notes/implemented/bug-fix/2026-09-10-assistant-outcomes-retries-and-turn-budgets.md
+  async result(record: OperationResultRecord): Promise<ExecutionResult> {
+    const lane = await this.session.branch(this.current.taskId, context);
+    if (!lane) throw new Error("Native task lane is missing");
+    // Native stop bounds follow traversal order; scan back from this operation's tip.
+    const entries = record.tipId === null ? [] : (await lane.findEntries({
+      start: record.tipId, ...(record.fromTipId === null ? {} : { stopAtId: record.fromTipId }),
+    }, context)).filter(entry => entry.id !== record.fromTipId);
+    const assistant = entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    const text = assistant?.type === "message" && "content" in assistant.message ? typeof assistant.message.content === "string" ? assistant.message.content.trim() : extractText(assistant.message.content).trim() : "";
+    const stoppedBy = (await this.session.getValue(value<unknown>(namespace, `stop/${record.operationId}`), context))?.value;
+    if (stoppedBy !== undefined && stoppedBy !== "user" && stoppedBy !== "agent") throw new Error("Invalid task stop initiator");
+    let outcome: TaskOutcome;
+    if (record.status === "failed") outcome = { status: "error", error: record.error?.message ?? "Native operation failed", result: text };
+    else if (record.status === "aborted") outcome = { status: stoppedBy ? "stopped" : "aborted", result: text, stoppedBy };
+    else if (record.status === "declined") outcome = { status: "stopped", result: text };
+    else if (!text) outcome = { status: "error", error: "Subagent completed without final assistant text" };
+    else outcome = {
+      status: this.current.policy.limits.maxTurns !== undefined && entries.filter(entry => entry.type === "message" && entry.message.role === "assistant" && !["error", "aborted", "pending", "deferred"].includes(entry.message.stopReason)).length >= this.current.policy.limits.maxTurns ? "turn_limited" : "completed",
+      result: text,
+    };
+    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), completedAt: record.endedAt, startedAt: record.startedAt,
+      sourceEntryIds: Object.freeze(assistant ? [assistant.id] : []) });
+  }
+
   get binding(): TaskBinding { return this.current; }
+
+  recordStop(operationId: string, initiator: "user" | "agent"): Promise<void> {
+    return this.session.setValue(value(namespace, `stop/${operationId}`), initiator, context);
+  }
 
   async takeOver(): Promise<void> {
     if (this.current.control === "manual") return;

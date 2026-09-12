@@ -1,7 +1,7 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMenuStore, resetMenuStore } from "../../../support/menu-mocks.js";
 import { createMockCtx } from "../../../support/menu-helpers.js";
-import { getAllTypes } from "../../../../src/agents/agent-types.js";
 
 let settingsLists: any[] = [];
 let selectLists: any[] = [];
@@ -63,7 +63,7 @@ function reset(): void {
   selectLists = [];
   wrappers = [];
   vi.clearAllMocks();
-  (getAllTypes as any).mockReturnValue(["Explore", "reviewer"]);
+  (getMenuRuntime().catalogue.getAllTypes as any).mockReturnValue(["Explore", "reviewer"]);
 }
 
 function topItem(id: string): any {
@@ -90,7 +90,7 @@ describe("Model Routing top level", () => {
 
   it("renders the OFF boundary without configuration rows", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(wrappers[0].options.title).toBe("Model Routing");
     expect(topItem("enabled").currentValue).toBe("OFF");
     expect(topItem("quickSetup")).toBeUndefined();
@@ -100,7 +100,7 @@ describe("Model Routing top level", () => {
 
   it("toggles Model routing", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     settingsLists[0].onChange("enabled", "ON");
     expect(getMenuStore().routing.enabled).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Model routing enabled", "info");
@@ -116,7 +116,7 @@ describe("Model Routing top level", () => {
       },
     } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("providerAccess").label).toBe("Provider access");
     expect(topItem("providerAccess").currentValue).toBe("1 enabled");
     expect(topItem("agentAccess").currentValue).toBe("2 configured");
@@ -131,7 +131,7 @@ describe("Model Routing top level", () => {
       agentAccess: { Explore: { providers: { openai: {} } } },
     } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("clearAll").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Yes" });
     expect(getMenuStore().routing).toEqual({ enabled: false, enabledProviders: [], agentAccess: {} });
@@ -150,7 +150,7 @@ describe("Provider access", () => {
       ...ctx.modelRegistry.getAll(),
       ...Array.from({ length: 40 }, (_, index) => ({ provider: `builtin-${index}`, id: "default" })),
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items.filter((item: any) => item.kind === "provider").map((item: any) => item.provider))
       .toEqual(["openai"]);
@@ -166,7 +166,7 @@ describe("Provider access", () => {
   it("shows Default, one separator, and direct checkboxes without diagnostics", async () => {
     resetMenuStore({ modelRouting: { ...getMenuStore().routing, enabledProviders: ["anthropic"] } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     const rows = lastSelect().items;
     expect(rows[0].label).toContain("[✓] Default · anthropic/claude-sonnet-4-20250514");
@@ -178,7 +178,7 @@ describe("Provider access", () => {
 
   it("toggles in place and preserves the cursor on the Provider", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     const openai = lastSelect().items.find((row: any) => row.provider === "openai");
     lastSelect().onSelect(openai);
@@ -199,7 +199,7 @@ describe("Provider access", () => {
 
   it("toggles the selected Provider with Space", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     const list = lastSelect();
     list.selectedIndex = list.items.findIndex((row: any) => row.provider === "openai");
@@ -212,7 +212,7 @@ describe("Provider access", () => {
 
   it("refreshes availability and the catalogue when the submenu opens", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     ctx.modelRegistry.getAvailable.mockReturnValue([
       { provider: "anthropic", id: "claude-haiku-4" },
       { provider: "late-provider", id: "worker" },
@@ -226,7 +226,7 @@ describe("Provider access", () => {
 
   it("rechecks the dynamic parent before toggling a stale row", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     const staleOpenAI = lastSelect().items.find((row: any) => row.provider === "openai");
     ctx.model = { provider: "openai", id: "gpt-4o" };
@@ -239,7 +239,7 @@ describe("Provider access", () => {
   it("excludes the parent and unavailable persisted providers from the summary", async () => {
     resetMenuStore({ modelRouting: { ...getMenuStore().routing, enabledProviders: ["anthropic", "openai", "google"] } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("providerAccess").currentValue).toBe("1 enabled");
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items.filter((row: any) => row.kind === "provider").map((row: any) => row.provider))
@@ -253,7 +253,7 @@ describe("Provider access", () => {
       { provider: "constructor", id: "worker" },
       { provider: "__proto__", id: "worker" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     const prototypeRow = lastSelect().items.find((row: any) => row.provider === "__proto__");
     expect(prototypeRow.kind).toBe("provider");
@@ -266,7 +266,7 @@ describe("Provider access", () => {
     ctx.modelRegistry.getAvailable.mockReturnValue([
       { provider: "anthropic", id: "claude-sonnet-4-20250514" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items).toHaveLength(3);
     expect(lastSelect().items[0].kind).toBe("default");
@@ -280,7 +280,7 @@ describe("Provider access", () => {
     const ctx = createMockCtx();
     ctx.model = undefined;
     ctx.modelRegistry.getAvailable.mockReturnValue([]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("providerAccess").submenu("", vi.fn());
     expect(lastSelect().items[0].label).toContain("[ ] Default · No active parent model");
     expect(lastSelect().items[0].description).toContain("Unavailable");
@@ -295,7 +295,7 @@ describe("Quick model setup", () => {
 
   it("starts with a locked Default row and one separator", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const rows = lastSelect().items;
@@ -313,7 +313,7 @@ describe("Quick model setup", () => {
 
   it("writes current-provider exact access immediately and enables canonical routing state", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     getMenuStore().mutate.routing.setEnabled(false);
@@ -328,7 +328,7 @@ describe("Quick model setup", () => {
 
   it("uses the canonical all-model rule", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
@@ -341,7 +341,7 @@ describe("Quick model setup", () => {
     } });
     vi.spyOn(memIO.io, "save").mockImplementationOnce(() => { throw new Error("Rename denied"); });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     selectLastValue("Explore");
     selectLastValue("claude-haiku-4");
@@ -358,7 +358,7 @@ describe("Quick model setup", () => {
 
   it("switches from All models to an exact rule when a model is selected", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("__all__");
@@ -371,7 +371,7 @@ describe("Quick model setup", () => {
     const ctx = createMockCtx();
     const done = vi.fn();
     ctx.model = undefined;
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     const placeholder = topItem("quickSetup").submenu("", done);
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -387,7 +387,7 @@ describe("Quick model setup", () => {
       Explore: { providers: { anthropic: { models: ["claude-haiku-4"] } } },
     } } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("quickSetup").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     selectLastValue("claude-haiku-4");
@@ -408,7 +408,7 @@ describe("Agent model access", () => {
       "ghost-agent": { providers: { google: { models: ["gemini-2.5-pro"] } } },
     } } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     expect(lastSelect().items.find((item: any) => item.value === "Explore").description)
       .toBe("openai (All models)");
@@ -423,7 +423,7 @@ describe("Agent model access", () => {
       reviewer: { providers: { openai: { models: ["gpt-4o", "o3"] } } },
     } } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     expect(lastSelect().items.find((item: any) => item.value === "Explore").description)
       .toBe("openai (1 model)");
@@ -440,7 +440,7 @@ describe("Agent model access", () => {
       ...ctx.modelRegistry.getAvailable(),
       { provider: "cicadas", id: "worker" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const rows = lastSelect().items;
@@ -459,7 +459,7 @@ describe("Agent model access", () => {
   it("moves the implicit Provider gate when the parent changes", async () => {
     const ctx = createMockCtx();
     ctx.model = { provider: "openai", id: "gpt-4o" };
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const providers = lastSelect().items.filter((item: any) => item.kind === "provider");
@@ -470,7 +470,7 @@ describe("Agent model access", () => {
   it("marks the Default row unavailable when no parent model is active", async () => {
     const ctx = createMockCtx();
     ctx.model = undefined;
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     const defaultRow = lastSelect().items[0];
@@ -480,7 +480,7 @@ describe("Agent model access", () => {
 
   it("refreshes available models when entering the model editor", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     ctx.modelRegistry.getAvailable.mockReturnValue([
@@ -499,7 +499,7 @@ describe("Agent model access", () => {
       ...ctx.modelRegistry.getAvailable(),
       { provider: "constructor", id: "worker" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     expect(lastSelect().items.find((row: any) => row.value === "constructor").description).toBe("");
@@ -507,7 +507,7 @@ describe("Agent model access", () => {
 
   it("saves exact access immediately without an Apply row", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "openai"));
@@ -524,7 +524,7 @@ describe("Agent model access", () => {
       ...ctx.modelRegistry.getAvailable(),
       { provider: "openai", id: "__all__" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "openai"));
@@ -540,7 +540,7 @@ describe("Agent model access", () => {
 
   it("saves All models immediately and removes access when it is unchecked", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "openai"));
@@ -567,7 +567,7 @@ describe("Agent model access", () => {
       { model: { provider: "anthropic", id: "claude-sonnet-4-20250514" } },
       { model: { provider: "openai", id: "o3" } },
     ];
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     expect(lastSelect().items.find((row: any) => row.value === "Explore").description)
       .toBe("openai (1 model)");
@@ -589,7 +589,7 @@ describe("Agent model access", () => {
   it("uses a concise empty state when the scope has no alternate models", async () => {
     const ctx = createMockCtx();
     ctx.scopedModels = [{ model: ctx.model }];
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.value === "anthropic"));
@@ -605,7 +605,7 @@ describe("Agent model access", () => {
       Explore: { providers: { google: { models: ["gemini-2.5-pro"] } } },
     } } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("agentAccess").submenu("", vi.fn());
     lastSelect().onSelect({ value: "Explore" });
     expect(lastSelect().items.find((row: any) => row.value === "google")).toBeUndefined();
@@ -629,20 +629,20 @@ describe("Saved unavailable providers", () => {
 
   it("shows the conditional exception row and excludes the current parent", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("savedUnavailableProviders").currentValue).toBe("1");
 
     ctx.model = { provider: "google", id: "gemini-2.5-pro" };
     settingsLists = [];
     selectLists = [];
     wrappers = [];
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("savedUnavailableProviders")).toBeUndefined();
   });
 
   it("shows only routing and non-zero rule information in the exception flow", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("savedUnavailableProviders").submenu("", vi.fn());
     const google = lastSelect().items.find((row: any) => row.provider === "google");
     expect(google.description).toBe("Routing ON · 2 saved Agent rules");
@@ -657,7 +657,7 @@ describe("Saved unavailable providers", () => {
 
   it("toggles dormant routing without deleting rules and deletes rules only after confirmation", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("savedUnavailableProviders").submenu("", vi.fn());
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.provider === "google"));
 
@@ -678,7 +678,7 @@ describe("Saved unavailable providers", () => {
 
   it("closes a stale delete action after its submenu factory returns", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("savedUnavailableProviders").submenu("", vi.fn());
     lastSelect().onSelect(lastSelect().items.find((row: any) => row.provider === "google"));
     const remove = lastSettings().items.find((item: any) => item.id === "deleteRules");
@@ -694,7 +694,7 @@ describe("Saved unavailable providers", () => {
   it("omits zero rule counts and the delete action", async () => {
     resetMenuStore({ modelRouting: { ...getMenuStore().routing, agentAccess: {} } });
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("savedUnavailableProviders").submenu("", vi.fn());
     const google = lastSelect().items.find((row: any) => row.provider === "google");
     expect(google.description).toBe("Routing ON");
@@ -705,7 +705,7 @@ describe("Saved unavailable providers", () => {
 
   it("refreshes availability at exception entry instead of using the top snapshot", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     ctx.modelRegistry.getAvailable.mockReturnValue([
       ...ctx.modelRegistry.getAvailable(),
       { provider: "google", id: "gemini-2.5-pro" },
@@ -732,7 +732,7 @@ describe("Global unavailable rule cleanup", () => {
 
   it("shows one global action with every affected Provider, Agent, and model ID", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("cleanUnavailableRules").currentValue).toBe("2");
     const component = topItem("cleanUnavailableRules").submenu("", vi.fn());
     const rendered = component.render(100);
@@ -754,7 +754,7 @@ describe("Global unavailable rule cleanup", () => {
       ...store.routing.agentAccess.Explore.providers.openai.models!, "ancient",
     ]);
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     topItem("cleanUnavailableRules").submenu("", vi.fn());
     ctx.modelRegistry.getAll.mockReturnValue([
       ...ctx.modelRegistry.getAll(),
@@ -770,7 +770,7 @@ describe("Global unavailable rule cleanup", () => {
 
   it("refreshes the catalogue when the action opens and closes after returning", async () => {
     const ctx = createMockCtx();
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     ctx.modelRegistry.getAll.mockReturnValue([
       ...ctx.modelRegistry.getAll(),
       { provider: "openai", id: "retired" },
@@ -794,7 +794,7 @@ describe("Global unavailable rule cleanup", () => {
     ctx.modelRegistry.getAvailable.mockReturnValue([
       { provider: "anthropic", id: "claude-sonnet-4-20250514" },
     ]);
-    await showModelRoutingMenu(ctx);
+    await showModelRoutingMenu(ctx, getMenuRuntime());
     expect(topItem("cleanUnavailableRules")).toBeUndefined();
     expect(topItem("savedUnavailableProviders")).toBeDefined();
   });
@@ -804,7 +804,7 @@ describe("Global unavailable rule cleanup", () => {
     missingProvider.modelRegistry.getAll.mockReturnValue([
       { provider: "anthropic", id: "claude-sonnet-4-20250514" },
     ]);
-    await showModelRoutingMenu(missingProvider);
+    await showModelRoutingMenu(missingProvider, getMenuRuntime());
     expect(topItem("cleanUnavailableRules")).toBeUndefined();
 
     settingsLists = [];
@@ -812,7 +812,7 @@ describe("Global unavailable rule cleanup", () => {
     wrappers = [];
     const unreliable = createMockCtx();
     unreliable.modelRegistry.getError.mockReturnValue(new Error("catalogue failed"));
-    await showModelRoutingMenu(unreliable);
+    await showModelRoutingMenu(unreliable, getMenuRuntime());
     expect(topItem("cleanUnavailableRules")).toBeUndefined();
   });
 });

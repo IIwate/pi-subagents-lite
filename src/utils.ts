@@ -86,5 +86,5 @@ export function unknownModelError(modelRef: string): string {
   );
 }
 
-/** Timeout for git commands (ms). Shared by agent-runner and worktree-validator. */
+/** Timeout for git commands during child resource preparation and worktree validation (ms). */
 export const GIT_EXEC_TIMEOUT_MS = 5000;

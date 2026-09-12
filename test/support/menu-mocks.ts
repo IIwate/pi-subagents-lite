@@ -2,7 +2,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { ConfigStore } from "../../src/config/config-store.js";
 import { createDefaultConfig, createMemoryConfigIO, createTestHarness, type MemoryConfigIO, type TestHarness } from "./harness.js";
 import type { SubagentsConfig } from "../../src/config/types.js";
-import type { AgentManager } from "../../src/agents/agent-manager.js";
+import type { MenuRuntime } from "../../src/ui/menu/helpers.js";
 
 let harness: TestHarness;
 let currentMemIO: MemoryConfigIO;
@@ -29,26 +29,18 @@ export function getMenuStore(): ConfigStore {
   return currentStore;
 }
 
-export const mockModules = {
-  mockNavigator: { setDebugStatusPreview: vi.fn() },
-  mockManager: {
-    armDebugFault: vi.fn(),
-    clearDebugFault: vi.fn(),
-    debugDiagnostics: vi.fn<AgentManager["debugDiagnostics"]>(() => ({ agents: [] })),
-    listAgents: vi.fn(() => []),
-  },
+export const mockEngine = { list: vi.fn(() => []) };
+
+export const mockCatalogue = {
+  getAgentConfig: vi.fn(), getAvailableTypes: vi.fn(() => ["general-purpose", "Explore"]),
+  getAllTypes: vi.fn(() => ["general-purpose", "Explore"]),
+  setDefaultAgentsDisabled: vi.fn(),
 };
 
-vi.mock("../../src/agents/agent-types.js", async importOriginal => ({
-  ...await importOriginal<typeof import("../../src/agents/agent-types.js")>(),
-  getConfig: vi.fn(() => ({ displayName: "unknown" })),
-  getAgentConfig: vi.fn(),
-  getAvailableTypes: vi.fn(() => ["general-purpose", "Explore"]),
-  getAllTypes: vi.fn(() => ["general-purpose", "Explore"]),
-  resolveType: vi.fn((name: string) => name),
-  discoverNewAgents: vi.fn(async () => 0),
-  setDefaultAgentsDisabled: vi.fn(),
-}));
+export function getMenuRuntime(): MenuRuntime {
+  currentStore.setDeps({ catalogue: mockCatalogue });
+  return { store: currentStore, active: true, catalogue: mockCatalogue, engine: mockEngine } as unknown as MenuRuntime;
+}
 
 export let selectDialogInstances: Array<{ items: any[]; callbacks: any }> = [];
 export function resetSelectDialogInstances() { selectDialogInstances = []; }
@@ -81,10 +73,4 @@ vi.mock("../../src/config/config-io.js", async (importOriginal) => {
 
 vi.mock("../../src/agents/tool-execution.js", () => ({
   formatResultContent: vi.fn((record: any) => record.result ?? ""),
-}));
-
-vi.mock("../../src/shell.js", () => ({
-  getStore: () => currentStore,
-  getNavigator: () => mockModules.mockNavigator,
-  getManager: () => mockModules.mockManager,
 }));

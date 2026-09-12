@@ -13,14 +13,18 @@ export class TaskNavigationSource implements NavigationSource {
   private readonly observers = new Map<string, Promise<() => void>>();
   private readonly listeners = new Set<() => void>();
   private readonly pins = new Map<string, number>();
+  private readonly paused = new Map<string, number>();
   private readonly hidden = new Set<string>();
   private readonly dirty = new Set<string>();
   private refreshing?: Promise<void>;
   private disposed = false;
   private readonly unsubscribe: () => void;
+  private readonly retention: ReturnType<typeof setInterval>;
 
   constructor(private readonly engine: TaskEngine) {
     this.unsubscribe = engine.subscribe(() => { void this.refresh(); });
+    this.retention = setInterval(() => this.expire(), 60_000);
+    this.retention.unref?.();
     void this.refresh();
   }
 
@@ -42,6 +46,17 @@ export class TaskNavigationSource implements NavigationSource {
     return () => { this.watchers.delete(taskId); };
   }
 
+  private expire(): void {
+    let changed = false;
+    for (const agent of this.agents.values()) {
+      if (!agent.execution.settled || agent.lifecycle.completedAt === undefined || this.pins.has(agent.id) || this.hidden.has(agent.id)) continue;
+      if (Date.now() < agent.lifecycle.completedAt + 600_000 + (this.paused.get(agent.id) ?? 0)) continue;
+      this.hidden.add(agent.id);
+      changed = true;
+    }
+    if (changed) for (const listener of this.listeners) listener();
+  }
+
   refresh(taskId?: string): Promise<void> {
     if (this.disposed) return Promise.resolve();
     for (const id of taskId ? [taskId] : this.engine.list().map(task => task.taskId)) this.dirty.add(id);
@@ -61,6 +76,11 @@ export class TaskNavigationSource implements NavigationSource {
             const state = await this.engine.snapshot(task.taskId);
             if (this.disposed) return;
             const current = state.task;
+            if (this.agents.get(task.taskId)?.operationId !== current.operationId) {
+              this.paused.delete(task.taskId);
+              this.hidden.delete(task.taskId);
+            }
+            const binding = this.engine.binding(current.taskId);
             const snapshot = state.execution;
             const observedOperation = snapshot.operation?.operationId ?? snapshot.lastResult?.operationId;
             if (observedOperation && observedOperation !== current.operationId) { this.dirty.add(task.taskId); continue; }
@@ -69,8 +89,8 @@ export class TaskNavigationSource implements NavigationSource {
             const now = Date.now();
             this.agents.set(task.taskId, Object.freeze({
               id: current.taskId, operationId: current.operationId,
-              display: Object.freeze({ type: current.policy.agent, name: current.policy.agent,
-                description: snapshot.messages.find(message => message.role === "user")?.text.split("\n")[0] ?? current.policy.agent }),
+              display: Object.freeze({ type: current.policy.agent, name: binding.display?.name ?? current.policy.agent,
+                description: binding.display?.description ?? snapshot.messages.find(message => message.role === "user")?.text.split("\n")[0] ?? current.policy.agent }),
               lifecycle: Object.freeze({ status: outcome?.status ?? current.state.status as NavigationStatus,
                 startedAt: snapshot.operation?.startedAt ?? snapshot.lastResult?.startedAt ?? now,
                 completedAt: current.state.status === "settled" ? snapshot.lastResult?.completedAt : undefined,
@@ -90,6 +110,7 @@ export class TaskNavigationSource implements NavigationSource {
             }));
             this.watchers.get(task.taskId)?.();
           } catch (error) {
+            if (this.disposed) return;
             const previous = this.agents.get(task.taskId);
             if (previous) this.agents.set(task.taskId, Object.freeze({ ...previous, error: String(error) }));
             else this.agents.set(task.taskId, {
@@ -129,18 +150,24 @@ export class TaskNavigationSource implements NavigationSource {
         case "steer":
         case "followUp":
           await this.engine.queue(task.taskId, action.type, action.input);
+          if (task.state.status === "waiting") this.engine.resume(task.taskId);
           return { accepted: true, message: this.engine.get(task.taskId).state.status === "settled" ? "Input queued. Continue the task to consume it." : undefined };
         case "continue": return { accepted: true, operationId: (await this.engine.continue(task.taskId, action.input)).operationId };
         case "takeover":
           await this.engine.takeOver(task.taskId); this.pins.set(task.taskId, Date.now()); return { accepted: true };
         case "abort":
-        case "abortRetry": await this.engine.requestAbort(task.taskId); return { accepted: true };
+        case "abortRetry": await this.engine.requestAbort(task.taskId, "user"); return { accepted: true };
         case "pin":
-          if (this.pins.has(task.taskId)) this.pins.delete(task.taskId); else this.pins.set(task.taskId, Date.now());
+          if (this.pins.has(task.taskId)) {
+            const completedAt = this.agents.get(task.taskId)?.lifecycle.completedAt;
+            if (completedAt !== undefined) this.paused.set(task.taskId, (this.paused.get(task.taskId) ?? 0)
+              + Date.now() - Math.max(completedAt, this.pins.get(task.taskId)!));
+            this.pins.delete(task.taskId);
+          } else this.pins.set(task.taskId, Date.now());
           return { accepted: true, pinned: this.pins.has(task.taskId) };
         case "remove":
           await this.engine.takeOver(task.taskId);
-          if (this.engine.get(task.taskId).state.status !== "settled") await this.engine.requestAbort(task.taskId);
+          if (this.engine.get(task.taskId).state.status !== "settled") await this.engine.requestAbort(task.taskId, "user");
           this.hidden.add(task.taskId); return { accepted: true };
         case "dequeue": {
           const snapshot = await this.engine.snapshot(task.taskId);
@@ -161,6 +188,7 @@ export class TaskNavigationSource implements NavigationSource {
   }
 
   dispose(): void {
+    clearInterval(this.retention);
     this.disposed = true; this.unsubscribe(); this.listeners.clear(); this.watchers.clear();
     for (const observer of this.observers.values()) void observer.then(stop => stop(), () => { /* Failed subscriptions own no resources. */ });
     this.observers.clear(); this.agents.clear(); this.transcripts.clear();

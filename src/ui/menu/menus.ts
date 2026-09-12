@@ -10,7 +10,6 @@
  *   - menu-model-routing.ts: showModelRoutingMenu
  *   - menu-concurrency.ts: showConcurrencySettingsMenu
  *   - menu-widget-settings.ts: showWidgetSettingsMenu
- *   - menu-debug.ts: showDebugMenu
  *   - menu-spawn-options.ts: showSpawnOptionsMenu
  *   - menu-system-prompt.ts: showSystemPromptMenu
  *   - menus.ts (this file): /agents dispatcher and settings entries
@@ -23,10 +22,9 @@ import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import { showModelRoutingMenu } from "./menu-model-routing.js";
 import { showConcurrencySettingsMenu } from "./menu-concurrency.js";
 import { showWidgetSettingsMenu } from "./menu-widget-settings.js";
-import { showDebugMenu } from "./menu-debug.js";
 import { showSpawnOptionsMenu } from "./menu-spawn-options.js";
 import { showSystemPromptMenu } from "./menu-system-prompt.js";
-import { getStore } from "../../shell.js";
+import type { MenuRuntime } from "./helpers.js";
 
 /**
  * Render `items` as a titled SelectList and dispatch the chosen value.
@@ -54,29 +52,29 @@ async function runSelectMenu(
 // Note: see .agents/notes/implemented/architecture/2026-09-10-menu-modal-lifecycle.md
 export async function showAgentsMenu(
   ctx: ExtensionCommandContext,
+  runtime: MenuRuntime,
 ): Promise<void> {
   // Items refresh per iteration so the routing row reflects live state.
   const buildItems = (): SelectItem[] => {
-    const routing = getStore().routing;
+    if (!runtime.active) return [];
+    const routing = runtime.store.routing;
     return [
       { value: "routing", label: "Model routing", description: routing.enabled ? "ON · provider and Agent model access" : "OFF · exact parent only" },
-      { value: "concurrency", label: "Concurrency settings", description: `${getStore().concurrency.default} slots per model` },
+      { value: "concurrency", label: "Concurrency settings", description: `${runtime.store.concurrency.default} slots per model` },
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "List defaults and stats visibility" },
-      { value: "debug", label: "Debug", description: "Agent types, diagnostics, and fault injection" },
     ];
   };
 
   await runSelectMenu(ctx, "Agents", buildItems, async (choice) => {
+    if (!runtime.active) return;
     switch (choice) {
-      case "routing": await showModelRoutingMenu(ctx); break;
-      case "concurrency": await showConcurrencySettingsMenu(ctx); break;
-      case "spawnoptions": await showSpawnOptionsMenu(ctx); break;
-      case "systemprompt": await showSystemPromptMenu(ctx); break;
-      // Keep the widget-settings function/file name to avoid a history-only rename; the menu now means display settings.
-      case "display": await showWidgetSettingsMenu(ctx); break;
-      case "debug": await showDebugMenu(ctx); break;
+      case "routing": await showModelRoutingMenu(ctx, runtime); break;
+      case "concurrency": await showConcurrencySettingsMenu(ctx, runtime); break;
+      case "spawnoptions": await showSpawnOptionsMenu(ctx, runtime); break;
+      case "systemprompt": await showSystemPromptMenu(ctx, runtime); break;
+      case "display": await showWidgetSettingsMenu(ctx, runtime); break;
     }
   });
 }

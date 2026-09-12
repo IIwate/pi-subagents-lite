@@ -1,17 +1,17 @@
 import {
-  AgentHarness, BACKGROUND_CONTEXT, createBashTool, createEditTool, createReadTool, createWriteTool,
+  AgentHarness, BACKGROUND_CONTEXT, calculateContextTokens, getLastAssistantUsage, createBashTool, createEditTool, createReadTool, createWriteTool,
   getOrThrow, type AgentHarnessOptions, type AgentLane, type AgentMessage, type Entry,
   type ExecutionToolContext, type LaneSnapshot, type OperationResultRecord, type Session,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
-import type { TaskOutcome } from "../domain/task.js";
 import type {
   DriveResult, ExecutionDriver, ExecutionMessage, ExecutionResult, ExecutionSnapshot, TaskBinding, TaskInput,
 } from "../engine/contracts.js";
 import { extractText } from "../prompt/context.js";
 import { NativeTaskStore } from "./native-task-store.js";
 import { projectMessage } from "./message-projection.js";
+import type { PiResources } from "./pi-resources.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -24,6 +24,7 @@ export interface HarnessDriverOptions {
   resources?: AgentHarnessOptions<ExecutionToolContext>["resources"];
   retry?: AgentHarnessOptions<ExecutionToolContext>["retry"];
   compaction?: AgentHarnessOptions<ExecutionToolContext>["compaction"];
+  piResources?: PiResources;
 }
 
 function textOf(message: AgentMessage): string {
@@ -60,6 +61,7 @@ export class HarnessDriver implements ExecutionDriver {
     private readonly harness: AgentHarness<ExecutionToolContext>,
     private readonly lane: AgentLane,
     private readonly env: NodeExecutionEnv,
+    private readonly resources?: PiResources,
   ) {}
 
   static async open(options: HarnessDriverOptions): Promise<HarnessDriver> {
@@ -85,13 +87,21 @@ export class HarnessDriver implements ExecutionDriver {
         },
       });
       env = new NodeExecutionEnv({ cwd: policy.cwd });
-      const tools = options.tools ?? [createReadTool(), createBashTool(), createEditTool(), createWriteTool()];
+      const tools = options.tools ?? options.piResources?.tools ?? [createReadTool(), createBashTool(), createEditTool(), createWriteTool()];
       const available = new Set(tools.map(tool => tool.name));
       for (const name of policy.tools) {
         if (!available.has(name)) throw new Error(`Accepted tool is unavailable: ${name}`);
       }
+      // The driver retains the session writer until extension shutdown has flushed application state.
+      const executionSession = new Proxy(options.session, {
+        get(target, key) {
+          if (key === "close") return async () => {};
+          const member: unknown = Reflect.get(target, key, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
       const attached = await AgentHarness.create<ExecutionToolContext>({
-        session: options.session, models, model, tools: [...tools], toolContext: { env },
+        session: executionSession, models, model, tools: [...tools], toolContext: { env },
         systemPrompt: policy.systemPrompt, activeToolNames: [...policy.tools], thinkingLevel: policy.thinkingLevel,
         resources: options.resources, retry: options.retry, compaction: options.compaction,
       }, context);
@@ -103,21 +113,25 @@ export class HarnessDriver implements ExecutionDriver {
         || JSON.stringify(await lane.getActiveTools(context)) !== JSON.stringify(policy.tools)) {
         throw new Error("Native lane configuration differs from its accepted policy");
       }
-      const driver = new HarnessDriver(store, harness, lane, env);
+      const driver = new HarnessDriver(store, harness, lane, env, options.piResources);
       const watch = await lane.watch(context);
       const snapshot = watch.snapshot;
       watch.unsubscribe();
       driver.currentOperationId = snapshot.operation?.id;
       driver.turnCount = snapshot.operation ? turns(operationEntries(snapshot)) : 0;
-      driver.warned = operationEntries(snapshot).some(entry => entry.type === "message" && textOf(entry.message) === driver.limitReminder())
-        || snapshot.queues.some(item => item.type === "message" && textOf(item.message) === driver.limitReminder());
+      const reminder = driver.limitReminder();
+      driver.warned = operationEntries(snapshot).some(entry => entry.type === "message" && textOf(entry.message) === reminder)
+        || snapshot.queues.some(item => item.type === "message" && textOf(item.message) === reminder);
       driver.installPolicy();
+      await options.piResources?.attach(harness, lane, store);
       return driver;
     } catch (error) {
       const cleanup = await Promise.allSettled([
-        harness ? harness.close(context) : options.session.close(context),
+        harness?.close(context),
         ...(env ? [env.cleanup(context)] : []),
+        ...(options.piResources ? [options.piResources.close()] : []),
       ]);
+      cleanup.push(...await Promise.allSettled([options.session.close(context)]));
       const failures = cleanup.flatMap(result => result.status === "rejected" ? [result.reason] : []);
       if (failures.length) throw new AggregateError([error, ...failures], "Native task attachment and cleanup failed");
       throw error;
@@ -152,8 +166,9 @@ export class HarnessDriver implements ExecutionDriver {
     return run;
   }
 
-  async requestAbort(operationId: string): Promise<void> {
+  async requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void> {
     this.assertOpen();
+    if (stoppedBy) await this.store.recordStop(operationId, stoppedBy);
     getOrThrow(await this.lane.requestAbort(operationId, context));
   }
 
@@ -172,6 +187,12 @@ export class HarnessDriver implements ExecutionDriver {
     const watch = await this.lane.watch(context);
     const state = watch.snapshot;
     watch.unsubscribe();
+    let contextStart = 0;
+    for (let index = state.transcript.length - 1; index >= 0; index--) {
+      if (state.transcript[index].type === "compaction") { contextStart = index + 1; break; }
+    }
+    const contextUsage = getLastAssistantUsage(state.transcript.slice(contextStart));
+    const model = await this.lane.getModel(context);
     return Object.freeze({
       operation: state.operation ? Object.freeze({ operationId: state.operation.id, cancelling: state.operation.status === "aborting", startedAt: state.operation.startedAt }) : undefined,
       lastResult: state.lastResult ? await this.result(state.lastResult) : undefined,
@@ -189,7 +210,7 @@ export class HarnessDriver implements ExecutionDriver {
       stats: Object.freeze({ input: state.stats.usage.input, output: state.stats.usage.output, cost: state.stats.usage.cost.total,
         toolUses: state.transcript.filter(entry => entry.type === "message" && entry.message.role === "toolResult").length,
         turnCount: turns(operationEntries(state)), compactions: state.transcript.filter(entry => entry.type === "compaction").length,
-        contextPercent: null }),
+        contextPercent: contextUsage && model?.contextWindow ? calculateContextTokens(contextUsage) / model.contextWindow * 100 : null }),
       retry: state.operation?.retry ? Object.freeze({ ...state.operation.retry }) : undefined,
       queued: Object.freeze(state.queues.map(item => Object.freeze({
         entryId: item.entryId, kind: item.kind, text: item.type === "message" ? textOf(item.message) : "",
@@ -213,35 +234,17 @@ export class HarnessDriver implements ExecutionDriver {
     if (this.closing) return this.closing;
     this.closing = Promise.resolve().then(async () => {
       for (const unsubscribe of this.subscriptions) unsubscribe();
-      try {
-        await this.harness.close(context);
-      } finally {
-        // Harness.close seals effects but does not wait for already admitted tools to return.
-        await Promise.allSettled([...this.drives.values(), this.policyWork]);
-        await this.env.cleanup(context);
-      }
+      const closing = await Promise.allSettled([this.harness.close(context), this.resources?.close()]);
+      // Harness.close seals effects but does not wait for already admitted tools to return.
+      await Promise.allSettled([...this.drives.values(), this.policyWork]);
+      closing.push(...await Promise.allSettled([this.store.session.close(context), this.env.cleanup(context)]));
+      const failures = closing.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length) throw new AggregateError(failures, "Native task cleanup failed");
     });
     return this.closing;
   }
 
-  private async result(record: OperationResultRecord): Promise<ExecutionResult> {
-    const entries = record.tipId === null ? [] : (await this.lane.findEntries({
-      start: record.tipId, ...(record.fromTipId === null ? {} : { stopAtId: record.fromTipId }), order: "oldestFirst",
-    }, context)).filter(entry => entry.id !== record.fromTipId);
-    const assistant = entries.filter(entry => entry.type === "message" && entry.message.role === "assistant").at(-1);
-    const text = assistant?.type === "message" ? textOf(assistant.message).trim() : "";
-    let outcome: TaskOutcome;
-    if (record.status === "failed") outcome = { status: "error", error: record.error?.message ?? "Native operation failed", result: text };
-    else if (record.status === "aborted") outcome = { status: "aborted", result: text };
-    else if (record.status === "declined") outcome = { status: "stopped", result: text };
-    else if (!text) outcome = { status: "error", error: "Subagent completed without final assistant text" };
-    else outcome = {
-      status: this.store.binding.policy.limits.maxTurns !== undefined && turns(entries) >= this.store.binding.policy.limits.maxTurns ? "turn_limited" : "completed",
-      result: text,
-    };
-    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), completedAt: record.endedAt, startedAt: record.startedAt,
-      sourceEntryIds: Object.freeze(assistant ? [assistant.id] : []) });
-  }
+  private result(record: OperationResultRecord): Promise<ExecutionResult> { return this.store.result(record); }
 
   private limitReminder(): string {
     const { maxTurns, graceTurns } = this.store.binding.policy.limits;

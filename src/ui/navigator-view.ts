@@ -49,10 +49,6 @@ function applySelectedBackground(line: string, width: number, theme: Theme): str
   return theme.bg("selectedBg", restored);
 }
 
-function agentStatusValue(record: NavigationAgent, preview?: NavigationStatus): NavigationStatus {
-  return preview ?? record.lifecycle.status;
-}
-
 function agentStatusLabel(status: NavigationStatus): string {
   switch (status) {
     case "queued": return "Queued";
@@ -67,22 +63,21 @@ function agentStatusLabel(status: NavigationStatus): string {
   }
 }
 
-export function plainAgentStatus(record: NavigationAgent, preview?: NavigationStatus): string {
+export function plainAgentStatus(record: NavigationAgent): string {
   if (record.execution.retryState) {
     return `Retrying ${record.execution.retryState.attempt}/${record.execution.retryState.maxAttempts}`;
   }
-  return agentStatusLabel(agentStatusValue(record, preview));
+  return agentStatusLabel(record.lifecycle.status);
 }
 
 function renderAgentStatus(
   record: NavigationAgent,
   theme: Theme,
-  preview?: NavigationStatus,
 ): string {
   if (record.execution.retryState) {
     return theme.fg("warning", `Retrying ${record.execution.retryState.attempt}/${record.execution.retryState.maxAttempts}`);
   }
-  const statusValue = agentStatusValue(record, preview);
+  const statusValue = record.lifecycle.status;
   const color = statusValue === "turn_limited" || statusValue === "aborted"
     ? "warning"
     : statusValue === "running"
@@ -93,12 +88,6 @@ function renderAgentStatus(
           ? "error"
           : "dim";
   return theme.fg(color, agentStatusLabel(statusValue));
-}
-
-function renderDebugBadge(record: NavigationAgent, theme: Theme): string {
-  return record.execution.debugFaultKind
-    ? theme.bold(theme.fg("accent", "[DEBUG]"))
-    : "";
 }
 
 function computeListWindow(
@@ -205,14 +194,13 @@ export class NavigatorView {
       const durationMs = (record.lifecycle.completedAt ?? state.now) - record.lifecycle.startedAt;
       const { modelName, providerName, thinkingLevel } = record.execution;
       const parentModel = state.parentModel;
-      const plainStatus = plainAgentStatus(record, state.debugStatus);
-      const status = renderAgentStatus(record, theme, state.debugStatus);
-      const debugBadge = renderDebugBadge(record, theme);
+      const plainStatus = plainAgentStatus(record);
+      const status = renderAgentStatus(record, theme);
       const fixedPrefix = ` ${indicator} `;
       const pinBadge = pinned ? ` ${theme.fg("accent", "◆")}` : "";
       const plainPinBadge = pinned ? " ◆" : "";
-      const statusSuffix = `${debugBadge ? ` ${debugBadge}` : ""} (${status})${pinBadge}`;
-      const plainStatusSuffix = `${debugBadge ? " [DEBUG]" : ""} (${plainStatus})${plainPinBadge}`;
+      const statusSuffix = ` (${status})${pinBadge}`;
+      const plainStatusSuffix = ` (${plainStatus})${plainPinBadge}`;
       const identityStr = formatModelIdentity({
         providerName,
         modelName,

@@ -1,12 +1,12 @@
+import { projectMessage } from "../../src/drivers/message-projection.js";
+import type { NavigationAction } from "../../src/ui/navigation.js";
+import type { ExecutionMessage } from "../../src/engine/contracts.js";
 /**
  * Shared fixtures and helpers for AgentNavigator tests.
  */
 
 import { vi } from "vitest";
 import { ScrollView, VStack } from "@earendil-works/pi-tui";
-import type { AgentManager } from "../../src/agents/agent-manager.js";
-import { AgentPresentation } from "../../src/agents/agent-presentation.js";
-import { getCoordinator } from "../../src/shell.js";
 
 export interface MockEditor {
   getText: () => string;
@@ -26,6 +26,7 @@ export function makeRecord(id = "agent-12345678", status = "running"): any {
     id,
     display: {
       type: "Explore",
+      name: "Explore",
       description: "Inspect the project",
     },
     lifecycle: {
@@ -67,30 +68,72 @@ export function makeRecord(id = "agent-12345678", status = "running"): any {
   };
 }
 
-export function makeManager(records: any[]) {
-  const manager = {
-    listAgents: () => records,
-    getRecord: (id: string) => records.find(record => record.id === id),
-    togglePinned: vi.fn(),
-    abort: vi.fn(),
-    abortRetry: vi.fn(() => false),
-    dequeueMessages: vi.fn(() => []),
-    clear: vi.fn(() => false),
-    sendInput: vi.fn(async () => ({ accepted: true })),
-    interact: vi.fn(async () => ({ accepted: true })),
-    takeOver: vi.fn((id: string) => {
+export function makeSource(records: any[]): any {
+  const cache = new WeakMap<object, ExecutionMessage>();
+  let sequence = 0;
+  const subscriptions = new Map<string, () => void>();
+  const project = (message: any) => {
+    let result = cache.get(message);
+    if (!result) { result = projectMessage(String(++sequence), message); cache.set(message, result); }
+    return result;
+  };
+  const source: any = {
+    togglePinned: vi.fn(), abort: vi.fn(() => true), abortRetry: vi.fn(() => false),
+    dequeueMessages: vi.fn(() => []), clear: vi.fn(() => false), sendInput: vi.fn(async () => ({ accepted: true })),
+    takeOver: vi.fn((id: string) => { const record = records.find(record => record.id === id); if (record) record.lifecycle.takenOver = true; return !!record; }),
+    getRecord: (id: string) => {
       const record = records.find(record => record.id === id);
-      if (!record) return false;
-      record.lifecycle.takenOver = true;
-      return true;
-    }),
-  } as unknown as AgentManager;
-  const source = new AgentPresentation(manager, getCoordinator() ?? undefined);
-  const names = ["togglePinned", "abort", "abortRetry", "dequeueMessages", "clear", "sendInput", "takeOver"] as const;
-  for (const name of names) Object.defineProperty(source, name, {
-    configurable: true, get: () => manager[name], set: handler => { Object.assign(manager, { [name]: handler }); },
-  });
-  return source as AgentPresentation & Pick<AgentManager, typeof names[number]>;
+      if (!record) return;
+      const frame = record.execution.session;
+      const queued = [...(frame?.getSteeringMessages?.() ?? []).map((text: string) => ({ kind: "steer", input: { text } })),
+        ...(frame?.getFollowUpMessages?.() ?? []).map((text: string) => ({ kind: "followUp", input: { text } })),
+        ...(record.execution.pendingSteers ?? []).map((item: any) => ({ kind: item.kind ?? "steer", input: { text: item.message, images: item.images } }))];
+      return { ...record, operationId: record.execution.operationId ?? id,
+        display: { ...record.display, name: record.display.name ?? record.display.type },
+        execution: { ...record.execution, settled: record.execution.settled ?? !["running", "queued"].includes(record.lifecycle.status),
+          providerName: frame?.model?.provider ?? record.display.invocation?.providerName,
+          modelName: frame?.model?.id ?? record.display.invocation?.modelName,
+          thinkingLevel: frame?.thinkingLevel ?? record.display.invocation?.thinkingLevel },
+        queued: queued.map((item: any, index: number) => ({ ...item, entryId: String(index) })),
+        canDeliver: !!record.lifecycle.takenOver && !!(record.result?.trim() || frame?.messages.some((message: any) =>
+          ["user", "assistant"].includes(message.role) && project(message).text.trim())),
+      };
+    },
+    listAgents: () => records.map(record => source.getRecord(record.id)),
+    transcript: (id: string) => {
+      const record = records.find(record => record.id === id);
+      const frame = record?.execution.session;
+      const messages = frame?.messages.map(project) ?? [];
+      if (record?.result && !messages.some((message: ExecutionMessage) => ["user", "assistant"].includes(message.role) && message.text.trim())) {
+        messages.push({ entryId: id + ":result", role: "assistant", text: record.result });
+      }
+      return { ready: !!frame || !!record?.result, messages, streaming: frame?.agent.state.streamingMessage ? project(frame.agent.state.streamingMessage) : undefined };
+    },
+    watchTranscript: (id: string, listener: () => void) => {
+      const stop = records.find(record => record.id === id)?.execution.session?.subscribe((event: any) => {
+        if (event.message) cache.delete(event.message);
+        listener();
+      });
+      const unsubscribe = () => { stop?.(); subscriptions.delete(id); };
+      subscriptions.set(id, unsubscribe);
+      return unsubscribe;
+    },
+    subscribe: () => () => {},
+    dispatch: (action: NavigationAction) => {
+      if (action.type === "deliver") return { accepted: true, deliveryId: action.deliveryId ?? "selection" };
+      switch (action.type) {
+        case "takeover": return { accepted: source.takeOver(action.taskId) };
+        case "pin": return { accepted: true, pinned: source.togglePinned(action.taskId) };
+        case "abort": return { accepted: source.abort(action.taskId, "user") };
+        case "abortRetry": return { accepted: source.abortRetry(action.taskId) };
+        case "remove": return { accepted: source.clear(action.taskId, "user") };
+        case "dequeue": return { accepted: true, restored: source.dequeueMessages(action.taskId).map((text: string) => ({ text })) };
+        case "steer": case "followUp": case "continue": return source.sendInput(action.taskId, action.input.text, action.input.images, action.type);
+      }
+    },
+    dispose: () => { for (const stop of [...subscriptions.values()]) stop(); },
+  };
+  return source;
 }
 
 export function stripAnsi(text: string): string {

@@ -3,15 +3,15 @@ import { getStatusNote } from "../status-note.js";
  * tool-execution.ts — Agent tool execution handlers.
  *
  * Contains the execute callbacks registered for the Agent tool.
- * Spawn coordination and background nudge scheduling live in spawn-coordinator.ts.
+ * Accepted policy and native execution are owned by the activation runtime.
  */
 
 import { CONFIG_DIR_NAME, type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 
-import type { AgentRecord } from "../types.js";
+import type { TaskOutcome } from "../domain/task.js";
+import type { ExtensionRuntime } from "../runtime.js";
 import { SHORT_ID_LENGTH } from "../types.js";
-import { resolveType, resolveAcceptedRunPolicy, discoverNewAgents } from "./agent-types.js";
 import { validateWorktreePath } from "../spawn/worktree-validator.js";
 
 import {
@@ -35,13 +35,7 @@ import {
 } from "../models/model-scope.js";
 import { authorizeModel } from "../models/model-access.js";
 import { resolveThinkingLevel } from "../models/thinking-resolver.js";
-import {
-  getPiInstance,
-  getSessionCtx,
-  getStore,
-  getCoordinator,
-  getManager,
-} from "../shell.js";
+
 
 // ============================================================================
 // Tool result helpers
@@ -61,11 +55,9 @@ function errorResult(text: string) {
  * Result text plus status note for foreground returns and background nudges.
  * Keeping one formatter prevents their completion semantics from drifting.
  */
-export function formatResultContent(record: AgentRecord): string {
-  if (record.lifecycle.status === "error") {
-    return `Agent failed: ${record.error || "unknown error"}`;
-  }
-  return (record.result ?? "") + getStatusNote(record.lifecycle);
+export function formatResultContent(outcome: TaskOutcome): string {
+  if (outcome.status === "error") return `Agent failed: ${outcome.error}${outcome.result ? `\n\n${outcome.result}` : ""}`;
+  return (outcome.result ?? "") + getStatusNote({ status: outcome.status, startedAt: 0, stoppedBy: "stoppedBy" in outcome ? outcome.stoppedBy : undefined });
 }
 
 // ============================================================================
@@ -73,22 +65,25 @@ export function formatResultContent(record: AgentRecord): string {
 // ============================================================================
 
 export async function executeAgentTool(
+  runtime: ExtensionRuntime,
   _toolCallId: string,
   params: Record<string, unknown>,
   signal: AbortSignal | undefined,
   _onUpdate: ((update: any) => void) | undefined,
   ctx: ExtensionContext,
 ): Promise<any> {
+  runtime.assertContext(ctx);
+  const parentEntryId = ctx.sessionManager.getLeafId();
   // Validate worktree_path early — needed for on-demand agent discovery
   const rawWorktreePath = params.worktree_path as string | undefined;
   let validatedWorktreePath: string | undefined;
   if (rawWorktreePath && rawWorktreePath.trim() !== "") {
-    const parentCwd = getSessionCtx()?.cwd ?? ctx.cwd;
+    const parentCwd = runtime.context?.cwd ?? ctx.cwd;
     const warnings: string[] = [];
     const onWarning = (msg: string) => { warnings.push(msg); };
     let validation;
     try {
-      validation = await validateWorktreePath(getPiInstance(), rawWorktreePath, parentCwd, onWarning);
+      validation = await validateWorktreePath(runtime.pi, rawWorktreePath, parentCwd, onWarning);
     } catch (err: unknown) {
       throw new Error(`worktree_path validation failed: ${errorMessage(err)}`);
     }
@@ -102,15 +97,15 @@ export async function executeAgentTool(
   }
 
   const type = (params.agent as string) || "general-purpose";
-  let resolvedType = resolveType(type);
+  let resolvedType = runtime.catalogue.resolveType(type);
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
     // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
     const worktreeDir = validatedWorktreePath && ctx.isProjectTrusted?.() !== false
       ? join(validatedWorktreePath, CONFIG_DIR_NAME, "agents")
       : undefined;
-    await discoverNewAgents(worktreeDir);
-    resolvedType = resolveType(type);
+    await runtime.catalogue.discoverNewAgents(worktreeDir);
+    resolvedType = runtime.catalogue.resolveType(type);
   }
   if (!resolvedType) {
     throw new Error(`Unknown agent type: ${type}`);
@@ -122,7 +117,7 @@ export async function executeAgentTool(
   const requestedBackground = typeof params.run_in_background === "boolean"
     ? params.run_in_background
     : undefined;
-  const store = getStore();
+  const store = runtime.store;
 
   if (requestedBackground !== true && store.agent.forceBackground) {
     throw new Error(
@@ -133,7 +128,7 @@ export async function executeAgentTool(
   }
 
   const runInBackground = requestedBackground === true;
-  const scopedModels = structuredClone(ctx.scopedModels);
+  const scopedModels = [...ctx.scopedModels];
   const routing = store.routing;
   const explicitModelRef = typeof params.model === "string" ? params.model.trim() || undefined : undefined;
   const explicitModel = explicitModelRef !== undefined;
@@ -202,7 +197,7 @@ export async function executeAgentTool(
   } catch {
     // Ignore settings resolution errors in environments where settings cannot be read
   }
-  const acceptedPolicy = resolveAcceptedRunPolicy(resolvedType, {
+  const acceptedPolicy = runtime.catalogue.resolveAcceptedRunPolicy(resolvedType, {
     loadSkillsImplicitly: store.agent.loadSkillsImplicitly,
     loadExtensionsImplicitly: store.agent.loadExtensionsImplicitly,
     systemPromptMode: store.agent.systemPromptMode,
@@ -211,13 +206,9 @@ export async function executeAgentTool(
     defaultTools,
   });
   if (!acceptedPolicy) throw new Error(`Unknown agent type: ${type}`);
-  const maxTurns = acceptedPolicy.definition.maxTurns;
 
-  const acceptedModel = structuredClone(model);
+  const acceptedModel = model;
 
-  // Capture the accepted model/provider for queued-agent display.
-  const modelName = acceptedModel.id;
-  const providerName = acceptedModel.provider;
 
   // Resolve thinking now so queued work cannot observe later scope/config edits.
   const thinkingLevel = resolveThinkingLevel({
@@ -229,101 +220,28 @@ export async function executeAgentTool(
     parentThinking: ctx.thinkingLevel,
   });
 
-  // Use SpawnCoordinator for unified spawn path
-  const coordinator = getCoordinator()!;
-  const result = await coordinator.spawn(getPiInstance(), ctx, {
-    type: resolvedType,
-    prompt,
-    description,
-    signal: runInBackground ? undefined : signal,
-    acceptedPolicy,
-    model: acceptedModel,
-    modelKey: resolvedModelKey,
-    scopedModels,
-    maxTurns,
-    thinkingLevel,
-    graceTurns: store.agent.graceTurns,
-    worktreePath: validatedWorktreePath,
-    invocation: Object.freeze({ modelName, providerName, thinkingLevel }),
-    runInBackground,
-  });
-
-  const { agentId, record } = result;
-
-  if (result.detached) {
-    return successResult(
-      "[Subagent detached to background: User took over this session interactively in the child view. Wait for user delivery or explicit status lookup.]",
-    );
-  }
-
-  if (runInBackground) {
-    const suffix = `The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${agentId}`;
-    const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
-    return successResult(`[${label}] ${suffix}`);
-  }
-
-  // Foreground: record.execution.promise is already awaited by coordinator.spawn()
-  const content = formatResultContent(record);
-  return record.lifecycle.status === "error" ? errorResult(content) : successResult(content);
+  const { task, detached } = await runtime.spawn({ ctx, parentEntryId, prompt, description, acceptedPolicy, model: acceptedModel,
+    thinkingLevel: thinkingLevel ?? "off", graceTurns: store.agent.graceTurns, worktreePath: validatedWorktreePath,
+    runInBackground, signal: runInBackground ? undefined : signal });
+  if (detached) return successResult("[Subagent detached: User took over this session. Wait for user delivery or explicit status lookup.]");
+  if (runInBackground) return successResult(`[Agent ${task.state.status}] The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${task.taskId}`);
+  const content = task.state.status === "settled" ? formatResultContent(task.state.outcome) : `Agent ${task.state.status}`;
+  return task.state.status === "settled" && task.state.outcome.status === "error" ? errorResult(content) : successResult(content);
 }
-
-// ============================================================================
-// Running agents list helper (used by executeStopAgentTool)
-// ============================================================================
-
-/**
- * Build a compact list of running (or queued) agents.
- * Format: "short_id (type), short_id (type)" — one line, easy for LLM to parse.
- */
-function formatRunningAgents(): string {
-  const agents = getManager()!.listAgents().filter(
-    (a) => a.lifecycle.status === "running" || a.lifecycle.status === "queued",
-  );
-
-  if (agents.length === 0) return "none";
-
-  return agents
-    .map((a) => `${a.id.slice(0, SHORT_ID_LENGTH)} (${a.display.type})`)
-    .join(", ");
-}
-
-// ============================================================================
-// StopAgent execute handler
-// ============================================================================
 
 export async function executeStopAgentTool(
-  _toolCallId: string,
-  params: Record<string, unknown>,
-  _signal: AbortSignal | undefined,
-  _onUpdate: ((update: any) => void) | undefined,
-  _ctx: ExtensionContext,
+  runtime: ExtensionRuntime, _toolCallId: string, params: Record<string, unknown>,
+  _signal: AbortSignal | undefined, _onUpdate: ((update: any) => void) | undefined, ctx: ExtensionContext,
 ): Promise<any> {
-  const agentId = params.agent_id as string | undefined;
-
-  if (!agentId) {
-    return errorResult("agent_id is required");
-  }
-
-  const record = getManager()!.getRecord(agentId);
-
-  if (!record) {
-    // Agent not found → return error + list of running agents
-    return errorResult(
-      `Agent ${agentId} not found. Running agents: ${formatRunningAgents()}`,
-    );
-  }
-
-  // Check if already in a terminal state (not running or queued)
-  if (record.lifecycle.status !== "running" && record.lifecycle.status !== "queued") {
-    return successResult(
-      `Agent ${agentId} is already ${record.lifecycle.status}. Running agents: ${formatRunningAgents()}`,
-    );
-  }
-
-  // Attempt to stop the running/queued agent
-  if (getManager()!.abort(agentId, "agent")) {
-    return successResult(`Stopped agent ${agentId.slice(0, SHORT_ID_LENGTH)}`);
-  }
-
-  return errorResult(`Failed to stop agent ${agentId}`);
+  runtime.assertContext(ctx);
+  const id = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
+  const tasks = runtime.engine.list();
+  const task = tasks.find(task => task.taskId === id);
+  const running = () => tasks.filter(task => task.state.status !== "settled")
+    .map(task => `${task.taskId.slice(0, SHORT_ID_LENGTH)} (${task.policy.agent})`).join(", ") || "none";
+  if (!id) return errorResult("agent_id is required");
+  if (!task) return errorResult(`Agent ${id} not found. Running agents: ${running()}`);
+  if (task.state.status === "settled") return successResult(`Agent ${id} is already ${task.state.outcome.status}. Running agents: ${running()}`);
+  await runtime.engine.requestAbort(id, "agent");
+  return successResult(`Stopped agent ${id.slice(0, SHORT_ID_LENGTH)}`);
 }

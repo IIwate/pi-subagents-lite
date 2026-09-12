@@ -27,6 +27,7 @@ export class TaskEngine {
   private flushing?: Promise<void>;
   private flushAgain = false;
   private closing?: Promise<void>;
+  private pendingCount = 0;
 
   constructor(limits: QuotaLimits, private readonly delivery: DeliveryChannel) {
     this.quota = new Quota(limits);
@@ -77,11 +78,15 @@ export class TaskEngine {
   }
 
   get(taskId: string): Task { return this.require(taskId).task; }
+  binding(taskId: string) { return this.require(taskId).driver.store.binding; }
+  pendingResults(): number { return this.pendingCount; }
+  storedDeliveries(taskId: string) { return this.require(taskId).driver.store.deliveries(); }
   list(): readonly Task[] { return [...this.records.values()].map(record => record.task); }
 
   async snapshot(taskId: string) {
     const record = this.require(taskId);
-    return { task: record.task, execution: await record.driver.snapshot(), fault: record.fault, deliveryError: record.deliveryError };
+    const execution = await record.driver.snapshot();
+    return { task: record.task, execution, fault: record.fault, deliveryError: record.deliveryError };
   }
 
   observe(taskId: string, listener: () => void): Promise<() => void> { return this.require(taskId).driver.observe(listener); }
@@ -156,11 +161,12 @@ export class TaskEngine {
     } finally { this.notify(); }
   }
 
-  async requestAbort(taskId: string): Promise<void> {
+  async requestAbort(taskId: string, stoppedBy?: "user" | "agent"): Promise<void> {
     this.assertOpen();
     const record = this.require(taskId);
     const operationId = record.task.operationId;
-    await record.driver.requestAbort(operationId);
+    if (record.task.state.status === "settled") return;
+    await record.driver.requestAbort(operationId, stoppedBy);
     record.task = reduceTask(record.task, { type: "cancel_requested", operationId });
     record.scheduled = !record.driving;
     this.drain();
@@ -210,6 +216,7 @@ export class TaskEngine {
       const failures: unknown[] = [];
       do {
         this.flushAgain = false;
+        let pending = 0;
         for (const record of this.records.values()) {
           if (this.closing) return;
           try {
@@ -218,13 +225,16 @@ export class TaskEngine {
               const attempt = await this.delivery.deliver(stored.delivery, () => !this.closing && !record.fault
                 && (stored.delivery.kind === "selection" || record.task.control === "autonomous"));
               if (attempt.status === "received") await record.driver.store.acknowledge(attempt.receipt);
+              else if (attempt.reason !== "ineligible") pending++;
             }
             record.deliveryError = undefined;
           } catch (error) {
             record.deliveryError = error;
             failures.push(error);
+            pending++;
           }
         }
+        this.pendingCount = pending;
       } while (this.flushAgain && !this.closing);
       this.notify();
       if (failures.length) throw new AggregateError(failures, "Parent result delivery failed; durable results are retained");

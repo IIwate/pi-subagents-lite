@@ -30,4 +30,4 @@ tag/version/lockfile/发布检查集中到 workflow, 但 npm publisher 设置和
 
 ## Verification
 
-生产和测试 typecheck 检查当前依赖 API, [Pi retry compatibility](../../../../test/unit/agents/pi-retry-compat.test.ts)、[real Pi session scenarios](../../../../test/scenarios/agents/pi-session.test.ts) 与 [navigator lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 检查重要适配点. 实际 publish/pack 属于发布流程, 文档验证不假装完成 npm 外部发布验证.
+生产和测试 typecheck 检查当前依赖 API, [Pi retry compatibility](../../../../test/scenarios/runtime.test.ts)、[real Pi session scenarios](../../../../test/scenarios/runtime.test.ts) 与 [navigator lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 检查重要适配点. 实际 publish/pack 属于发布流程, 文档验证不假装完成 npm 外部发布验证.

@@ -8,23 +8,19 @@ Status: implemented
 
 ## Decision
 
-[usage](../../../../src/agents/usage.ts) 定义 record 生命周期内的累计量, [runner events](../../../../src/agents/agent-runner.ts) 从 assistant/toolResult 的 message_end 及成功、未 aborted 的 compaction_end 提取 usage. input/output/cacheWrite 累加, cost 使用宿主 usage.cost.total; 不用 token 数自行估算金额. callback 由每次 run/continue 订阅并在 finally 解除.
+[HarnessDriver](../../../../src/drivers/harness-driver.ts) 从原生 Session 的 usage 读取累计 input、output 和 cost, 原生统计在 compaction 与继续执行后保留. 不用 token 数估算金额, 也不重复累计已写入的原生 usage. Provider 的 cacheRead 不计入新增输入, cacheWrite 仍保存在原生 usage 中.
 
 ```ts type-equiv: LifetimeUsage from src/agents/usage.ts
 export type LifetimeUsage = { input: number; output: number; cacheWrite: number; cost: number };
 ```
 
-cacheRead 是此次请求重用前缀的量, 不进入这一“新处理 token”累计口径; cost 仍保留 provider 报告的全部费用. 这不是服务端总吞吐或每轮完整输入计数. 不报告 cache 的 provider 仍按其 input 字段累计, 不从相邻请求推断 delta.
+toolUses 按原生分支中的工具结果计数, turnCount 表示当前 operation 的有效 assistant 回合, compactionCount 来自 compaction entries. contextPercent 使用最近一次压缩之后的原生 assistant usage 与该 Lane 模型的 contextWindow; 尚无有效 usage 时为 null. [TaskNavigationSource](../../../../src/ui/task-source.ts) 投影这些值, View 仅读取缓存并按设置显示.
 
-Manager 的 record 在继续执行时保留 lifetimeUsage 和 toolUses, turnCount 累加本次回合数. contextPercent 从 Pi getSessionStats 获取并在进展事件中缓存, 取不到或 post-compaction 尚不可知时为 null, 不伪造 0%. 列表 render 读取缓存, 不重复扫描长历史.
-
-当前没有跨已删除记录的父级总费用计数器. Clear/cleanup 释放记录后, 该记录统计不再出现在列表; 持久结果只保留交付元数据和正文. [展示设置](2026-09-10-configuration-ownership-and-persistence.md) 默认关闭费用显示, 不改变底层累计.
-
-显示将 input/output 分列, 可按开关隐藏 tool/turn/token/context/cost/time. turn 接近预算的 80% 才显示上限, 达到上限使用错误色, 便于把稀缺预算与普通累计区分. 这些颜色不触发取消, 控制仍由 runner 负责.
+统计与任务一起持久保留, UI 隐藏不清除原生 usage. 当前没有跨所有子任务的父级总费用计数器. 显示开关、预算颜色和折行仅影响展示, 不改变 TaskEngine 或 Driver 的执行预算.
 
 ## Alternatives considered
 
-- **每次渲染从 session messages 或 getSessionStats 重算总量.** 无需持久 accumulator, 但 compaction 改写消息集合, 渲染成本也随历史增长. 当前用事件累计, 当前 context 与 lifetime 明确分开.
+- **每次渲染从 session messages 或 getSessionStats 重算总量.** 无需持久 accumulator, 但 compaction 改写消息集合, 渲染成本也随历史增长. 原生 Session 负责累计, 当前 context 与 lifetime 明确分开.
 - **把 cacheRead 也算作新输入.** 适合衡量服务端 token 吞吐, 但不是本 UI 的累计口径, 反复前缀容易被理解为反复新增工作.
 - **为不报告 cache 的 provider 计算相邻 input delta.** `0bfa330`, `1dbdc64`, `6194481` 给出该历史选择, 对逐渐增长的 vLLM 上下文有意义; compaction、重试和 provider 定义差异使 delta 不等同真实计费输入. 当前保留 provider 原始 input.
 - **保留父会话 lifetime cost archive.** 删除子记录后仍能看总成本, 但需正确处理 clear 后迟到 usage, 否则重复计算. 当前单一列表不提供这个已裁撤的统计面.
@@ -43,4 +39,4 @@ Manager 的 record 在继续执行时保留 lifetimeUsage 和 toolUses, turnCoun
 
 ## Verification
 
-[usage tests](../../../../test/unit/agents/usage.test.ts)、[runner events](../../../../test/unit/agents/runner/agent-runner.events.test.ts)、[manager interaction](../../../../test/unit/agents/manager/agent-manager.interaction.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 验证事件归属、累计与显示. Provider 实际账单不是这些离线测试的验证对象.
+[usage tests](../../../../test/unit/agents/usage.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts)、[原生执行](../../../../test/scenarios/agents/execution-adapters.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 覆盖累计来源与显示边界. 离线测试不代表 Provider 实际账单.

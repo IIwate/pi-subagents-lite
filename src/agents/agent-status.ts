@@ -1,99 +1,27 @@
-/**
- * AgentStatus tool implementation.
- *
- * The no-argument form lists current records. An exact agent_id also searches
- * the parent session's durable result entries.
- */
-
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord } from "../types.js";
-import { getCoordinator, getManager } from "../shell.js";
-import { findStoredResult } from "../spawn/result-inbox.js";
+import type { ExtensionRuntime } from "../runtime.js";
 import { formatResultContent } from "./tool-execution.js";
 
-function formatAgent(record: AgentRecord): string {
-  return `${record.id} (${record.display.type}) ${record.lifecycle.status}`;
-}
-
-function modelProvider(record: AgentRecord): { provider?: string; model?: string } {
-  const sessionModel = record.execution.session?.model;
-  return {
-    provider: sessionModel?.provider ?? record.display.invocation?.providerName,
-    model: sessionModel?.id ?? record.display.invocation?.modelName,
-  };
-}
-
-function resultLookupText(
-  agentId: string,
-  record: AgentRecord | undefined,
-  stored: ReturnType<typeof findStoredResult>,
-): string | undefined {
-  if (!record && !stored) return undefined;
-
-  const status = record?.lifecycle.status ?? stored!.status;
-  const error = record?.error ?? stored?.error;
-  const recordResult = record?.result?.trim() ?? "";
-  const result = recordResult || stored?.result || (record ? formatResultContent(record).trim() : "");
-  const recordModel = record ? modelProvider(record) : {};
-  const provider = recordModel.provider ?? stored?.provider;
-  const model = recordModel.model ?? stored?.model;
-
-  const lines = [
-    `Agent ${agentId}: ${status}`,
-    `Provider: ${provider ?? "unknown"}`,
-    `Model: ${model ?? "unknown"}`,
-  ];
-  if (error) lines.push(`Error: ${error}`);
-  if (result) lines.push(`Result:\n${result}`);
-  return lines.join("\n");
-}
-
-/** Execute AgentStatus without polling or sleep-waiting. */
 export async function executeAgentStatusTool(
-  _toolCallId: string,
-  params: Record<string, unknown>,
-  _signal: AbortSignal | undefined,
-  _onUpdate: ((update: any) => void) | undefined,
-  _ctx: ExtensionContext,
+  runtime: ExtensionRuntime, _toolCallId: string, params: Record<string, unknown>,
+  _signal: AbortSignal | undefined, _onUpdate: ((update: any) => void) | undefined, ctx: ExtensionContext,
 ): Promise<any> {
-  const manager = getManager()!;
-  const requestedId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
+  runtime.assertContext(ctx);
+  const id = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
+  const tasks = runtime.engine.list();
   const nudge = "Don't poll, sleep, or timeout-wait — background results are delivered automatically.";
-
-  if (requestedId) {
-    const record = manager.getRecord(requestedId);
-    const coordinator = getCoordinator();
-    const stored = coordinator?.getStoredResult(requestedId)
-      ?? (record?.result ? undefined : findStoredResult(_ctx, requestedId));
-    const text = resultLookupText(requestedId, record, stored);
-    if (!text) {
-      return {
-        content: [{ type: "text", text: `Unknown agent: ${requestedId}\n\n${nudge}` }],
-        isError: true,
-      };
-    }
-
-    const recordResult = record?.result?.trim();
-    const delivered = stored && (!recordResult || recordResult === stored.result.trim()) ? stored : undefined;
-    if (delivered) coordinator?.markResultPresented(delivered.deliveryId);
-    return {
-      content: [{ type: "text", text: `${text}\n\n${nudge}` }],
-      details: delivered ? {
-        parentSessionId: delivered.parentSessionId,
-        deliveryIds: [delivered.deliveryId],
-      } : undefined,
-    };
-  }
-
-  const agents = manager.listAgents();
-  if (agents.length === 0) {
-    return {
-      content: [{ type: "text", text: `No agents running or completed.\n\n${nudge}` }],
-    };
-  }
-
-  const formatted = agents.map(formatAgent).join(", ");
-  return {
-    content: [{ type: "text", text: `${formatted}\n\n${nudge}` }],
-  };
+  const task = id ? tasks.find(task => task.taskId === id) : undefined;
+  const stored = id && !task ? await runtime.storedResult(id) : undefined;
+  if (id && !task && !stored) return { content: [{ type: "text", text: `Unknown agent: ${id}\n\n${nudge}` }], isError: true };
+  const outcome = task?.state.status === "settled" ? task.state.outcome : stored?.result?.outcome;
+  const policy = task?.policy ?? stored?.binding.policy;
+  const text = policy
+    ? `Agent ${id}: ${outcome?.status ?? task?.state.status ?? "unavailable"}\nProvider: ${policy.model.provider}\nModel: ${policy.model.id}\nResult:\n${outcome ? formatResultContent(outcome) : "No settled result."}`
+    : tasks.map(task => `${task.taskId} (${task.policy.agent}) ${task.state.status === "settled" ? task.state.outcome.status : task.state.status}`).join(", ") || "No agents running or completed.";
+  const deliveries = task ? await runtime.engine.storedDeliveries(id) : stored?.deliveries ?? [];
+  const operationId = task?.operationId ?? stored?.result?.operationId;
+  const presented = deliveries.filter(item => item.delivery.operationId === operationId && text.includes(item.delivery.text));
+  return { content: [{ type: "text", text: `${text}\n\n${nudge}` }], details: presented.length ? {
+    parentSessionId: ctx.sessionManager.getSessionId(), deliveries: presented.map(item => item.delivery),
+  } : undefined };
 }

@@ -12,7 +12,7 @@ Status: implemented
 
 工具省略顶层 description/promptSnippet/promptGuidelines, 对 Pi 的 required description 使用局部 ts-expect-error. 参数保留必要单句说明和类型, additionalProperties=false 拒绝未知参数, thinking 是独立 enum. 工具的新建/停止/精确查询职责不包含 resume、轮询等待或返回日志路径. 前台/后台策略拒绝通过抛错让 Pi 正确记录 tool error, forceBackground 开启时必须显式 run_in_background=true, 不静默改变执行模式.
 
-三个工具使用 renderShell=self 和空 Container 的 call/result renderer, 阻止默认 tool card 的外壳残留. 结果仍进入模型上下文, 自动交付消息 display=false. [navigator](../bug-fix/2026-09-10-navigator-rendering-and-cache.md) 承载实时状态, 异常 pending 由 [inbox](2026-09-09-parent-result-delivery-and-ack.md) 提供. 用户获得的是执行/交付事实, 不是第二套输出日志.
+三个工具使用 renderShell=self 和空 Container 的 call/result renderer, 阻止默认 tool card 的外壳残留. 结果仍进入模型上下文, 自动交付消息 display=false. [navigator](../bug-fix/2026-09-10-navigator-rendering-and-cache.md) 承载实时状态, 异常 pending 由 [inbox](2026-09-11-native-execution-and-parent-delivery-adapters.md) 提供. 用户获得的是执行/交付事实, 不是第二套输出日志.
 
 ## Retired output surfaces
 
@@ -37,4 +37,4 @@ schema 表面稳定、工具聊天行静默, 但这不验证模型已经理解�
 
 ## Verification
 
-[index/schema tests](../../../../test/unit/index.test.ts) 验证静态注册、schema 和 silent render, [tool execution](../../../../test/unit/agents/tool-execution.test.ts) 验证 pre-spawn 拒绝, [navigator render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts) 验证当前展示. 已裁撤日志的历史测试不属于主线运行面, 本文不声称重新执行这些测试.
+[index/schema tests](../../../../test/unit/index.test.ts) 验证静态注册、schema 和 silent render, [tool execution](../../../../test/scenarios/runtime.test.ts) 验证 pre-spawn 拒绝, [navigator render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts) 验证当前展示. 已裁撤日志的历史测试不属于主线运行面, 本文不声称重新执行这些测试.

@@ -8,70 +8,10 @@
  *   - makeAgentMd: build agent .md content from frontmatter fields
  *   - tempDirWithFiles: create a temp dir with files for scanAgentFilesInDir tests
  *
- * Shared mock factories (for vi.mock call sites):
- *   - shellMock: shell dependency stubs (parameterized by hoisted fns)
  */
 
 import { vi } from "vitest";
 import type { TestHarness } from "./harness.js";
-
-/* ================================================================== */
-/*  Shared mock factories                                             */
-/*  These return factory bodies for vi.mock() calls.                  */
-/*  Each test file keeps its own vi.mock("path", factory) line;       */
-/*  only the factory BODY is deduplicated here.                       */
-/* ================================================================== */
-
-/* ------------------------------------------------------------------ */
-/*  Per-test-overridable mock builders                                */
-/*  These accept hoisted fns from the test file so behavior can be    */
-/*  controlled per-test. The test file keeps its own vi.hoisted().    */
-/* ------------------------------------------------------------------ */
-
-export interface ShellMockFns {
-  manager?: any;
-  pi?: any;
-  sessionCtx?: any;
-  store?: any;
-  coordinator?: any;
-}
-
-/**
- * Shell dependency mock builder.
- * Accepts partial overrides; defaults to no-op stubs.
- * Pass hoisted fns for per-test behavioral control.
- *
- * Usage:
- *   const { mockAbort } = vi.hoisted(() => ({ mockAbort: vi.fn() }));
- *   vi.mock("../../src/shell.js", () => shellMock({
- *     manager: { abort: mockAbort, getRecord: vi.fn(), listAgents: vi.fn() },
- *   }));
- */
-export function shellMock(fns: ShellMockFns = {}) {
-  const manager = fns.manager ?? {
-    // AgentManager.abort returns boolean ("was it stopped"), not void — be
-    // explicit so the default fallback states the contract instead of
-    // returning undefined and happening to be falsy.
-    abort: vi.fn(() => false),
-    getRecord: vi.fn(),
-    listAgents: vi.fn(() => []),
-    spawn: vi.fn(),
-  };
-  const pi = fns.pi ?? { sendMessage: vi.fn(), exec: vi.fn() };
-  const sessionCtx = fns.sessionCtx ?? { cwd: "/home/test" };
-  const store = fns.store ?? {
-    agent: { graceTurns: 6, forceBackground: false, showCost: false },
-  };
-  const coordinator = fns.coordinator ?? { spawn: vi.fn() };
-
-  return {
-    getManager: () => manager,
-    getPiInstance: () => pi,
-    getSessionCtx: () => sessionCtx,
-    getStore: () => store,
-    getCoordinator: () => coordinator,
-  };
-}
 
 import {
   mkdirSync,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentNavigator } from "../../../src/ui/agent-navigator.js";
 import type { NavigationReply } from "../../../src/ui/navigation.js";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
-import { makeManager, makeRecord, makeUI, mountSelector } from "../../support/navigator.js";
+import { makeSource, makeRecord, makeUI, mountSelector } from "../../support/navigator.js";
 
 describe("Navigation action ownership", () => {
   let resources: TestHarness;
@@ -13,7 +13,7 @@ describe("Navigation action ownership", () => {
     const record = makeRecord();
     record.execution.session.getSteeringMessages = () => ["Pending correction"];
     const result = Promise.withResolvers<NavigationReply>();
-    const source = makeManager([record]);
+    const source = makeSource([record]);
     const dispatch = vi.fn(() => result.promise);
     const navigator = new AgentNavigator(source, dispatch);
     resources.onDispose(() => navigator.dispose());

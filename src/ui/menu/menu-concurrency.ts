@@ -2,11 +2,10 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { getAllTypes } from "../../agents/agent-types.js";
 import { DEFAULT_CONCURRENCY } from "../../config/config-io.js";
 import { effectiveAlternateModelKeys } from "../../models/model-access.js";
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
-import { getManager, getStore } from "../../shell.js";
+import type { MenuRuntime } from "./helpers.js";
 import {
   buildListTheme,
   buildModelOptions,
@@ -20,7 +19,7 @@ import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SelectOption } from "../searchable-select.js";
 import type { Theme } from "../types.js";
 
-type Store = ReturnType<typeof getStore>;
+type Store = MenuRuntime["store"];
 type LimitKind = "provider" | "model";
 
 type LimitRef = {
@@ -29,14 +28,14 @@ type LimitRef = {
   limit: number;
 };
 
-function activeModelKeys(ctx: ExtensionCommandContext, store: Store): string[] {
+function activeModelKeys(runtime: MenuRuntime, ctx: ExtensionCommandContext, store: Store): string[] {
   const availableKeys = new Set(ctx.modelRegistry.getAvailable().map(modelKey));
   const scopedKeys = scopedModelKeys(ctx.scopedModels);
   const parentKey = ctx.model ? modelKey(ctx.model) : "";
   const keys = new Set<string>();
   if (parentKey) keys.add(parentKey);
 
-  for (const type of getAllTypes()) {
+  for (const type of runtime.catalogue.getAllTypes()) {
     for (const key of effectiveAlternateModelKeys(
       type,
       store.routing,
@@ -47,9 +46,7 @@ function activeModelKeys(ctx: ExtensionCommandContext, store: Store): string[] {
   }
 
   // Accepted sessions remain actionable even after routing or scope changes.
-  for (const record of getManager()?.listAgents() ?? []) {
-    if (record.execution.modelKey) keys.add(record.execution.modelKey);
-  }
+  for (const task of runtime.engine?.list() ?? []) keys.add(`${task.policy.model.provider}/${task.policy.model.id}`);
   return [...keys].sort();
 }
 
@@ -162,13 +159,13 @@ function inactiveLimitsSubmenu(options: {
   };
 }
 
-export async function showConcurrencySettingsMenu(ctx: ExtensionCommandContext): Promise<void> {
+export async function showConcurrencySettingsMenu(ctx: ExtensionCommandContext, runtime: MenuRuntime): Promise<void> {
   let rebuild: ((items: SettingItem[]) => void) | undefined;
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
     const buildItems = (): SettingItem[] => {
-      const store = getStore();
-      const models = activeModelKeys(ctx, store);
+      const store = runtime.store;
+      const models = activeModelKeys(runtime, ctx, store);
       const activeModels = new Set(models);
       const activeProviders = new Set(models.map((key) => key.split("/")[0]).filter(Boolean));
       const providerLimits = Object.entries(store.concurrency.providers)

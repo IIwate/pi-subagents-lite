@@ -10,14 +10,9 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  registerAgents,
-  getAvailableTypes,
-  getAgentConfig,
-  setAgentScanDirs,
-  setDefaultAgentsDisabled,
-  getConfig,
-} from "../../../src/agents/agent-types.js";
+import { AgentCatalogue } from "../../../src/agents/agent-types.js";
+let catalogue = new AgentCatalogue();
+beforeEach(() => { catalogue = new AgentCatalogue(); });
 import type { AgentConfig } from "../../../src/agents/types.js";
 
 /* ------------------------------------------------------------------ */
@@ -26,20 +21,20 @@ import type { AgentConfig } from "../../../src/agents/types.js";
 
 describe("registerAgents — disableDefaultAgents", () => {
   beforeEach(() => {
-    registerAgents(new Map());
-    setAgentScanDirs("", "");
+    catalogue.registerAgents(new Map());
+    catalogue.setAgentScanDirs("", "");
   });
 
   it("includes DEFAULT_AGENTS by default (disableDefaultAgents=false)", () => {
-    registerAgents(new Map());
-    const types = getAvailableTypes();
+    catalogue.registerAgents(new Map());
+    const types = catalogue.getAvailableTypes();
     expect(types).toContain("general-purpose");
     expect(types).toContain("Explore");
   });
 
   it("skips DEFAULT_AGENTS when disableDefaultAgents is true", () => {
-    registerAgents(new Map(), { disableDefaultAgents: true });
-    const types = getAvailableTypes();
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: true });
+    const types = catalogue.getAvailableTypes();
     expect(types).not.toContain("general-purpose");
     expect(types).not.toContain("Explore");
   });
@@ -51,8 +46,8 @@ describe("registerAgents — disableDefaultAgents", () => {
       description: "Custom agent",
       systemPrompt: "test",
     });
-    registerAgents(userAgents, { disableDefaultAgents: true });
-    const types = getAvailableTypes();
+    catalogue.registerAgents(userAgents, { disableDefaultAgents: true });
+    const types = catalogue.getAvailableTypes();
     expect(types).toContain("my-agent");
     expect(types).not.toContain("general-purpose");
   });
@@ -64,14 +59,14 @@ describe("registerAgents — disableDefaultAgents", () => {
       description: "My custom general-purpose agent",
       systemPrompt: "custom prompt",
     });
-    registerAgents(userAgents, { disableDefaultAgents: true });
-    const config = getAgentConfig("general-purpose");
+    catalogue.registerAgents(userAgents, { disableDefaultAgents: true });
+    const config = catalogue.getAgentConfig("general-purpose");
     expect(config).toBeDefined();
     expect(config!.description).toBe("My custom general-purpose agent");
   });
 
   it("applies immediately without removing a custom default-name override", () => {
-    registerAgents(new Map([[
+    catalogue.registerAgents(new Map([[
       "general-purpose",
       {
         name: "general-purpose",
@@ -81,19 +76,19 @@ describe("registerAgents — disableDefaultAgents", () => {
       },
     ]]));
 
-    setDefaultAgentsDisabled(true);
-    expect(getAvailableTypes()).toEqual(["general-purpose"]);
-    expect(getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
+    catalogue.setDefaultAgentsDisabled(true);
+    expect(catalogue.getAvailableTypes()).toEqual(["general-purpose"]);
+    expect(catalogue.getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
 
-    setDefaultAgentsDisabled(false);
-    expect(getAvailableTypes()).toContain("general-purpose");
-    expect(getAvailableTypes()).toContain("Explore");
-    expect(getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
+    catalogue.setDefaultAgentsDisabled(false);
+    expect(catalogue.getAvailableTypes()).toContain("general-purpose");
+    expect(catalogue.getAvailableTypes()).toContain("Explore");
+    expect(catalogue.getAgentConfig("general-purpose")?.description).toBe("Custom general-purpose agent");
   });
 
   it("returns empty types when defaults disabled and no user agents", () => {
-    registerAgents(new Map(), { disableDefaultAgents: true });
-    expect(getAvailableTypes()).toEqual([]);
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: true });
+    expect(catalogue.getAvailableTypes()).toEqual([]);
   });
 });
 
@@ -103,13 +98,13 @@ describe("registerAgents — disableDefaultAgents", () => {
 
 describe("getConfig — fallback when defaults disabled", () => {
   beforeEach(() => {
-    registerAgents(new Map());
-    setAgentScanDirs("", "");
+    catalogue.registerAgents(new Map());
+    catalogue.setAgentScanDirs("", "");
   });
 
   it("falls back to generic config when defaults disabled and general-purpose missing", () => {
-    registerAgents(new Map(), { disableDefaultAgents: true });
-    const config = getConfig("some-unknown-type");
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: true });
+    const config = catalogue.getConfig("some-unknown-type");
     // Should fall through to the absolute fallback (generic config)
     expect(config.displayName).toBe("Agent");
     expect(config.description).toBe("General-purpose agent for complex, multi-step tasks");

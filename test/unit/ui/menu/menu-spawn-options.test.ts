@@ -1,3 +1,4 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 /**
  * menu-spawn-options.test.ts — Tests for showSpawnOptionsMenu.
  *
@@ -65,7 +66,7 @@ describe("showSpawnOptionsMenu — SettingsList integration", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
@@ -81,7 +82,7 @@ describe("showSpawnOptionsMenu — force background", () => {
 
   it("shows 'Force background · OFF' when disabled", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const fb = settingsListCalls[0].items.find((i: any) => i.id === "forceBackground");
     expect(fb.currentValue).toBe("OFF");
   });
@@ -89,7 +90,7 @@ describe("showSpawnOptionsMenu — force background", () => {
   it("shows 'Force background · ON' when enabled", async () => {
     resetMenuStore({ agent: { forceBackground: true } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const fb = settingsListCalls[0].items.find((i: any) => i.id === "forceBackground");
     expect(fb.currentValue).toBe("ON");
   });
@@ -97,7 +98,7 @@ describe("showSpawnOptionsMenu — force background", () => {
   it("toggles force background via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("forceBackground", "ON");
     expect(store.agent.forceBackground).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
@@ -107,7 +108,7 @@ describe("showSpawnOptionsMenu — force background", () => {
     const { store, memIO } = resetMenuStore({ agent: { forceBackground: false } });
     vi.spyOn(memIO.io, "save").mockImplementation(() => { throw new Error("Permission denied"); });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const row = settingsListCalls[0].items.find(item => item.id === "forceBackground");
     row.currentValue = "ON";
     settingsListCalls[0].onChange(row.id, "ON");
@@ -127,7 +128,7 @@ describe("showSpawnOptionsMenu — background delivery", () => {
 
   it("does not expose a background delivery policy", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const delivery = settingsListCalls[0].items.find((item: any) => item.id === "backgroundDelivery");
     expect(delivery).toBeUndefined();
   });
@@ -143,7 +144,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
 
   it("shows 'Grace turns · 6' with default value", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
     expect(gt.currentValue).toBe("6");
     expect(typeof gt.submenu).toBe("function");
@@ -152,7 +153,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   it("shows configured grace turns value", async () => {
     resetMenuStore({ agent: { forceBackground: false, graceTurns: 10 } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
     expect(gt.currentValue).toBe("10");
   });
@@ -160,7 +161,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   it("grace turns submenu creates Input and handles valid submit", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 5 } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
 
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
     const mockDone = vi.fn();
@@ -178,7 +179,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   it("grace turns submenu rejects negative numbers", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
 
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
     const mockDone = vi.fn();
@@ -192,7 +193,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
 
   it("grace turns submenu handles escape", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
 
     const gt = settingsListCalls[0].items.find((i: any) => i.id === "graceTurns");
     const mockDone = vi.fn();
@@ -205,7 +206,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
   it.each(["3junk", "1e999", "2.5"])("rejects the complete invalid numeric input %s", async value => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const done = vi.fn();
     settingsListCalls[0].items.find(item => item.id === "graceTurns").submenu("3", done);
     inputInstances[0].onSubmit!(value);
@@ -218,7 +219,7 @@ describe("showSpawnOptionsMenu — grace turns", () => {
     const { store, memIO } = resetMenuStore({ agent: { forceBackground: false, graceTurns: 3 } });
     vi.spyOn(memIO.io, "save").mockImplementationOnce(() => { throw new Error("Disk full"); });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const done = vi.fn();
     settingsListCalls[0].items.find(item => item.id === "graceTurns").submenu("3", done);
     inputInstances[0].onSubmit!("4");
@@ -241,7 +242,7 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
 
   it("shows 'Default thinking level · inherit' when no default is set", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
     expect(dt.currentValue).toBe("inherit");
   });
@@ -249,14 +250,14 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
   it("shows configured thinking level", async () => {
     resetMenuStore({ agent: { forceBackground: false, defaultThinking: "high" } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
     expect(dt.currentValue).toBe("high");
   });
 
   it("offers max thinking level", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const dt = settingsListCalls[0].items.find((i: any) => i.id === "defaultThinking");
     expect(dt.values).toContain("max");
   });
@@ -264,7 +265,7 @@ describe("showSpawnOptionsMenu — default thinking level", () => {
   it("sets thinking level via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("defaultThinking", "medium");
     expect(store.agent.defaultThinking).toBe("medium");
     settingsListCalls[0].onChange("defaultThinking", "inherit");
@@ -282,7 +283,7 @@ describe("showSpawnOptionsMenu — Disable default agents", () => {
 
   it("shows 'Disable default agents · OFF' by default", async () => {
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const dda = settingsListCalls[0].items.find((i: any) => i.id === "disableDefaultAgents");
     expect(dda.currentValue).toBe("OFF");
   });
@@ -290,7 +291,7 @@ describe("showSpawnOptionsMenu — Disable default agents", () => {
   it("shows 'Disable default agents · ON' when disableDefaultAgents is true", async () => {
     resetMenuStore({ agent: { forceBackground: false, disableDefaultAgents: true } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     const dda = settingsListCalls[0].items.find((i: any) => i.id === "disableDefaultAgents");
     expect(dda.currentValue).toBe("ON");
   });
@@ -298,7 +299,7 @@ describe("showSpawnOptionsMenu — Disable default agents", () => {
   it("toggles disable default agents via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, disableDefaultAgents: false } });
     const ctx = createMockCtx();
-    await showSpawnOptionsMenu(ctx);
+    await showSpawnOptionsMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("disableDefaultAgents", "ON");
     expect(store.agent.disableDefaultAgents).toBe(true);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");

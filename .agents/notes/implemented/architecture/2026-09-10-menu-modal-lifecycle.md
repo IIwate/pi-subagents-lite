@@ -19,7 +19,7 @@ Status: implemented
 - **连续嵌套 ctx.ui.custom.** 调用点直观, 但宿主只有一个当前自定义交互, 返回可落到已被替换的父 modal. 单个 modal 内委派或先关闭再打开保持明确的所有权.
 - **每次设置变化重新调用 ui.select.** 不需要维护 list 对象, 但光标回到开头, 用户连续修改体验不稳定. 持续的 SettingsList 适合叶页, 顶层选择后离开则可重建.
 - **所有层统一转义 j/k/左右键.** 快捷键统一, 但会破坏搜索词和 Input 光标. focusable 子组件是文本输入的边界.
-- **菜单派发新 Agent 并自带结果 viewer.** 全部工作集中在 `/agents` 很直接, 但与 [标准 editor/selector](../feature/2026-09-10-human-takeover-and-selective-delivery.md) 形成两套输入和结果路径. 当前菜单负责配置/诊断, 执行通过 Agent 工具或子会话 editor.
+- **菜单派发新 Agent 并自带结果 viewer.** 全部工作集中在 `/agents` 很直接, 但与 [标准 editor/selector](../feature/2026-09-10-human-takeover-and-selective-delivery.md) 形成两套输入和结果路径. 当前菜单负责配置, 执行通过 Agent 工具或子会话 editor.
 
 ## Consequences
 

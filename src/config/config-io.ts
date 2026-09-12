@@ -1,23 +1,11 @@
-/**
- * config-io.ts — Config persistence (read/write).
- *
- * Atomic writes: write to an exclusively created sibling file, then rename.
- * Loaded at session_start; saved on every /agents menu mutation.
- *
- * New-schema only: assignment-era routing shapes (allowCrossProvider,
- * allowedProviders, agentModels, dynamic agent[type] keys, agent.default) are not migrated. A
- * missing or malformed modelRouting block falls back to the defaults below;
- * the next explicit save writes the canonical schema.
- */
-
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { AgentModelAccess, AgentSettings, ModelRoutingConfig, ProviderModelAccess, SubagentsConfig } from "./types.js";
+import type { AgentModelAccess, AgentSettings, ProviderModelAccess, SubagentsConfig } from "./types.js";
 
 const CONFIG_DIR = getAgentDir();
-export const CONFIG_PATH = path.join(CONFIG_DIR, "subagents-lite.json");
+export const CONFIG_PATH = path.join(CONFIG_DIR, "subagents-lite-v3.json");
 /** Path to custom prompt file for subagent system prompts. */
 export const CUSTOM_PROMPT_PATH = path.join(CONFIG_DIR, "subagents-lite-prompt.md");
 /** Default number of grace turns before an agent is force-stopped. */
@@ -41,11 +29,6 @@ export function validateGraceTurns(value: number): number {
   return value;
 }
 
-/** Fresh fallback routing policy when modelRouting is missing or malformed. */
-function defaultModelRouting(): ModelRoutingConfig {
-  return { enabled: false, enabledProviders: [], agentAccess: {} };
-}
-
 /** Default agent settings — merged into loaded config so callers get a complete shape. */
 const DEFAULT_AGENT: AgentSettings = {
   forceBackground: false,
@@ -63,12 +46,6 @@ const DEFAULT_AGENT: AgentSettings = {
   showTime: true,
 };
 
-/**
- * Known agent setting keys. Unknown keys (legacy dynamic model keys, the
- * retired `default`) are dropped at load, so the next explicit save writes
- * the canonical schema. This is schema hygiene, not migration: old model
- * values are never read or transformed.
- */
 const AGENT_SETTING_KEYS: readonly (keyof AgentSettings)[] = [
   "forceBackground",
   "graceTurns",
@@ -96,132 +73,92 @@ function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
 }
 
-function invalidValue(field: string, fallback: unknown): void {
-  console.warn(`[subagents] Invalid config field ${JSON.stringify(field)}; using ${JSON.stringify(fallback)}.`);
-}
-
-function readConcurrencyLimit(raw: unknown, fallback: number, field: string): number {
-  if (typeof raw === "number" && Number.isFinite(raw)) return normalizeConcurrencyLimit(raw);
-  if (raw !== undefined) invalidValue(field, fallback);
-  return fallback;
-}
-
-function readConcurrencyOverrides(raw: unknown, field: string): Record<string, number> | undefined {
-  if (raw === undefined) return undefined;
-  if (!isPlainObject(raw)) {
-    invalidValue(field, {});
-    return undefined;
+/** Parse the current configuration at the file boundary; invalid files fail visibly. */
+export function parseConfig(input: unknown): SubagentsConfig {
+  const object = (value: unknown, field: string): Record<string, unknown> => {
+    if (!isPlainObject(value)) throw new Error(`Invalid config object: ${field}`);
+    return value;
+  };
+  const keys = (value: Record<string, unknown>, allowed: readonly string[], field: string) => {
+    for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new Error(`Unknown config field: ${field}.${key}`);
+  };
+  const strings = (value: unknown, field: string): string[] => {
+    if (!Array.isArray(value) || value.some(item => typeof item !== "string" || !item.trim())) throw new Error(`Invalid config string list: ${field}`);
+    return [...new Set(value.map(item => item.trim()))];
+  };
+  const limit = (value: unknown, field: string): number => {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid concurrency limit: ${field}`);
+    return value;
+  };
+  const root = object(input, "root");
+  keys(root, ["agent", "concurrency", "modelRouting"], "root");
+  const rawAgent = object(root.agent === undefined ? {} : root.agent, "agent");
+  keys(rawAgent, AGENT_SETTING_KEYS, "agent");
+  for (const [key, value] of Object.entries(rawAgent)) {
+    if (key === "graceTurns") validateGraceTurns(value as number);
+    else if (key === "systemPromptMode") {
+      if (typeof value !== "string" || !VALID_SYSTEM_PROMPT_MODES.has(value)) throw new Error("Invalid system prompt mode");
+    } else if (key === "defaultThinking") {
+      if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value as string)) throw new Error("Invalid default thinking level");
+    } else if (typeof value !== "boolean") throw new Error(`Invalid boolean setting: agent.${key}`);
   }
-  return Object.fromEntries(Object.entries(raw).map(([key, value]) => [
-    key, readConcurrencyLimit(value, 1, `${field}.${key}`),
-  ]));
-}
-
-/**
- * Normalize the persisted routing policy. Omitted models means all models;
- * invalid or empty model arrays remove the provider rule instead of widening
- * it to all-model access.
- */
-function normalizeModelRouting(raw: unknown): ModelRoutingConfig {
-  if (!isPlainObject(raw)) return defaultModelRouting();
-
-  const enabledProviders: string[] = [];
-  if (Array.isArray(raw.enabledProviders)) {
-    const seen = new Set<string>();
-    for (const value of raw.enabledProviders) {
-      if (typeof value !== "string") continue;
-      const provider = value.trim();
-      if (!provider || seen.has(provider)) continue;
-      seen.add(provider);
-      enabledProviders.push(provider);
-    }
-  }
-
+  const concurrency = object(root.concurrency === undefined ? {} : root.concurrency, "concurrency");
+  keys(concurrency, ["default", "providers", "models"], "concurrency");
+  const overrides = (field: "providers" | "models") => concurrency[field] === undefined ? undefined
+    : Object.fromEntries(Object.entries(object(concurrency[field], `concurrency.${field}`)).map(([key, value]) => [key, limit(value, key)]));
+  const routing = object(root.modelRouting === undefined ? {} : root.modelRouting, "modelRouting");
+  keys(routing, ["enabled", "enabledProviders", "agentAccess"], "modelRouting");
+  if (routing.enabled !== undefined && typeof routing.enabled !== "boolean") throw new Error("Invalid model routing switch");
   const agentAccess: Record<string, AgentModelAccess> = {};
-  if (isPlainObject(raw.agentAccess)) {
-    for (const [rawType, rawAccess] of Object.entries(raw.agentAccess)) {
-      const type = rawType.trim();
-      if (!type || !isPlainObject(rawAccess) || !isPlainObject(rawAccess.providers)) continue;
-
-      const providers: Record<string, ProviderModelAccess> = {};
-      for (const [rawProvider, rawProviderAccess] of Object.entries(rawAccess.providers)) {
-        const provider = rawProvider.trim();
-        if (!provider || !isPlainObject(rawProviderAccess)) continue;
-        if (!Object.hasOwn(rawProviderAccess, "models")) {
-          if (Object.keys(rawProviderAccess).length === 0) setOwn(providers, provider, {});
-          continue;
-        }
-        if (!Array.isArray(rawProviderAccess.models)) continue;
-        const models = [...new Set(rawProviderAccess.models
-          .filter((model): model is string => typeof model === "string")
-          .map((model) => model.trim())
-          .filter(Boolean))];
-        if (models.length > 0) setOwn(providers, provider, { models });
-      }
-      if (Object.keys(providers).length > 0) setOwn(agentAccess, type, { providers });
+  for (const [type, rawAccess] of Object.entries(object(routing.agentAccess === undefined ? {} : routing.agentAccess, "agentAccess"))) {
+    if (!type.trim()) throw new Error("Empty agent access key");
+    const access = object(rawAccess, type);
+    keys(access, ["providers"], type);
+    const providers: Record<string, ProviderModelAccess> = {};
+    for (const [provider, rawRule] of Object.entries(object(access.providers, `${type}.providers`))) {
+      if (!provider.trim()) throw new Error("Empty provider access key");
+      const rule = object(rawRule, provider);
+      keys(rule, ["models"], provider);
+      const models = rule.models === undefined ? undefined : strings(rule.models, provider);
+      if (models?.length === 0) throw new Error(`Empty model allowlist: ${provider}`);
+      setOwn(providers, provider, models ? { models } : {});
     }
-  }
-
-  return { enabled: raw.enabled === true, enabledProviders, agentAccess };
-}
-
-/**
- * Read config from disk. Merges loaded values over defaults so the result
- * is always a complete SubagentsConfig — no partial shapes for callers to
- * handle. Numeric ceilings are normalized at this external boundary; legacy
- * model fields on agent are ignored.
- */
-export function loadConfig(): SubagentsConfig {
-  let raw: Record<string, unknown>;
-  try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
-  } catch {
-    raw = {};
-  }
-  // The literal JSON value `null` parses without throwing — guard it like
-  // any other malformed shape so startup can never break.
-  if (!isPlainObject(raw)) raw = {};
-
-  const agentRaw = isPlainObject(raw.agent) ? raw.agent : {};
-  const concurrencyRaw = isPlainObject(raw.concurrency) ? raw.concurrency : {};
-  const agent: AgentSettings = {} as AgentSettings;
-  for (const key of AGENT_SETTING_KEYS) {
-    const value = agentRaw[key];
-    if (value !== undefined) (agent as unknown as Record<string, unknown>)[key] = value;
-  }
-  if (agent.graceTurns !== undefined) {
-    try {
-      agent.graceTurns = validateGraceTurns(agent.graceTurns);
-    } catch {
-      invalidValue("agent.graceTurns", DEFAULT_GRACE_TURNS);
-      agent.graceTurns = DEFAULT_GRACE_TURNS;
-    }
+    setOwn(agentAccess, type, { providers });
   }
   return {
-    modelRouting: normalizeModelRouting(raw.modelRouting),
-    agent: { ...DEFAULT_AGENT, ...agent },
-    concurrency: {
-      default: readConcurrencyLimit(concurrencyRaw.default, DEFAULT_CONCURRENCY.default, "concurrency.default"),
-      providers: readConcurrencyOverrides(concurrencyRaw.providers, "concurrency.providers"),
-      models: readConcurrencyOverrides(concurrencyRaw.models, "concurrency.models"),
-    },
+    agent: { ...DEFAULT_AGENT, ...rawAgent },
+    concurrency: { default: concurrency.default === undefined ? DEFAULT_CONCURRENCY.default : limit(concurrency.default, "default"),
+      providers: overrides("providers"), models: overrides("models") },
+    modelRouting: { enabled: routing.enabled === true,
+      enabledProviders: routing.enabledProviders === undefined ? [] : strings(routing.enabledProviders, "enabledProviders"), agentAccess },
   };
 }
 
+export function loadConfig(configPath = CONFIG_PATH): SubagentsConfig {
+  let content: string;
+  try { content = fs.readFileSync(configPath, "utf8"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return parseConfig({});
+    throw error;
+  }
+  try { return parseConfig(JSON.parse(content)); } catch (error) {
+    throw new Error(`Invalid subagent configuration ${configPath}: ${error}`, { cause: error });
+  }
+}
+
 /** Write config to disk with atomic rename. */
-export function saveConfigAtomic(config: SubagentsConfig): void {
-  const content = JSON.stringify(config, null, 2);
-  const tmpPath = `${CONFIG_PATH}.${randomUUID()}.tmp`;
+export function saveConfigAtomic(config: SubagentsConfig, configPath = CONFIG_PATH): void {
+  const content = JSON.stringify(parseConfig(config), null, 2);
+  const tmpPath = `${configPath}.${randomUUID()}.tmp`;
   let fd: number | undefined;
   let ownsTemporary = false;
   try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fd = fs.openSync(tmpPath, "wx");
     ownsTemporary = true;
     fs.writeFileSync(fd, content, "utf-8");
     fs.closeSync(fd);
     fd = undefined;
-    fs.renameSync(tmpPath, CONFIG_PATH);
+    fs.renameSync(tmpPath, configPath);
     ownsTemporary = false;
   } finally {
     // Cleanup diagnostics must not replace the write or rename error.

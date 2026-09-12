@@ -16,11 +16,10 @@ import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { ThinkingLevel } from "../../types.js";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-io.js";
-import { getStore } from "../../shell.js";
-import { setDefaultAgentsDisabled } from "../../agents/agent-types.js";
+import type { MenuRuntime } from "./helpers.js";
 
-export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promise<void> {
-  const store = getStore();
+export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext, runtime: MenuRuntime): Promise<void> {
+  const store = runtime.store;
 
   const items: SettingItem[] = [
     {
@@ -71,7 +70,6 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext): Promis
         case "disableDefaultAgents": {
           const disabled = newValue === "ON";
           store.mutate.agent.setDisableDefaultAgents(disabled);
-          setDefaultAgentsDisabled(disabled);
           ctx.ui.notify(`Default agents ${disabled ? "disabled" : "enabled"}`, "info");
           break;
         }

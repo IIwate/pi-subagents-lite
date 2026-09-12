@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[ConfigStore](../../../../src/config/config-store.ts) 为每个 mutation 深拷贝候选配置, 在候选上修改和校验, 保存成功后替换有效配置, 再同步 manager、navigator 或 registry. 保存抛错时有效配置及副作用目标保留旧值. Quick setup 和跨 Provider 的不可用模型规则清理各自只提交一次候选.
+[ConfigStore](../../../../src/config/config-store.ts) 为每个 mutation 深拷贝候选配置, 在候选上修改和校验, 保存成功后替换有效配置, 再同步 TaskEngine、Navigator 或 AgentCatalogue. 保存抛错时有效配置及副作用目标保留旧值. Quick setup 和跨 Provider 的不可用模型规则清理各自只提交一次候选.
 
 ```ts type-equiv: ConfigIO from src/config/config-store.ts
 import type { SubagentsConfig } from "../../../../src/config/types.js";
@@ -25,8 +25,8 @@ export interface ConfigIO {
 
 数值规则分别按字段执行:
 
-- 有限 concurrency 按 max(1, ceil(n)) 归一化, 保留小数容量及小于 1 时至少一个 slot 的语义. 加载时非法 default 使用 4, 非法显式 Provider/Model 上限使用 1 并报告字段. 菜单和 mutation 拒绝非有限值.
-- graceTurns 使用非负安全整数, 非法加载值使用 6; 菜单拒绝非法输入并保留旧值. 0 的实际后续回合语义由 [回合预算](2026-09-10-assistant-outcomes-retries-and-turn-budgets.md) 定义.
+- 有限 concurrency 按 max(1, ceil(n)) 归一化, 保留小数容量及小于 1 时至少一个 slot 的语义. 持久文件要求正安全整数, 非法值明确拒绝; mutation 拒绝非有限值, 正常菜单仅接受安全整数.
+- graceTurns 使用非负安全整数, 非法加载值明确拒绝; 菜单拒绝非法输入并保留旧值. 0 的实际后续回合语义由 [回合预算](2026-09-10-assistant-outcomes-retries-and-turn-budgets.md) 定义.
 - Agent 文件中的 max_turns/max_tokens 必须是有限数值或可解析的有限数值字符串. maxTurns 未指定或为 0 表示不限; 其他有限值向上取整且至少为 1. 非法声明不能转换成未指定的无限预算.
 - 数值菜单解析完整输入, 接受满足最小值的安全整数, 拒绝部分有效字符串和非整数.
 
@@ -38,8 +38,8 @@ export interface ConfigIO {
 
 ## Consequences
 
-保存失败拒绝更新是有效策略契约. 路由 JSON schema 沿用 [配置所有权](../architecture/2026-09-10-configuration-ownership-and-persistence.md), 路径使用 [Pi 资源目录](2026-09-10-canonical-agent-resources-and-discovery.md). 独占临时文件避免临时路径竞争, 不提供多进程 lost-update 合并、文件锁或掉电 fsync 保证. malformed 文档仍按当前加载规则回退, 仅显式保存改写目标文件.
+保存失败拒绝更新是有效策略契约. 路由 JSON schema 沿用 [配置所有权](../architecture/2026-09-10-configuration-ownership-and-persistence.md), 路径使用 [Pi 资源目录](2026-09-10-canonical-agent-resources-and-discovery.md). 独占临时文件避免临时路径竞争, 不提供多进程 lost-update 合并、文件锁或掉电 fsync 保证. malformed 文档明确报错并保留原文件.
 
 ## Verification
 
-[Store](../../../../test/unit/config/config-store.test.ts)、[外部 JSON](../../../../test/unit/config/config-io-normalize.test.ts) 和 [真实文件场景](../../../../test/scenarios/config-persistence.test.ts) 检查候选发布、部分写入/rename 失败、原文件保留和 scheduler 上限. [数值与开关](../../../../test/unit/ui/menu/menu-spawn-options.test.ts)、[模型勾选](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 检查失败显示及重试.
+[Store](../../../../test/unit/config/config-store.test.ts)、[外部 JSON](../../../../test/unit/config/config-io.test.ts) 和 [真实文件场景](../../../../test/scenarios/config-persistence.test.ts) 检查候选发布、部分写入/rename 失败、原文件保留和 scheduler 上限. [数值与开关](../../../../test/unit/ui/menu/menu-spawn-options.test.ts)、[模型勾选](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 检查失败显示及重试.

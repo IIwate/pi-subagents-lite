@@ -7,9 +7,10 @@ pi-subagents-lite is a Pi extension for isolated subagent sessions, model access
 | Location | Responsibility |
 |---|---|
 | [src/index.ts](src/index.ts), [registration.ts](src/registration.ts), [events.ts](src/events.ts) | Extension entry, tool/shortcut registration, and service lifecycle assembly. |
-| [src/shell.ts](src/shell.ts) | Current service references and process-local handoff across reloads. |
-| [src/agents/](src/agents/) | Agent definitions, tool handlers, child execution, concurrency, cancellation, and teardown. |
-| [src/spawn/](src/spawn/) | Spawn coordination, parent-session result storage, delivery, receipt reconciliation, and worktree validation. |
+| [src/runtime.ts](src/runtime.ts) | Activation ownership, native task discovery, and resource teardown. |
+| [src/domain/](src/domain/), [src/engine/](src/engine/), [src/drivers/](src/drivers/) | Accepted policy, admission, native execution, durable results, and host adapters. |
+| [src/agents/](src/agents/) | Agent definitions, discovery, and tool handlers. |
+| [src/spawn/](src/spawn/) | Same-repository worktree validation. |
 | [src/models/](src/models/), [src/config/](src/config/) | Model authorization and thinking resolution; configuration loading, persistence, and applied settings. |
 | [src/prompt/](src/prompt/) | Context extraction, skills, deterministic guidance, and selected-message formatting. |
 | [src/ui/](src/ui/) | Input routing, transcript rendering, navigation, delivery selection, and settings views. |
@@ -18,14 +19,14 @@ pi-subagents-lite is a Pi extension for isolated subagent sessions, model access
 
 ## Runtime invariants
 
-- **Execution records and durable results have separate owners.** `AgentManager` owns live sessions and execution resources; the result inbox owns saved deliveries. Never reconstruct executable records from inbox entries or apply the UI retention timer to durable results ([delivery](.agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md)).
+- **Execution records and durable results have separate owners.** `TaskEngine` and its drivers own execution resources; native session values own saved deliveries. Never reconstruct executable records from outbox entries or apply the UI retention timer to durable results ([delivery](.agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md)).
 - **ACK requires a durable receipt.** Verify the matching delivery in the parent session log before acknowledging it; sending a message, rendering it, or completing a model turn is insufficient. Preserve results when persistence or acknowledgement fails.
-- **Delivery retains its origin.** Automatic delivery requires the original parent session and active origin branch; explicit `AgentStatus` reads are session-wide. Reload handoffs remain isolated by parent session ID.
-- **Human takeover leaves subsequent output for explicit selection.** The editor sends instructions; the delivery selector selects existing messages. A taken-over terminal run does not automatically create a parent inbox entry or wake Main ([takeover](.agents/notes/implemented/architecture/2026-09-09-parent-result-delivery-and-ack.md)).
+- **Delivery retains its origin.** Automatic delivery requires the original parent session and active origin branch; explicit `AgentStatus` reads are session-wide. Native task discovery remains isolated by parent session ID.
+- **Human takeover leaves subsequent output for explicit selection.** The editor sends instructions; the delivery selector selects existing messages. A taken-over terminal run does not automatically create a automatic outbox entry or wake Main ([takeover](.agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md)).
 - **Accepted work keeps its policy.** Running and queued agents retain the accepted configuration. Every run respects both Model and Provider ceilings; each reservation releases at most once, and a blocked settled-session continuation returns a local rejection ([concurrency](.agents/notes/implemented/architecture/2026-09-09-hierarchical-concurrency-ceilings.md)).
 - **Model routing grants access.** Omitted `model` selects the exact parent model; rejected explicit choices must fail visibly. Alternate access uses Pi availability and active scope, while dormant saved rules remain intact ([model access](.agents/notes/implemented/architecture/2026-09-09-model-routing-and-access-policy.md)).
 - **Tool registration stays stable.** Register Agent tools once; dynamic access belongs in `before_agent_start` system guidance. Equal effective state produces byte-stable guidance; result messages and tool cards retain the existing silent presentation ([registration](.agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md), [guidance](.agents/notes/implemented/architecture/2026-09-09-byte-stable-guidance-contract.md)).
-- **Resolve services and release resources through their owners.** Read current services through Shell getters at call time. Timers, subscriptions, child sessions, and UI replacements need matching teardown; retain cancellation and shutdown ordering ([lifecycle](.agents/notes/implemented/architecture/2026-09-09-composition-root-and-shell-singleton.md)).
+- **Resolve services and release resources through their owners.** Capture the owning ExtensionRuntime in registration closures and reject stale session callbacks. Timers, subscriptions, child sessions, and UI replacements need matching teardown; retain cancellation and shutdown ordering ([lifecycle](.agents/notes/implemented/architecture/2026-09-12-explicit-runtime-and-native-task-ownership.md)).
 - **Terminal output and focus are explicit.** Pass model/tool text through [displayText](src/ui/format.ts) before rendering. Preserve [navigator](src/ui/agent-navigator.ts) cursor ownership, including removal of editor cursor markers while the list is focused, and restore the host components owned by a screen swap.
 
 ## Engineering conventions

@@ -92,6 +92,32 @@ describe("Native task delivery to an official Pi parent", () => {
     return parent.session.sessionManager.getEntries().filter(entry => entry.type === "custom_message" && entry.customType === RESULT_MESSAGE_TYPE);
   }
 
+  it("acknowledges a durable AgentStatus result without another parent wake", async () => {
+    let delivery!: TaskDelivery;
+    const parent = await host(pi => {
+      pi.registerTool({ name: "AgentStatus", label: "Agent status", description: "Read a saved child result", parameters: Type.Object({}),
+        execute: async () => ({ content: [{ type: "text", text: delivery.text }],
+          details: { parentSessionId: delivery.parent.sessionId, deliveries: [delivery] } }),
+      });
+    });
+    const native = await child(parent);
+    let held = true;
+    const tasks = engine({ deliver: async (value, eligible) => held ? { status: "pending", reason: "busy" }
+      : parent.channel.deliver(value, eligible) });
+    parent.worker.setResponses([fauxAssistantMessage("Saved status result")]);
+    await tasks.accept(native.driver, { text: "Produce a result" });
+    await tasks.wait("child-task");
+    delivery = (await native.driver.store.deliveries())[0].delivery;
+    parent.provider.setResponses([fauxAssistantMessage(fauxToolCall("AgentStatus", {}), { stopReason: "toolUse" }), fauxAssistantMessage("Read the result")]);
+    await parent.session.prompt("Read the child result");
+    const calls = parent.provider.state.callCount;
+    held = false;
+    await tasks.flushDeliveries();
+    expect((await native.driver.store.deliveries())[0].receipt).toBeDefined();
+    expect(receipts(parent)).toEqual([]);
+    expect(parent.provider.state.callCount).toBe(calls);
+  });
+
   it("dispatches through the extension tool entry, waits for parent idle, and verifies receipt before the parent answers", async () => {
     let tasks!: TaskEngine;
     let worker!: HarnessDriver;

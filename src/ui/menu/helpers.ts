@@ -1,3 +1,7 @@
+import type { ExtensionRuntime } from "../../runtime.js";
+
+export type MenuRuntime = Pick<ExtensionRuntime, "store" | "catalogue" | "engine" | "active">;
+
 /**
  * helpers.ts — Shared helpers for menu modules:
  * theme builders for SettingsList/SelectList, numeric validation,

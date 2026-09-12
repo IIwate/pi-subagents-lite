@@ -12,6 +12,8 @@ export interface TaskBinding {
   readonly parent: ParentOrigin;
   readonly mode: "foreground" | "background";
   readonly control: "autonomous" | "manual";
+  readonly display?: { readonly name: string; readonly description: string };
+  readonly resources?: { readonly extensions: readonly string[]; readonly trusted: boolean };
 }
 
 export interface TaskInput {
@@ -100,7 +102,7 @@ export interface ExecutionDriver {
   readonly store: TaskStore;
   accept(input: TaskInput): Promise<string>;
   drive(operationId: string): Promise<DriveResult>;
-  requestAbort(operationId: string): Promise<void>;
+  requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void>;
   queue(kind: "steer" | "followUp", input: TaskInput): Promise<string>;
   cancelQueued(entryId: string): Promise<"cancelled" | "already_consumed" | "not_found">;
   snapshot(): Promise<ExecutionSnapshot>;

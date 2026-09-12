@@ -8,8 +8,6 @@ import { NavigatorView, renderPending, renderRetry } from "./navigator-view.js";
 import { TranscriptView } from "./transcript.js";
 import type { NavigationAction, NavigationAgent, NavigationReply, NavigationSource, NavigationStatus, NavigatorViewState } from "./navigation.js";
 
-export type DebugStatusPreview = NavigationStatus;
-
 // Note: see .agents/notes/implemented/architecture/2026-09-10-navigator-screen-and-input-ownership.md
 export class AgentNavigator {
   private readonly screen: PiScreen;
@@ -22,7 +20,6 @@ export class AgentNavigator {
   private interactionNotice?: string;
   private interactionRequestId = 0;
   private statsVisibility: StatsVisibility = {};
-  private debugStatusPreview?: DebugStatusPreview;
   private listExpanded: boolean;
   private listFocused = false;
   private footerStatus?: string;
@@ -105,7 +102,6 @@ export class AgentNavigator {
     return true;
   }
 
-  setDebugStatusPreview(status: DebugStatusPreview | undefined): void { this.debugStatusPreview = status; this.lastRenderSig = ""; this.screen.requestRender(true); }
   setStatsVisibility(visible: StatsVisibility): void { this.statsVisibility = { ...visible }; this.lastRenderSig = ""; this.screen.requestRender(); }
   ensureTimer(): void {
     if (!this.uiCtx || this.disposed) return;
@@ -416,7 +412,7 @@ export class AgentNavigator {
     return { records: this.source.listAgents(), selectedId: this.selectedAgentId, highlightedId: this.highlightedAgentId,
       confirmingClearId: this.confirmingClearId, listFocused: this.listFocused, listExpanded: this.listExpanded,
       notice: this.interactionNotice, pending: this.pendingResultState(), parentModel: this.getParentModelInfo?.(),
-      statsVisibility: this.statsVisibility, debugStatus: this.debugStatusPreview, theme: this.uiCtx!.theme, now: Date.now() };
+      statsVisibility: this.statsVisibility, theme: this.uiCtx!.theme, now: Date.now() };
   }
 
   // Note: see .agents/notes/implemented/bug-fix/2026-09-10-navigator-rendering-and-cache.md

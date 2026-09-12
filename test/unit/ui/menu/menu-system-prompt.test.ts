@@ -1,3 +1,4 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 /**
  * menu-system-prompt.test.ts — Tests for showSystemPromptMenu.
  *
@@ -51,7 +52,7 @@ describe("showSystemPromptMenu — SettingsList integration", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
@@ -66,7 +67,7 @@ describe("showSystemPromptMenu — system prompt mode", () => {
 
   it("shows 'System prompt mode · replace' by default", async () => {
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const spm = settingsListCalls[0].items.find((i: any) => i.id === "systemPromptMode");
     expect(spm.currentValue).toBe("replace");
   });
@@ -74,7 +75,7 @@ describe("showSystemPromptMenu — system prompt mode", () => {
   it("shows configured system prompt mode", async () => {
     resetMenuStore({ agent: { forceBackground: false, systemPromptMode: "inherit" } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const spm = settingsListCalls[0].items.find((i: any) => i.id === "systemPromptMode");
     expect(spm.currentValue).toBe("inherit");
   });
@@ -82,7 +83,7 @@ describe("showSystemPromptMenu — system prompt mode", () => {
   it("sets system prompt mode via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("systemPromptMode", "inherit");
     expect(store.agent.systemPromptMode).toBe("inherit");
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
@@ -112,7 +113,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
   it("shows 'Create prompt file' when mode is custom and file does not exist", async () => {
     existsSyncSpy.mockReturnValue(false);
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const ids = settingsListCalls[0].items.map((i: any) => i.id);
     expect(ids).toContain("createPromptFile");
     const cpf = settingsListCalls[0].items.find((i: any) => i.id === "createPromptFile");
@@ -122,7 +123,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
   it("does NOT show 'Create prompt file' when mode is custom and file exists", async () => {
     existsSyncSpy.mockReturnValue(true);
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const ids = settingsListCalls[0].items.map((i: any) => i.id);
     expect(ids).not.toContain("createPromptFile");
   });
@@ -131,7 +132,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
     resetMenuStore({ agent: { forceBackground: false, systemPromptMode: "replace" } });
     existsSyncSpy.mockReturnValue(false);
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const ids = settingsListCalls[0].items.map((i: any) => i.id);
     expect(ids).not.toContain("createPromptFile");
   });
@@ -139,7 +140,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
   it("creates file and shows notification via onChange", async () => {
     existsSyncSpy.mockReturnValue(false);
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("createPromptFile", "Create");
     expect(mkdirSyncSpy).toHaveBeenCalled();
     expect(writeFileSyncSpy).toHaveBeenCalled();
@@ -150,7 +151,7 @@ describe("showSystemPromptMenu — Create prompt file", () => {
     existsSyncSpy.mockReturnValue(false);
     mkdirSyncSpy.mockImplementation(() => { throw new Error("permission denied"); });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("createPromptFile", "Create");
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Failed to create prompt file"), "error");
   });
@@ -165,7 +166,7 @@ describe("showSystemPromptMenu — Include AGENTS.md", () => {
 
   it("shows 'Include AGENTS.md · ON' when includeContextFiles is true", async () => {
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const icf = settingsListCalls[0].items.find((i: any) => i.id === "includeContextFiles");
     expect(icf.currentValue).toBe("ON");
   });
@@ -173,7 +174,7 @@ describe("showSystemPromptMenu — Include AGENTS.md", () => {
   it("shows 'Include AGENTS.md · OFF' when includeContextFiles is false", async () => {
     resetMenuStore({ agent: { forceBackground: false, includeContextFiles: false } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const icf = settingsListCalls[0].items.find((i: any) => i.id === "includeContextFiles");
     expect(icf.currentValue).toBe("OFF");
   });
@@ -181,7 +182,7 @@ describe("showSystemPromptMenu — Include AGENTS.md", () => {
   it("toggles include context files via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, includeContextFiles: true } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("includeContextFiles", "OFF");
     expect(store.agent.includeContextFiles).toBe(false);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
@@ -197,7 +198,7 @@ describe("showSystemPromptMenu — Load skills implicitly", () => {
 
   it("shows 'Load skills implicitly · ON' when loadSkillsImplicitly is true", async () => {
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const lsi = settingsListCalls[0].items.find((i: any) => i.id === "loadSkillsImplicitly");
     expect(lsi.currentValue).toBe("ON");
   });
@@ -205,7 +206,7 @@ describe("showSystemPromptMenu — Load skills implicitly", () => {
   it("shows 'Load skills implicitly · OFF' when loadSkillsImplicitly is false", async () => {
     resetMenuStore({ agent: { forceBackground: false, loadSkillsImplicitly: false } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const lsi = settingsListCalls[0].items.find((i: any) => i.id === "loadSkillsImplicitly");
     expect(lsi.currentValue).toBe("OFF");
   });
@@ -213,7 +214,7 @@ describe("showSystemPromptMenu — Load skills implicitly", () => {
   it("toggles load skills implicitly via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, loadSkillsImplicitly: true } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("loadSkillsImplicitly", "OFF");
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");
@@ -229,7 +230,7 @@ describe("showSystemPromptMenu — Load extensions implicitly", () => {
 
   it("shows 'Load extensions implicitly · ON' when loadExtensionsImplicitly is true", async () => {
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const lei = settingsListCalls[0].items.find((i: any) => i.id === "loadExtensionsImplicitly");
     expect(lei.currentValue).toBe("ON");
   });
@@ -237,7 +238,7 @@ describe("showSystemPromptMenu — Load extensions implicitly", () => {
   it("shows 'Load extensions implicitly · OFF' when loadExtensionsImplicitly is false", async () => {
     resetMenuStore({ agent: { forceBackground: false, loadExtensionsImplicitly: false } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     const lei = settingsListCalls[0].items.find((i: any) => i.id === "loadExtensionsImplicitly");
     expect(lei.currentValue).toBe("OFF");
   });
@@ -245,7 +246,7 @@ describe("showSystemPromptMenu — Load extensions implicitly", () => {
   it("toggles load extensions implicitly via onChange", async () => {
     const { store } = resetMenuStore({ agent: { forceBackground: false, loadExtensionsImplicitly: true } });
     const ctx = createMockCtx();
-    await showSystemPromptMenu(ctx);
+    await showSystemPromptMenu(ctx, getMenuRuntime());
     settingsListCalls[0].onChange("loadExtensionsImplicitly", "OFF");
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.any(String), "info");

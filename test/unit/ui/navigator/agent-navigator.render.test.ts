@@ -10,11 +10,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness, type TestHarness } from "../../../support/harness.js";
-import { registerAgents } from "../../../../src/agents/agent-types.js";
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
 import {
   makeRecord,
-  makeManager,
+  makeSource,
   makeUI,
   mountSelector,
   stripAnsi,
@@ -34,7 +33,7 @@ describe("AgentNavigator — Rendering", () => {
 
   it("stays hidden before any subagent exists", () => {
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([]));
+    navigator = new AgentNavigator(makeSource([]));
     navigator.setUICtx(ui.ctx as any);
 
     expect(ui.widgets.size).toBe(0);
@@ -44,7 +43,7 @@ describe("AgentNavigator — Rendering", () => {
   it("defaults to an expanded list with controls on Main", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -58,7 +57,7 @@ describe("AgentNavigator — Rendering", () => {
     let pending = 3;
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]), undefined, () => pending);
+    navigator = new AgentNavigator(makeSource([record]), undefined, () => pending);
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -75,7 +74,7 @@ describe("AgentNavigator — Rendering", () => {
     record.execution.settled = true;
     record.error = "temporary provider failure";
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]), undefined, () => 1);
+    navigator = new AgentNavigator(makeSource([record]), undefined, () => 1);
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -87,7 +86,7 @@ describe("AgentNavigator — Rendering", () => {
   it("lets the user collapse and expand the list", () => {
     const records = [makeRecord("agent-1"), makeRecord("agent-2", "queued")];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -107,7 +106,7 @@ describe("AgentNavigator — Rendering", () => {
   it("starts folded when the default expansion setting is off", () => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]), undefined, undefined, undefined, false);
+    navigator = new AgentNavigator(makeSource([record]), undefined, undefined, undefined, false);
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -125,7 +124,7 @@ describe("AgentNavigator — Rendering", () => {
   it.each([true, false])("preserves list expansion when returning to Main: expanded=%s", expanded => {
     const record = makeRecord();
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -155,7 +154,7 @@ describe("AgentNavigator — Rendering", () => {
   it("preserves the user's collapsed choice while the record list is empty", () => {
     const records = [makeRecord()];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     mountSelector(ui);
 
@@ -174,7 +173,7 @@ describe("AgentNavigator — Rendering", () => {
   it("registers a below-editor selector containing Main and subagents", () => {
     const records = [makeRecord("agent-1"), makeRecord("agent-2", "queued")];
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -194,7 +193,7 @@ describe("AgentNavigator — Rendering", () => {
       return record;
     });
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager(records));
+    navigator = new AgentNavigator(makeSource(records));
     navigator.setUICtx(ui.ctx as any);
     const { tui, selector } = mountSelector(ui);
     tui.terminal.rows = rows;
@@ -214,7 +213,7 @@ describe("AgentNavigator — Rendering", () => {
   it("hides zero running and queued counts when only terminal records remain", () => {
     const record = makeRecord("agent-done", "completed");
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     const { selector } = mountSelector(ui);
 
@@ -231,7 +230,7 @@ describe("AgentNavigator — Rendering", () => {
 
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(
-      makeManager([record]),
+      makeSource([record]),
       undefined,
       undefined,
       () => ({ providerName: "provider-x", modelName: "model-x", thinkingLevel: "high" }),
@@ -251,7 +250,7 @@ describe("AgentNavigator — Rendering", () => {
 
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(
-      makeManager([record]),
+      makeSource([record]),
       undefined,
       undefined,
       () => ({ providerName: "openai-test", modelName: "gpt-test", thinkingLevel: "high" }),
@@ -271,7 +270,7 @@ describe("AgentNavigator — Rendering", () => {
 
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(
-      makeManager([record]),
+      makeSource([record]),
       undefined,
       undefined,
       () => ({ providerName: "openai-test", modelName: "gpt-test", thinkingLevel: "high" }),
@@ -285,7 +284,7 @@ describe("AgentNavigator — Rendering", () => {
 
   it("routes Space to the highlighted agent's pin command", () => {
     const record = makeRecord("agent-pin", "completed");
-    const manager = makeManager([record]);
+    const manager = makeSource([record]);
     const ui = makeUI({ value: "" });
     navigator = new AgentNavigator(manager);
     navigator.setUICtx(ui.ctx as any);
@@ -312,7 +311,7 @@ describe("AgentNavigator — Rendering", () => {
     } as any;
 
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -333,7 +332,7 @@ describe("AgentNavigator — Rendering", () => {
     } as any;
 
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     mountSelector(ui);
@@ -347,53 +346,13 @@ describe("AgentNavigator — Rendering", () => {
     expect(openSpy).toHaveBeenCalled();
   });
 
-  it("renders a debug status preview without mutating agent lifecycle", () => {
-    const record = makeRecord("agent-running", "running");
-    const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
-    navigator.setUICtx(ui.ctx as any);
-    navigator.ensureTimer();
-    const { selector } = mountSelector(ui);
-
-    navigator.setDebugStatusPreview("error");
-    expect(selector.render(120).join("\n")).toContain("Error");
-    expect(record.lifecycle.status).toBe("running");
-
-    navigator.setDebugStatusPreview(undefined);
-    expect(selector.render(120).join("\n")).toContain("Running");
-  });
-
-  it("marks records created by Debug fault injection", () => {
-    const record = makeRecord("agent-debug", "error");
-    record.execution.settled = true;
-    record.execution.debugFaultKind = "output_blocked";
-    record.error = "debug injected: content was flagged";
-    const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
-    navigator.setUICtx(ui.ctx as any);
-    navigator.ensureTimer();
-    const { tui, selector } = mountSelector(ui);
-
-    const listText = stripAnsi(selector.render(120).join("\n"));
-    expect(listText).toContain("Explore [DEBUG] (Error)");
-    expect(listText).not.toContain("Error (Debug)");
-
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\x1b[B");
-    navigator.handleTerminalInput("\r");
-    const transcript = stripAnsi(tui.document.children[tui.chatIndex].render(120).join("\n"));
-    expect(transcript).toContain("Explore [DEBUG] (Error)");
-    expect(transcript).not.toContain("agent-de");
-  });
-
   it("keeps Error visible when a narrow terminal truncates other columns", () => {
     const record = makeRecord("agent-blocked", "error");
     record.execution.settled = true;
-    record.execution.debugFaultKind = "output_blocked";
     record.error = "content was flagged";
     record.display.description = "A very long security audit description";
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -405,19 +364,11 @@ describe("AgentNavigator — Rendering", () => {
   });
 
   it("preserves status and provider-first identity space for a long custom display name", () => {
-    registerAgents(new Map([[
-      "long-agent",
-      {
-        name: "long-agent",
-        displayName: "Extremely Long Custom Agent Display Name",
-        description: "Long name test",
-        systemPrompt: "Review the project.",
-      } as any,
-    ]]));
     const record = makeRecord("agent-long", "running");
     record.display.type = "long-agent";
+    record.display.name = "Extremely Long Custom Agent Display Name";
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -440,7 +391,7 @@ describe("AgentNavigator — Rendering", () => {
     record.execution.session!.model = { id: "custom-model", provider: "custom-provider" } as any;
 
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -471,7 +422,7 @@ describe("AgentNavigator — Rendering", () => {
     record.execution.session!.model = { id: "m", provider: "p" } as any;
 
     const ui = makeUI({ value: "" });
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { tui, selector } = mountSelector(ui);
@@ -497,7 +448,7 @@ describe("AgentNavigator — Rendering", () => {
       } as any;
 
       const ui = makeUI({ value: "" });
-      navigator = new AgentNavigator(makeManager([record]));
+      navigator = new AgentNavigator(makeSource([record]));
       navigator.setUICtx(ui.ctx as any);
       navigator.ensureTimer();
       const { selector } = mountSelector(ui);
@@ -517,7 +468,7 @@ describe("AgentNavigator — Rendering", () => {
       record.execution.session = { messages: [] } as any;
 
       const ui = makeUI({ value: "" });
-      navigator = new AgentNavigator(makeManager([record]));
+      navigator = new AgentNavigator(makeSource([record]));
       navigator.setUICtx(ui.ctx as any);
       navigator.ensureTimer();
       const { selector } = mountSelector(ui);
@@ -539,7 +490,7 @@ describe("AgentNavigator — Rendering", () => {
       } as any;
 
       const ui = makeUI({ value: "" });
-      navigator = new AgentNavigator(makeManager([record]));
+      navigator = new AgentNavigator(makeSource([record]));
       navigator.setUICtx(ui.ctx as any);
       navigator.ensureTimer();
       const { selector } = mountSelector(ui);
@@ -561,7 +512,7 @@ describe("AgentNavigator — Rendering", () => {
     const r2 = makeRecord("agent-2");
     const ui = makeUI({ value: "" });
     ui.theme.bg = vi.fn((color: string, text: string) => `[bg:${color}]${text}[/bg]`);
-    navigator = new AgentNavigator(makeManager([r1, r2]));
+    navigator = new AgentNavigator(makeSource([r1, r2]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);
@@ -585,7 +536,7 @@ describe("AgentNavigator — Rendering", () => {
     record.display.description = "A".repeat(200); // Guarantees truncation with ellipsis and SGR reset
     const ui = makeUI({ value: "" });
     ui.theme.bg = vi.fn((_color: string, text: string) => `\x1b[44m${text}\x1b[49m`);
-    navigator = new AgentNavigator(makeManager([record]));
+    navigator = new AgentNavigator(makeSource([record]));
     navigator.setUICtx(ui.ctx as any);
     navigator.ensureTimer();
     const { selector } = mountSelector(ui);

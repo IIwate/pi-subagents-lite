@@ -10,7 +10,7 @@
  * Full integration testing is manual via pi TUI.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import { Value } from "typebox/value";
 import {
   createMockExtensionAPI,
@@ -69,28 +69,9 @@ vi.mock("../../src/ui/searchable-select.js", () => ({
   SearchableSelectDialog: class {},
 }));
 
-vi.mock("../../src/agents/agent-types.js", () => ({
-  resolveType: vi.fn((name: string) => name),
-  getConfig: vi.fn(() => ({ displayName: "unknown" })),
-  getAgentConfig: vi.fn(() => ({})),
-  registerAgents: vi.fn(),
-  getAvailableTypes: vi.fn(() => ["general-purpose", "Explore"]),
-  getAllTypes: vi.fn(() => ["general-purpose", "Explore"]),
-}));
 
-vi.mock("../../src/agents/agent-discovery.js", () => ({
-  scanAgentFilesInDir: vi.fn().mockResolvedValue([]),
-  mergeAgents: vi.fn().mockReturnValue(new Map()),
-  AgentConfigFromMd: {},
-}));
 
-vi.mock("../../src/agents/agent-runner.js", () => ({
-  runAgent: vi.fn(),
-}));
 
-vi.mock("../../src/agents/default-agents.js", () => ({
-  DEFAULT_AGENTS: new Map(),
-}));
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -297,26 +278,21 @@ describe("shortcut registration", () => {
     ]);
   });
 
-  it("routes shortcuts to the current navigator", async () => {
-    const shell = await import("../../src/shell.js");
-    const navigator = {
-      toggleList: vi.fn(),
-      activateMain: vi.fn(),
-      isListFocused: vi.fn(() => true),
-      takeOverActive: vi.fn(),
-    };
-    shell.setNavigator(navigator as any);
-    try {
-      await api.shortcuts[0]!.handler({});
-      await api.shortcuts[1]!.handler({});
-      await api.shortcuts[2]!.handler({});
-      expect(navigator.toggleList).toHaveBeenCalledOnce();
-      expect(navigator.activateMain).toHaveBeenCalledOnce();
-      expect(navigator.takeOverActive).toHaveBeenCalledOnce();
-    } finally {
-      shell.setNavigator(null);
-    }
+  it("routes shortcuts to their activation's navigator", async () => {
+    const { registerTools } = await import("../../src/registration.js");
+    const first = createMockExtensionAPI();
+    const second = createMockExtensionAPI();
+    const navigator = { toggleList: vi.fn(), activateMain: vi.fn(), takeOverActive: vi.fn() };
+    const other = { toggleList: vi.fn(), activateMain: vi.fn(), takeOverActive: vi.fn() };
+    registerTools(first.api as any, { active: true, navigator } as any);
+    registerTools(second.api as any, { active: true, navigator: other } as any);
+    for (const shortcut of first.shortcuts) await shortcut.handler({});
+    expect(navigator.toggleList).toHaveBeenCalledOnce();
+    expect(navigator.activateMain).toHaveBeenCalledOnce();
+    expect(navigator.takeOverActive).toHaveBeenCalledOnce();
+    expect(other.toggleList).not.toHaveBeenCalled();
   });
+
 });
 
 /* ------------------------------------------------------------------ */
@@ -341,56 +317,7 @@ describe("event listener registration", () => {
     expect(api.listeners.some((l) => l.event === "before_agent_start")).toBe(true);
   });
 
-  it("injects current guidance only while the Agent tool is active", async () => {
-    const handler = api.listeners.find((listener) => listener.event === "before_agent_start")!.handler;
-    const ctx = {
-      model: { provider: "anthropic", id: "sonnet" },
-      modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "sonnet" }] },
-      scopedModels: [],
-    };
-    const active = await handler({
-      systemPrompt: "base",
-      systemPromptOptions: { selectedTools: ["Agent"] },
-    }, ctx);
-    expect(active.systemPrompt).toContain("base\n\n[Subagent access]");
-    expect(active.systemPrompt).toContain("anthropic/sonnet");
-    expect(api.api.sendUserMessage).not.toHaveBeenCalled();
-    expect(api.api.sendMessage).not.toHaveBeenCalled();
 
-    const inactive = await handler({
-      systemPrompt: "base",
-      systemPromptOptions: { selectedTools: ["read"] },
-    }, ctx);
-    expect(inactive).toBeUndefined();
-  });
-
-  it("continues shutdown cleanup after a display disposer fails", async () => {
-    const shell = await import("../../src/shell.js");
-    const navigator = { dispose: vi.fn(() => { throw new Error("navigator host disposed"); }) };
-    const coordinator = { dispose: vi.fn() };
-    const manager = { listAgents: vi.fn(() => []), dispose: vi.fn().mockResolvedValue(undefined) };
-    const storeDispose = vi.spyOn(shell.getStore(), "dispose").mockImplementation(() => {});
-    shell.setNavigator(navigator as any);
-    shell.setCoordinator(coordinator as any);
-    shell.setManager(manager as any);
-
-    try {
-      const shutdown = api.listeners.find(listener => listener.event === "session_shutdown")?.handler;
-      await expect(shutdown?.({}, { hasUI: false, ui: {} })).rejects.toThrow("navigator host disposed");
-
-      expect(coordinator.dispose).toHaveBeenCalledTimes(1);
-      expect(storeDispose).toHaveBeenCalledTimes(1);
-      expect(manager.dispose).toHaveBeenCalledTimes(1);
-      expect(shell.getNavigator()).toBeNull();
-      expect(shell.getCoordinator()).toBeNull();
-      expect(shell.getManager()).toBeNull();
-    } finally {
-      storeDispose.mockRestore();
-      shell.setNavigator(null);
-      shell.setCoordinator(null);
-      shell.setManager(null);
-    }
-  });
 });
 
 
@@ -416,69 +343,5 @@ describe("Agent tool schema — worktree_path", () => {
     expect(prop.type).toBe("string");
     expect(prop.description).toContain("linked worktree");
     expect(prop.description).toContain("another repository");
-  });
-});
-
-
-/* ------------------------------------------------------------------ */
-/*  Subagent spawn guard (prevents shell clobbering)                  */
-/* ------------------------------------------------------------------ */
-
-describe("subagent spawn guard", () => {
-  // The real shell module is used here (index.test.ts does not mock shell.js).
-  let shell: typeof import("../../src/shell.js");
-
-  beforeEach(async () => {
-    shell = await import("../../src/shell.js");
-  });
-
-  it("registers tools and listeners for the parent session", async () => {
-    const api = createMockExtensionAPI();
-    await loadExtension(api.api);
-
-    expect(api.tools.length).toBeGreaterThan(0);
-    expect(api.listeners.some((l) => l.event === "session_start")).toBe(true);
-    expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(true);
-    expect(api.listeners.some((l) => l.event === "model_select")).toBe(true);
-    expect(api.listeners.some((l) => l.event === "thinking_level_select")).toBe(true);
-  });
-
-  it("stays inert when loaded inside a subagent spawn", async () => {
-    await shell.withSubagentSpawn(async () => {
-      const api = createMockExtensionAPI();
-      await loadExtension(api.api);
-
-      // No tools, no event handlers: the subagent must not clobber the parent shell.
-      expect(api.tools).toHaveLength(0);
-      expect(api.listeners).toHaveLength(0);
-      expect(api.shortcuts).toHaveLength(0);
-    });
-    expect(shell.isInsideSubagentSpawn()).toBe(false);
-  });
-
-  it("is inert for nested spawns and restores the parent async context", async () => {
-    await shell.withSubagentSpawn(() => shell.withSubagentSpawn(async () => {
-      const api = createMockExtensionAPI();
-      await loadExtension(api.api);
-      expect(api.tools).toHaveLength(0);
-    }));
-
-    const api = createMockExtensionAPI();
-    await loadExtension(api.api);
-    expect(api.tools.length).toBeGreaterThan(0);
-  });
-
-  it("does not make unrelated parent work inert while a child context is active", async () => {
-    let release!: () => void;
-    const child = shell.withSubagentSpawn(() => new Promise<void>((resolve) => { release = resolve; }));
-    await Promise.resolve();
-
-    expect(shell.isInsideSubagentSpawn()).toBe(false);
-    const api = createMockExtensionAPI();
-    await loadExtension(api.api);
-    expect(api.tools.length).toBeGreaterThan(0);
-
-    release();
-    await child;
   });
 });

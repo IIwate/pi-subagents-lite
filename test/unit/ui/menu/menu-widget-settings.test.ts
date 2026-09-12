@@ -1,3 +1,4 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 /** Display settings menu tests. */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -49,7 +50,7 @@ describe("showWidgetSettingsMenu", () => {
 
   it("uses one native settings list", async () => {
     const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
+    await showWidgetSettingsMenu(ctx, getMenuRuntime());
 
     expect(ctx.ui.custom).toHaveBeenCalledOnce();
     expect(ctx.ui.select).not.toHaveBeenCalled();
@@ -81,7 +82,7 @@ describe("showWidgetSettingsMenu", () => {
       },
     });
     const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
+    await showWidgetSettingsMenu(ctx, getMenuRuntime());
 
     const items = settingsListCalls[0].items;
     expect(items.find((item: any) => item.id === "expandListByDefault").currentValue).toBe("OFF");
@@ -92,7 +93,7 @@ describe("showWidgetSettingsMenu", () => {
 
   it("tells the user to reload after changing the list default", async () => {
     const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
+    await showWidgetSettingsMenu(ctx, getMenuRuntime());
 
     settingsListCalls[0].onChange("expandListByDefault", "OFF");
 
@@ -105,7 +106,7 @@ describe("showWidgetSettingsMenu", () => {
   it("updates every display setting", async () => {
     const { store } = resetMenuStore();
     const ctx = createMockCtx();
-    await showWidgetSettingsMenu(ctx);
+    await showWidgetSettingsMenu(ctx, getMenuRuntime());
     const { onChange } = settingsListCalls[0];
 
     for (const id of [

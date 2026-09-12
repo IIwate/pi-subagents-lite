@@ -3,7 +3,7 @@ import { freezePolicy, type TaskPolicy } from "./policy.js";
 export type TaskOutcome =
   | { readonly status: "completed" | "turn_limited"; readonly result: string }
   | { readonly status: "error"; readonly error: string; readonly result?: string }
-  | { readonly status: "aborted" | "stopped"; readonly result?: string };
+  | { readonly status: "aborted" | "stopped"; readonly result?: string; readonly stoppedBy?: "user" | "agent" };
 
 export type TaskState =
   | { readonly status: "queued" | "running" | "waiting" | "cancelling" }

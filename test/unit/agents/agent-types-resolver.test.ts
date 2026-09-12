@@ -10,19 +10,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
 
 // Import the module under test
-import {
-  resolveSessionAllowedTools,
-  resolveVisibleTools,
-  EXCLUDED_TOOL_NAMES,
-  BUILTIN_TOOL_NAMES,
-  DEFAULT_FALLBACK_TOOLS,
-  resolveDefaultRegisteredTools,
-  adaptExploreRegisteredTools,
-  getConfig,
-  registerAgents,
-  resolveAcceptedRunPolicy,
-  resolveType,
-} from "../../../src/agents/agent-types.js";
+import { AgentCatalogue, resolveSessionAllowedTools, resolveVisibleTools, EXCLUDED_TOOL_NAMES, BUILTIN_TOOL_NAMES, DEFAULT_FALLBACK_TOOLS, resolveDefaultRegisteredTools, adaptExploreRegisteredTools } from "../../../src/agents/agent-types.js";
+let catalogue = new AgentCatalogue();
+beforeEach(() => { catalogue = new AgentCatalogue(); });
 import { DEFAULT_AGENTS } from "../../../src/agents/default-agents.js";
 import type { AgentConfig } from "../../../src/agents/types.js";
 
@@ -36,10 +26,10 @@ describe("resolveType name precedence", () => {
       ["alias-owner", { name: "alias-owner", displayName: "probe", description: "", systemPrompt: "Alias" }],
       ["Probe", { name: "Probe", description: "", systemPrompt: "Canonical" }],
     ];
-    registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
-    expect(resolveType("Probe")).toBe("Probe");
-    expect(resolveType("probe")).toBe("Probe");
-    expect(resolveType("alias-owner")).toBe("alias-owner");
+    catalogue.registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
+    expect(catalogue.resolveType("Probe")).toBe("Probe");
+    expect(catalogue.resolveType("probe")).toBe("Probe");
+    expect(catalogue.resolveType("alias-owner")).toBe("alias-owner");
   });
 
   it.each([false, true])("reports sorted ambiguities with reversed registration %s", reverse => {
@@ -47,10 +37,10 @@ describe("resolveType name precedence", () => {
       ["Probe", { name: "Probe", displayName: "shared", description: "", systemPrompt: "First" }],
       ["PROBE", { name: "PROBE", displayName: "shared", description: "", systemPrompt: "Second" }],
     ];
-    registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
-    expect(resolveType("Probe")).toBe("Probe");
-    expect(() => resolveType("probe")).toThrow('Ambiguous agent type "probe": PROBE, Probe.');
-    expect(() => resolveType("shared")).toThrow('Ambiguous agent type "shared": PROBE, Probe.');
+    catalogue.registerAgents(new Map(reverse ? entries.reverse() : entries), { disableDefaultAgents: true });
+    expect(catalogue.resolveType("Probe")).toBe("Probe");
+    expect(() => catalogue.resolveType("probe")).toThrow('Ambiguous agent type "probe": PROBE, Probe.');
+    expect(() => catalogue.resolveType("shared")).toThrow('Ambiguous agent type "shared": PROBE, Probe.');
   });
 });
 
@@ -456,9 +446,9 @@ describe("resolveAcceptedRunPolicy", () => {
       preloadSkills: ["review"],
       source: "project",
     };
-    registerAgents(new Map([[config.name, config]]), { disableDefaultAgents: true });
+    catalogue.registerAgents(new Map([[config.name, config]]), { disableDefaultAgents: true });
 
-    const policy = resolveAcceptedRunPolicy(config.name, {
+    const policy = catalogue.resolveAcceptedRunPolicy(config.name, {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: false,
       systemPromptMode: "inherit",
@@ -473,7 +463,7 @@ describe("resolveAcceptedRunPolicy", () => {
     (config.excludeExtensions as string[]).push("later");
     (config.preloadSkills as string[]).push("later");
     config.systemPrompt = "Mutated prompt";
-    registerAgents(new Map(), { disableDefaultAgents: true });
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: true });
 
     expect(policy).toMatchObject({
       registeredTools: ["read"],
@@ -491,7 +481,7 @@ describe("resolveAcceptedRunPolicy", () => {
         source: "project",
       },
     });
-    expect(resolveAcceptedRunPolicy(config.name, {
+    expect(catalogue.resolveAcceptedRunPolicy(config.name, {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",
@@ -535,57 +525,57 @@ describe("getConfig — global implicit defaults", () => {
       skills: false,
       systemPrompt: "test",
     });
-    registerAgents(agents);
+    catalogue.registerAgents(agents);
   });
 
   it("agent with explicit skills: true ignores global loadSkillsImplicitly=false", () => {
-    const result = getConfig("test-agent", false, true);
+    const result = catalogue.getConfig("test-agent", false, true);
     expect(result.skills).toBe(true);
   });
 
   it("agent with explicit extensions: true ignores global loadExtensionsImplicitly=false", () => {
-    const result = getConfig("test-agent", true, false);
+    const result = catalogue.getConfig("test-agent", true, false);
     expect(result.extensions).toBe(true);
   });
 
   it("agent with no skills/extensions uses global default (false)", () => {
-    const result = getConfig("implicit-agent", false, false);
+    const result = catalogue.getConfig("implicit-agent", false, false);
     expect(result.skills).toBe(false);
     expect(result.extensions).toBe(false);
   });
 
   it("agent with no skills/extensions uses global default (true)", () => {
-    const result = getConfig("implicit-agent", true, true);
+    const result = catalogue.getConfig("implicit-agent", true, true);
     expect(result.skills).toBe(true);
     expect(result.extensions).toBe(true);
   });
 
   it("agent with skills: true gets global loadSkillsImplicitly=true", () => {
-    const result = getConfig("test-agent", true, true);
+    const result = catalogue.getConfig("test-agent", true, true);
     expect(result.skills).toBe(true);
   });
 
   it("agent with explicit skills list ignores global default", () => {
-    const result = getConfig("explicit-skills", false, false);
+    const result = catalogue.getConfig("explicit-skills", false, false);
     expect(result.skills).toEqual(["tdd"]);
     // extensions not explicitly set, so global default false applies
     expect(result.extensions).toBe(false);
   });
 
   it("agent with skills: false ignores global default", () => {
-    const result = getConfig("no-skills", true, true);
+    const result = catalogue.getConfig("no-skills", true, true);
     expect(result.skills).toBe(false);
     expect(result.extensions).toBe(false);
   });
 
   it("unknown agent type uses global defaults", () => {
-    const result = getConfig("nonexistent", false, false);
+    const result = catalogue.getConfig("nonexistent", false, false);
     expect(result.skills).toBe(false);
     expect(result.extensions).toBe(false);
   });
 
   it("unknown agent type with load-all defaults to true", () => {
-    const result = getConfig("nonexistent", true, true);
+    const result = catalogue.getConfig("nonexistent", true, true);
     expect(result.skills).toBe(true);
     expect(result.extensions).toBe(true);
   });
@@ -640,12 +630,12 @@ describe("PowerShell tool whitelist and exclusion (AC-1 ~ AC-3)", () => {
 describe("defaultTools dynamic inheritance (AC-4 ~ AC-5)", () => {
   beforeEach(() => {
     // Re-register default agents
-    registerAgents(new Map(), { disableDefaultAgents: false });
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: false });
   });
 
   it("AC-4: general-purpose inherits defaultTools containing powershell without bash", () => {
     const customDefaultTools = ["read", "powershell", "edit", "write"];
-    const policy = resolveAcceptedRunPolicy("general-purpose", {
+    const policy = catalogue.resolveAcceptedRunPolicy("general-purpose", {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",
@@ -661,7 +651,7 @@ describe("defaultTools dynamic inheritance (AC-4 ~ AC-5)", () => {
   });
 
   it("AC-5: general-purpose falls back to standard 6 tools when defaultTools is undefined", () => {
-    const policy = resolveAcceptedRunPolicy("general-purpose", {
+    const policy = catalogue.resolveAcceptedRunPolicy("general-purpose", {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",

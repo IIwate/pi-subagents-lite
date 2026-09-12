@@ -18,7 +18,7 @@ Status: implemented
 - format 检查固定头部、必需章节和 implemented 的提案式标题.
 - doc refs 检查扫描到的源码中 Note/docs 路径存在.
 - doc typecheck 编译普通 ts/typescript code fences; ignore-check 明确排除草稿, type-equiv 交给专门检查.
-- type-equiv 对照显式声明的核心类型和真实源文件 AST, 不为了凑数量复制无意义类型或整段实现.
+- type-equiv 排除 Notes 的 archived 目录, 对照活跃记录显式声明的核心类型和真实源文件 AST, 不为了凑数量复制无意义类型或整段实现.
 
 archive 命令移动 implemented 文档并写 SHA-256 manifest. 当前五项检查不读取该 manifest 校验归档内容, 也不验证标题锚点、Git 提交依据、Note 与源码的语义一致性或“一 Note 一锚点”唯一性. 上述要求仍需维护时核对, 不能宣称现有脚本已自动强制执行.
 
@@ -40,4 +40,4 @@ archive 命令移动 implemented 文档并写 SHA-256 manifest. 当前五项检�
 
 ## Verification
 
-`npm run verify-notes` 执行这些门禁. [note-links scenario](../../../../test/scenarios/notes/note-links.test.ts) 用临时仓库运行实际 tree 脚本, 验证 Note 内部死链拦截, 并确保对外部测试路径保持解耦放行. 该测试不宣称覆盖 archive、语义审核或所有 Markdown 语法.
+`npm run verify-notes` 执行这些门禁. [note-links scenario](../../../../test/scenarios/notes/note-links.test.ts) 用临时仓库运行实际 tree 脚本, 验证 Note 内部死链拦截, 并确保对外部测试路径保持解耦放行. 同一场景运行 type-equiv, 验证归档中的已移除类型不参与当前接口校验, 同时活跃契约失配仍报错. 不宣称覆盖归档内容封印、语义审核或所有 Markdown 语法.

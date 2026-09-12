@@ -94,7 +94,9 @@ Run `/agents` in Pi to open the interactive settings menu:
 - **Spawn Options**: Set default thinking levels, force-background mode, and grace turns.
 - **Display Settings**: Configure whether the subagent list starts expanded, and toggle visible metrics.
 
-Global configuration and custom system prompts are stored in `subagents-lite.json` and `subagents-lite-prompt.md` inside Pi's agent directory (`getAgentDir()`).
+Configuration and custom system prompts are stored in `subagents-lite-v3.json` and `subagents-lite-prompt.md` inside Pi's agent directory (`getAgentDir()`).
+
+Native task data is stored under `subagents-lite-v3/sessions` inside Pi's agent directory. Reload discovers saved results and unfinished operations; submit input in a waiting subagent to resume it. Configuration uses the v3 file format, and malformed existing files fail visibly.
 
 ## License
 

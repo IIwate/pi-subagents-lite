@@ -12,9 +12,9 @@ Status: implemented
 
 字段覆盖顺序为 built-in < global < project. `undefined` 字段不覆盖较低层, false 和数组保留明确意图; 正文包括空字符串参与覆盖. `skills`/`extensions` 在定义层保留未指定状态, 到接受任务时才应用全局隐式加载默认值. `preload_skills` 仅支持显式名字集合或 false, 不把 true 解释成加载全部正文.
 
-[registry](../../../../src/agents/agent-types.ts) 在 session start 全量建立, 未找到类型时按需 rescan, 只补不存在的名字. worktree 定义最后补入, 不覆盖已注册同名项. 名称依次匹配 exact canonical、唯一 case-fold canonical、唯一 displayName; 同级歧义报告排序后的候选. `hidden` 从 guidance 的可见列表排除, 但精确名字仍可被工具解析. 禁用内建定义只影响后续查找, 不停掉已接受任务, 同名用户定义仍可存在.
+[AgentCatalogue](../../../../src/agents/agent-types.ts) 属于 Runtime 实例, 在 session start 全量建立, 未找到类型时按需 rescan, 只补不存在的名字. worktree 定义最后补入, 不覆盖已注册同名项. 名称依次匹配 exact canonical、唯一 case-fold canonical、唯一 displayName; 同级歧义报告排序后的候选. `hidden` 从 guidance 的可见列表排除, 但精确名字仍可被工具解析. 禁用内建定义只影响后续查找, 不停掉已接受任务, 同名用户定义仍可存在.
 
-[session start](../../../../src/events.ts) 仅在 `ctx.isProjectTrusted?.() !== false` 时传入项目目录; [worktree rescan](../../../../src/agents/tool-execution.ts) 同样检查该门禁. 未可信项目不扫描 project/worktree Agent 文件. 这是 Pi 最终信任结果的负向门禁, 不是本扩展主动发起信任询问; 方法缺失仍放行. [worktree validator](2026-09-09-worktree-path-parameter-naming.md) 仅验证仓库关系, 不授权项目内容.
+[Runtime 启动](../../../../src/runtime.ts) 仅在 `ctx.isProjectTrusted()` 时传入项目目录; [worktree rescan](../../../../src/agents/tool-execution.ts) 同样检查该门禁. 未可信项目不扫描 project/worktree Agent 文件. 这是 Pi 最终信任结果的负向门禁, 不是本扩展主动发起信任询问; 该接口由受支持的官方宿主提供. [worktree validator](2026-09-09-worktree-path-parameter-naming.md) 仅验证仓库关系, 不授权项目内容.
 
 ## Alternatives considered
 
@@ -36,4 +36,4 @@ Status: implemented
 
 ## Verification
 
-[discovery unit tests](../../../../test/unit/agents/agent-discovery.test.ts)、[definition resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[disable defaults](../../../../test/unit/agents/disable-default-agents.test.ts) 验证解析、歧义和覆盖规则. [file discovery](../../../../test/scenarios/agents/agent-file-discovery.test.ts)、[type discovery](../../../../test/scenarios/agents/agent-types-discovery.test.ts)、[events](../../../../test/scenarios/events.test.ts) 和 [Agent tool tests](../../../../test/unit/agents/tool-execution.test.ts) 验证文件、Pi override 与信任入口.
+[discovery unit tests](../../../../test/unit/agents/agent-discovery.test.ts)、[definition resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[disable defaults](../../../../test/unit/agents/disable-default-agents.test.ts) 验证解析、歧义和覆盖规则. [file discovery](../../../../test/scenarios/agents/agent-file-discovery.test.ts)、[type discovery](../../../../test/scenarios/agents/agent-types-discovery.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 验证文件、Pi override 与信任入口.

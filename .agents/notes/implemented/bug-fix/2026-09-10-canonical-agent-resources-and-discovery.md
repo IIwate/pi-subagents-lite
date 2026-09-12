@@ -33,4 +33,4 @@ YAML 的重复 key 和字段类型错误会产生文件诊断. 有意保留的�
 
 ## Verification
 
-[parser](../../../../test/unit/agents/agent-discovery.test.ts)、[resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[文件扫描](../../../../test/scenarios/agents/agent-file-discovery.test.ts) 和 [worktree 发现](../../../../test/scenarios/agents/agent-types-discovery.test.ts) 检查格式、排序、歧义及补名. [资源与配置](../../../../test/scenarios/config-persistence.test.ts)、[发现入口](../../../../test/scenarios/events.test.ts) 和 [skills](../../../../test/unit/prompt/skill-loader.test.ts) 检查 Pi override 与独立 home roots.
+[parser](../../../../test/unit/agents/agent-discovery.test.ts)、[resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[文件扫描](../../../../test/scenarios/agents/agent-file-discovery.test.ts) 和 [worktree 发现](../../../../test/scenarios/agents/agent-types-discovery.test.ts) 检查格式、排序、歧义及补名. [资源与配置](../../../../test/scenarios/config-persistence.test.ts)、[发现入口](../../../../test/scenarios/runtime.test.ts) 和 [skills](../../../../test/unit/prompt/skill-loader.test.ts) 检查 Pi override 与独立 home roots.

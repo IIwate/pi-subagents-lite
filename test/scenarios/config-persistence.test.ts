@@ -2,13 +2,8 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigStore } from "../../src/config/config-store.js";
-import { AgentManager } from "../../src/agents/agent-manager.js";
-import { runAgent } from "../../src/agents/agent-runner.js";
 import { createTestHarness, type TestHarness } from "../support/harness.js";
-import { fakeCtx, fakePi } from "../support/fixtures.js";
-import { fakeOptions, mockRunResult } from "../support/manager.js";
 
-vi.mock("../../src/agents/agent-runner.js", () => ({ runAgent: vi.fn(), continueAgentSession: vi.fn() }));
 vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof import("node:fs")>() }));
 
 describe("configuration persistence", () => {
@@ -23,7 +18,7 @@ describe("configuration persistence", () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", directory);
     vi.resetModules();
     config = await import("../../src/config/config-io.js");
-    expect(config.CONFIG_PATH).toBe(join(directory, "subagents-lite.json"));
+    expect(config.CONFIG_PATH).toBe(join(directory, "subagents-lite-v3.json"));
     config.saveConfigAtomic(harness.memIO.current());
     store = new ConfigStore({ load: config.loadConfig, save: config.saveConfigAtomic });
     harness.onDispose(() => store.dispose());
@@ -31,7 +26,7 @@ describe("configuration persistence", () => {
   afterEach(async () => { await harness.dispose(); });
 
   it("uses the Pi agent directory for both settings and custom prompts", () => {
-    expect(config.CONFIG_PATH).toBe(join(directory, "subagents-lite.json"));
+    expect(config.CONFIG_PATH).toBe(join(directory, "subagents-lite-v3.json"));
     expect(config.CUSTOM_PROMPT_PATH).toBe(join(directory, "subagents-lite-prompt.md"));
     store.mutate.agent.setForceBackground(true);
     expect(config.loadConfig().agent.forceBackground).toBe(true);
@@ -40,9 +35,9 @@ describe("configuration persistence", () => {
 
   it.each(["write", "rename"])("preserves disk and effective policy when %s fails", operation => {
     const original = fs.readFileSync(config.CONFIG_PATH, "utf-8");
-    const setConcurrency = vi.fn();
+    const setLimits = vi.fn();
     const setStatsVisibility = vi.fn();
-    store.setDeps({ manager: { setConcurrency } as any, navigator: { setStatsVisibility } as any });
+    store.setDeps({ engine: { setLimits } as any, navigator: { setStatsVisibility } as any });
     const failure = new Error(`${operation} denied`);
     if (operation === "write") {
       const write = fs.writeFileSync;
@@ -56,39 +51,23 @@ describe("configuration persistence", () => {
 
     expect(() => store.mutate.concurrency.setDefault(8)).toThrow(failure);
     expect(fs.readFileSync(config.CONFIG_PATH, "utf-8")).toBe(original);
-    expect(fs.readdirSync(directory)).toEqual(["subagents-lite.json"]);
+    expect(fs.readdirSync(directory)).toEqual(["subagents-lite-v3.json"]);
     expect(store.concurrency.default).toBe(4);
-    expect(setConcurrency).toHaveBeenCalledOnce();
+    expect(setLimits).toHaveBeenCalledOnce();
     expect(setStatsVisibility).toHaveBeenCalledOnce();
 
     store.mutate.concurrency.setDefault(2);
     expect(config.loadConfig().concurrency.default).toBe(2);
     expect(store.concurrency.default).toBe(2);
-    expect(setConcurrency).toHaveBeenCalledTimes(2);
+    expect(setLimits).toHaveBeenCalledTimes(2);
   });
 
   it.each([
-    { name: "model", raw: '{"concurrency":{"default":1e999,"models":{"test/model":"invalid"}}}', secondModel: "test/model" },
-    { name: "provider", raw: '{"concurrency":{"default":4,"providers":{"test":1e999}}}', secondModel: "test/other" },
-  ])("keeps malformed $name ceilings effective at the scheduler boundary", async ({ raw, secondModel }) => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    '{"concurrency":{"default":1e999}}', '{"concurrency":{"providers":{"test":0}}}',
+    '{"agent":{"showCost":"yes"}}', 'null', '{',
+  ])("preserves effective policy when loading invalid input %s", raw => {
     fs.writeFileSync(config.CONFIG_PATH, raw);
-    store.reload();
-    vi.mocked(runAgent).mockResolvedValue(mockRunResult());
-    const manager = new AgentManager();
-    harness.onDispose(() => manager.dispose());
-    store.setDeps({ manager });
-    const first = manager.spawn(fakePi(), fakeCtx(), "Explore", "first", fakeOptions({ modelKey: "test/model" }));
-    const second = manager.spawn(fakePi(), fakeCtx(), "Explore", "second", fakeOptions({ modelKey: secondModel }));
-    const firstRecord = manager.getRecord(first)!;
-    const secondRecord = manager.getRecord(second)!;
-    harness.onDispose(async () => {
-      await firstRecord.execution.promise;
-      await secondRecord.execution.promise;
-    });
-    expect(firstRecord.lifecycle.status).toBe("running");
-    expect(secondRecord.lifecycle.status).toBe("queued");
-    await firstRecord.execution.promise;
-    await secondRecord.execution.promise;
+    expect(() => store.reload()).toThrow("Invalid subagent configuration");
+    expect(store.concurrency.default).toBe(4);
   });
 });

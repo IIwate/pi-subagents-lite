@@ -1,3 +1,4 @@
+import { getMenuRuntime } from "../../../support/menu-mocks.js";
 /**
  * menus.test.ts — Tests for the /agents menu dispatcher.
  *
@@ -8,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resetMenuStore } from "../../../support/menu-mocks.js";
 import { createMockCtx } from "../../../support/menu-helpers.js";
-import { getAgentConfig } from "../../../../src/agents/agent-types.js";
 
 // Import
 import { showAgentsMenu } from "../../../../src/ui/menu/menus.js";
@@ -56,12 +56,12 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it("shows all settings and Debug without an extra category menu", async () => {
+  it("shows all configuration entries directly", async () => {
     const ctx = createMockCtx();
     let rendered = "";
     ctx.ui.custom.mockImplementation(async (factory: any) => {
@@ -78,7 +78,7 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
       return undefined;
     });
 
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
 
     expect(rendered).not.toContain("Spawn agent");
     expect(rendered).not.toMatch(/^\s+Settings\b/m);
@@ -88,7 +88,6 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
     expect(rendered).toContain("Spawn options");
     expect(rendered).toContain("System prompt");
     expect(rendered).toContain("Display settings");
-    expect(rendered).toContain("Debug");
     expect(rendered).not.toContain("Running agents");
   });
 
@@ -102,7 +101,7 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
     const ctx = createMockCtx();
     const flow = captureMenuFlow(ctx, choice);
 
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
 
     expect(flow.calls()).toBe(3);
     expect(flow.rendered[0]).toContain("Agents");
@@ -112,7 +111,7 @@ describe("showAgentsMenu — SelectList dispatcher", () => {
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
     // custom returns undefined = escape
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
@@ -125,7 +124,7 @@ describe("showAgentsMenu — current state", () => {
 
   it("uses ctx.ui.custom (not ctx.ui.select)", async () => {
     const ctx = createMockCtx();
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
@@ -145,7 +144,7 @@ describe("showAgentsMenu — current state", () => {
       return undefined;
     });
 
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
 
     expect(rendered).toContain("8 slots per model");
     expect(rendered).not.toContain("Default 8");
@@ -153,7 +152,7 @@ describe("showAgentsMenu — current state", () => {
 
   it("Escape closes the menu", async () => {
     const ctx = createMockCtx();
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
     expect(ctx.ui.custom).toHaveBeenCalled();
   });
 });
@@ -162,24 +161,19 @@ describe("Agents menu — submenu navigation", () => {
   beforeEach(() => {
     resetAgentState();
     vi.clearAllMocks();
-    (getAgentConfig as any).mockImplementation((name: string) => {
-      if (name === "Explore") return { name: "Explore", description: "Explore agent", extensions: false, skills: false, systemPrompt: "" };
-      if (name === "general-purpose") return { name: "general-purpose", description: "General-purpose agent", extensions: false, skills: false, systemPrompt: "" };
-      return undefined;
-    });
   });
 
   it.each([
     ["Escape", "\x1b"],
     ["left arrow", "\x1b[D"],
-  ])("opens Debug and returns to Agents with %s", async (_label, cancelKey) => {
+  ])("opens display settings and returns to Agents with %s", async (_label, cancelKey) => {
     const ctx = createMockCtx();
-    const flow = captureMenuFlow(ctx, "debug", cancelKey);
+    const flow = captureMenuFlow(ctx, "display", cancelKey);
 
-    await showAgentsMenu(ctx);
+    await showAgentsMenu(ctx, getMenuRuntime());
 
     expect(flow.calls()).toBe(3);
-    expect(flow.rendered[1]).toContain("Debug");
+    expect(flow.rendered[1]).toContain("Display Settings");
     expect(flow.rendered[2]).toContain("Agents");
   });
 });

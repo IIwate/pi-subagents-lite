@@ -1,25 +1,7 @@
-/**
- * Type definitions for the subagent system.
- */
-
-import type { ImageContent, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DebugFaultKind } from "./agents/debug-fault.js";
-import type { LifetimeUsage } from "./agents/usage.js";
-import type { SubagentType, AgentConfig, AgentInvocation, SystemPromptMode } from "./agents/types.js";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { AgentConfig, SystemPromptMode } from "./agents/types.js";
 
 export type ThinkingLevel = ModelThinkingLevel;
-
-/** Resolved model + run-limit tunables shared by every spawn/run shape. */
-export interface RunTunables {
-  model?: Model<any>;
-  /** Scope captured when the Agent call was accepted. */
-  scopedModels?: ExtensionContext["scopedModels"];
-  maxTurns?: number;
-  /** Accepted-call snapshot, including undefined. */
-  readonly thinkingLevel?: ThinkingLevel;
-  graceTurns?: number;
-}
 
 // Note: see .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
 export interface AgentRetryState {
@@ -30,36 +12,10 @@ export interface AgentRetryState {
   errorMessage?: string;
 }
 
-// Note: see .agents/notes/implemented/architecture/2026-09-10-agent-lifecycle-and-session-teardown.md
-export interface AgentRecord {
-  id: string;
-  result?: string;
-  error?: string;
-  /** Lifecycle state: status, timestamps. */
-  lifecycle: AgentLifecycle;
-  /** Display-oriented info: type, description, invocation. */
-  display: AgentDisplayInfo;
-  /** Execution internals: session, abort controller, pending steers. */
-  execution: AgentExecutionState;
-  /** Accumulated statistics: usage, tool uses, turns. */
-  stats: AgentAccumulatedStats;
-}
-
 export interface EnvInfo {
   isGitRepo: boolean;
   branch: string | null;
   platform: string;
-}
-
-/** Internal runner events consumed by AgentManager record tracking. */
-export interface RunCallbacks {
-  onToolUse?: () => void;
-  onSessionSetupStarted?: () => void;
-  onSessionSetupFinished?: () => void;
-  onSessionCreated?: (session: AgentSession) => void | Promise<void>;
-  onTurnEnd?: (turnCount: number) => void;
-  onAssistantUsage?: (usage: LifetimeUsage) => void;
-  onCompaction?: () => void;
 }
 
 // Note: see .agents/notes/implemented/architecture/2026-09-10-isolated-child-resources-and-tool-gates.md
@@ -77,39 +33,12 @@ export interface AcceptedRunPolicy {
   parentModelKey: string;
 }
 
-/**
- * Coordinator-side spawn config shared by SpawnOptions and SpawnIntent.
- * The resolved run params that both the manager and coordinator agree on;
- * extends RunTunables with display/identity fields.
- */
-export interface SpawnConfig extends RunTunables {
-  acceptedPolicy: AcceptedRunPolicy;
-  description: string;
-  modelKey?: string;
-  worktreePath?: string;
-  /** Parent session and branch anchor captured when background work is accepted. */
-  resultSessionId?: string;
-  resultOriginEntryId?: string | null;
-  invocation?: AgentInvocation;
-}
-
-/** How many characters of agent ID to show in display. */
 export const SHORT_ID_LENGTH = 8;
 
-// ---------------------------------------------------------------------------
-// Sub-object interfaces for decomposed AgentRecord
-// ---------------------------------------------------------------------------
-
-/** Possible agent lifecycle statuses. */
 export type AgentStatus = "queued" | "running" | "completed" | "turn_limited" | "aborted" | "stopped" | "error";
 
-/** Who initiated an agent stop: "user" via UI menu, or "agent" via StopAgent tool. */
 export type StopInitiator = "user" | "agent";
 
-/**
- * Lifecycle state: when the agent started, completed, and its current status.
- * Used by agent-manager (lifecycle control), menus (status display), widget (linger logic).
- */
 export interface AgentLifecycle {
   status: AgentStatus;
   startedAt: number;
@@ -129,67 +58,4 @@ export interface AgentLifecycle {
   resultConsumed?: boolean;
   /** True if user took over this session interactively in child view. */
   takenOver?: boolean;
-}
-
-/**
- * Display-oriented fields: type name, description, invocation params.
- * Used by the agent list and management menus.
- */
-interface AgentDisplayInfo {
-  type: SubagentType;
-  description: string;
-  /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-  invocation?: AgentInvocation;
-}
-
-/**
- * Execution internals: session handle, abort controller, pending steers.
- * Used by agent-manager (session lifecycle), tool-execution (steering, nudge).
- */
-interface AgentExecutionState {
-  operationId?: string;
-  session?: AgentSession;
-  abortController?: AbortController;
-  promise?: Promise<string>;
-  /** Whether the current execution promise has fully settled. */
-  settled?: boolean;
-  /** Resolved model key used for concurrency accounting. */
-  modelKey?: string;
-  /** Grace turns retained for direct follow-up prompts. */
-  graceTurns?: number;
-  /** Parent session and branch anchor captured with the accepted invocation. */
-  resultSessionId?: string;
-  resultOriginEntryId?: string | null;
-  /** Unique final-result identity currently represented by the record. */
-  resultDeliveryId?: string;
-  /** Debug fault assigned after the real child session is configured. */
-  debugFaultKind?: DebugFaultKind;
-  /** Steering messages queued before the session was ready. */
-  pendingSteers?: Array<{ message: string; images?: ImageContent[]; kind?: "steer" | "followUp" }>;
-  /** Active backoff delay state when an auto-retry is in progress. */
-  retryState?: AgentRetryState;
-  /** Callback to immediately detach foreground execution into background. */
-  detach?: () => void;
-}
-
-/**
- * Accumulated statistics: usage breakdown, tool uses, turn count.
- * Used by the agent list and selected-session footer.
- */
-interface AgentAccumulatedStats {
-  /**
-   * Lifetime usage breakdown, accumulated from assistant/tool events and
-   * compactions. Total = input + output + cacheWrite + cost (cacheRead deliberately
-   * excluded — see issue #38). Initialized to zeros at spawn.
-   */
-  lifetimeUsage: LifetimeUsage;
-  toolUses: number;
-  /** Final turn count (set on completion). Used by widget after activity cleanup. */
-  turnCount?: number;
-  /** Max turns limit (from invocation or default). */
-  maxTurns?: number;
-  /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
-  compactionCount: number;
-  /** Context usage percentage (0-100), cached from progress and completion events. */
-  contextPercent?: number | null;
 }

@@ -8,15 +8,11 @@ Status: implemented
 
 ## Decision
 
-[ConfigStore](../../../../src/config/config-store.ts) 集中持有一份 `SubagentsConfig`, 提供 resolved reads 和具名 mutation. store 在 Shell 构造时建立, session start reload, manager/navigator 创建后通过 setDeps 连接. dispose 只清除依赖引用. 运行时读取和菜单写入共同经过 store; concurrency mutation 持久化后调用 manager, display mutation 同步 navigator, 默认 Agent 策略由相应菜单同步 registry.
+[ConfigStore](../../../../src/config/config-store.ts) 持有所属 ExtensionRuntime 的配置, 提供 resolved reads 和具名 mutation. TaskEngine、Navigator 与 AgentCatalogue 通过 setDeps 注入, 保存后的配额、展示和默认 Agent 开关由 Store 同步. dispose 封闭写入并释放依赖; 迟到菜单回调不能操作另一实例.
 
-[config-io](../../../../src/config/config-io.ts) 读取一个 global JSON 文档, 使用已知 agent keys 和 modelRouting canonical shape. 缺文件、读取失败、JSON malformed 或顶层非对象均回退 defaults. routing 只接受明确的 enabled true, 去除空 provider/重复模型; `models` 缺省的空对象表示 all-model grant, 空/非法数组删除该规则, 不能变成全模型. `Object.hasOwn` 和 defineProperty 保持 `__proto__` 等键为数据, 不授予原型链上的权限.
+[config-io](../../../../src/config/config-io.ts) 使用 getAgentDir 下的 subagents-lite-v3.json. 缺少文件采用默认值, 已存在文件的读取失败、JSON 错误、非对象、未知字段或非法值明确报错. 路由中的空对象表示 all-model grant, 非空 models 数组表示精确授权; 空或非法数组不会被解释为全部模型. 特殊字典键必须是显式 own property.
 
-模型分配时代的 `allowCrossProvider`, `allowedProviders`, `agentModels`, 动态 `agent[type]` 和 `agent.default` 不迁移. 加载只投影当前格式, 下一次显式保存写 canonical shape; 没有后台迁移. provider 暂时不可用时保留休眠授权, 具体策略由 [model access](2026-09-09-model-routing-and-access-policy.md) 负责.
-
-mutation 在候选副本上修改, 同目录独占临时文件写入并 rename 成功后才发布有效配置和副作用. 写入失败保留旧值并向菜单报告. [配置提交](../bug-fix/2026-09-10-configuration-commit-and-validation.md) 负责失败恢复、批量 mutation 和 UI 显示一致性.
-
-systemPromptMode 使用闭集检查, 部分布尔值通过显式比较解析. grace/concurrency 在外部 JSON 和 mutation 入口执行 [字段数值规则](../bug-fix/2026-09-10-configuration-commit-and-validation.md), 非有限值不能进入 scheduler 的容量比较.
+配置输入仅解释当前格式. 休眠 Provider/Model 授权按原值保留. 一个 mutation 在独立候选上修改, 同目录独占临时文件写入和 rename 成功后才发布配置及副作用, 写失败时保留旧值. 文件入口检查布尔值、prompt/thinking 闭集、正安全整数配额和非负安全整数 grace.
 
 ## Alternatives considered
 
@@ -27,7 +23,7 @@ systemPromptMode 使用闭集检查, 部分布尔值通过显式比较解析. gr
 
 ## Consequences
 
-store 给调用者统一默认值和副作用入口, 但并非所有 getter 都返回深拷贝: routing 是复制快照, concurrency 的 map 仍共享内部对象, 内部读取者不得修改. malformed 文件会被下次显式保存覆盖; 独占临时文件不提供 fsync 或跨进程更新合并. 路径统一使用 [Pi 资源目录](../bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md).
+store 给调用者统一默认值和副作用入口, 但并非所有 getter 都返回深拷贝: routing 是复制快照, concurrency 的 map 仍共享内部对象, 内部读取者不得修改. malformed 文件需要修正后才能加载; 独占临时文件不提供 fsync 或跨进程更新合并. 路径统一使用 [Pi 资源目录](../bug-fix/2026-09-10-canonical-agent-resources-and-discovery.md).
 
 ## Evidence
 
@@ -38,4 +34,4 @@ store 给调用者统一默认值和副作用入口, 但并非所有 getter 都�
 
 ## Verification
 
-[ConfigStore tests](../../../../test/unit/config/config-store.test.ts) 验证候选发布、副作用和 routing copy; [config normalization](../../../../test/unit/config/config-io-normalize.test.ts) 验证磁盘形状、数值与特殊键; [真实文件场景](../../../../test/scenarios/config-persistence.test.ts) 验证保存失败和 scheduler 边界; [model access](../../../../test/unit/models/model-access.test.ts) 验证权限不扩大.
+[ConfigStore tests](../../../../test/unit/config/config-store.test.ts) 验证候选发布、副作用和 routing copy; [config normalization](../../../../test/unit/config/config-io.test.ts) 验证磁盘形状、数值与特殊键; [真实文件场景](../../../../test/scenarios/config-persistence.test.ts) 验证保存失败和 scheduler 边界; [model access](../../../../test/unit/models/model-access.test.ts) 验证权限不扩大.

@@ -31,4 +31,4 @@ normalizeGitPath 根据 Git 输出或 cwd 的盘符/UNC 形态选择 path.win32 
 
 ## Verification
 
-[worktree validator scenarios](../../../../test/scenarios/spawn/worktree-validator.test.ts) 覆盖目录、symlink、Git 错误和 Windows 路径格式. [Agent tool tests](../../../../test/unit/agents/tool-execution.test.ts) 验证失败不派发. Mock Windows 路径检查与 Linux 文件系统场景不能代替原生 Windows 文件系统保证; CI 的 Windows matrix 是对应平台入口.
+[worktree validator scenarios](../../../../test/scenarios/spawn/worktree-validator.test.ts) 覆盖目录、symlink、Git 错误和 Windows 路径格式. [Agent tool tests](../../../../test/scenarios/runtime.test.ts) 验证失败不派发. Mock Windows 路径检查与 Linux 文件系统场景不能代替原生 Windows 文件系统保证; CI 的 Windows matrix 是对应平台入口.

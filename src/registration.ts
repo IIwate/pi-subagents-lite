@@ -4,7 +4,7 @@ import { Container } from "@earendil-works/pi-tui";
 import { executeAgentTool, executeStopAgentTool } from "./agents/tool-execution.js";
 import { executeAgentStatusTool } from "./agents/agent-status.js";
 import { showAgentsMenu } from "./ui/menu/menus.js";
-import { getNavigator } from "./shell.js";
+import type { ExtensionRuntime } from "./runtime.js";
 import { VALID_THINKING_LEVELS } from "./models/thinking-resolver.js";
 
 // Subagent state belongs to the below-editor list. Results still reach the LLM,
@@ -20,7 +20,7 @@ const SILENT_TOOL_RENDERING = {
 // ============================================================================
 
 /** Register the Agent tool once; per-run guidance lists current Agent types. */
-export function registerAgentTool(pi: ExtensionAPI): void {
+export function registerAgentTool(pi: ExtensionAPI, runtime: ExtensionRuntime): void {
   const agentParam = Type.Optional(Type.String());
   // @ts-expect-error — description removed to save prompt tokens
   pi.registerTool({
@@ -43,7 +43,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",
       })),
     }, { additionalProperties: false }),
-    execute: executeAgentTool,
+    execute: (...args) => executeAgentTool(runtime, ...args),
 
     ...SILENT_TOOL_RENDERING,
   });
@@ -55,9 +55,9 @@ export function registerAgentTool(pi: ExtensionAPI): void {
 
 /** Register all tools, commands, and message renderers. */
 // Note: see .agents/notes/implemented/architecture/2026-09-09-stealth-tool-registration.md
-export function registerTools(pi: ExtensionAPI): void {
+export function registerTools(pi: ExtensionAPI, runtime: ExtensionRuntime): void {
   // Agent tool — stable stealth schema; dynamic state lives in per-run guidance
-  registerAgentTool(pi);
+  registerAgentTool(pi, runtime);
 
   // StopAgent tool — stealth schema, stop a running agent by ID
   // @ts-expect-error — description removed to save prompt tokens
@@ -67,7 +67,7 @@ export function registerTools(pi: ExtensionAPI): void {
     parameters: Type.Object({
       agent_id: Type.String(),
     }, { additionalProperties: false }),
-    execute: executeStopAgentTool,
+    execute: (...args) => executeStopAgentTool(runtime, ...args),
     ...SILENT_TOOL_RENDERING,
   });
 
@@ -79,28 +79,28 @@ export function registerTools(pi: ExtensionAPI): void {
     parameters: Type.Object({
       agent_id: Type.Optional(Type.String()),
     }, { additionalProperties: false }),
-    execute: executeAgentStatusTool,
+    execute: (...args) => executeAgentStatusTool(runtime, ...args),
     ...SILENT_TOOL_RENDERING,
   });
 
   // Command registration
   pi.registerCommand("agents", {
-    description: "Manage subagents: model access, concurrency, diagnostics, and agent types",
+    description: "Configure subagent models, concurrency, execution, prompts, and display",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      await showAgentsMenu(ctx);
+      await showAgentsMenu(ctx, runtime);
     },
   });
 
   pi.registerShortcut("alt+a", {
     description: "Toggle subagent list",
-    handler: () => getNavigator()?.toggleList(),
+    handler: () => { if (runtime.active) runtime.navigator?.toggleList(); },
   });
   pi.registerShortcut("alt+m", {
     description: "Return to Main agent",
-    handler: () => getNavigator()?.activateMain(),
+    handler: () => { if (runtime.active) runtime.navigator?.activateMain(); },
   });
   pi.registerShortcut("alt+t", {
     description: "Take over the selected subagent",
-    handler: () => { getNavigator()?.takeOverActive(); },
+    handler: () => { if (runtime.active) runtime.navigator?.takeOverActive(); },
   });
 }

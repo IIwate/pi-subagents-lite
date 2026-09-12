@@ -2,11 +2,10 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, SettingsList, type Component, type SettingItem } from "@earendil-works/pi-tui";
-import { getAllTypes } from "../../agents/agent-types.js";
 import type { ModelRoutingConfig } from "../../config/types.js";
 import { unavailableModelRules } from "../../models/model-access.js";
 import { modelKey, scopedModelKeys } from "../../models/model-scope.js";
-import { getStore } from "../../shell.js";
+import type { MenuRuntime } from "./helpers.js";
 import type { Theme } from "../types.js";
 import {
   buildListTheme,
@@ -19,7 +18,7 @@ import {
 import { createConfirmSubmenu, createMultilineConfirmComponent } from "./submenus/confirm.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 
-type Store = ReturnType<typeof getStore>;
+type Store = MenuRuntime["store"];
 type ModelRef = { provider: string; id: string };
 type RebuildMenu = (preserveSubmenu?: boolean) => void;
 
@@ -293,6 +292,7 @@ function buildModelEditor(options: {
 }
 
 function quickSetupSubmenu(
+  runtime: MenuRuntime,
   store: Store,
   ctx: ExtensionCommandContext,
   theme: Theme,
@@ -305,7 +305,7 @@ function quickSetupSubmenu(
     }
     const snapshot = registrySnapshot(ctx, store);
     const effectiveProviders = effectiveProviderSet(store, snapshot, ctx);
-    const agents = getAllTypes().sort().map((type) => ({
+    const agents = runtime.catalogue.getAllTypes().sort().map((type) => ({
       value: type,
       label: type,
       description: agentSummary(store, type, effectiveProviders, snapshot, ctx),
@@ -557,13 +557,14 @@ function cleanUnavailableSubmenu(
 }
 
 function agentAccessSubmenu(
+  runtime: MenuRuntime,
   store: Store,
   ctx: ExtensionCommandContext,
   theme: Theme,
   onRebuild: RebuildMenu,
 ): SettingItem["submenu"] {
   return (_value, done) => {
-    const registered = new Set(getAllTypes());
+    const registered = new Set(runtime.catalogue.getAllTypes());
     const types = [...new Set([...registered, ...Object.keys(store.routing.agentAccess)])].sort();
     const entrySnapshot = registrySnapshot(ctx, store);
     const entryProviders = effectiveProviderSet(store, entrySnapshot, ctx);
@@ -624,12 +625,12 @@ function agentAccessSubmenu(
   };
 }
 
-export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promise<void> {
+export async function showModelRoutingMenu(ctx: ExtensionCommandContext, runtime: MenuRuntime): Promise<void> {
   let rebuild: ((items: SettingItem[], preserveSubmenu?: boolean) => void) | undefined;
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
     const buildItems = (): SettingItem[] => {
-      const store = getStore();
+      const store = runtime.store;
       const routing = store.routing;
       const triggerRebuild: RebuildMenu = (preserveSubmenu = false) => rebuild?.(buildItems(), preserveSubmenu);
       const items: SettingItem[] = [{
@@ -645,7 +646,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         id: "quickSetup",
         label: "Quick model setup",
         currentValue: "",
-        submenu: quickSetupSubmenu(store, ctx, theme, triggerRebuild),
+        submenu: quickSetupSubmenu(runtime, store, ctx, theme, triggerRebuild),
       });
       const snapshot = registrySnapshot(ctx, store);
       const mutableProviders = availableAlternateProviders(snapshot, ctx);
@@ -662,7 +663,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
         id: "agentAccess",
         label: "Agent model access",
         currentValue: `${configuredAgentCount(store)} configured`,
-        submenu: agentAccessSubmenu(store, ctx, theme, triggerRebuild),
+        submenu: agentAccessSubmenu(runtime, store, ctx, theme, triggerRebuild),
       });
       const unavailableProviders = savedUnavailableProviders(snapshot, ctx);
       if (unavailableProviders.length > 0) {
@@ -701,7 +702,7 @@ export async function showModelRoutingMenu(ctx: ExtensionCommandContext): Promis
     };
 
     const settings = new SettingsList(buildItems(), 15, buildListTheme(theme), (id, value) => {
-      if (id === "enabled" && saveSetting(ctx, () => getStore().mutate.routing.setEnabled(value === "ON"))) {
+      if (id === "enabled" && saveSetting(ctx, () => runtime.store.mutate.routing.setEnabled(value === "ON"))) {
         ctx.ui.notify(`Model routing ${value === "ON" ? "enabled" : "disabled"}`, "info");
       }
       rebuild?.(buildItems());

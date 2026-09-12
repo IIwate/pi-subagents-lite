@@ -47,4 +47,4 @@ future calls 使用当前授权, running/queued 使用接受时快照. authoriza
 
 ## Verification
 
-[model access](../../../../test/unit/models/model-access.test.ts)、[scope](../../../../test/unit/models/model-scope.test.ts)、[thinking](../../../../test/unit/models/thinking-resolver.test.ts)、[tool execution](../../../../test/unit/agents/tool-execution.test.ts)、[model routing menu](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 和 [queued invocation](../../../../test/scenarios/agents/queued-invocation.test.ts) 验证授权、可用目录、显式拒绝和快照.
+[model access](../../../../test/unit/models/model-access.test.ts)、[scope](../../../../test/unit/models/model-scope.test.ts)、[thinking](../../../../test/unit/models/thinking-resolver.test.ts)、[tool execution](../../../../test/scenarios/runtime.test.ts)、[model routing menu](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 和 [queued invocation](../../../../test/scenarios/runtime.test.ts) 验证授权、可用目录、显式拒绝和快照.

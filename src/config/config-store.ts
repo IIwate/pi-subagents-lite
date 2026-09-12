@@ -4,14 +4,15 @@
  * - Reads return defaults baked in (no `?? 6` at call sites).
  * - Each persisted mutate method is prepare + persist + publish + its side effect, so a
  *   side effect cannot be forgotten.
- * - Navigator/manager are injected after construction (they're created lazily).
+ * - Navigator/engine are injected after construction (they're created lazily).
  *
  * Lifecycle: per-session. `reload()` re-reads disk at session_start;
  * `dispose()` drops deps at session_shutdown.
  */
 
 import type { AgentNavigator } from "../ui/agent-navigator.js";
-import type { AgentManager } from "../agents/agent-manager.js";
+import type { TaskEngine } from "../engine/task-engine.js";
+import type { AgentCatalogue } from "../agents/agent-types.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
@@ -81,14 +82,17 @@ export interface ResolvedRoutingConfig {
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   navigator?: AgentNavigator;
-  manager?: AgentManager;
+  engine?: Pick<TaskEngine, "setLimits">;
+  catalogue?: Pick<AgentCatalogue, "setDefaultAgentsDisabled">;
 }
 
 // Note: see .agents/notes/implemented/architecture/2026-09-10-configuration-ownership-and-persistence.md
 export class ConfigStore {
   private config: SubagentsConfig;
   private navigator?: AgentNavigator;
-  private manager?: AgentManager;
+  private engine?: Pick<TaskEngine, "setLimits">;
+  private catalogue?: Pick<AgentCatalogue, "setDefaultAgentsDisabled">;
+  private disposed = false;
 
   constructor(private readonly io: ConfigIO = fileConfigIO) {
     this.config = this.io.load();
@@ -251,6 +255,7 @@ export class ConfigStore {
       },
       setDisableDefaultAgents: (value: boolean): void => {
         this.commit(config => { config.agent.disableDefaultAgents = value; });
+        this.catalogue?.setDefaultAgentsDisabled(value);
       },
       setExpandListByDefault: (value: boolean): void => {
         this.commit(config => { config.agent.expandListByDefault = value; });
@@ -306,22 +311,26 @@ export class ConfigStore {
     this.syncAllDeps();
   }
 
-  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy navigator/manager). */
+  /** Inject side-effect targets. Re-syncs whatever deps are present (lazy navigator/engine). */
   setDeps(deps: ConfigStoreDeps): void {
     if (deps.navigator !== undefined) this.navigator = deps.navigator;
-    if (deps.manager !== undefined) this.manager = deps.manager;
+    if (deps.engine !== undefined) this.engine = deps.engine;
+    if (deps.catalogue !== undefined) this.catalogue = deps.catalogue;
     this.syncAllDeps();
   }
 
-  /** Drop deps at session_shutdown. The navigator/manager are disposed by the composition root. */
+  /** Drop deps at session_shutdown. The navigator/engine are disposed by the composition root. */
   dispose(): void {
     this.navigator = undefined;
-    this.manager = undefined;
+    this.disposed = true;
+    this.engine = undefined;
+    this.catalogue = undefined;
   }
 
   // ── Private helpers ────────────────────────────────────────────
 
   private commit(update: (candidate: SubagentsConfig) => void): void {
+    if (this.disposed) throw new Error("Configuration belongs to a closed runtime");
     const candidate = structuredClone(this.config);
     update(candidate);
     this.io.save(candidate);
@@ -376,12 +385,13 @@ export class ConfigStore {
   }
 
   private applyConcurrency(): void {
-    this.manager?.setConcurrency(this.config.concurrency);
+    this.engine?.setLimits(this.config.concurrency);
   }
 
   /** Full re-sync of all present deps. Used by reload/setDeps. */
   private syncAllDeps(): void {
     this.syncStatsVisibility();
     this.applyConcurrency();
+    this.catalogue?.setDefaultAgentsDisabled(this.agent.disableDefaultAgents);
   }
 }

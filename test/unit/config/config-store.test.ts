@@ -200,9 +200,9 @@ describe("ConfigStore non-routing behavior", () => {
     const harness = createTestHarness();
     const { store, memIO } = harness;
     try {
-      const setConcurrency = vi.fn();
+      const setLimits = vi.fn();
       const setStatsVisibility = vi.fn();
-      store.setDeps({ manager: { setConcurrency } as any, navigator: { setStatsVisibility } as any });
+      store.setDeps({ engine: { setLimits } as any, navigator: { setStatsVisibility } as any });
       const before = { agent: store.agent, routing: store.routing, concurrency: store.concurrency };
       const failure = new Error("Config rename failed");
       const save = vi.spyOn(memIO.io, "save").mockImplementation(() => {
@@ -219,15 +219,15 @@ describe("ConfigStore non-routing behavior", () => {
         expect({ agent: store.agent, routing: store.routing, concurrency: store.concurrency }).toEqual(before);
       }
       expect(memIO.saves).toHaveLength(0);
-      expect(setConcurrency).toHaveBeenCalledOnce();
+      expect(setLimits).toHaveBeenCalledOnce();
       expect(setStatsVisibility).toHaveBeenCalledOnce();
 
       save.mockRestore();
       store.mutate.concurrency.setDefault(1.5);
       expect(store.concurrency.default).toBe(2);
       expect(memIO.saves).toHaveLength(1);
-      expect(setConcurrency).toHaveBeenCalledTimes(2);
-      expect(setConcurrency).toHaveBeenLastCalledWith({ default: 2 });
+      expect(setLimits).toHaveBeenCalledTimes(2);
+      expect(setLimits).toHaveBeenLastCalledWith({ default: 2 });
     } finally {
       await harness.dispose();
     }
@@ -269,7 +269,7 @@ describe("ConfigStore non-routing behavior", () => {
     const concurrencies: unknown[] = [];
     store.setDeps({
       navigator: { setStatsVisibility: (value: unknown) => visibility.push(value) } as any,
-      manager: { setConcurrency: (value: unknown) => concurrencies.push(value) } as any,
+      engine: { setLimits: (value: unknown) => concurrencies.push(value) } as any,
     });
     store.mutate.agent.setShowTools(false);
     store.mutate.concurrency.setDefault(8);

@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { resolveDefaultRegisteredTools, adaptExploreRegisteredTools, resolveVisibleTools, resolveSessionAllowedTools, resolveAcceptedRunPolicy, registerAgents, DEFAULT_FALLBACK_TOOLS, BUILTIN_TOOL_NAMES } from "../../../src/agents/agent-types.js";
+import { AgentCatalogue, resolveDefaultRegisteredTools, adaptExploreRegisteredTools, resolveVisibleTools, resolveSessionAllowedTools, DEFAULT_FALLBACK_TOOLS, BUILTIN_TOOL_NAMES } from "../../../src/agents/agent-types.js";
+let catalogue = new AgentCatalogue();
+beforeEach(() => { catalogue = new AgentCatalogue(); });
 import type { AgentConfig } from "../../../src/agents/types.js";
 
 describe("defaultTools edge cases & sanitization", () => {
   beforeEach(() => {
-    registerAgents(new Map(), { disableDefaultAgents: false });
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: false });
   });
   it("deduplicates redundant tool names in defaultTools", () => {
     const input = ["read", "powershell", "powershell", "edit", "read"];
@@ -44,7 +46,7 @@ describe("defaultTools edge cases & sanitization", () => {
 
 describe("Frontmatter policy conflicts & resolution order", () => {
   beforeEach(() => {
-    registerAgents(new Map(), { disableDefaultAgents: false });
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: false });
   });
 
   it("tools whitelist wins over excludeTools when both are specified", () => {
@@ -59,7 +61,7 @@ describe("Frontmatter policy conflicts & resolution order", () => {
   });
 
   it("tools: false strictly yields an empty tool list regardless of defaultTools", () => {
-    const policy = resolveAcceptedRunPolicy("general-purpose", {
+    const policy = catalogue.resolveAcceptedRunPolicy("general-purpose", {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",
@@ -111,9 +113,9 @@ describe("Explore agent adaptation edge cases", () => {
       source: "project",
       systemPrompt: "custom prompt",
     };
-    registerAgents(new Map([["Explore", customExplore]]), { disableDefaultAgents: true });
+    catalogue.registerAgents(new Map([["Explore", customExplore]]), { disableDefaultAgents: true });
 
-    const policy = resolveAcceptedRunPolicy("Explore", {
+    const policy = catalogue.resolveAcceptedRunPolicy("Explore", {
       loadSkillsImplicitly: true,
       loadExtensionsImplicitly: true,
       systemPromptMode: "replace",

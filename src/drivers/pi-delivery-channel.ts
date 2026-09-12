@@ -11,6 +11,7 @@ function object(input: unknown): input is Record<string, unknown> {
 }
 
 function resultContent(delivery: TaskDelivery): string {
+  if (delivery.kind === "selection") return `[Selected messages from subagent ${delivery.taskId}]\n\n${delivery.text}`;
   return `[Subagent ${delivery.taskId} ${delivery.status}]\n\n${delivery.text}`;
 }
 
@@ -35,7 +36,9 @@ export class PiDeliveryChannel implements DeliveryChannel {
     if (!entries) return { status: "pending", reason: "not_durable" };
     const existing = this.receipt(entries, delivery);
     if (existing) {
-      this.wake(delivery, entries, eligible);
+      if (entries.some(entry => object(entry) && entry.id === existing.entryId && entry.type === "custom_message")) {
+        this.wake(delivery, entries, eligible);
+      }
       return { status: "received", receipt: existing };
     }
     if (!eligible() || !this.belongs(ctx, delivery)) return { status: "pending", reason: "ineligible" };
@@ -86,6 +89,19 @@ export class PiDeliveryChannel implements DeliveryChannel {
 
   private receipt(entries: readonly unknown[], delivery: TaskDelivery): DeliveryReceipt | undefined {
     for (const entry of entries) {
+      if (object(entry) && entry.type === "message" && object(entry.message) && entry.message.role === "toolResult"
+        && entry.message.toolName === "AgentStatus" && object(entry.message.details)
+        && entry.message.details.parentSessionId === this.sessionId && Array.isArray(entry.message.details.deliveries)) {
+        const selected = entry.message.details.deliveries.find(item => object(item) && item.deliveryId === delivery.deliveryId);
+        if (selected) {
+          const body = Array.isArray(entry.message.content) ? entry.message.content.filter(object)
+            .filter(part => part.type === "text" && typeof part.text === "string").map(part => part.text).join("\n") : "";
+          if (!object(selected) || selected.taskId !== delivery.taskId || selected.operationId !== delivery.operationId
+            || selected.text !== delivery.text || !body.includes(delivery.text) || typeof entry.id !== "string" || !entry.id
+            || typeof entry.timestamp !== "string" || !entry.timestamp) throw new Error("Parent status receipt identity or content mismatch");
+          return { deliveryId: delivery.deliveryId, parentSessionId: this.sessionId, entryId: entry.id };
+        }
+      }
       if (!object(entry) || entry.type !== "custom_message" || entry.customType !== RESULT_MESSAGE_TYPE
         || !object(entry.details) || entry.details.deliveryId !== delivery.deliveryId) continue;
       if (entry.details.parentSessionId !== this.sessionId || entry.details.taskId !== delivery.taskId

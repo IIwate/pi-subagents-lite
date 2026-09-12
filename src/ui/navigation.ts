@@ -21,7 +21,6 @@ export interface NavigationAgent {
     readonly providerName?: string;
     readonly modelName?: string;
     readonly thinkingLevel?: string;
-    readonly debugFaultKind?: string;
     readonly retryState?: { readonly attempt: number; readonly maxAttempts: number; readonly delayMs: number; readonly startAt: number };
   };
   readonly stats: {
@@ -85,7 +84,6 @@ export interface NavigatorViewState {
   readonly pending?: number;
   readonly parentModel?: { readonly providerName?: string; readonly modelName?: string; readonly thinkingLevel?: string };
   readonly statsVisibility: StatsVisibility;
-  readonly debugStatus?: NavigationStatus;
   readonly theme: Theme;
   readonly now: number;
 }

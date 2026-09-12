@@ -12,14 +12,9 @@ import { createTestHarness, type TestHarness } from "../../support/harness.js";
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeAgentMd, tempDirWithFiles } from "../../support/fixtures.js";
-import {
-  registerAgents,
-  setAgentScanDirs,
-  discoverNewAgents,
-  resolveType,
-  getAgentConfig,
-  getAvailableTypes,
-} from "../../../src/agents/agent-types.js";
+import { AgentCatalogue } from "../../../src/agents/agent-types.js";
+let catalogue = new AgentCatalogue();
+beforeEach(() => { catalogue = new AgentCatalogue(); });
 
 /* ------------------------------------------------------------------ */
 /*  Tests                                                             */
@@ -32,9 +27,9 @@ afterEach(async () => { await harness.dispose(); });
 describe("discoverNewAgents — worktree-local agent types", () => {
   beforeEach(() => {
     // Reset to clean state: just the default agents
-    registerAgents(new Map());
+    catalogue.registerAgents(new Map());
     // Clear scan dirs so they don't pollute tests
-    setAgentScanDirs("", "");
+    catalogue.setAgentScanDirs("", "");
   });
 
   it("discovers a worktree-local agent type when worktreeDir is set", async () => {
@@ -43,19 +38,19 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "feature-reviewer.md", content: makeAgentMd({ name: "feature-reviewer", description: "Reviews feature branches" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
     // Not known before discovery
-    expect(resolveType("feature-reviewer")).toBeUndefined();
+    expect(catalogue.resolveType("feature-reviewer")).toBeUndefined();
 
     // Discover with worktree dir
-    const count = await discoverNewAgents(worktreeDir);
+    const count = await catalogue.discoverNewAgents(worktreeDir);
     expect(count).toBeGreaterThanOrEqual(1);
 
     // Now it should be resolved
-    expect(resolveType("feature-reviewer")).toBe("feature-reviewer");
-    expect(getAgentConfig("feature-reviewer")?.description).toBe("Reviews feature branches");
+    expect(catalogue.resolveType("feature-reviewer")).toBe("feature-reviewer");
+    expect(catalogue.getAgentConfig("feature-reviewer")?.description).toBe("Reviews feature branches");
   });
 
   it("worktree-local type is NOT found without worktreeDir", async () => {
@@ -64,12 +59,12 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "feature-reviewer.md", content: makeAgentMd({ name: "feature-reviewer" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
     // Discover WITHOUT worktree dir — should not find the worktree type
-    await discoverNewAgents();
-    expect(resolveType("feature-reviewer")).toBeUndefined();
+    await catalogue.discoverNewAgents();
+    expect(catalogue.resolveType("feature-reviewer")).toBeUndefined();
   });
 
   it("worktree scan adds to session-wide registry, visible to subsequent spawns", async () => {
@@ -78,16 +73,16 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "wt-agent.md", content: makeAgentMd({ name: "wt-agent", description: "WT agent" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
     // First discovery with worktree
-    await discoverNewAgents(worktreeDir);
-    expect(resolveType("wt-agent")).toBe("wt-agent");
+    await catalogue.discoverNewAgents(worktreeDir);
+    expect(catalogue.resolveType("wt-agent")).toBe("wt-agent");
 
     // Second discovery WITHOUT worktree — should still be in registry
-    const count = await discoverNewAgents();
-    expect(resolveType("wt-agent")).toBe("wt-agent");
+    const count = await catalogue.discoverNewAgents();
+    expect(catalogue.resolveType("wt-agent")).toBe("wt-agent");
     expect(count).toBe(0); // No new agents (already known)
   });
 
@@ -99,14 +94,14 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "wt-agent.md", content: makeAgentMd({ name: "wt-agent", description: "WT" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
-    const count = await discoverNewAgents(worktreeDir);
+    const count = await catalogue.discoverNewAgents(worktreeDir);
 
     // Both project and worktree types should be discovered
-    expect(resolveType("project-agent")).toBe("project-agent");
-    expect(resolveType("wt-agent")).toBe("wt-agent");
+    expect(catalogue.resolveType("project-agent")).toBe("project-agent");
+    expect(catalogue.resolveType("wt-agent")).toBe("wt-agent");
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
@@ -114,12 +109,12 @@ describe("discoverNewAgents — worktree-local agent types", () => {
     const projectDir = tempDirWithFiles(harness, [], "project-agents");
     const nonexistentDir = tempDirWithFiles(harness, [], "nonexistent-base");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
     // Point to a directory that doesn't have .pi/agents/ — should not error
     const fakeWorktreeDir = nonexistentDir + "/.pi/agents";
-    const count = await discoverNewAgents(fakeWorktreeDir);
+    const count = await catalogue.discoverNewAgents(fakeWorktreeDir);
     expect(count).toBe(0);
   });
 
@@ -129,11 +124,11 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "wt-agent.md", content: makeAgentMd({ name: "wt-agent", extensions: "read, bash", thinking: "high", max_turns: "50" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
-    await discoverNewAgents(worktreeDir);
-    const config = getAgentConfig("wt-agent");
+    await catalogue.discoverNewAgents(worktreeDir);
+    const config = catalogue.getAgentConfig("wt-agent");
     expect(config).toBeDefined();
     // Extensions parsed correctly
     expect(config!.extensions).toEqual(["read", "bash"]);
@@ -149,12 +144,12 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "wt-agent.md", content: makeAgentMd({ name: "wt-agent" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
-    const count = await discoverNewAgents("");
+    const count = await catalogue.discoverNewAgents("");
     expect(count).toBe(0);
-    expect(resolveType("wt-agent")).toBeUndefined();
+    expect(catalogue.resolveType("wt-agent")).toBeUndefined();
   });
 
   it("does not duplicate agents already in the registry", async () => {
@@ -165,24 +160,24 @@ describe("discoverNewAgents — worktree-local agent types", () => {
       { name: "wt-shared.md", content: makeAgentMd({ name: "shared", description: "From worktree" }) },
     ], "worktree-agents");
 
-    setAgentScanDirs("", projectDir);
-    registerAgents(new Map());
+    catalogue.setAgentScanDirs("", projectDir);
+    catalogue.registerAgents(new Map());
 
     // First discovery — project agent gets added
-    await discoverNewAgents();
-    expect(getAgentConfig("shared")?.description).toBe("From project");
+    await catalogue.discoverNewAgents();
+    expect(catalogue.getAgentConfig("shared")?.description).toBe("From project");
 
     // Second discovery with worktree — should NOT override the already-registered agent
-    const count = await discoverNewAgents(worktreeDir);
+    const count = await catalogue.discoverNewAgents(worktreeDir);
     expect(count).toBe(0); // "shared" is already known
-    expect(getAgentConfig("shared")?.description).toBe("From project");
+    expect(catalogue.getAgentConfig("shared")?.description).toBe("From project");
   });
 });
 
 describe("discoverNewAgents - disableDefaultAgents", () => {
   beforeEach(() => {
-    registerAgents(new Map());
-    setAgentScanDirs("", "");
+    catalogue.registerAgents(new Map());
+    catalogue.setAgentScanDirs("", "");
   });
 
   it("preserves the session policy while discovering a custom agent", async () => {
@@ -190,11 +185,11 @@ describe("discoverNewAgents - disableDefaultAgents", () => {
       { name: "custom.md", content: makeAgentMd({ name: "custom", description: "Custom" }) },
     ], "project-agents");
 
-    setAgentScanDirs("", projectDir, true);
-    registerAgents(new Map(), { disableDefaultAgents: true });
+    catalogue.setAgentScanDirs("", projectDir, true);
+    catalogue.registerAgents(new Map(), { disableDefaultAgents: true });
 
-    await discoverNewAgents();
+    await catalogue.discoverNewAgents();
 
-    expect(getAvailableTypes()).toEqual(["custom"]);
+    expect(catalogue.getAvailableTypes()).toEqual(["custom"]);
   });
 });

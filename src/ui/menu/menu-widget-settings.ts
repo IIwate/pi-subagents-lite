@@ -4,10 +4,10 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { buildListTheme, saveSetting } from "./helpers.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import { getStore } from "../../shell.js";
+import type { MenuRuntime } from "./helpers.js";
 
 /** Display config — label, description, and store accessors keyed by setting id. */
-function buildDisplayConfig(store: ReturnType<typeof getStore>) {
+function buildDisplayConfig(store: MenuRuntime["store"]) {
   return new Map<string, { label: string; description: string; get: () => boolean; set: (v: boolean) => void }>([
     ["expandListByDefault", { label: "Expand list by default", description: "Start each new conversation with the agent list expanded.", get: () => store.agent.expandListByDefault, set: (v) => store.mutate.agent.setExpandListByDefault(v) }],
     ["showTools", { label: "Show tools", description: "Show tool call count (N calls) in the agent list.", get: () => store.agent.showTools, set: (v) => store.mutate.agent.setShowTools(v) }],
@@ -20,8 +20,8 @@ function buildDisplayConfig(store: ReturnType<typeof getStore>) {
   ]);
 }
 
-export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Promise<void> {
-  const store = getStore();
+export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext, runtime: MenuRuntime): Promise<void> {
+  const store = runtime.store;
   const displayConfig = buildDisplayConfig(store);
   let settingsList: SettingsList;
 
