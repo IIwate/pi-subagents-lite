@@ -101,6 +101,63 @@ describe("ExtensionRuntime ownership", () => {
     expect(parent.errors).toEqual([]);
   });
 
+  it.each([
+    { forceBackground: true, requestedBackground: undefined, mode: "background" },
+    { forceBackground: true, requestedBackground: false, mode: "background" },
+    { forceBackground: true, requestedBackground: true, mode: "background" },
+    { forceBackground: false, requestedBackground: undefined, mode: "foreground" },
+    { forceBackground: false, requestedBackground: false, mode: "foreground" },
+    { forceBackground: false, requestedBackground: true, mode: "background" },
+  ])("accepts $mode execution with forceBackground=$forceBackground and run_in_background=$requestedBackground", async ({ forceBackground, requestedBackground, mode }) => {
+    const parent = await host("mode"); const gate = holdRead();
+    parent.runtime.store.mutate.agent.setForceBackground(forceBackground);
+    parent.worker.setResponses([fauxAssistantMessage(fauxToolCall("read", { path: "wait" }), { stopReason: "toolUse" }), fauxAssistantMessage("Configured mode result")]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Result received")]);
+    const controller = new AbortController(); harness.onDispose(() => controller.abort());
+    const execution = executeAgentTool(parent.runtime, "mode", {
+      agent: "worker", prompt: "Work", model: "mode-worker/child",
+      ...(requestedBackground === undefined ? {} : { run_in_background: requestedBackground }),
+    }, controller.signal, undefined, parent.runtime.context);
+    await gate.entered.promise;
+    const task = parent.runtime.engine.list()[0];
+    parent.runtime.store.mutate.agent.setForceBackground(!forceBackground);
+    if (mode === "background") {
+      const result = await execution;
+      expect(result.content[0].text).toContain("The result will be delivered automatically");
+      expect(result.content[0].text).toContain(`Agent ID: ${task.taskId}`);
+      controller.abort();
+    }
+    gate.release.resolve(); await settled(parent.runtime, task.taskId);
+    expect(parent.runtime.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Configured mode result" } });
+    if (mode === "foreground") expect((await execution).content[0].text).toContain("Configured mode result");
+    await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+    expect(resultEntries(parent)).toHaveLength(mode === "background" ? 1 : 0);
+    if (mode === "background") expect(readFileSync(parent.session.sessionManager.getSessionFile()!, "utf8")).toContain("Configured mode result");
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("refreshes background guidance on the next parent turn and preserves identical effective prompts", async () => {
+    const parent = await host("guidance");
+    const prompts: string[] = [];
+    for (const enabled of [false, true, true, false]) {
+      parent.runtime.store.mutate.agent.setForceBackground(enabled);
+      parent.parentProvider.setResponses([context => {
+        prompts.push(context.systemPrompt ?? "");
+        return fauxAssistantMessage("Settings applied");
+      }]);
+      await parent.session.prompt("Use the current agent settings");
+    }
+    expect(prompts[0]).toContain("use foreground when the result gates the next parent action");
+    expect(prompts[1]).toContain("All Agent calls run in the background");
+    expect(prompts[1]).toContain("end your turn and resume when it is delivered");
+    expect(prompts[1]).toContain("Do not poll, sleep, or timeout-wait");
+    expect(prompts[1]).not.toContain("use foreground");
+    expect(prompts[1]).not.toContain("set `run_in_background: true`");
+    expect(prompts[2]).toBe(prompts[1]);
+    expect(prompts[3]).toBe(prompts[0]);
+    expect(parent.errors).toEqual([]);
+  });
+
   it("isolates catalogue, accepted policy, configuration, and shutdown across two runtimes", async () => {
     const first = await host("first"); const second = await host("second");
     const gate = holdRead();

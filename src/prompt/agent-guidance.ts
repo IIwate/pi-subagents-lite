@@ -11,6 +11,7 @@ export interface GuidanceAgent {
 // Note: see .agents/notes/implemented/architecture/2026-09-09-byte-stable-guidance-contract.md
 export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
+  forceBackground: boolean;
   parentModelKey: string;
   routing: Readonly<ModelRoutingConfig>;
   availableKeys: ReadonlySet<string>;
@@ -19,7 +20,7 @@ export interface AgentGuidanceOptions {
 
 /** Deterministic per-run guidance for the schema-stealth Agent tool. */
 export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string {
-  const { parentModelKey, routing, availableKeys, scopedKeys } = options;
+  const { forceBackground, parentModelKey, routing, availableKeys, scopedKeys } = options;
   const agents = [...options.agents].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   const lines = ["[Subagent access]", "", "Available agent types:"];
 
@@ -35,9 +36,13 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     "",
     "Agent tool rules:",
     "- Agents start with a fresh conversation.",
-    "- For background work, set `run_in_background: true`; results are delivered automatically. Do not poll, sleep, or timeout-wait.",
+    forceBackground
+      ? "- All Agent calls run in the background; results are delivered automatically. Do not poll, sleep, or timeout-wait."
+      : "- For background work, set `run_in_background: true`; results are delivered automatically. Do not poll, sleep, or timeout-wait.",
     "- A background Agent error is final. Do not spawn a replacement unless the user explicitly asks to retry.",
-    "- Prefer background for independent work; use foreground when the result gates the next parent action.",
+    forceBackground
+      ? "- Continue independent work while agents run. If the next action depends on an agent's result, end your turn and resume when it is delivered."
+      : "- Prefer background for independent work; use foreground when the result gates the next parent action.",
     "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
     "- Omit `model` to use the exact parent model.",
     "- For an alternate, pass one exact model key listed below; do not invent or abbreviate model IDs.",

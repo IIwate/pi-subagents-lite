@@ -114,20 +114,8 @@ export async function executeAgentTool(
   const prompt = params.prompt as string;
   const rawDescription = (params.description as string | undefined) || (prompt.split("\n")[0] || prompt);
   const description = (rawDescription.split("\n")[0] || "").trim().slice(0, 40);
-  const requestedBackground = typeof params.run_in_background === "boolean"
-    ? params.run_in_background
-    : undefined;
   const store = runtime.store;
-
-  if (requestedBackground !== true && store.agent.forceBackground) {
-    throw new Error(
-      "Foreground execution is disabled: the user has enabled 'forceBackground' in subagent settings. "
-      + "You must explicitly set 'run_in_background: true' to spawn this subagent asynchronously, "
-      + "or inform the user that their current configuration forbids foreground execution.",
-    );
-  }
-
-  const runInBackground = requestedBackground === true;
+  const runInBackground = store.agent.forceBackground || params.run_in_background === true;
   const scopedModels = [...ctx.scopedModels];
   const routing = store.routing;
   const explicitModelRef = typeof params.model === "string" ? params.model.trim() || undefined : undefined;

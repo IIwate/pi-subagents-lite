@@ -9,6 +9,7 @@ const agents = [
 function build(overrides: Record<string, unknown> = {}): string {
   return buildCurrentAgentGuidance({
     agents,
+    forceBackground: false,
     parentModelKey: "anthropic/sonnet",
     routing: {
       enabled: true,
@@ -29,9 +30,9 @@ function build(overrides: Record<string, unknown> = {}): string {
 }
 
 describe("buildCurrentAgentGuidance", () => {
-  it("is deterministic and sorts Agent types", () => {
-    const first = build();
-    expect(build()).toBe(first);
+  it.each([false, true])("is deterministic and sorts Agent types with forceBackground=%s", forceBackground => {
+    const first = build({ forceBackground });
+    expect(build({ forceBackground, agents: [...agents].reverse() })).toBe(first);
     expect(first.indexOf("Explore: Fast exploration")).toBeLessThan(first.indexOf("reviewer: Focused review"));
   });
 

@@ -16,6 +16,7 @@ export function setupEventListeners(pi: ExtensionAPI, runtime: ExtensionRuntime)
         const config = runtime.catalogue.getAgentConfig(name);
         return config ? [{ name, description: config.description, registeredTools: config.registeredTools, maxTurns: config.maxTurns }] : [];
       }),
+      forceBackground: runtime.store.agent.forceBackground,
       parentModelKey: ctx.model ? modelKey(ctx.model) : "", routing: runtime.store.routing,
       availableKeys: new Set(ctx.modelRegistry.getAvailable().map(modelKey)), scopedKeys: scopedModelKeys(ctx.scopedModels),
     });

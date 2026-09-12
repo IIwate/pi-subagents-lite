@@ -10,7 +10,7 @@ Status: implemented
 
 [registerTools](../../../../src/registration.ts) 在本扩展初始化时一次性注册 Agent、StopAgent、AgentStatus. Agent 类型使用 string 参数, 动态目录由 [guidance](2026-09-09-dynamic-guidance-injection.md) 提供, 不反复修改 schema enum. 这只约束本扩展的注册行为, 不宣称其他扩展或整个 Pi 工具集不可改变.
 
-工具省略顶层 description/promptSnippet/promptGuidelines, 对 Pi 的 required description 使用局部 ts-expect-error. 参数保留必要单句说明和类型, additionalProperties=false 拒绝未知参数, thinking 是独立 enum. 工具的新建/停止/精确查询职责不包含 resume、轮询等待或返回日志路径. 前台/后台策略拒绝通过抛错让 Pi 正确记录 tool error, forceBackground 开启时必须显式 run_in_background=true, 不静默改变执行模式.
+工具省略顶层 description/promptSnippet/promptGuidelines, 对 Pi 的 required description 使用局部 ts-expect-error. 参数保留必要单句说明和类型, additionalProperties=false 拒绝未知参数, thinking 是独立 enum. 工具的新建/停止/精确查询职责不包含 resume、轮询等待或返回日志路径. 新任务接受时使用 forceBackground 或 run_in_background=true 决定后台模式, 开启强制后台时省略参数或显式 false 均正常受理. 实际模式统一控制等待、取消信号和结果交付, 已接受任务保持其模式.
 
 三个工具使用 renderShell=self 和空 Container 的 call/result renderer, 阻止默认 tool card 的外壳残留. 结果仍进入模型上下文, 自动交付消息 display=false. [navigator](../bug-fix/2026-09-10-navigator-rendering-and-cache.md) 承载实时状态, 异常 pending 由 [inbox](2026-09-11-native-execution-and-parent-delivery-adapters.md) 提供. 用户获得的是执行/交付事实, 不是第二套输出日志.
 
@@ -24,6 +24,7 @@ Status: implemented
 
 - **保留平台默认工具卡片和详细 schema 文档.** 用户可直接查看调用, 模型也能就地看到说明, 但后台多任务会重复占据聊天/模型输入. 当前静默显示以 navigator 和简明动态 guidance 补足.
 - **按需注册工具或 session briefing.** 无使用时工具列表可更少, 但中途工具变化改变前缀, briefing 还需处理刷新和 compaction. 历史否决理由见 [rejected Note](../../rejected/architecture/2026-09-09-lazy-tool-registration-and-session-briefing.md); 缓存收益依赖 provider, 不是可保证的速度倍数.
+- **要求强制后台调用显式传入 true.** 参数与实际模式可直接对应, 但 guidance 刷新间隙或省略参数会触发额外重试. 接受时应用配置并正常返回实际后台状态, 配合动态 guidance 消除这次无业务收益的拒绝.
 - **保留日志路径/统计为工具 details 的 UI 数据.** renderer 可方便展示 tail 命令, 但 details 不是纯 UI 秘密通道, 历史提交记录了暴露给模型的风险. 当前结果 metadata 仅承担交付协议.
 - **保留并行的 tree widget、count badge、footer 和结果 viewer.** 每个表面各有信息, 但会复制状态和刷新逻辑. 统一的导航列表/子屏降低多处同步义务, 代价是失去独立外部 tail 接口.
 
@@ -37,4 +38,4 @@ schema 表面稳定、工具聊天行静默, 但这不验证模型已经理解�
 
 ## Verification
 
-[index/schema tests](../../../../test/unit/index.test.ts) 验证静态注册、schema 和 silent render, [tool execution](../../../../test/scenarios/runtime.test.ts) 验证 pre-spawn 拒绝, [navigator render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts) 验证当前展示. 已裁撤日志的历史测试不属于主线运行面, 本文不声称重新执行这些测试.
+[index/schema tests](../../../../test/unit/index.test.ts) 验证静态注册、schema 和 silent render, [tool execution](../../../../test/scenarios/runtime.test.ts) 验证执行模式、取消信号隔离与持久交付, [navigator render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts) 验证当前展示. 已裁撤日志的历史测试不属于主线运行面, 本文不声称重新执行这些测试.

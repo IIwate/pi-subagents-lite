@@ -13,6 +13,7 @@ Status: implemented
 ```ts type-equiv: AgentGuidanceOptions from src/prompt/agent-guidance.ts
 export interface AgentGuidanceOptions {
   agents: readonly GuidanceAgent[];
+  forceBackground: boolean;
   parentModelKey: string;
   routing: Readonly<ModelRoutingConfig>;
   availableKeys: ReadonlySet<string>;
@@ -21,6 +22,8 @@ export interface AgentGuidanceOptions {
 ```
 
 固定规则说明 fresh conversation、后台结果自动报告和不轮询、error 后不擅自派发替代任务、worktree_path 约束、精确父模型默认值和显式拒绝. alternate keys 使用 [model access](2026-09-09-model-routing-and-access-policy.md) 的同一交集计算, 排除精确父模型、不可用/未授权/超 scope 项. all-model grant 仍展开实际 provider/model keys, 不输出 wildcard.
+
+执行模式规则使用当前 forceBackground: 开启时说明所有 Agent 调用均在后台执行, 可继续独立工作, 依赖结果时结束当前轮并在结果送达后继续; 关闭时按任务依赖选择前台或后台. 英文 guidance 随下一次正常父请求刷新, 同一有效配置保持字节稳定.
 
 Agent 无规则时只展示父模型默认能力. 无父模型时明确省略 model 无法启动, 授权的显式备选仍可列出. routing OFF 时不列 alternate. 这份 guidance 只使用内存输入, 不承担 registry discovery、文件读取或 tool schema 注册.
 
@@ -40,4 +43,4 @@ Agent 无规则时只展示父模型默认能力. 无父模型时明确省略 mo
 
 ## Verification
 
-[guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查 Agent 顺序、稳定输出、精确模型、scope 和父 provider gate; [model access tests](../../../../test/unit/models/model-access.test.ts) 检查真实授权交集. type-equiv 对照当前公开 options, 不人为镜像整个字符串实现.
+[guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查两种执行策略下的 Agent 顺序、稳定输出、精确模型、scope 和父 provider gate; [runtime scenarios](../../../../test/scenarios/runtime.test.ts) 检查配置切换后真实父请求的 guidance 与稳定性; [model access tests](../../../../test/unit/models/model-access.test.ts) 检查真实授权交集. type-equiv 对照当前公开 options, 不人为镜像整个字符串实现.

@@ -27,7 +27,7 @@ export async function showSpawnOptionsMenu(ctx: ExtensionCommandContext, runtime
       label: "Force background",
       currentValue: store.agent.forceBackground ? "ON" : "OFF",
       values: ["ON", "OFF"],
-      description: "Spawn every agent in the background by default (no foreground wait).",
+      description: "Always run new agents in the background and deliver results automatically.",
     },
     {
       id: "graceTurns",
