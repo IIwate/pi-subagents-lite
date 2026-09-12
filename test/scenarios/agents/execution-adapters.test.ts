@@ -12,6 +12,7 @@ import { TaskEngine } from "../../../src/engine/task-engine.js";
 import type { TaskBinding } from "../../../src/engine/contracts.js";
 import type { TaskPolicy } from "../../../src/domain/policy.js";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
+import { controlledModelStream } from "../../support/model-stream.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -73,6 +74,130 @@ describe("Execution adapters", () => {
     resources.onDispose(() => repository.close(context));
     return repository;
   }
+
+  function modelStreams(count: number) {
+    const streams = Array.from({ length: count }, () => controlledModelStream(resources, provider.models[0]));
+    const opened = streams.map(() => Promise.withResolvers<AbortSignal>());
+    let next = 0;
+    const requests = vi.spyOn(provider.provider, "streamSimple").mockImplementation((_model, _request, options) => {
+      const index = next++;
+      if (!streams[index] || !options?.signal) throw new Error("Unexpected model request");
+      opened[index].resolve(options.signal);
+      return streams[index].source;
+    });
+    return { streams, opened: opened.map(item => item.promise), requests };
+  }
+
+  it("allows long pre-output thinking on a model stream and delivers its final response", async () => {
+    vi.useFakeTimers();
+    const { streams, opened, requests } = modelStreams(1);
+    const tasks = engine();
+    const child = await driver(binding("reasoning"));
+    await tasks.accept(child, { text: "Think carefully before answering" });
+    const signal = await opened[0];
+    await vi.advanceTimersByTimeAsync(599_000);
+    expect(signal.aborted).toBe(false);
+    streams[0].thinking("First reasoning step");
+    await vi.advanceTimersByTimeAsync(590_000);
+    expect(signal.aborted).toBe(false);
+    streams[0].thinking("Second reasoning step");
+    await vi.advanceTimersByTimeAsync(590_000);
+    expect(signal.aborted).toBe(false);
+    streams[0].finish("Reasoned final answer");
+    expect((await tasks.wait("reasoning")).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Reasoned final answer" } });
+    expect(requests).toHaveBeenCalledOnce();
+    expect((await child.store.deliveries()).map(item => item.delivery.text)).toEqual(["Reasoned final answer"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retries a stalled model stream with native backoff and releases quota after delivery", async () => {
+    vi.useFakeTimers();
+    const { streams, opened, requests } = modelStreams(4);
+    const tasks = engine();
+    const child = await driver(binding("recovering"), { retry: { enabled: true, maxRetries: 10, baseDelayMs: 1000 } });
+    const queued = await driver(binding("queued"));
+    await tasks.accept(child, { text: "Recover from a broken stream" });
+    const firstSignal = await opened[0];
+    streams[0].text("Incomplete answer");
+    await tasks.accept(queued, { text: "Run after the first task" });
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(firstSignal.aborted).toBe(false);
+    streams[0].text(" with progress");
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(firstSignal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(firstSignal.aborted).toBe(true);
+    expect((await child.snapshot()).retry).toMatchObject({ attempt: 2, maxAttempts: 11, nextAttemptAt: Date.now() + 1000 });
+    expect(tasks.get("queued").state.status).toBe("queued");
+    expect(await child.store.deliveries()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(requests).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    const secondSignal = await opened[1];
+    expect(secondSignal).not.toBe(firstSignal);
+    expect(secondSignal.aborted).toBe(false);
+    streams[1].text("Another partial answer");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(secondSignal.aborted).toBe(true);
+    expect((await child.snapshot()).retry).toMatchObject({ attempt: 3, nextAttemptAt: Date.now() + 2000 });
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(requests).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    const thirdSignal = await opened[2];
+    expect(thirdSignal.aborted).toBe(false);
+    streams[2].finish("Recovered final answer");
+    expect((await tasks.wait("recovering")).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Recovered final answer" } });
+    expect((await child.store.deliveries()).map(item => item.delivery.text)).toEqual(["Recovered final answer"]);
+    await opened[3];
+    streams[3].finish("Queued task completed");
+    expect((await tasks.wait("queued")).state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("settles an exhausted model stream retry budget and admits the next task", async () => {
+    vi.useFakeTimers();
+    const { streams, opened, requests } = modelStreams(3);
+    const tasks = engine();
+    const child = await driver(binding("exhausted"), { retry: { enabled: true, maxRetries: 1, baseDelayMs: 1000 } });
+    const queued = await driver(binding("next"));
+    await tasks.accept(child, { text: "Bound a persistent transport failure" });
+    const firstSignal = await opened[0];
+    await tasks.accept(queued, { text: "Use the released quota" });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(firstSignal.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    const secondSignal = await opened[1];
+    streams[1].text("Last partial result");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(secondSignal.aborted).toBe(true);
+    expect((await tasks.wait("exhausted")).state).toMatchObject({ status: "settled", outcome: {
+      status: "error", error: expect.stringContaining("120 seconds"), result: "Last partial result",
+    } });
+    expect(await child.store.deliveries()).toHaveLength(1);
+    await opened[2];
+    expect(requests).toHaveBeenCalledTimes(3);
+    streams[2].finish("Next task completed");
+    await tasks.wait("next");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps user cancellation of a stalled model stream silent without retry", async () => {
+    vi.useFakeTimers();
+    const { streams, opened, requests } = modelStreams(1);
+    const tasks = engine();
+    const child = await driver(binding("stopped"), { retry: { enabled: true, maxRetries: 10, baseDelayMs: 1000 } });
+    await tasks.accept(child, { text: "Wait for user intervention" });
+    const signal = await opened[0];
+    streams[0].text("Preserved partial output");
+    await vi.advanceTimersByTimeAsync(0);
+    await tasks.requestAbort("stopped", "user");
+    expect((await tasks.wait("stopped")).state).toMatchObject({ status: "settled", outcome: { status: "stopped", stoppedBy: "user", result: "Preserved partial output" } });
+    expect(signal.aborted).toBe(true);
+    expect(await child.store.deliveries()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(requests).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it("holds actual quota after an observer abort and applies queued steering with the accepted policy", async () => {
     const entered = Promise.withResolvers<void>();

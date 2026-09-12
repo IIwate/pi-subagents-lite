@@ -12,6 +12,7 @@ import { extractText } from "../prompt/context.js";
 import { NativeTaskStore } from "./native-task-store.js";
 import { projectMessage } from "./message-projection.js";
 import type { PiResources } from "./pi-resources.js";
+import { withStreamWatchdog } from "./stream-watchdog.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -75,13 +76,20 @@ export class HarnessDriver implements ExecutionDriver {
       const model = { ...sourceModel, ...(policy.limits.maxTokens === undefined ? {} : { maxTokens: policy.limits.maxTokens }) };
       // The native engine resolves models again per request. Scope lookup and output limits without mutating the host catalogue.
       const getModel: Models["getModel"] = (provider, id) => provider === model.provider && id === model.id ? model : undefined;
-      const streamSimple: Models["streamSimple"] = (requestModel, request, streamOptions) => options.models.streamSimple(requestModel, request, {
-        ...streamOptions, ...(policy.limits.maxTokens === undefined ? {} : { maxTokens: policy.limits.maxTokens }),
-      });
+      const streamSimple: Models["streamSimple"] = (requestModel, request, streamOptions) => withStreamWatchdog(requestModel, streamOptions?.signal,
+        signal => options.models.streamSimple(requestModel, request, {
+          ...streamOptions, signal, ...(policy.limits.maxTokens === undefined ? {} : { maxTokens: policy.limits.maxTokens }),
+        }));
+      const completeSimple: Models["completeSimple"] = (requestModel, request, streamOptions) => withStreamWatchdog(requestModel, streamOptions?.signal,
+        signal => options.models.streamSimple(requestModel, request, { ...streamOptions, signal })).result();
+      const streamDeferred: Models["streamDeferred"] = (requestModel, handle, streamOptions) => withStreamWatchdog(requestModel, streamOptions?.signal,
+        signal => options.models.streamDeferred(requestModel, handle, { ...streamOptions, signal }));
       const models = new Proxy(options.models, {
         get(target, key) {
           if (key === "getModel") return getModel;
           if (key === "streamSimple") return streamSimple;
+          if (key === "completeSimple") return completeSimple;
+          if (key === "streamDeferred") return streamDeferred;
           const member: unknown = Reflect.get(target, key, target);
           return typeof member === "function" ? member.bind(target) : member;
         },

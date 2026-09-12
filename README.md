@@ -98,6 +98,8 @@ Configuration and custom system prompts are stored in `subagents-lite-v3.json` a
 
 Native task data is stored under `subagents-lite-v3/sessions` inside Pi's agent directory. Reload discovers saved results and unfinished operations; submit input in a waiting subagent to resume it. Configuration uses the v3 file format, and malformed existing files fail visibly.
 
+Model requests allow 10 minutes of silence before text or tool output, with thinking progress renewing that budget. After output starts, 2 minutes without model progress cancels the request. Transient timeouts use Pi's configured retry policy and exponential backoff; exhausted retries surface as task errors. These are inactivity budgets, not a limit on total task duration.
+
 When upgrading from v2, finish pending work first and configure v3 through `/agents`. v2 settings, unfinished tasks, and undelivered results are not imported. See the [v3 release notes](CHANGELOG.md#300) for the execution and input changes.
 
 ## License

@@ -40,6 +40,8 @@ export interface DeliveryChannel {
 
 模型身份、thinking、工具白名单、system prompt 与预算来自已接受策略. Driver 为模型建立一次局部请求视图, 固定 getModel 结果并传递 maxTokens; 其他 Models 方法绑定回原对象, 同时支持公开的 ModelRuntime 类实例. 宿主目录和模型对象不被修改. 默认原生 read/bash/edit/write 使用任务自己的 ExecutionEnv; 调用方可提供已解析的原生工具和资源. 任意 coding-agent 扩展工厂不自动获得 Harness hook 语义.
 
+局部 Models 视图对 streamSimple、摘要 completeSimple 与 streamDeferred 应用[请求闲置保护](../bug-fix/2026-09-10-assistant-outcomes-retries-and-turn-budgets.md#request-inactivity). completeSimple 消费受保护流的 result, 保留摘要自己的 stream options; 请求级取消与 Lane 取消分开, 原生 Harness 仍拥有重试和 operation 结算.
+
 accept 只持久接受 prompt, drive 才执行. TaskEngine 在双层 Quota 准入后驱动, 同一次占用只释放一次. wait 的 signal 仅结束观察. 原生 drive 的真实 Promise 返回之后才释放占用, 包括已持久保存的 waiting; waiting 可由显式 resume 重新准入. restore 读取原生状态, 不自动启动模型请求. 已结算任务通过 continue 创建新 operation; 先预留配额, 无容量返回 QuotaUnavailable, 保留旧 operation 和结果.
 
 requestAbort 先提交原生取消请求, 再更新领域投影. 未获准入的取消通过已封闭 effect gate 的原生 reconciliation 结算, 不占用 provider slot. close 在调用宿主关闭和工具取消回调前登记共享 Promise, 先封闭 Harness, 保留 Driver 所有的 Session writer 供子扩展 shutdown 保存状态, 等待已接纳的 drive/工具返回后关闭 Session 并释放环境; 它不伪造 terminal result. 不响应取消的第三方工具会延长关闭等待. 关闭后的未知工具效果由原生 replay 策略裁决, replay=never 不重放.
