@@ -242,7 +242,7 @@ export class DeliverySelectorComponent implements Component {
         )
       : "";
 
-    let rightRows: string[] = [];
+    const rightRows: string[] = [];
     if (narrow && currentItem) {
       const checked = this.selectedIndices.has(currentItem.index) ? "x" : " ";
       rightRows.push(`[${checked}] ${currentItem.label}`, `${this.cursorIndex + 1}/${this.items.length} · ${this.selectedIndices.size} selected`, "");

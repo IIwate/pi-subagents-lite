@@ -12,13 +12,13 @@ Status: implemented
 
 工具省略顶层 description/promptSnippet/promptGuidelines, 对 Pi 的 required description 使用局部 ts-expect-error. 参数保留必要单句说明和类型, additionalProperties=false 拒绝未知参数, thinking 是独立 enum. 工具的新建/停止/精确查询职责不包含 resume、轮询等待或返回日志路径. 新任务接受时使用 forceBackground 或 run_in_background=true 决定后台模式, 开启强制后台时省略参数或显式 false 均正常受理. 实际模式统一控制等待、取消信号和结果交付, 已接受任务保持其模式.
 
-三个工具使用 renderShell=self 和空 Container 的 call/result renderer, 阻止默认 tool card 的外壳残留. 结果仍进入模型上下文, 自动交付消息 display=false. [navigator](../bug-fix/2026-09-10-navigator-rendering-and-cache.md) 承载实时状态, 异常 pending 由 [inbox](2026-09-11-native-execution-and-parent-delivery-adapters.md) 提供. 用户获得的是执行/交付事实, 不是第二套输出日志.
+三个工具使用 renderShell=self 和空 Container 的 call/result renderer, 阻止默认 tool card 的外壳残留. 结果仍进入模型上下文, 自动交付消息 display=false. [navigator](../bug-fix/2026-09-10-navigator-rendering-and-cache.md) 承载实时状态, 异常 pending 由 [原生 outbox](2026-09-11-native-execution-and-parent-delivery-adapters.md) 提供. 用户获得的是执行/交付事实, 不是第二套输出日志.
 
 ## Retired output surfaces
 
 当前没有独立 `/tmp/pi-agent-outputs/<id>.log`、tree widget、running-agent menu 或 child usage footer. 可复核的 log 实现在 `7cd9cd1^:src/agents/output-file.ts`: AgentOutputLog 按初始/继续消息索引订阅, finalize 先补 final stats、flush 再 unsubscribe. live thinking buffer 到阈值按句末切分, thinking_end 只写未流式输出的尾部; 缺 thinking_end 时 turn_end 仍记完成的 block, 避免历史 flush 重复. 写入是 best effort, 不是 durable delivery.
 
-这些防御仅对该日志产品有效. 当前 source of display 是 Pi session transcript, source of saved result 是父 inbox. 若将来要求可 tail 的完整审计日志, 必须重新明确存储位置、跨平台权限、retention、thinking 可见性和流式去重, 不能直接把旧文件恢复后称为完成.
+这些防御仅对该日志产品有效. 当前 source of display 是原生 Session transcript, source of saved result 是原生 outbox. 若将来要求可 tail 的完整审计日志, 必须重新明确存储位置、跨平台权限、retention、thinking 可见性和流式去重, 不能直接把旧文件恢复后称为完成.
 
 ## Alternatives considered
 

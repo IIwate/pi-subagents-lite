@@ -6,7 +6,7 @@ Status: implemented
 
 宿主执行回调与用户控制操作有不同生命周期. 旧 operation 的迟到完成不能覆盖同一任务的新运行, 等待和取消不能等同执行结束, 一次重复释放也不能释放后续运行的额度. 模型与配置对象仍由宿主或设置界面持有, 直接保存其可变引用会让已接受策略漂移.
 
-这些约束需要在不持有 Pi 会话、文件句柄、定时器或终端组件的情况下独立成立. [v3 能力边界](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md) 规定执行和父交付通过仓库内部 Adapter 接入官方宿主.
+这些约束需要在不持有 Pi 会话、文件句柄、定时器或终端组件的情况下独立成立. [v3 能力边界](2026-09-10-capability-boundaries-and-explicit-runtime.md) 规定执行和父交付通过仓库内部 Adapter 接入官方宿主.
 
 ## Decision
 

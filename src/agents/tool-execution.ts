@@ -85,7 +85,7 @@ export async function executeAgentTool(
     try {
       validation = await validateWorktreePath(runtime.pi, rawWorktreePath, parentCwd, onWarning);
     } catch (err: unknown) {
-      throw new Error(`worktree_path validation failed: ${errorMessage(err)}`);
+      throw new Error(`worktree_path validation failed: ${errorMessage(err)}`, { cause: err });
     }
     if (!validation.ok) {
       for (const msg of warnings) {

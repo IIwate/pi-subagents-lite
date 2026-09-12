@@ -23,7 +23,7 @@ Status: implemented
 
 ## Consequences
 
-菜单借用 Pi 现有输入组件, 但 wrapper 仍依赖 selectedIndex、submenuComponent、filteredItems 等私有字段; Pi 升级需验证委派和 rebuild. 内部 hint 文本识别与 focusable 判定也不是稳定的公共 modal-stack API. 完整 renderer-independent settings 重构可独立评审, 见 [模块边界提案](../../proposed/architecture/2026-09-10-capability-boundaries-and-explicit-runtime.md).
+菜单借用 Pi 现有输入组件, 但 wrapper 仍依赖 selectedIndex、submenuComponent、filteredItems 等私有字段; Pi 升级需验证委派和 rebuild. 内部 hint 文本识别与 focusable 判定也不是稳定的公共 modal-stack API. Pi 组件依赖位于 UI 层, 配置通过所属 Runtime 的 ConfigStore 提交; 所有权划分见 [v3 能力边界](2026-09-10-capability-boundaries-and-explicit-runtime.md).
 
 ## Evidence
 

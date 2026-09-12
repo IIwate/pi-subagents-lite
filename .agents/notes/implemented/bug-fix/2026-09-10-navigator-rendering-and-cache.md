@@ -12,7 +12,7 @@ Status: implemented
 
 展开列表以 Main 为固定摘要行, 子记录窗口容量为 `min(6, max(3, floor(rows / 5)))`, 实际条数再受记录数约束. 3~6 是子记录槽位范围, 不是整个 widget 总高度; command 和 hidden indicators 另占行. 不按 editor/footer 的经验高度减成 0 行. 状态列与统计通过宽度预算降级, 身份与父模型完全相同则省略, 自定义 footer 仍保留. 默认展开设置只决定新 navigator 的初值.
 
-Manager list 顺序为 attention(error/aborted/turn_limited)、running、queued、archive(completed/stopped). pin 仅在同一 rank 内提升; terminal 按完成时间倒序, active 按开始时间正序, 完全相等时保留 Map 注册顺序. 这不是 scheduler 队列的重排.
+[TaskNavigationSource](../../../../src/ui/task-source.ts) 的列表顺序为 attention(error/aborted/turn_limited)、active(running/waiting/cancelling)、queued、archive(completed/stopped). pin 仅在同一 rank 内提升; terminal 按完成时间倒序, active 按开始时间正序, 完全相等时保留 Map 注册顺序. 这不是 scheduler 队列的重排.
 
 刷新 timer 为一秒. 初次 spawn、统计进展和被接受的人工继续通过 ensureTimer 重启, 当前无选中子屏且无 running/queued/unsettled 时停止. UI 失败由 update/render 边界截住, 停止 timer 并最多提示一次, 后续实际事件仍可重试. 清理依次尝试所有 restoration, 不让一个 host UI 异常阻止其他资源释放.
 
@@ -39,4 +39,4 @@ Manager list 顺序为 attention(error/aborted/turn_limited)、running、queued�
 
 ## Verification
 
-[render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts)、[transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts)、[lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 和 [manager ordering](../../../../test/scenarios/agents/execution-adapters.test.ts) 覆盖对应行为. 旧 output log、tree widget 和重复 footer 的选择依据由 [Stealth](../architecture/2026-09-09-stealth-tool-registration.md) 记录, 不要求恢复已删除实现来测试当前 UI.
+[render](../../../../test/unit/ui/navigator/agent-navigator.render.test.ts)、[transcript](../../../../test/unit/ui/navigator/agent-navigator.transcript.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 覆盖布局、缓存与恢复; [source retention](../../../../test/unit/ui/task-source.test.ts) 验证 pin 与展示保留窗口. 旧 output log、tree widget 和重复 footer 的选择依据由 [Stealth](../architecture/2026-09-09-stealth-tool-registration.md) 记录, 不要求恢复已删除实现来测试当前 UI.

@@ -8,9 +8,9 @@ Status: implemented
 
 ## Decision
 
-[setupEventListeners](../../../../src/events.ts) 在 before_agent_start 根据当前 context 和 ConfigStore 生成 guidance, 追加到 event.systemPrompt. 仅当 selectedTools 包含 Agent 时加入 Agent 规则. 构建使用当前已注册 Agent 目录、父模型、available keys 和 scope, 不在 hook 内执行磁盘发现.
+[setupEventListeners](../../../../src/events.ts) 在 before_agent_start 根据当前 context 和 ConfigStore 生成 guidance, 追加到 event.systemPrompt. 仅当 selectedTools 包含 Agent 时加入 Agent 规则. 构建使用当前已注册 Agent 目录、父模型、forceBackground、available keys 和 scope, 不在 hook 内执行磁盘发现.
 
-同一个 hook 先请求 [result inbox preflight](2026-09-11-native-execution-and-parent-delivery-adapters.md), 非 Agent 会话仍可能接收历史结果 message; “不注入 Agent guidance”不等于“阻止一切结果交付”. system guidance 与 custom result message 是不同输出, 不能用模型可见内容都必须新增 session event 的规则代替此 API 契约.
+[原生结果交付](2026-09-11-native-execution-and-parent-delivery-adapters.md) 由任务完成、Runtime 初始化及 agent_settled/session_tree 事件触发. 交付资格独立于 selectedTools, system guidance 与持久 custom result message 各有所有者.
 
 model_select/thinking_level_select 更新所属 Runtime context, 下一轮重新计算. 配置和 availability 的变化同样进入下一轮 guidance; 已接受子调用仍使用 [快照](2026-09-10-isolated-child-resources-and-tool-gates.md). 文本构建的排序/授权内容归 [字节稳定契约](2026-09-09-byte-stable-guidance-contract.md).
 
@@ -22,7 +22,7 @@ model_select/thinking_level_select 更新所属 Runtime context, 下一轮重新
 
 ## Consequences
 
-guidance 跟随下一次正常父请求更新, 没有独立 turn. 此 hook 仍可因第三方 context/registry 调用失败而丢弃返回, 且结果 preflight 存在异步 I/O, 不能宣称整个钩子是纯同步或毫秒级. 主线没有 Pi 跨扩展排序 barrier; 本 Note 不保证其他扩展最终保留相同 system prompt.
+guidance 跟随下一次正常父请求更新, 没有独立 turn. 此同步 hook 仍可因第三方 context/registry 调用失败而丢弃返回. 主线没有 Pi 跨扩展排序 barrier; 本 Note 不保证其他扩展最终保留相同 system prompt.
 
 ## Evidence
 
@@ -30,4 +30,4 @@ guidance 跟随下一次正常父请求更新, 没有独立 turn. 此 hook 仍�
 
 ## Verification
 
-[events unit tests](../../../../test/scenarios/runtime.test.ts)、[events scenarios](../../../../test/scenarios/runtime.test.ts) 和 [guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查 selectedTools 条件、当前授权和 hook 返回. [durable inbox scenarios](../../../../test/scenarios/spawn/delivery-channel.test.ts) 负责结果接收事实, 不用 guidance 测试替代.
+[Runtime scenarios](../../../../test/scenarios/runtime.test.ts) 检查配置切换后实际父请求的 guidance 与稳定性; [guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查当前授权和确定性文本. [delivery scenarios](../../../../test/scenarios/spawn/delivery-channel.test.ts) 负责结果接收事实, 不用 guidance 测试替代.

@@ -133,7 +133,7 @@ export class HarnessDriver implements ExecutionDriver {
       ]);
       cleanup.push(...await Promise.allSettled([options.session.close(context)]));
       const failures = cleanup.flatMap(result => result.status === "rejected" ? [result.reason] : []);
-      if (failures.length) throw new AggregateError([error, ...failures], "Native task attachment and cleanup failed");
+      if (failures.length) throw new AggregateError([error, ...failures], "Native task attachment and cleanup failed", { cause: error });
       throw error;
     }
   }

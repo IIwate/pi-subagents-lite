@@ -1,6 +1,6 @@
 # Development
 
-[package.json](../package.json) defines supported runtimes and executable scripts. Install dependencies with `bun install`; use `bun add` or `bun add -d` to update them. Local verification follows the [root rules](../AGENTS.md#verification).
+[package.json](../package.json) defines supported runtimes and executable scripts. Install dependencies with `bun install`; use `bun add` or `bun add -d` to update them. Local verification follows the [root rules](../AGENTS.md#verification-and-test-standards).
 
 ## Commands
 
@@ -8,6 +8,7 @@
 |---|---|
 | `bun run typecheck` | Production TypeScript. |
 | `bun run typecheck:test` | Production code, all tests, shared fixtures, and Vitest configuration. |
+| `bun run lint` | ESLint correctness rules for production code, tests, and Vitest configuration; zero warnings allowed. |
 | `bun run test:unit` | Module invariants. |
 | `bun run test:scenarios` | Cross-module and external resource scenarios. |
 | `bun run test` | Official full suite, with both projects and at most four workers. |
@@ -17,6 +18,8 @@
 
 Pass a file or directory to a layer command for focused execution, for example `bun run test:unit test/unit/ui/delivery-selector.test.ts`.
 
+[ESLint](../eslint.config.mjs) uses the recommended JavaScript and TypeScript correctness rules. TypeScript owns unused-symbol checks. Explicit `any` remains available for Pi adapters and test doubles whose host types are incomplete; lint does not impose formatting rules.
+
 ## Test layers
 
 - [test/unit/](../test/unit/) verifies pure functions and individual module behavior with focused fixtures.
@@ -25,7 +28,7 @@ Pass a file or directory to a layer command for focused execution, for example `
 
 Choose a layer by the behavior and resources exercised, rather than file size or filename. The [testing Note](../.agents/notes/implemented/testing/2026-09-09-test-layers-and-scenario-harness.md) owns fixture design and the reasons for the split. [vitest.config.mts](../vitest.config.mts) selects disjoint projects, and [tsconfig.test.json](../tsconfig.test.json) includes tests and fixtures by directory.
 
-The [Test workflow](../.github/workflows/test.yml) runs both layers on Linux and Windows for pushes and pull requests, in normal order and with fixed-seed shuffling. Its matrix and seed live in the workflow. The [Publish workflow](../.github/workflows/publish.yml) checks production and test types and runs the full suite before packaging.
+The [Test workflow](../.github/workflows/test.yml) checks types, lint, and npm package contents, and runs both layers on Linux and Windows in normal order and with fixed-seed shuffling. Its matrix and seed live in the workflow. The [Verify Notes workflow](../.github/workflows/verify-notes.yml) checks documentation for main-branch updates and pull requests. The [Publish workflow](../.github/workflows/publish.yml) repeats the quality gates, including Notes, before publishing.
 
 ## Worktrees
 

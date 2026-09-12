@@ -1,6 +1,6 @@
 {
   "name": "@iiwate/pi-subagents-lite",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Lightweight sub-agents for pi — spawn specialized agents with isolated sessions, tools, and models.",
   "keywords": [
     "pi-package",
@@ -40,11 +40,13 @@
   "files": [
     "src/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "eslint src test vitest.config.mts --max-warnings 0",
     "test": "vitest run --maxWorkers=4",
     "test:unit": "vitest run --project unit --maxWorkers=4",
     "test:scenarios": "vitest run --project scenarios --maxWorkers=4",
@@ -68,8 +70,11 @@
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@earendil-works/pi-tui": "0.85.1",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "tsx": "^4.19.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7",
-    "tsx": "^4.19.0"
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^4.1.7"
   }
 }

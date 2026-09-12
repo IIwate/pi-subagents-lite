@@ -4,7 +4,7 @@ Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent
 
 ## Features
 
-- **Isolated Subagent Sessions**: Run multi-step tasks in dedicated, sandboxed sessions without polluting the parent conversation.
+- **Isolated Subagent Sessions**: Run multi-step tasks with independent conversation context, tools, and model settings.
 - **Background & Foreground Execution**: Spawn background agents that report back when finished, or foreground agents that block the current turn.
 - **Model Routing & Thinking Access**: Inherit the parent model by default, or authorize alternate providers and models with fine-grained thinking budgets.
 - **TUI Below-Editor Navigator**: Monitor running, queued, and completed agents directly below the editor with responsive terminal layouts.
@@ -14,7 +14,7 @@ Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent
 
 ## Install
 
-Requires Pi 0.84.3+.
+Requires Pi 0.85.1 and Node.js 22.19+. Package peer ranges define dependency compatibility; development and adapter verification use Pi 0.85.1.
 
 ```bash
 pi install npm:@iiwate/pi-subagents-lite
@@ -97,6 +97,8 @@ Run `/agents` in Pi to open the interactive settings menu:
 Configuration and custom system prompts are stored in `subagents-lite-v3.json` and `subagents-lite-prompt.md` inside Pi's agent directory (`getAgentDir()`).
 
 Native task data is stored under `subagents-lite-v3/sessions` inside Pi's agent directory. Reload discovers saved results and unfinished operations; submit input in a waiting subagent to resume it. Configuration uses the v3 file format, and malformed existing files fail visibly.
+
+When upgrading from v2, finish pending work first and configure v3 through `/agents`. v2 settings, unfinished tasks, and undelivered results are not imported. See the [v3 release notes](CHANGELOG.md#300) for the execution and input changes.
 
 ## License
 

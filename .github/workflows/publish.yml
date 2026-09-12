@@ -31,6 +31,8 @@ jobs:
           node -e 'const expected = `v${require("./package.json").version}`; if (process.env.GITHUB_REF_NAME !== expected) { console.error(`Tag ${process.env.GITHUB_REF_NAME} does not match ${expected}`); process.exit(1); }'
       - run: bun run typecheck
       - run: bun run typecheck:test
+      - run: bun run lint
+      - run: bun run verify-notes
       - run: bun run test
       - run: npm pack --dry-run
       - run: npm publish --access public

@@ -8,11 +8,11 @@ Pi 扩展由宿主动态加载 TypeScript, 不适合另外打包一份宿主运�
 
 ## Decision
 
-[package.json](../../../../package.json) 通过 pi.extensions 指向 src/index.ts, npm 包白名单包含 src、README、LICENSE. Pi AI/coding-agent/TUI 与 TypeBox 是 peer dependencies, 同时为本仓库开发验证固定 Pi dev versions. Bun lockfile 固定依赖图, 本地不构建一个与宿主竞争的 Pi runtime 副本.
+[package.json](../../../../package.json) 通过 pi.extensions 指向 src/index.ts, npm 包白名单包含 src、README、CHANGELOG、LICENSE. Pi agent-core/AI/coding-agent/TUI 与 TypeBox 是 peer dependencies, 同时为本仓库开发验证固定 Pi 0.85.1. Bun lockfile 固定依赖图, 本地不构建一个与宿主竞争的 Pi runtime 副本. [CHANGELOG](../../../../CHANGELOG.md) 记录版本能力与升级代价.
 
 兼容范围由 package peer range 表达, 开发测试针对 lockfile 实际版本. 核心升级点使用原生 Pi scopedModels、model.maxTokens、document/dock 和 TypeBox API; 私有 retry classifier/layout 仍有专门契约测试. 通过当前版本检查不能推导整个 semver 范围都兼容.
 
-[Publish workflow](../../../../.github/workflows/publish.yml) 只对 v* tag 运行, 校验 tag 与 package version 一致, 使用 frozen lockfile, 检查类型/全量测试/pack dry-run, 再通过 GitHub OIDC 和 npm Trusted Publishing 发布. Node 24 与固定 npm CLI 用于发布环境, 不依赖开发机长寿命 NPM_TOKEN. 标签不可变及发布前条件由 [release procedure](../../../../docs/releasing.md) 统一维护, 本文不复制操作步骤.
+[Publish workflow](../../../../.github/workflows/publish.yml) 只对 v* tag 运行, 校验 tag 与 package version 一致, 使用 frozen lockfile, 检查类型、lint、Notes、全量测试和 pack dry-run, 再通过 GitHub OIDC 和 npm Trusted Publishing 发布. Node 24 与固定 npm CLI 用于发布环境, 不依赖开发机长寿命 NPM_TOKEN. 标签不可变及发布前条件由 [release procedure](../../../../docs/releasing.md) 统一维护, 本文不复制操作步骤.
 
 ## Alternatives considered
 
@@ -30,4 +30,4 @@ tag/version/lockfile/发布检查集中到 workflow, 但 npm publisher 设置和
 
 ## Verification
 
-生产和测试 typecheck 检查当前依赖 API, [Pi retry compatibility](../../../../test/scenarios/runtime.test.ts)、[real Pi session scenarios](../../../../test/scenarios/runtime.test.ts) 与 [navigator lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 检查重要适配点. 实际 publish/pack 属于发布流程, 文档验证不假装完成 npm 外部发布验证.
+生产和测试 typecheck 检查当前依赖 API, [real Pi session scenarios](../../../../test/scenarios/runtime.test.ts) 与 [navigator lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 检查重要适配点. Test 与 Publish workflow 都检查 npm pack dry-run; 打包内容检查不表示已经发布到 npm.

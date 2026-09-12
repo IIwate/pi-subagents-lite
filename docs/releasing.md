@@ -4,7 +4,7 @@
 
 ## Prepare and publish
 
-1. Set the package version and prepare release notes describing final user-visible features and breaking changes. Fold intermediate fixes, tests, and superseded implementations into the feature they completed.
+1. Set the package version and update [CHANGELOG.md](../CHANGELOG.md) with final user-visible features and breaking changes. Fold intermediate fixes, tests, and superseded implementations into the feature they completed.
 2. Before tagging, confirm that the release commit is on `origin/main`, the working tree is clean, the changelog is approved, and the normal [Test workflow](../.github/workflows/test.yml) passes for that commit.
 3. Create and push the annotated tag. Replace `<version>` with the package version:
 
@@ -13,7 +13,7 @@
    git push origin v<version>
    ```
 
-4. Check the Publish workflow result. It verifies the tag/version match, installs with the lockfile, checks production and test types, runs the full suite, and performs an npm package dry run before publishing.
+4. Check the Publish workflow result. It verifies the tag/version match, installs with the lockfile, checks production and test types, lint, and Notes, runs the full suite, and performs an npm package dry run before publishing.
 
 Never move or force-push a release tag. Rerun a failed workflow only after confirming npm has not published that version; code fixes require a new version and tag.
 

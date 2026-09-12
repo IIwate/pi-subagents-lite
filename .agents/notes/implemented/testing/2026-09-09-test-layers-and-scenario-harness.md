@@ -13,6 +13,7 @@ Pure delivery formatting, selector navigation, and manager/coordinator lifecycle
 - Offline provider fixtures supply responses and failures to the real Pi agent loop; rendering tests supply navigation snapshots. Scheduling, retries, and delivery follow the production paths. Fixture gates control when a provider response becomes available and release during teardown. [Runtime scenarios](../../../../test/scenarios/runtime.test.ts) verify failure, explicit continuation, and the resulting durable output.
 - [vitest.config.mts](../../../../vitest.config.mts) defines disjoint projects named `unit` and `scenarios`. `bun run test:unit` and `bun run test:scenarios` select one layer; `bun run test` includes both. Scenarios run offline and do not provide physical terminal or live provider coverage.
 - [tsconfig.test.json](../../../../tsconfig.test.json) includes every test and fixture through `test/**/*.ts`, plus production code and Vitest configuration. Active Notes link to the responsible test layer. The relative-link gate checks targets throughout the repository, including test files. CI checks both layers in normal and fixed-seed shuffled runs on Linux and Windows; publishing checks their types and runs the full suite.
+- [ESLint](../../../../eslint.config.mjs) applies recommended correctness rules to production code, tests, and Vitest configuration with zero warnings allowed. TypeScript owns unused-symbol checks. Host adapters and test doubles retain explicit `any`, setup callbacks retain forward declarations, and terminal protocol code and its tests permit control-character regexes. These exceptions preserve their respective runtime and verification boundaries.
 
 ## Alternatives considered
 
@@ -27,6 +28,7 @@ Pure delivery formatting, selector navigation, and manager/coordinator lifecycle
 ## Verification
 
 - `bun run typecheck` and `bun run typecheck:test` check production, tests, fixtures, and project configuration.
+- `bun run lint` checks the configured correctness rules with `--max-warnings 0`.
 - `bun run test:unit` covers module invariants; `bun run test:scenarios` covers composition and external resource boundaries. `bun run test --sequence.shuffle --sequence.seed=73021` exercises both layers with shuffled collection and execution.
 - `npm run verify-notes` checks Note structure, repository-relative links, source anchors, document code, and type equivalence.
 - [note-links.test.ts](../../../../test/scenarios/notes/note-links.test.ts) exercises a missing test-file link and its valid replacement against the actual tree gate.
