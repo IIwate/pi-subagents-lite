@@ -10,7 +10,7 @@ Status: implemented
 
 [ExtensionRuntime](../../../../src/runtime.ts) 是每次扩展激活的组合根. [注册](../../../../src/registration.ts) 与 [事件](../../../../src/events.ts) 的闭包捕获所属实例, catalogue、ConfigStore、TaskEngine、Native Session 仓库、导航 Source 和 PiScreen 由该实例管理. 父会话 ID 与文件身份在 session_start 绑定, 工具回调在入口及异步资源交接处核对所属会话.
 
-原生 Session/Harness 由扩展拥有, 官方 Pi 的父会话仍由宿主拥有. [执行与交付 Adapter](2026-09-11-native-execution-and-parent-delivery-adapters.md) 是正式 Agent 工具入口; [NavigationSource](2026-09-11-declarative-navigation-and-input-actions.md) 只提供展示值与动作. 模型授权在资源准备前完成, 已接受的 prompt、模型身份、thinking、工具集合和运行预算保持固定.
+原生 Session/Harness 由扩展拥有, 官方 Pi 的父会话仍由宿主拥有. [执行与交付 Adapter](2026-09-11-native-execution-and-parent-delivery-adapters.md) 是正式 Agent 工具入口; [NavigationSource](2026-09-11-declarative-navigation-and-input-actions.md) 只提供展示值与动作. 模型授权在资源准备前完成, 已接受的 prompt、模型身份、thinking、工具授权上界和运行预算保持固定.
 
 ## Persistence and discovery
 
@@ -60,7 +60,7 @@ Steer 和 FollowUp 保持控制模式. Takeover 持久改为 manual 并解除前
 
 同进程可以建立多个独立 Runtime. 配额、目录、配置更新、任务结果和关闭仅影响所属实例. 文件与真实执行各自有所有者, reload 不依赖可变业务单例.
 
-PiResources 仍受当前官方 Pi 的工具与 hook API 约束; 固定策略后的模型、工具集合和结构性 session 操作不能由子扩展改写. 不响应关闭的第三方工具或 shutdown handler 会延长释放等待, 不用提前释放配额伪装资源已退出. 未确认 outbox 继续保留, 原生与父会话之间没有跨文件原子事务.
+PiResources 仍受当前官方 Pi 的工具与 hook API 约束; 固定策略后的模型、工具授权上界和结构性 session 操作不能由子扩展改写. 当前可用工具是该上界内的原生配置子集, 动态选择与 hook 错误边界由 [资源门禁](2026-09-10-isolated-child-resources-and-tool-gates.md) 维护. 不响应关闭的第三方工具或 shutdown handler 会延长释放等待, 不用提前释放配额伪装资源已退出. 未确认 outbox 继续保留, 原生与父会话之间没有跨文件原子事务.
 
 ## Verification
 

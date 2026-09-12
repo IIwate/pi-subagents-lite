@@ -1,8 +1,8 @@
-import { globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
 import { ExtensionRuntime } from "../../src/runtime.js";
 import { registerTools } from "../../src/registration.js";
 import { setupEventListeners } from "../../src/events.js";
@@ -295,6 +295,100 @@ describe("ExtensionRuntime ownership", () => {
     expect(diagnostics).toHaveBeenCalled();
     const result = await executeAgentStatusTool(replacement, "status", { agent_id: task.taskId }, undefined, undefined, ctx);
     expect(result.content[0].text).toContain("Persistent resource result");
+  });
+
+  it("filters child tools within the accepted ceiling before requests and restores the saved subset", async () => {
+    const parent = await host("tool-filter", "tools: [read, probe/ask_user_question]\nextensions: [probe]\nskills: false");
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "input.txt"), "Readable without UI");
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `export default function (pi) {
+      pi.registerTool({ name: "ask_user_question", label: "Ask", description: "Ask through the UI", parameters: { type: "object", properties: {} },
+        execute: async () => ({ content: [{ type: "text", text: "Question asked" }], details: {} }) });
+      pi.on("before_agent_start", (_event, ctx) => {
+        const active = pi.getActiveTools();
+        if (!ctx.hasUI) pi.setActiveTools(active.filter(name => name !== "ask_user_question"));
+        pi.setActiveTools([...pi.getActiveTools(), "write", "Agent", "unknown_tool"]);
+      });
+    }`);
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("read", { path: "input.txt" }), { stopReason: "toolUse" }); },
+      request => { requests.push(request); return fauxAssistantMessage("Filtered child result"); },
+    ]);
+    const task = await spawn(parent, "Read the file", false);
+    expect(requests.map(request => request.tools?.map(tool => tool.name))).toEqual([["read"], ["read"]]);
+    expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Readable without UI") })]) }));
+    expect(task.policy.tools).toEqual(["read", "ask_user_question"]);
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.engine.get(task.taskId).policy.tools).toEqual(task.policy.tools);
+    parent.worker.setResponses([request => { requests.push(request); return fauxAssistantMessage("Restored filtered result"); }]);
+    await replacement.engine.continue(task.taskId, { text: "Continue with the filtered tools" });
+    await replacement.engine.wait(task.taskId);
+    expect(requests.at(-1)!.tools?.map(tool => tool.name)).toEqual(["read"]);
+    expect(warnings).not.toHaveBeenCalled();
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("reports child hook failures while preserving tool execution and durable delivery", async () => {
+    const parent = await host("hook-errors", "tools: [read]\nextensions: [probe]\nskills: false");
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "input.txt"), "Read after a hook failure");
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `export default function (pi) {
+      pi.on("before_agent_start", () => { throw new Error("Optional startup hook failed"); });
+      pi.on("tool_result", () => { throw new Error("Optional result hook failed"); });
+    }`);
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      fauxAssistantMessage(fauxToolCall("read", { path: "input.txt" }), { stopReason: "toolUse" }),
+      request => { requests.push(request); return fauxAssistantMessage("Result after child hook errors"); },
+    ]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Child result received")]);
+    const task = await spawn(parent); await settled(parent.runtime, task.taskId);
+    await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false }));
+    expect(warnings).toHaveBeenCalledWith(expect.stringContaining("Optional startup hook failed"));
+    expect(warnings).toHaveBeenCalledWith(expect.stringContaining("Optional result hook failed"));
+    expect(resultEntries(parent)).toHaveLength(1);
+    expect(readFileSync(parent.session.sessionManager.getSessionFile()!, "utf8")).toContain("Result after child hook errors");
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("keeps child state write failures fatal to tool execution and resource flushing", async () => {
+    const parent = await host("write-error", "tools: [probe/inspect]\nextensions: [probe]\nskills: false");
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `import { writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      export default function (pi) {
+        pi.on("before_agent_start", () => pi.appendEntry("probe.state", { count: 1 }));
+        pi.registerTool({ name: "inspect", label: "Inspect", description: "Record a tool effect", parameters: { type: "object", properties: {} },
+          execute: async (_id, _args, _signal, _update, ctx) => {
+            writeFileSync(join(ctx.cwd, "executed.txt"), "Tool executed");
+            return { content: [{ type: "text", text: "Tool executed" }], details: {} };
+          } });
+      }`);
+    const writeFailure = new Error("Child state persistence failed");
+    const attach = PiResources.prototype.attach;
+    vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, childHarness, lane, store) {
+      await attach.call(this, childHarness, lane, store);
+      vi.spyOn(store.session, "setValue").mockRejectedValue(writeFailure);
+    });
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      fauxAssistantMessage(fauxToolCall("inspect", {}), { stopReason: "toolUse" }),
+      request => { requests.push(request); return fauxAssistantMessage("Tool execution was blocked"); },
+    ]);
+    await spawn(parent, "Attempt the tool after saving state", false);
+    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "inspect", isError: true,
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining(writeFailure.message) })]) }));
+    expect(existsSync(join(parent.directory, "executed.txt"))).toBe(false);
+    await expect(parent.runtime.dispose()).rejects.toThrow("cleanup failed");
   });
 
   it("persists an explicit stop separately from a turn-budget abort", async () => {

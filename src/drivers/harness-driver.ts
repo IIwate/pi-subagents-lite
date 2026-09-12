@@ -108,9 +108,10 @@ export class HarnessDriver implements ExecutionDriver {
       harness = attached.harness;
       const lane = await harness.lane(store.binding.taskId, context);
       const configured = await lane.getModel(context);
+      const activeTools = await lane.getActiveTools(context);
       if (configured?.provider !== policy.model.provider || configured.id !== policy.model.id
         || await lane.getThinkingLevel(context) !== policy.thinkingLevel
-        || JSON.stringify(await lane.getActiveTools(context)) !== JSON.stringify(policy.tools)) {
+        || activeTools.some(name => !policy.tools.includes(name))) {
         throw new Error("Native lane configuration differs from its accepted policy");
       }
       const driver = new HarnessDriver(store, harness, lane, env, options.piResources);

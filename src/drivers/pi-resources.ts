@@ -128,7 +128,7 @@ export class PiResources {
     } catch (error) { await resources.close(); throw error; }
   }
 
-  get toolNames(): readonly string[] { return this.activeTools; }
+  get toolNames(): readonly string[] { return this.tools.map(tool => tool.name); }
 
   private bind(): void {
     const { cwd, policy, restored, model, thinking, parent } = this.options;
@@ -143,7 +143,9 @@ export class PiResources {
       return typeof member === "function" ? member.bind(this.view) : member;
     } });
     this.runner = new ExtensionRunner(loaded.extensions, loaded.runtime, cwd, view, new ModelRegistry(this.models));
-    this.stops.push(this.runner.onError(error => { this.writeError = new Error(`Child extension ${error.event}: ${error.error}`); }));
+    this.stops.push(this.runner.onError(error => {
+      this.warn(`Child extension ${error.extensionPath} (${error.event}): ${error.error}`);
+    }));
     this.activeTools = policy?.registeredTools.filter(name => !EXCLUDED_TOOL_NAMES.includes(name)) ?? [...restored!.policy.tools];
     const unsupported = () => { throw new Error("Child extensions cannot change the accepted execution policy"); };
     this.runner.bindCore({
@@ -168,7 +170,12 @@ export class PiResources {
       getSessionName: () => this.view.getSessionName(), setLabel: (id, label) => { this.assertAttached(); this.enqueue(() => this.harness!.setLabel(id, label, context)); },
       getActiveTools: () => [...this.activeTools],
       getAllTools: () => [...this.definitions.values()].map(tool => ({ ...tool, sourceInfo: { source: "extension", scope: "temporary", origin: "top-level", path: cwd } })),
-      setActiveTools: names => { if (this.store) unsupported(); this.activeTools = names.filter(name => !EXCLUDED_TOOL_NAMES.includes(name)); },
+      setActiveTools: names => {
+        this.assertOpen();
+        const active = names.filter(name => !EXCLUDED_TOOL_NAMES.includes(name) && (!this.store || this.store.binding.policy.tools.includes(name)));
+        this.activeTools = active;
+        if (this.lane) this.enqueue(() => this.lane!.setActiveTools(active, context));
+      },
       refreshTools: () => { if (this.store) unsupported(); this.collectDefinitions(); }, getCommands: () => [],
       setModel: unsupported, getThinkingLevel: () => thinking, setThinkingLevel: unsupported,
     }, {
@@ -199,6 +206,7 @@ export class PiResources {
       executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
       execute: async (id, args, update, _toolContext, _invocation, callContext) => {
         this.assertOpen(); await this.flush();
+        if (!this.activeTools.includes(tool.name)) throw new Error(`Tool is not active: ${tool.name}`);
         const result = await tool.execute(id, args, callContext.abortSignal, update, this.runner.createContext());
         await this.flush(); return result;
       },
@@ -207,9 +215,10 @@ export class PiResources {
   }
 
   async attach(harness: AgentHarness<ExecutionToolContext>, lane: AgentLane, store: NativeTaskStore): Promise<void> {
-    this.harness = harness; this.lane = lane; this.store = store;
     const watch = await lane.watch(context);
+    this.harness = harness; this.lane = lane; this.store = store;
     this.snapshot = watch.snapshot;
+    this.activeTools = [...watch.snapshot.configuration.activeToolNames];
     this.stops.push(() => watch.unsubscribe());
     watch.start(async event => {
       if (this.closing) return;
@@ -241,6 +250,8 @@ export class PiResources {
     this.stops.push(harness.hooks.on("before_run", async event => {
       const text = event.prompt.flatMap(message => "content" in message ? [typeof message.content === "string" ? message.content : extractText(message.content)] : []).join("\n");
       const result = await this.runner.emitBeforeAgentStart(text, undefined, this.systemPrompt, { cwd: this.options.cwd, selectedTools: this.activeTools });
+      // The first native checkpoint must capture tool filtering performed by child hooks.
+      await this.flush();
       if (result?.systemPrompt) this.systemPrompt = result.systemPrompt;
       return result?.messages ? { messages: result.messages.map(message => ({ ...message, role: "custom" as const, timestamp: Date.now() })) } : undefined;
     }));

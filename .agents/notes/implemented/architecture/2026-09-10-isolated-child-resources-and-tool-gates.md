@@ -28,17 +28,23 @@ export interface AcceptedRunPolicy {
 
 [PiResources](../../../../src/drivers/pi-resources.ts) 为子任务加载独立的 ModelRuntime、ExtensionRunner 和官方 Pi 工具. 父当前分支中各 customType 的最后状态经过独立复制, 子侧修改保存在原生 Session values. 父 conversation 不进入子模型请求; 扩展读取的同步 SessionManager 是原生消息及 custom state 的投影.
 
-extensions 的数组按扩展名过滤, tools 的数组支持 ext/* 展开; false 表达空集合, whitelist 优先于对应 blacklist. session_start 后收集延迟注册工具, 最终允许集合既是 Harness 的注册集合也是 activeToolNames. Agent 始终排除, 本扩展不参加子资源的 session_start, 因而没有递归 Runtime 初始化.
+extensions 的数组按扩展名过滤, tools 的数组支持 ext/* 展开; false 表达空集合, whitelist 优先于对应 blacklist. session_start 后收集延迟注册工具, 最终允许集合成为 Harness 的注册集合和 TaskPolicy.tools 授权上界. Agent 始终排除, 本扩展不参加子资源的 session_start, 因而没有递归 Runtime 初始化.
+
+子扩展的 setActiveTools 只选择已接受工具集合内的名字, 未授权名字及内置排除工具被过滤. 当前 activeTools 独立于注册集合和冻结策略, 通过原生 Lane 配置持久化; reload 校验当前集合是授权上界的子集. before_agent_start 完成后先 flush 配置写入, 再由原生 checkpoint 捕获请求工具集合. 工具执行前再次检查当前可用集合, 覆盖请求发出后工具被隐藏的情况.
 
 默认工具采用宿主 defaultTools 或内建默认集合. 内建 Explore 按 Windows Bash 可用性和宿主 PowerShell 偏好调整, 显式工具名单保留其含义. shell 工具本身具有文件写入能力, 提示中的只读职责不构成操作系统 sandbox.
 
-before_agent_start、context、Provider payload/headers/response、tool_call/tool_result 和 message_end 由 Adapter 接到原生 hook. 子扩展不能修改已接受的模型、thinking 或工具集合. 关闭时发送子 extension shutdown 并释放订阅. 选定扩展路径随 TaskBinding 保存, 恢复按这些路径加载; 资源不可用时保留数据并报告错误.
+before_agent_start、context、Provider payload/headers/response、tool_call/tool_result 和 message_end 由 Adapter 接到原生 hook. 子扩展不能修改已接受的模型、thinking 或工具授权上界. 关闭时发送子 extension shutdown 并释放订阅. 选定扩展路径随 TaskBinding 保存, 恢复按这些路径加载; 资源不可用时保留数据并报告错误.
+
+ExtensionRunner 报告的普通 hook 异常携带扩展路径和事件名进入 warning, 不写入 writeError. 原生工具调用 hook 的显式 block 或抛错仍拒绝该次工具调用. 原生状态写入及快照同步失败继续保留在 writeError 中, flush 和工具执行不会把失败当作成功.
 
 ## Alternatives considered
 
 - **出队重新读取当前定义和授权.** 可让撤销立即覆盖等待任务, 但改变已接受调用的模型、工具或 prompt 模式. 当前快照选择执行可预测性; 即时撤销需要独立产品决定.
 - **复制父 conversation 或 fork 完整 session.** 能继承充分上下文, 但违背独立委派, 增加 token 并可能重复处理父任务. 当前只继承扩展 custom state.
 - **始终固定 registry allowlist.** 能在 Pi 最底层限制工具, 但 wildcard 无法预知 `session_start` 新工具. 始终取消 gate 又会削弱明确受限 Agent; 当前按策略区分, bind 后再过滤.
+- **拒绝任务接受后的全部工具选择变化.** 冻结实现简单, 可以阻止越权增加工具, 但也拒绝无 UI 时隐藏交互工具等常规扩展行为. 固定授权上界、原生可用子集和执行前检查分别承担权限与动态选择.
+- **将所有 hook 异常视为持久化失败.** 可以保守地停止后续工作, 但普通扩展异常并不证明状态写入失败, 共享故障标记会阻断其他正常工具. hook 诊断与原生写入失败各自遵循所属边界.
 - **维护一套扩展名注册表或无条件切换 PowerShell.** 前者需同步 Pi 安装布局, 后者会改写显式工具选择及 shell 语法. 当前复用已加载扩展信息和宿主能力.
 
 ## Consequences
@@ -54,4 +60,4 @@ prompt 正文、技能和上下文在任务发布前准备, 原生队列保存�
 
 ## Verification
 
-[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求 hook 和缺资源时的数据读取.
+[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求工具过滤、可用子集恢复、hook 异常隔离和缺资源时的数据读取. 状态写入失败场景验证工具副作用被阻止且关闭仍报告 flush 失败.
