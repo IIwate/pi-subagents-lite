@@ -1,12 +1,12 @@
+# Agent Note: <标题>
+
+Status: proposed
+
 <!--
   【适用边界提醒】
   1. 此模板仅用于【跨会话异步评审】、【等待人类审阅/架构投票】或【分期工程立项】场景。
   2. 若本次任务为【单轮闭环交付】（代码与决策随同次提交原子合入），请直接使用 templates/implemented.md 以现在时撰写，避免仪式性的写后即搬迁。
 -->
-
-# Agent Note: <标题>
-
-Status: proposed
 
 ## Problem
 

@@ -7,13 +7,15 @@ description: 编写与维护 Agent Notes 架构决策记录。在技术选型、
 
 Agent Notes 是面向 AI Agent 与工程团队的架构决策与防撞护栏体系。用于固化代码与常规文档无法承载的动机、被否决方案以及验证基线，与代码变更同一批提交。
 
+先根据当前任务、实现和实测判断方案。Note 记录决定及其成立前提；需求或证据改变前提时重新评估，不用旧记录否决新目标。本 Skill 不增加审批流程，也不授予提交、推送或发布权限。
+
 ## 核心工程纪律
 
 1. 优先就地同步事实
 修改既有模块、路径迁移、包重命名或参数默认值调整时，在同一个提交中直接更新持有该决定的既有 Note，保持其陈述与代码现状一致。严禁在文末追加流水账式的修改历史。详见 [when-to-write.md](references/when-to-write.md) 与 [implemented/AGENTS.md](../../notes/implemented/AGENTS.md)。
 
 2. 决策反转需立新篇
-就地修改仅限于事实落地形态的更新。若技术选型或架构原则发生反转，必须新建 Note 并建立双向交叉链接；被完全取代的旧 Note 依据 [archiving.md](references/archiving.md) 规则移入 `archived/`。
+同一决定的落地形态就地更新；技术选型或架构原则改变时新建 Note。部分取代时双方说明各自范围；完全取代时用归档命令的 `--replacement` 生成双向关系并整理链接，先预览再封印。具体操作见 [archiving.md](references/archiving.md)。
 
 3. 源码入口反向锚点（单一主宿主规则）
 凡涉及架构决策的核心代码入口，遵循“单一主宿主（Single Primary Host）”原则保留一行反向注释（原则上一篇 Note 仅对应源码中唯一一处锚点，严禁全库散弹式打标）：
@@ -23,7 +25,7 @@ Agent Notes 是面向 AI Agent 与工程团队的架构决策与防撞护栏体�
 ```ts
 // Note: 见 .agents/notes/implemented/<class>/<filename>.md
 ```
-门禁脚本 `verify-doc-refs` 会静态扫描全库源码注释，杜绝死链与事实漂移。
+`verify-doc-refs` 检查扫描到的源码引用目标是否存在。锚点唯一性、归属是否合理和文字事实仍由维护者判断。
 
 4. 强制反稻草人备选
 每篇 Note 必须包含 `## Alternatives considered` 章节。必须包含真实对比过的替代路径，必须包含维持现状或不做的选项，并陈述对手方案的最强论据后再予以否定。自检标准见 [quality-gate.md](references/quality-gate.md)。
@@ -35,13 +37,13 @@ Note 中的代码块实行三级分层防护，严禁为迎合门禁而人为捏
 - **伪代码/草稿**：显式标注 ````ts ignore-check```` 跳过类型检查。详见 [verification.md](references/verification.md)。
 
 6. 路径即状态与无中心索引
-目录结构编码状态与类别，禁止使用集中的 `INDEX.md`，通过相对 Markdown 链接（例如 `[topic](../../implemented/architecture/yyyy-mm-dd-xxx.md)`）进行交叉引用，根除多分支并发合并冲突。
+目录结构编码状态与类别，禁止使用集中的 `INDEX.md`，通过相对 Markdown 链接进行交叉引用。需要定位影响范围时用 `note-refs` 动态查询入站、出站与源码引用。
 
 7. 严格时态隔离
 `implemented/` 下严格使用现在时描述已落地的客观事实，严禁出现 `Proposal`、`Plan`、`Acceptance criteria` 等将来时口吻。行文规范见 [prose-checklist.md](references/prose-checklist.md)。
 
 8. 尊重项目定制与受管围栏隔离
-宿主项目根目录 `AGENTS.md` / `CLAUDE.md` 中的 `<!-- BEGIN WRITE-NOTES GUARDRAILS -->` 至 `<!-- END WRITE-NOTES GUARDRAILS -->` 属于脚手架受管区；围栏之外属于用户与项目的专属领地（如团队定制规则、包管理规范、部署流水线约束等）。Agent 与更新工具严禁改动围栏外的任何内容，严禁将用户定制规则视为“规范漂移”而自作主张抹除。
+安装、更新本 Skill 或维护脚手架时，根 `AGENTS.md` / `CLAUDE.md` 只更新 `<!-- BEGIN WRITE-NOTES GUARDRAILS -->` 与 `<!-- END WRITE-NOTES GUARDRAILS -->` 之间的受管区，保留围栏外项目内容。正常业务开发中，经当前任务授权的目录地图、架构指针和项目规则维护遵循项目约定，不受脚手架更新边界限制。
 
 9. 绝对免除边界（严禁为文档建 Note）
 Note 的定位是固化**代码与常规文档无法承载的架构动机与防撞护栏**。纯文档变更（README、用户指南、API 文档润色、错别字修正与排版）、注释微调、单测补充、常规依赖升级及非架构性日常缺陷修复，属于免除范围，直接提交产物即可，**绝对严禁为此新建 Note**（文档本身已能自圆其说，绝不为文档再造元文档）。
@@ -56,7 +58,7 @@ Note 的定位是固化**代码与常规文档无法承载的架构动机与防�
 - `proposed/`：仅用于**跨轮次/需异步评审**的方案与权衡（如等待人类审阅、分期工程立项、探索性 PoC），经评审确认后施工。模板见 [templates/proposed.md](../../notes/templates/proposed.md)。
 - `implemented/`：已落地的决策事实，与代码原子提交。**单轮闭环交付（随代码同批交付）直接在此以现在时编写**，免除写 proposed 再移动的摩擦。模板见 [templates/implemented.md](../../notes/templates/implemented.md)，纪律见 [implemented/AGENTS.md](../../notes/implemented/AGENTS.md)。
 - `rejected/`：被否决的方案，冻结在此并注明原因，防止后续反复提议已被证伪的路线。模板见 [templates/rejected.md](../../notes/templates/rejected.md)。
-- `archived/`：完全被后续决策取代的历史记录，永久冻结。约束见 [archived/AGENTS.md](../../notes/archived/AGENTS.md)。
+- `archived/`：完成归档和链接整理后的历史记录，正文冻结。登记在 manifest 中的文件由 `verify-archives` 校验内容哈希，历史 API 和正文链接不参与当前代码门禁。约束见 [archiving.md](references/archiving.md)。
 
 ### 6 大分类
 
@@ -109,7 +111,7 @@ Status: <状态>
 在项目根目录下通过脚本执行：
 
 ```bash
-# 全量门禁（目录树、格式与时态、源码反向死链、文档代码编译检查、AST 契约等价校验）
+# 全量门禁（目录树、格式、源码引用、文档编译、AST 契约与归档哈希）
 npm run verify-notes
 
 # 单项校验
@@ -118,12 +120,18 @@ npm run verify-format       # 头块格式、必选章节与时态禁令
 npm run verify-doc-refs     # 源码注释反向死链扫描
 npm run verify-typecheck    # Markdown 代码块真实编译检查
 npm run verify-type-equiv   # 架构核心符号 AST 等价性镜像校验
+npm run verify-archives     # 校验 manifest 登记的归档文件
 
-# 归档操作
-npm run archive-note .agents/notes/implemented/<class>/<filename>.md
+# 只读查询影响范围
+npm run note-refs -- <note-or-source-path>
+
+# 归档预览；确认内容正确后去掉 --dry-run 执行，无需额外审批流程
+npm run archive-note -- <old-note> --replacement <new-note> --dry-run
 
 # 无损升级规范与白盒门禁（更新 Skill/模板/脚本，绝不触碰已有 Note 资产）
 npx write-notes update
+# 同步配套脚本和门禁命令时显式选择
+npx write-notes update --scripts
 ```
 
 技术实现说明见 [verification.md](references/verification.md)。

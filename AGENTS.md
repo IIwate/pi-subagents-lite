@@ -65,5 +65,6 @@ Keep root rules self-contained in one to three sentences and link their detailed
 4. 必须包含 `## Alternatives considered` 章节，且必须包含维持现状选项与对手方案的最强论据。
 5. 源码反向锚点遵循“单一主宿主”原则（类型优先，流程次之，一 Note 一锚点，禁止全库散弹式打标）。
 6. 代码块分级防护：核心契约用 `type-equiv`，普通行为逻辑用标准 ts 编译检查，严禁为凑门禁虚构无意义类型。
-7. 免除范围（严禁建 Note）：纯文档修改（README/Wiki/使用指南/API 文档）、注释调整、单测增补、常规依赖升级与非架构性日常日常修复，直接提交即可，严禁新建任何 Note。
+7. 免除范围（严禁建 Note）：纯文档修改（README/Wiki/使用指南/API 文档）、注释调整、单测增补、常规依赖升级与非架构性日常修复。是否提交遵循当前任务授权。
+8. Note 记录决定及其成立前提。新需求或实测改变前提时重新评估；既有 Note 不替代用户目标，也不自动增加确认流程。
 <!-- END WRITE-NOTES GUARDRAILS -->

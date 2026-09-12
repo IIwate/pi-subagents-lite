@@ -1,112 +1,128 @@
-/**
- * CLI tool to archive an implemented Agent Note with frozen manifest sealing.
- * Usage: npx tsx scripts/archive-agent-note.ts .agents/notes/implemented/<class>/<filename>.md
- */
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
-import { agentNoteRoot, AGENT_NOTE_CLASSES, walkAgentNoteTree } from "./agent-note-tree.ts";
+/** Archive a decision after preparing its final links, replacement metadata, and integrity seal. */
+import { createHash, randomUUID } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
+import { parseArgs } from "node:util";
+import { agentNoteRoot, readArchiveManifest, walkAgentNoteTree } from "./agent-note-tree.ts";
+import { collectReferences, projectRoot, referencesIn, rewriteReferences } from "./note-references.ts";
 
-const targetArg = process.argv[2];
-if (!targetArg) {
-  console.error("Usage: npx tsx scripts/archive-agent-note.ts <path-to-note>");
-  process.exit(1);
+function link(from: string, to: string): string {
+  const url = relative(dirname(from), to).split(sep).map(encodeURIComponent).join("/");
+  return /[()]/.test(url) ? "<" + url + ">" : url;
 }
 
-const targetPath = resolve(process.cwd(), targetArg);
-if (!existsSync(targetPath)) {
-  console.error(`Error: target note not found at ${targetPath}`);
-  process.exit(1);
+function metadata(content: string, lines: string[]): string {
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  return content.replace(/^(Status: implemented)(?:\r?\n|$)/m, (_match, status: string) => status + eol + eol + lines.join(eol) + eol);
 }
 
-const relToRoot = relative(agentNoteRoot, targetPath).replace(/\\/g, "/");
-const segs = relToRoot.split("/");
-
-if (segs[0] !== "implemented" || segs.length !== 3) {
-  console.error(`Error: only notes in .agents/notes/implemented/<class>/ can be archived (got: ${relToRoot})`);
-  process.exit(1);
-}
-
-const [, cls, filename] = segs;
-if (!AGENT_NOTE_CLASSES.includes(cls as any)) {
-  console.error(`Error: unknown class "${cls}"`);
-  process.exit(1);
-}
-
-// 1. Read and update content with Archived line
-const raw = readFileSync(targetPath, "utf8");
-const lines = raw.split("\n");
-const statusIdx = lines.findIndex((l) => l === "Status: implemented");
-if (statusIdx === -1) {
-  console.error("Error: note must contain `Status: implemented` to be archived");
-  process.exit(1);
-}
-
-const today = new Date().toISOString().slice(0, 10);
-// Insert Archived line after Status line if not present
-if (!lines.some((l) => l.startsWith("Archived:"))) {
-  lines.splice(statusIdx + 1, 0, "", `Archived: ${today}`);
-}
-const updatedContent = lines.join("\n");
-
-// 2. Determine archived destination
-const archivedDir = join(agentNoteRoot, "archived", cls);
-mkdirSync(archivedDir, { recursive: true });
-const archivedPath = join(archivedDir, filename);
-
-if (existsSync(archivedPath)) {
-  console.error(`Error: target archived note already exists at ${archivedPath}`);
-  console.error("Refusing to overwrite existing archived note. Please inspect and resolve name collision manually.");
-  process.exit(1);
-}
-
-writeFileSync(targetPath, updatedContent, "utf8");
-renameSync(targetPath, archivedPath);
-console.log(`Moved: ${relToRoot} -> archived/${cls}/${filename}`);
-
-// 3. Update archived/manifest.json with SHA-256 seal
-const manifestPath = join(agentNoteRoot, "archived", "manifest.json");
-interface Manifest {
-  version: 1;
-  files: Record<string, string>;
-}
-let manifest: Manifest = { version: 1, files: {} };
-if (existsSync(manifestPath)) {
+function writeAtomic(file: string, content: string): void {
+  const temporary = file + "." + randomUUID() + ".tmp";
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  } catch (e) {
-    console.warn("Warning: existing manifest.json was invalid, creating fresh");
+    writeFileSync(temporary, content, { encoding: "utf8", flag: "wx" });
+    renameSync(temporary, file);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
-const newArchivedRel = `archived/${cls}/${filename}`;
-const sha256 = `sha256:${createHash("sha256").update(readFileSync(archivedPath)).digest("hex")}`;
-manifest.files[newArchivedRel] = sha256;
-
-// Deterministic sort keys
-const sortedFiles = Object.fromEntries(
-  Object.entries(manifest.files).sort(([a], [b]) => a.localeCompare(b))
-);
-writeFileSync(manifestPath, JSON.stringify({ version: 1, files: sortedFiles }, null, 2) + "\n", "utf8");
-console.log(`Sealed in archived/manifest.json with hash ${sha256.slice(0, 16)}...`);
-
-// 4. Scan inbound links in active notes
-const { notes } = walkAgentNoteTree();
-const inboundFound: string[] = [];
-for (const note of notes) {
-  const noteFullPath = resolve(agentNoteRoot, note.rel);
-  const content = readFileSync(noteFullPath, "utf8");
-  if (content.includes(filename)) {
-    inboundFound.push(note.rel);
+function main(): void {
+  const { values, positionals } = parseArgs({ allowPositionals: true,
+    options: { "dry-run": { type: "boolean" }, replacement: { type: "string" }, help: { type: "boolean", short: "h" } } });
+  if (values.help) {
+    console.log("Usage: npm run archive-note -- <implemented-note> [--replacement <implemented-note>] [--dry-run]");
+    return;
   }
+  if (positionals.length !== 1) throw new Error("Specify one implemented Note. Use --help for usage.");
+  const { notes, errors } = walkAgentNoteTree();
+  if (errors.length) throw new Error(errors.join("\n"));
+  const target = resolve(positionals[0]);
+  const oldRel = relative(agentNoteRoot, target).split(sep).join("/");
+  if (!notes.some(note => note.lifecycle === "implemented" && note.rel === oldRel)) {
+    throw new Error("Expected an implemented Note: " + positionals[0]);
+  }
+  const original = readFileSync(target, "utf8");
+  if (!/^Status: implemented\r?$/m.test(original) || /^Archived:/m.test(original)) throw new Error("Expected an unarchived implemented Note.");
+  const archiveRel = oldRel.replace(/^implemented\//, "archived/");
+  const archive = resolve(agentNoteRoot, archiveRel);
+  if (existsSync(archive)) throw new Error("Archive destination already exists: " + archive);
+
+  const replacement = values.replacement ? resolve(values.replacement) : undefined;
+  if (replacement) {
+    const replacementRel = relative(agentNoteRoot, replacement).split(sep).join("/");
+    if (replacement === target || !notes.some(note => note.lifecycle === "implemented" && note.rel === replacementRel)
+      || !/^Status: implemented\r?$/m.test(readFileSync(replacement, "utf8"))) {
+      throw new Error("The replacement must be a different implemented Note.");
+    }
+  }
+
+  // Validate persisted metadata before changing any files; a bad seal is never reset implicitly.
+  const manifestPath = resolve(agentNoteRoot, "archived/manifest.json");
+  const manifestBefore = existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : undefined;
+  const manifest = readArchiveManifest();
+  for (const [path, expected] of Object.entries(manifest.files)) {
+    const hash = "sha256:" + createHash("sha256").update(readFileSync(resolve(agentNoteRoot, path))).digest("hex");
+    if (hash !== expected) throw new Error("Archive seal mismatch: " + path);
+  }
+  if (Object.hasOwn(manifest.files, archiveRel)) throw new Error("Archive seal already exists: " + archiveRel);
+
+  let archived = rewriteReferences(original, referencesIn(target, original), archive,
+    ref => ref.target === target ? archive : ref.target);
+  archived = metadata(archived, ["Archived: " + new Date().toISOString().slice(0, 10),
+    ...(replacement ? ["Superseded-by: [" + relative(projectRoot, replacement) + "](" + link(archive, replacement) + ")"] : [])]);
+  const changes = new Map<string, { before: string; after: string }>();
+  const incoming = collectReferences().filter(ref => ref.file !== target && ref.target === target);
+  for (const file of new Set(incoming.map(ref => ref.file))) {
+    const before = readFileSync(file, "utf8");
+    const after = rewriteReferences(before, incoming.filter(ref => ref.file === file), file,
+      ref => ref.kind === "source" && replacement ? replacement : archive);
+    changes.set(file, { before, after });
+  }
+  if (replacement) {
+    const before = changes.get(replacement)?.before ?? readFileSync(replacement, "utf8");
+    const current = changes.get(replacement)?.after ?? before;
+    const after = metadata(current, ["Supersedes: [" + oldRel + "](" + link(replacement, archive) + ")"]);
+    changes.set(replacement, { before, after });
+  }
+  manifest.files[archiveRel] = "sha256:" + createHash("sha256").update(archived).digest("hex");
+  manifest.files = Object.fromEntries(Object.entries(manifest.files).sort(([a], [b]) => a.localeCompare(b)));
+  const manifestAfter = JSON.stringify(manifest, null, 2) + "\n";
+
+  console.log((values["dry-run"] ? "Preview" : "Archive") + ": " + oldRel + " -> " + archiveRel);
+  for (const ref of incoming) console.log("Update reference: " + relative(projectRoot, ref.file) + ":" + ref.line);
+  if (replacement) console.log("Replacement: " + relative(projectRoot, replacement));
+  console.log("Seal: " + relative(projectRoot, manifestPath));
+  if (values["dry-run"]) return;
+
+  mkdirSync(dirname(archive), { recursive: true });
+  let created = false;
+  const written: string[] = [];
+  let manifestWritten = false;
+  try {
+    // Retain the original until the archive, references, and manifest have all been written.
+    const file = openSync(archive, "wx");
+    created = true;
+    try { writeFileSync(file, archived, "utf8"); } finally { closeSync(file); }
+    for (const [file, change] of changes) {
+      writeAtomic(file, change.after);
+      written.push(file);
+    }
+    writeAtomic(manifestPath, manifestAfter);
+    manifestWritten = true;
+    unlinkSync(target);
+  } catch (error) {
+    const failures: unknown[] = [error];
+    const undo = (action: () => void) => { try { action(); } catch (failure) { failures.push(failure); } };
+    for (const file of written.reverse()) undo(() => writeAtomic(file, changes.get(file)!.before));
+    if (manifestWritten) undo(() => manifestBefore === undefined ? unlinkSync(manifestPath) : writeAtomic(manifestPath, manifestBefore));
+    if (created) undo(() => unlinkSync(archive));
+    throw new AggregateError(failures, failures.length === 1 ? "Archive failed; written changes were rolled back" : "Archive failed; rollback also failed", { cause: error });
+  }
+  console.log("Archived. Run npm run verify-notes to check the resulting tree and seal.");
 }
 
-if (inboundFound.length > 0) {
-  console.log("\n[Notice] The following active notes reference the archived note:");
-  for (const rel of inboundFound) {
-    console.log(`  - ${rel}`);
-  }
-  console.log("Please review and update their relative markdown links if necessary.");
-} else {
-  console.log("\nNo active notes reference this archived note.");
+try { main(); } catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  if (error instanceof AggregateError) for (const failure of error.errors) console.error(String(failure));
+  process.exitCode = 1;
 }

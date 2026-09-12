@@ -52,13 +52,15 @@
     "test:scenarios": "vitest run --project scenarios --maxWorkers=4",
     "test:parallel": "vitest run",
     "test:watch": "vitest",
-    "verify-notes": "npx tsx scripts/verify-agent-note-tree.ts && npx tsx scripts/verify-agent-note-format.ts && npx tsx scripts/verify-doc-refs.ts && npx tsx scripts/verify-doc-typecheck.ts && npx tsx scripts/verify-type-equiv.ts",
+    "verify-notes": "npx tsx scripts/verify-agent-note-tree.ts && npx tsx scripts/verify-agent-note-format.ts && npx tsx scripts/verify-doc-refs.ts && npx tsx scripts/verify-doc-typecheck.ts && npx tsx scripts/verify-type-equiv.ts && npx tsx scripts/verify-archived-notes.ts",
     "verify-tree": "npx tsx scripts/verify-agent-note-tree.ts",
     "verify-format": "npx tsx scripts/verify-agent-note-format.ts",
     "verify-doc-refs": "npx tsx scripts/verify-doc-refs.ts",
     "verify-typecheck": "npx tsx scripts/verify-doc-typecheck.ts",
     "verify-type-equiv": "npx tsx scripts/verify-type-equiv.ts",
-    "archive-note": "npx tsx scripts/archive-agent-note.ts"
+    "archive-note": "npx tsx scripts/archive-agent-note.ts",
+    "verify-archives": "npx tsx scripts/verify-archived-notes.ts",
+    "note-refs": "npx tsx scripts/note-references.ts"
   },
   "pi": {
     "extensions": [

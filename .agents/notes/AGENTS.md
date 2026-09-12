@@ -9,7 +9,7 @@ Agent Notes 是由 Agent 编写并维护的持久化架构决策记录（RFC）�
 - 若完全取代老方案：将旧 Note 的有效价值吸收进新 Note，老 Note 依据 [archived/AGENTS.md](archived/AGENTS.md) 规则移入 `archived/` 并在同一提交中修复所有入站相对链接。
 - 若部分取代老方案：保持两篇 Note 处于活跃状态并在正文中添加双向相对链接。
 
-2. 现行法律与事实同步
+2. 当前决定与事实同步
 对既有决策的维护严格遵循 [implemented/AGENTS.md](implemented/AGENTS.md) 的就地更新纪律。
 
 3. 严禁改动归档文件

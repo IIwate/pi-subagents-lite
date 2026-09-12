@@ -2,7 +2,7 @@
  * Shared structural source of truth for the Agent Note tree.
  * Portable: resolves .agents/notes from cwd (or AGENT_NOTE_ROOT env).
  */
-import { globSync, readdirSync, existsSync } from 'node:fs'
+import { globSync, readdirSync, existsSync, readFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
 function resolveAgentNoteRoot(): string {
@@ -33,7 +33,30 @@ export interface AgentNote {
   date: string
 }
 
-// Note: see .agents/notes/implemented/process/2026-09-10-note-verification-boundaries.md
+export interface ArchiveManifest {
+  version: 1
+  files: Record<string, string>
+}
+
+/** Validate the persisted seal before either checking or extending it. */
+export function readArchiveManifest(): ArchiveManifest {
+  const file = resolve(agentNoteRoot, 'archived/manifest.json')
+  if (!existsSync(file)) return { version: 1, files: {} }
+  const data: unknown = JSON.parse(readFileSync(file, 'utf8'))
+  if (!data || typeof data !== 'object' || !('version' in data) || data.version !== 1
+    || !('files' in data) || !data.files || typeof data.files !== 'object' || Array.isArray(data.files)) {
+    throw new Error(`Invalid archive manifest: ${file}`)
+  }
+  for (const [path, hash] of Object.entries(data.files)) {
+    const parts = path.split('/')
+    if (parts.length !== 3 || parts[0] !== 'archived' || !(AGENT_NOTE_CLASSES as readonly string[]).includes(parts[1])
+      || !/^\d{4}-\d{2}-\d{2}-[^/\\]+\.md$/.test(parts[2]) || typeof hash !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(hash)) {
+      throw new Error(`Invalid archive manifest entry: ${path}`)
+    }
+  }
+  return data as ArchiveManifest
+}
+
 export function walkAgentNoteTree(): { notes: AgentNote[]; errors: string[] } {
   const notes: AgentNote[] = []
   const errors: string[] = []

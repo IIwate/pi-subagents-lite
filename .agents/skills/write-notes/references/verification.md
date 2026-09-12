@@ -20,11 +20,11 @@
 3. **`verify-doc-refs`**（`scripts/verify-doc-refs.ts`）
    - 静态扫描全库源码（`.ts`, `.py`, `.go`, `.rs`, `.java` 等）中的注释与字符串引用；
    - 确保 `// Note: ... 见 .agents/notes/...` 形式的反向追溯注释全部指向真实存在的 Note；
-   - 配合“单一主宿主（Single Primary Host）”纪律，杜绝全库散弹式打标；
-   - 一旦 Note 被重命名、移动或删除而代码注释未同步更新，CI 强行拦截报错，从物理机制上终结事实漂移。
+   - 检查范围为扫描到的路径是否存在，不判断锚点唯一性、文字事实或架构合理性；
+   - Note 被重命名、移动或删除后，残留的失效源码引用会报错。
 
 4. **`verify-doc-typecheck`**（`scripts/verify-doc-typecheck.ts`）
-   - 提取全库 Note 与文档中的所有 ````ts```` / ````typescript```` 代码块；
+   - 提取活跃 Note 与文档中的 ````ts```` / ````typescript```` 代码块，排除归档目录；
    - 载入宿主项目的 `tsconfig.json` 并调用真实 TypeScript 编译器进行类型检查；
    - 杜绝代码重构后文档中的 API 示例过时腐烂；
    - 适用场景：纯行为逻辑、调用示范、算法说明及无跨模块契约变更的代码块；
@@ -38,14 +38,23 @@
      export interface SessionConfig { ... }
      ```
      ````
-   - 解析代码块与真实源文件的 TypeScript AST 抽象语法树；
+   - 解析代码块与真实源文件的 TypeScript AST 抽象语法树，排除归档目录中的历史契约；
    - 规范化比对字段与结构，一旦源码改动而 Note 未同步，立刻在 CI 中报错，确保架构文档与代码契约绝对一致；
    - **防异味铁律**：若本次变更纯属算法、状态机时序或内部逻辑修复（无新增/修改核心数据结构），使用标准 ````ts```` 走真实类型编译检查即可，**严禁为凑 AST 门禁而凭空捏造无意义类型**（全库无 type-equiv 标记时门禁自动安全放行）。
 
 ## 辅助与运维工具
 
-6. **`archive-agent-note`**（`scripts/archive-agent-note.ts`）
-   - 方案被新决策完全取代时的一键归档命令：插入归档日期行、移动到 `archived/<class>/`、写入 `manifest.json` SHA-256 校验和并提示修复活跃 Note 中的入站相对引用。
+6. **`verify-archived-notes`**（`scripts/verify-archived-notes.ts`）
+   - 校验 manifest 的格式、登记路径、文件存在性和 SHA-256 内容哈希；没有 manifest 时按零登记项通过。
+   - 只保证登记文件的内容一致，不检查历史链接、旧 API 或文字事实；未登记的历史文件不自动补封印。
+
+7. **`archive-agent-note`**（`scripts/archive-agent-note.ts`）
+   - 支持 `--dry-run` 与 `--replacement`，在写入前解析路径、引用和已有 manifest。生成归档日期、替代关系，更新引用并写入封印。
+   - 失败边界和具体命令见 [archiving.md](archiving.md)。
+
+8. **`note-references`**（`scripts/note-references.ts`）
+   - `npm run note-refs -- <note-or-source-path>` 输出 JSON 格式的 incoming/outgoing、文件、行号和目标是否存在。
+   - 动态扫描 Markdown 内联链接、引用定义及源码中的 Note/docs 路径；跳过代码围栏、归档、模板、安装的 Skill 与常见构建/依赖目录，不创建索引。
 
 ## CI 接入建议
 
@@ -54,4 +63,4 @@
 ```bash
 npm run verify-notes
 ```
-（依次执行 tree -> format -> doc-refs -> typecheck -> type-equiv 五重门禁，任何一项失败即红灯阻断）。
+依次执行 tree -> format -> doc-refs -> typecheck -> type-equiv -> archives。格式检查只检查约定的标题与章节，不证明自然语言时态或论证质量。旧项目使用 `write-notes update --scripts` 同步脚本及门禁命令；普通 update 保留项目已有脚本与命令。

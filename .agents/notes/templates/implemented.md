@@ -1,3 +1,7 @@
+# Agent Note: <标题>
+
+Status: implemented
+
 <!--
   【维护提醒】
   1. 现行法律契约：此文件在代码重构、改名或路径变更时，必须同批原子就地更新事实。单轮闭环任务直接在此以现在时编写，免去先 proposed 后搬迁的仪式性摩擦。
@@ -7,10 +11,6 @@
      - 流程次之：若为纯行为/算法/状态机修复，唯一放在顶层门面入口方法上方。
   3. 时态门禁：严禁出现 ## Proposal、## Plan、## Acceptance criteria 等计划态标题。
 -->
-
-# Agent Note: <标题>
-
-Status: implemented
 
 ## Problem
 

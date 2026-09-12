@@ -1,65 +1,45 @@
-# 按需阅读：归档、冻结与 manifest 封印机制
+# 按需阅读: 归档与决策替代
 
-> 提炼自 `deepseek-harness` 的 `dsh-archive-agent-notes` 与 `verify-archived-agent-notes`。收尾、复盘或大版本跃迁时对照；日常改动跳过。
+归档用于已经被取代或只需保留为历史依据的决定. 当前仍指导实现的决定留在 implemented 并就地维护. 新需求改变前提时可以重新判断, 不以记录年龄、长度或“已经稳定”决定是否归档.
 
----
+## 预览与执行
 
-## 1. 何时归档（implemented → archived）
+先完成新决定的内容, 再预览旧 Note 的归档:
 
-严格依据**「未来指导价值（Future Decision Value）」**语义判定，而非单纯以时间长短或字数行数评判：
+```bash
+npm run note-refs -- .agents/notes/implemented/architecture/2026-09-12-old.md
+npm run archive-note -- .agents/notes/implemented/architecture/2026-09-12-old.md --replacement .agents/notes/implemented/architecture/2026-09-12-new.md --dry-run
+```
 
-- **保留在活跃树（`implemented/`）**：
-  只要该决策的决策依据、被否决路线、边界假设、持久化/协议格式、安全规则或重新引入条件，对未来的代码重构与维护仍有指导价值，就继续保留在 `implemented/` 中，并随代码重构一同就地维护。即使篇幅很短，只要定义了核心边界，也必须保留。
-- **移入归档树（`archived/`）**：
-  已彻底落地、逻辑已深度稳定，且未来重构基本不会再推翻或重审该决定的记录；或者被后续大版本架构完全取代（Superseded）的历史 Note。即使篇幅很长，如果只是局部的适配细节或一次性实现，未来指导价值低，也应果断归档。
+预览列出归档目标、需要修改的引用、替代 Note 和 manifest 路径, 不写入文件或创建目录. 同名文件的其他引用以及已经指向归档路径的链接不列为待修复项. 检查内容后去掉 --dry-run 执行即可; 预览不是额外用户审批.
 
-### 校准判据参考
+没有后继决定的历史归档可以省略 --replacement. proposed 中的未采纳提案使用 rejected 或删除, 不交给归档命令.
 
-应当归档的示例：
-- 局部的单次 UI 交互调整；
-- 某一特定外部库参数适配细节，后续重构不再具备架构杠杆；
-- 一次性修补且边界不会复现的历史过程记录。
+## 工具行为
 
-应当保留在活跃树的示例：
-- 事件溯源与会话持久化语义（定义了系统可用性边界）；
-- 跨模块或跨包的核心所有权边界；
-- 显式放弃的特性与其重新引入的前提条件。
+1. 检查源文件、归档目标与可选的 implemented 替代 Note. 目标已存在时拒绝覆盖.
+2. 读取并验证已有 manifest 及其登记文件. 损坏的 JSON、非法路径、缺失文件或哈希不符会在修改前报错, 不重建空 manifest.
+3. 按归档后的目录重写旧 Note 的相对链接, 保留其原来指向的文件和片段. 代码围栏内的示例保持原文.
+4. 添加 Archived 日期. 指定替代 Note 时, 旧记录获得 Superseded-by 链接, 新记录获得 Supersedes 链接, 两者按最终位置生成.
+5. 将其他 Markdown 中指向旧位置的链接改为归档位置, 保留引用历史决定的含义. 源码中的 Note 路径在指定 --replacement 时改指新决定, 否则改指归档记录. 当前行为说明是否也应引用新决定, 仍需根据文字含义维护.
+6. 写入归档、受影响文件和 SHA-256 manifest, 最后移除源位置. 完成后运行 npm run verify-notes.
 
-> 注意：严禁归档 `proposed/` 记录：过时或放弃的提案直接移入 `rejected/` 或物理删除。被否决的 `rejected/` 仅在能阻止一个具有诱惑力的重大错误时保留，若前提已过时则直接删除。
+归档前的链接整理属于移动操作; 完成归档的正文保持冻结. 无需提前手写一条移动后会失效的同目录替代链接. 工具支持 Markdown 内联链接、引用定义、角括号目标和片段, 不作为完整 Markdown parser 使用.
 
----
+## 写入与失败边界
 
-## 2. 归档的标准操作流
+现有文件通过临时文件替换, 源 Note 在其余写入成功前保留. 可捕获的写入失败会尝试恢复已修改文件并报告原因; 恢复失败单独报告.
 
-归档动作将单文件从 `implemented/{class}/...` 移动到 `archived/{class}/...`（注意：省略 `implemented` 目录层级）：
+这不是跨文件原子事务. 进程被强制终止、存储设备故障或并发编辑可能留下未完成操作. 同一仓库的归档顺序执行, 中断后根据原文件、差异和预览检查状态, 不自动删除可能属于其他操作的文件.
 
-1. **移动文件**：
-   ```bash
-   git mv .agents/notes/implemented/architecture/2026-08-18-xxx.md .agents/notes/archived/architecture/2026-08-18-xxx.md
-   ```
-2. **插入归档日期标记**：
-   保留 `Status: implemented` 行，紧随其后插入一行 `Archived: YYYY-MM-DD`，前后保留空行：
-   ```markdown
-   # Agent Note: xxx
+## 归档验证
 
-   Status: implemented
+```bash
+npm run verify-archives
+```
 
-   Archived: 2026-08-31
+archive-note 总会登记归档文件的 SHA-256. verify-archives 检查 manifest 格式、登记路径、文件存在性和内容哈希; 它是新脚手架 verify-notes 的一部分. 没有 manifest 或未登记的历史文件不具有哈希校验保证, 工具不会擅自为旧文件重新建立基线.
 
-   ## Problem
-   ...
-   ```
-   除该标记外，**禁止修改归档正文的任何其他字符**。
-3. **修复入站链接**：
-   全局搜索引用了该 Note 旧路径的 Markdown 相对链接，修改为新归档路径或新取代 Note 路径。
-4. **计算哈希并封印入 `manifest.json`（可选进阶）**：
-   在 `.agents/notes/archived/manifest.json` 中记录该归档文件的 SHA-256 哈希值。一旦封印，后续任何对归档内容的篡改都会在门禁中报警。
+归档正文中的历史链接、格式和旧类型不参与当前 tree、format、文档编译或 AST 契约检查. 内容封印只验证字节一致, 不证明历史结论正确.
 
----
-
-## 3. 永久冻结契约（Frozen Immutable Contract）
-
-一旦进入 `archived/`：
-- **永久只读**：严禁编辑、格式化、更新或移动。
-- **免除日常扫描**：门禁脚本（`verify-agent-note-tree` 和 `verify-agent-note-format`）默认跳过 `archived/` 目录，归档文件的出站链接失效不会阻塞日常 CI 构建。
-- **不可作为当前行为依据**：代码冲突或架构评审时，以 `implemented/` 为现行法律，`archived/` 仅作为历史考据参考。
+旧项目通过 write-notes update --scripts 更新工具和门禁命令. 普通 update 保留项目已有脚本及命令.

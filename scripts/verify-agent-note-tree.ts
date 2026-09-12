@@ -3,41 +3,22 @@
  * Run: npx tsx scripts/verify-agent-note-tree.ts
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { agentNoteRoot, walkAgentNoteTree } from "./agent-note-tree.ts";
+import { referencesIn } from "./note-references.ts";
 
 const { notes, errors } = walkAgentNoteTree();
 
 // Check relative markdown links inside active notes
-const LINK_REGEX = /\[([^\]]+)\]\(([^)]+)\)/g;
-
 for (const note of notes) {
   const noteFullPath = resolve(agentNoteRoot, note.rel);
   const content = readFileSync(noteFullPath, "utf8");
-  let match: RegExpExecArray | null;
-
-  while ((match = LINK_REGEX.exec(content)) !== null) {
-    const rawTarget = match[2]?.trim();
-    if (!rawTarget) continue;
-
-    // Ignore web links, intra-page anchors and ellipsis placeholders
-    if (rawTarget.startsWith("http://") || rawTarget.startsWith("https://") || rawTarget.startsWith("#") || rawTarget.startsWith("mailto:") || rawTarget.includes("…")) {
-      continue;
-    }
-
-    // Strip anchor fragment if present
-    const fileTarget = rawTarget.split("#")[0];
-    if (!fileTarget) continue;
-
-    const resolvedTarget = resolve(dirname(noteFullPath), fileTarget);
-
+  for (const ref of referencesIn(noteFullPath, content)) {
     // Only verify internal links within agentNoteRoot
-    if (!resolvedTarget.startsWith(agentNoteRoot)) {
-      continue;
-    }
-
-    if (!existsSync(resolvedTarget)) {
-      errors.push(`link: ${note.rel} -> "${rawTarget}" target file does not exist`);
+    const target = relative(agentNoteRoot, ref.target);
+    if (target === ".." || target.startsWith(".." + sep) || isAbsolute(target)) continue;
+    if (!existsSync(ref.target)) {
+      errors.push(`link: ${note.rel}:${ref.line} -> "${target}" target file does not exist`);
     }
   }
 }
