@@ -172,11 +172,19 @@ export class PiResources {
       getAllTools: () => [...this.definitions.values()].map(tool => ({ ...tool, sourceInfo: { source: "extension", scope: "temporary", origin: "top-level", path: cwd } })),
       setActiveTools: names => {
         this.assertOpen();
-        const active = names.filter(name => !EXCLUDED_TOOL_NAMES.includes(name) && (!this.store || this.store.binding.policy.tools.includes(name)));
+        const allowed = this.store?.binding.policy.tools ?? (this.toolsReady ? this.toolNames : undefined);
+        const active = names.filter(name => !EXCLUDED_TOOL_NAMES.includes(name) && (!allowed || allowed.includes(name)));
         this.activeTools = active;
         if (this.lane) this.enqueue(() => this.lane!.setActiveTools(active, context));
       },
-      refreshTools: () => { if (this.toolsReady) unsupported(); this.collectDefinitions(); }, getCommands: () => [],
+      refreshTools: () => {
+        this.assertOpen();
+        this.collectDefinitions();
+        if (!this.toolsReady) return;
+        this.collectTools(this.store?.binding.policy.tools ?? this.toolNames);
+        if (this.harness) this.enqueue(() => this.harness!.setTools([...this.tools], context));
+      },
+      getCommands: () => [],
       setModel: unsupported, getThinkingLevel: () => thinking, setThinkingLevel: unsupported,
     }, {
       getModel: () => model, getScopedModels: () => [{ model, thinkingLevel: thinking }],
@@ -194,25 +202,27 @@ export class PiResources {
       if (EXCLUDED_TOOL_NAMES.includes(tool.definition.name)) continue;
       this.safeTools.delete(tool.definition.name);
       this.definitions.set(tool.definition.name, tool.definition);
-      if (!this.options.restored && !this.options.policy?.restrictToRegisteredTools && !this.activeTools.includes(tool.definition.name)) this.activeTools.push(tool.definition.name);
+      if (!this.toolsReady && !this.options.restored && !this.options.policy?.restrictToRegisteredTools
+        && !this.activeTools.includes(tool.definition.name)) this.activeTools.push(tool.definition.name);
     }
   }
 
   private collectTools(names: readonly string[]): void {
-    for (const name of names) {
+    const tools = names.map(name => {
       const tool = this.definitions.get(name);
       if (!tool) throw new Error(`Accepted tool is unavailable: ${name}`);
-      this.tools.push({
-      name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
-      executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
-      execute: async (id, args, update, _toolContext, _invocation, callContext) => {
-        this.assertOpen(); await this.flush();
-        if (!this.activeTools.includes(tool.name)) throw new Error(`Tool is not active: ${tool.name}`);
-        const result = await tool.execute(id, args, callContext.abortSignal, update, this.runner.createContext());
-        await this.flush(); return result;
-      },
-      });
-    }
+      return {
+        name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
+        executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
+        execute: async (id, args, update, _toolContext, _invocation, callContext) => {
+          this.assertOpen(); await this.flush();
+          if (!this.activeTools.includes(tool.name)) throw new Error(`Tool is not active: ${tool.name}`);
+          const result = await tool.execute(id, args, callContext.abortSignal, update, this.runner.createContext());
+          await this.flush(); return result;
+        },
+      } satisfies AgentHarnessTool<ExecutionToolContext>;
+    });
+    this.tools.splice(0, this.tools.length, ...tools);
     this.toolsReady = true;
   }
 
@@ -252,8 +262,9 @@ export class PiResources {
       await this.runner.emit({ type: "session_start", reason: "resume" });
       this.collectDefinitions();
       this.collectTools(store.binding.policy.tools);
-      await harness.setTools([...this.tools], context);
     }
+    // Registration can finish between resource preparation and native attachment.
+    this.enqueue(() => harness.setTools([...this.tools], context));
     this.stops.push(harness.hooks.on("before_drive", async (_event, callContext) => { this.abortSignal = callContext.abortSignal; await refresh(); await this.flush(); }));
     this.stops.push(harness.hooks.on("before_run", async event => {
       const text = event.prompt.flatMap(message => "content" in message ? [typeof message.content === "string" ? message.content : extractText(message.content)] : []).join("\n");

@@ -56,6 +56,8 @@ Native continue 在 accept 新 operation 前预留 Quota. 无容量返回 QuotaU
 
 Source.dispose 释放展示订阅、保留计时器与缓存. TaskEngine 仍拥有任务和原生执行资源. Native source 的 pin/隐藏列表状态属于展示会话; remove 请求人工控制和取消后隐藏投影, 不删除原生持久数据. 十分钟保留窗口仅隐藏已结算投影, pin 暂停剩余时间; 原生数据保持完整.
 
+TaskNavigationSource 在每批异步快照发布前及 listAgents/getRecord 读取时同步修剪超期记录. 构造时的初始刷新和随后逐项发现的恢复任务共用此路径, 超期且未 pin 的旧结果在首次展示时即隐藏. 每分钟的 timer 负责空闲期间的隐藏通知, 不承担初次加载正确性. 读取发现的隐藏通过微任务通知, 避免渲染重入并让页脚和选择状态得到更新; Source 关闭后不再派发通知. 新 operation 重置前一 operation 的隐藏与暂停窗口.
+
 ## Transcript and selection snapshots
 
 [message projection](../../../../src/drivers/message-projection.ts) 在 Adapter 边界提取 text、thinking、工具展示与图片标记, 保留原始正文. HarnessDriver 按不可变 Entry ID 复用消息投影, Source 持有原生观察订阅, View 对消息、theme 和 width 缓存折行.
@@ -80,6 +82,7 @@ PiScreen 保留已验证的 document/dock 结构检查和引用相等恢复, 不
 - **继续把所有输入视为 takeover.** 能立即释放前台等待并停止自动汇报. 但轻量纠偏也会改变自治交付模式. 显式控制动作保持输入和交付意图独立.
 - **撤回后无条件写回当前 editor.** 实现最少, 但异步完成可能落在 Main 或新选中的任务. 保留原目标身份与临时草稿, 由用户明确恢复.
 - **选择器重试按最新 transcript 重新计算.** 可以取得最新输出, 但保存成功回复丢失后会造成重复或内容漂移. 稳定 ID 和已选快照直接表达用户确认.
+- **仅由定时器清理, 或只在构造器调用一次 expire.** 改动和检查次数都最少, 但任务快照是异步加载且逐项恢复的, 构造时列表可以为空. 在发布和读取边界修剪, 才能保证过期历史不进入首次展示, 并覆盖读取发生在下一次 timer 之前的情况.
 
 ## Consequences
 
@@ -90,5 +93,7 @@ PiScreen 保留已验证的 document/dock 结构检查和引用相等恢复, 不
 ## Verification
 
 [Navigator unit tests](../../../../test/unit/ui/navigator/) 维护焦点、输入目标、原文恢复、可见宽度、缓存及宿主组件恢复的断言. [Action ownership](../../../../test/unit/ui/navigation-actions.test.ts) 覆盖已消费输入不重发和跨目标撤回. [Native navigation scenarios](../../../../test/scenarios/ui/task-navigation.test.ts) 从 editor 输入驱动真实 Lane, 检查 Steer/FollowUp、显式接管、原文与预览分离及跨 operation 保存重试.
+
+[展示保留单测](../../../../test/unit/ui/task-source.test.ts) 使用虚拟时钟覆盖初始化已有任务、后续发现旧任务、读取时到期、延迟通知、pin 暂停及新 operation 的展示窗口. [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 从真实原生文件重开已超期任务, 验证初始列表隐藏而执行结果仍能由 AgentStatus 查询.
 
 官方 Pi CLI 0.85.1 的离线 PTY 验证使用独立配置目录和原生 TaskEngine, 覆盖 regular/fullscreen 下的子屏切换、Steer、宿主 FollowUp、Alt+Up 撤回、接管、selector、窗口缩窄、返回 Main 和退出. 验证使用离线 Provider; 不代表在线模型可用性或全部终端/IME 组合.

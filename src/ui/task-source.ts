@@ -29,13 +29,17 @@ export class TaskNavigationSource implements NavigationSource {
   }
 
   listAgents(): readonly NavigationAgent[] {
+    this.expire();
     return [...this.agents.values()].filter(record => !this.hidden.has(record.id)).sort((a, b) =>
       rank[a.lifecycle.status] - rank[b.lifecycle.status]
       || Number(b.lifecycle.pinnedAt !== undefined) - Number(a.lifecycle.pinnedAt !== undefined)
       || (a.execution.settled && b.execution.settled
         ? (b.lifecycle.completedAt ?? 0) - (a.lifecycle.completedAt ?? 0) : a.lifecycle.startedAt - b.lifecycle.startedAt));
   }
-  getRecord(taskId: string): NavigationAgent | undefined { return this.hidden.has(taskId) ? undefined : this.agents.get(taskId); }
+  getRecord(taskId: string): NavigationAgent | undefined {
+    this.expire();
+    return this.hidden.has(taskId) ? undefined : this.agents.get(taskId);
+  }
   transcript(taskId: string): TranscriptSnapshot {
     const snapshot = this.transcripts.get(taskId);
     return { ready: Boolean(snapshot), messages: snapshot?.messages ?? [], streaming: snapshot?.streaming };
@@ -46,7 +50,7 @@ export class TaskNavigationSource implements NavigationSource {
     return () => { this.watchers.delete(taskId); };
   }
 
-  private expire(): void {
+  private expire(notify = true): void {
     let changed = false;
     for (const agent of this.agents.values()) {
       if (!agent.execution.settled || agent.lifecycle.completedAt === undefined || this.pins.has(agent.id) || this.hidden.has(agent.id)) continue;
@@ -54,7 +58,10 @@ export class TaskNavigationSource implements NavigationSource {
       this.hidden.add(agent.id);
       changed = true;
     }
-    if (changed) for (const listener of this.listeners) listener();
+    // Reads can discover expiry while the navigator is rendering; notify after that read completes.
+    if (changed && notify) queueMicrotask(() => {
+      if (!this.disposed) for (const listener of this.listeners) listener();
+    });
   }
 
   refresh(taskId?: string): Promise<void> {
@@ -124,6 +131,7 @@ export class TaskNavigationSource implements NavigationSource {
             });
           }
         }
+        this.expire(false);
         for (const listener of this.listeners) listener();
     }).finally(() => {
       this.refreshing = undefined;

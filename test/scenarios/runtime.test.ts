@@ -261,6 +261,85 @@ describe("ExtensionRuntime ownership", () => {
     expect(parent.errors).toEqual([]);
   });
 
+  it("refreshes accepted tools after asynchronous child registration across reload", async () => {
+    const parent = await host("tool-refresh", "tools: [probe/mcp, probe/hidden]\nextensions: [probe]\nskills: false");
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `export default function (pi) {
+      const initial = { name: "mcp", label: "MCP", description: "Cached MCP metadata", parameters: { type: "object", properties: { stale: { type: "string" } }, required: ["stale"] },
+        execute: async () => ({ content: [{ type: "text", text: "Stale implementation" }], details: {} }) };
+      pi.registerTool(initial);
+      pi.registerTool({ ...initial, name: "hidden" });
+      let connect;
+      let reason;
+      const connected = new Promise(resolve => { connect = resolve; });
+      const initialization = connected.then(() => {
+        pi.registerTool({ ...initial, description: "Connected MCP metadata: " + reason,
+          parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          execute: async (_id, args) => ({ content: [{ type: "text", text: "Connected " + reason + ": " + args.query }], details: {} }) });
+        pi.registerTool({ ...initial, name: "unapproved" });
+        pi.registerTool({ ...initial, name: "Agent" });
+        pi.setActiveTools([...pi.getActiveTools(), "unapproved", "write", "Agent"]);
+      });
+      pi.on("session_start", event => { reason = event.reason; });
+      pi.on("before_agent_start", async () => {
+        pi.setActiveTools(pi.getActiveTools().filter(name => name !== "hidden"));
+        connect();
+        await initialization;
+      });
+    }`);
+    const requests: ProviderContext[] = [];
+    const responses = () => [
+      (request: ProviderContext) => { requests.push(request); return fauxAssistantMessage(fauxToolCall("mcp", { query: "search" }), { stopReason: "toolUse" }); },
+      (request: ProviderContext) => { requests.push(request); return fauxAssistantMessage("Refreshed tool result"); },
+    ];
+    parent.worker.setResponses(responses());
+    const task = await spawn(parent, "Use connected tools", false);
+    expect(task.policy.tools).toEqual(["mcp", "hidden"]);
+    expect(requests[0].tools).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: new",
+      parameters: expect.objectContaining({ required: ["query"] }) })]);
+    expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
+      content: [{ type: "text", text: "Connected new: search" }] }));
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    parent.worker.setResponses(responses());
+    await replacement.engine.continue(task.taskId, { text: "Use refreshed tools after reload" });
+    await replacement.engine.wait(task.taskId);
+    expect(replacement.engine.get(task.taskId).policy.tools).toEqual(task.policy.tools);
+    expect(requests[2].tools).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: resume" })]);
+    expect(requests[3].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
+      content: [{ type: "text", text: "Connected resume: search" }] }));
+    expect(requests.map(request => request.tools?.map(tool => tool.name))).toEqual([["mcp"], ["mcp"], ["mcp"], ["mcp"]]);
+    expect(warnings).not.toHaveBeenCalled();
+    expect(diagnostics).not.toHaveBeenCalled();
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("hides expired native tasks on reload while preserving their saved results", async () => {
+    const parent = await host("expired");
+    parent.worker.setResponses([fauxAssistantMessage("Saved historical result")]);
+    const task = await spawn(parent, "Keep the result available", false);
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    const calls = parent.worker.state.callCount;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 7_200_000);
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.source!.listAgents()).toEqual([]);
+    expect(replacement.source!.getRecord(task.taskId)).toBeUndefined();
+    expect(replacement.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Saved historical result" } });
+    expect(parent.worker.state.callCount).toBe(calls);
+    const status = await executeAgentStatusTool(replacement, "status", { agent_id: task.taskId }, undefined, undefined, ctx);
+    expect(status.content[0].text).toContain("Saved historical result");
+    expect(parent.errors).toEqual([]);
+  });
+
   it("waits for late resource preparation, rejects its publication, and continues cleanup after UI failure", async () => {
     const parent = await host("late");
     const prepared = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
