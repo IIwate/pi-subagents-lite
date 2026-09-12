@@ -14,7 +14,7 @@ import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { buildListTheme, saveSetting } from "./helpers.js";
 import { createNumericSubmenu } from "./submenus/numeric-input.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import type { ThinkingLevel } from "../../types.js";
+import type { ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import { DEFAULT_GRACE_TURNS } from "../../config/config-io.js";
 import type { MenuRuntime } from "./helpers.js";
 

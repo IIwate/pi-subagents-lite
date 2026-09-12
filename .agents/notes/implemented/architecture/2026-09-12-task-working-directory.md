@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-Agent 工具使用可选 cwd 参数. [resolveWorkingDirectory](../../../../src/spawn/working-directory.ts) 在资源准备之前解析路径: 省略时选择父会话目录, 相对路径以父 cwd 为基准, realpath 解析物理路径, stat 验证目录类型. 显式空白或非字符串、缺失路径、非目录和文件系统错误直接拒绝本次调用, 错误包含目标与原因. 执行路径采用宿主原生格式, 不折叠大小写或做 WSL/Windows 路径互转.
+Agent 工具使用可选 cwd 参数. [resolveWorkingDirectory](../../../../src/agents/working-directory.ts) 在资源准备之前解析路径: 省略时选择父会话目录, 相对路径以父 cwd 为基准, realpath 解析物理路径, stat 验证目录类型. 显式空白或非字符串、缺失路径、非目录和文件系统错误直接拒绝本次调用, 错误包含目标与原因. 执行路径采用宿主原生格式, 不折叠大小写或做 WSL/Windows 路径互转.
 
 本决策取代 [同仓 worktree 参数契约](../../archived/architecture/2026-09-09-worktree-path-parameter-naming.md). v3 的公开参数为 cwd, 原生持久策略仍使用既有 TaskPolicy.cwd 字段. 目录有效性与 Git 无关, worktree 作为已有目录使用. full-access 工具能够访问其他位置; cwd 与 realpath 均不构成文件系统 sandbox 或目录权限边界.
 
@@ -46,4 +46,4 @@ Pi 的完整交互式信任解析还包含会话 override 与 project_trust hook
 
 ## Verification
 
-[目录场景](../../../../test/scenarios/spawn/working-directory.test.ts) 覆盖省略、绝对与相对路径、目录别名及无效输入. [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 使用官方资源工厂、真实文件和离线模型, 验证不同仓库及普通目录的并发相对读写、shell/扩展 cwd、技能和项目指令、Pi 保存信任与默认值、排队与原生文件重开、别名改指向、Git 缺失及目标目录失效后的持久结果读取. Windows junction 与工具分支由 Windows CI 执行.
+[目录场景](../../../../test/scenarios/agents/working-directory.test.ts) 覆盖省略、绝对与相对路径、目录别名及无效输入. [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 使用官方资源工厂、真实文件和离线模型, 验证不同仓库及普通目录的并发相对读写、shell/扩展 cwd、技能和项目指令、Pi 保存信任与默认值、排队与原生文件重开、别名改指向、Git 缺失及目标目录失效后的持久结果读取. Windows junction 与工具分支由 Windows CI 执行.

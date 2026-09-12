@@ -1,10 +1,13 @@
-import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import type { ThinkingLevel } from "../types.js";
-import { parseThinkingLevel } from "../utils.js";
+import { getSupportedThinkingLevels, type Model, type ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 
 export const VALID_THINKING_LEVELS = Object.freeze([
   "off", "minimal", "low", "medium", "high", "xhigh", "max",
 ] as const satisfies readonly ThinkingLevel[]);
+
+/** Normalize input before model-aware validation at the Agent entry point. */
+export function parseThinkingLevel(raw: string | undefined): string | undefined {
+  return raw?.trim().toLowerCase() || undefined;
+}
 
 function validateThinkingLevel(level: string): ThinkingLevel {
   const normalized = parseThinkingLevel(level);

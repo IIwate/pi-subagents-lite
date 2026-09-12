@@ -1,9 +1,9 @@
 import type { ExecutionMessage, TaskInput } from "../engine/contracts.js";
-import type { TaskOutcome } from "../domain/task.js";
+import type { TaskOutcome, TaskState } from "../domain/task.js";
 import type { Theme } from "./types.js";
 import type { StatsVisibility } from "./format.js";
 
-export type NavigationStatus = "queued" | "running" | "waiting" | "cancelling" | "completed" | "turn_limited" | "aborted" | "stopped" | "error";
+export type NavigationStatus = Exclude<TaskState["status"], "settled"> | TaskOutcome["status"];
 
 export interface NavigationAgent {
   readonly id: string;

@@ -15,7 +15,7 @@ import type { TaskEngine } from "../engine/task-engine.js";
 import type { AgentCatalogue } from "../agents/agent-types.js";
 import type { AgentModelAccess, ProviderModelAccess, SubagentsConfig } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
-import type { ThinkingLevel } from "../types.js";
+import type { ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigAtomic, normalizeConcurrencyLimit, validateGraceTurns } from "./config-io.js";
 
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {

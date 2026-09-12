@@ -64,4 +64,4 @@ PiResources 仍受当前官方 Pi 的工具与 hook API 约束; 固定策略后�
 
 ## Verification
 
-[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 使用官方父 AgentSession、离线 Provider 和真实原生文件, 覆盖正式工具入口、两实例交错、排队策略、关闭期间资源准备、UI 清理失败、reload、显式控制与扩展不可用时的结果读取. [父交付场景](../../../../test/scenarios/spawn/delivery-channel.test.ts) 覆盖 durable AgentStatus receipt, [展示保留](../../../../test/unit/ui/task-source.test.ts) 覆盖 pin 暂停和结果所有权. 这些证据不代表在线 Provider 或任意外部扩展的可用性.
+[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 使用官方父 AgentSession、离线 Provider 和真实原生文件, 覆盖正式工具入口、两实例交错、排队策略、关闭期间资源准备、UI 清理失败、reload、显式控制与扩展不可用时的结果读取. [父交付场景](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 覆盖 durable AgentStatus receipt, [展示保留](../../../../test/unit/ui/task-source.test.ts) 覆盖 pin 暂停和结果所有权. 这些证据不代表在线 Provider 或任意外部扩展的可用性.

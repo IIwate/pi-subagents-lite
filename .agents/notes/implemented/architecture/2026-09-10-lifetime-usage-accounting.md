@@ -39,4 +39,4 @@ toolUses 按原生分支中的工具结果计数, turnCount 表示当前 operati
 
 ## Verification
 
-[usage tests](../../../../test/unit/agents/usage.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts)、[原生执行](../../../../test/scenarios/agents/execution-adapters.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 覆盖累计来源与显示边界. 离线测试不代表 Provider 实际账单.
+[usage tests](../../../../test/unit/agents/usage.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts)、[原生执行](../../../../test/scenarios/drivers/harness-driver.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 覆盖累计来源与显示边界. 离线测试不代表 Provider 实际账单.

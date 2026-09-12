@@ -30,4 +30,4 @@ guidance 跟随下一次正常父请求更新, 没有独立 turn. 此同步 hook
 
 ## Verification
 
-[Runtime scenarios](../../../../test/scenarios/runtime.test.ts) 检查配置切换后实际父请求的 guidance 与稳定性; [guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查当前授权和确定性文本. [delivery scenarios](../../../../test/scenarios/spawn/delivery-channel.test.ts) 负责结果接收事实, 不用 guidance 测试替代.
+[Runtime scenarios](../../../../test/scenarios/runtime.test.ts) 检查配置切换后实际父请求的 guidance 与稳定性; [guidance tests](../../../../test/unit/prompt/agent-guidance.test.ts) 检查当前授权和确定性文本. [delivery scenarios](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 负责结果接收事实, 不用 guidance 测试替代.

@@ -5,9 +5,8 @@ import { makeSkill, mockLoadSkills, mockFormatSkillsForPrompt } from "../../supp
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
 import { createSkillDir, createFlatSkill } from "../../support/fixtures.js";
 import { preloadSkills, loadSkillMeta } from "../../../src/prompt/skill-loader.js";
-import { buildAgentPrompt } from "../../../src/prompt/prompts.js";
+import { buildAgentPrompt, type EnvInfo } from "../../../src/prompt/prompts.js";
 import type { AgentConfig } from "../../../src/agents/types.js";
-import type { EnvInfo } from "../../../src/types.js";
 
 let harness: TestHarness;
 let tmpDir: string;
@@ -23,6 +22,39 @@ afterEach(async () => { await harness.dispose(); });
 /* ------------------------------------------------------------------ */
 
 describe("preloadSkills", () => {
+  it("skips unsafe names even when discovery returns a matching readable skill", () => {
+    const names = [".hidden", "../etc", "..\\etc", "", "a".repeat(129), "my agent", "a/b"];
+    mockLoadSkills.mockReturnValue({
+      skills: names.map((name, index) => {
+        const file = join(tmpDir, `skill-${index}.md`);
+        writeFileSync(file, "Content that must not be preloaded");
+        return makeSkill(name, "Unsafe name", file);
+      }),
+      diagnostics: [],
+    });
+
+    for (const skill of preloadSkills(names, tmpDir)) {
+      expect(skill.content).toContain("skipped: name contains path traversal characters");
+      expect(skill.content).not.toContain("Content that must not be preloaded");
+    }
+  });
+
+  it("preloads valid names with punctuation and at the length boundary", () => {
+    const names = ["general-purpose", "Explore", "myAgent42", "my.agent", "code_review-v2", "a".repeat(128)];
+    mockLoadSkills.mockReturnValue({
+      skills: names.map((name, index) => {
+        const file = join(tmpDir, `skill-${index}.md`);
+        writeFileSync(file, "Approved skill content");
+        return makeSkill(name, "Valid name", file);
+      }),
+      diagnostics: [],
+    });
+
+    expect(preloadSkills(names, tmpDir)).toEqual(names.map(name => ({
+      name, description: "Valid name", content: "Approved skill content",
+    })));
+  });
+
   it("loads full content and extracts description from a skill directory", () => {
     createSkillDir(tmpDir, "tdd", "Test-driven development workflow", "## TDD Steps\n1. Red\n2. Green\n3. Refactor");
     const tddPath = join(tmpDir, ".pi", "skills", "tdd", "SKILL.md");

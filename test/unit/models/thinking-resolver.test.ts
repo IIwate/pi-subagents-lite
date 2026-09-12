@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   clampInheritedThinking,
+  parseThinkingLevel,
   resolveThinkingLevel,
   validateExplicitThinking,
 } from "../../../src/models/thinking-resolver.js";
@@ -21,6 +22,29 @@ function makeModel(overrides: Partial<Model<"openai-completions">> = {}): Model<
     ...overrides,
   };
 }
+
+describe("parseThinkingLevel", () => {
+  it("accepts known levels", () => {
+    expect(parseThinkingLevel("low")).toBe("low");
+    expect(parseThinkingLevel("xhigh")).toBe("xhigh");
+    expect(parseThinkingLevel("max")).toBe("max");
+  });
+
+  it("preserves unknown levels for model-aware validation", () => {
+    expect(parseThinkingLevel("custom-level")).toBe("custom-level");
+  });
+
+  it("normalizes case and surrounding whitespace", () => {
+    expect(parseThinkingLevel(" High ")).toBe("high");
+    expect(parseThinkingLevel("LOW")).toBe("low");
+  });
+
+  it("rejects empty / whitespace", () => {
+    expect(parseThinkingLevel(undefined)).toBeUndefined();
+    expect(parseThinkingLevel("")).toBeUndefined();
+    expect(parseThinkingLevel("   ")).toBeUndefined();
+  });
+});
 
 describe("validateExplicitThinking", () => {
   it.each([

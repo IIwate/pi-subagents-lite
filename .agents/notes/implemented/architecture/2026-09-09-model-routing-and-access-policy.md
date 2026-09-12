@@ -25,7 +25,7 @@ export interface ModelRoutingConfig {
 
 provider grant 的空对象代表所有当前可用模型, 非空 models 数组代表精确 ID. 空/非法数组在 [配置入口](2026-09-10-configuration-ownership-and-persistence.md) 删除 grant, 不能变成全模型. 暂时失去 credentials/availability/scope 不删除规则. Clean unavailable 仅在 provider 存在、registry 可靠时依据完整 catalogue 清理精确缺失 ID, 不用 getAvailable 的临时缺失推断删除.
 
-显式模型解析只做精确匹配. canonical provider/id 使用 registry.find; bare id 优先父 provider, 否则取 catalogue 中第一个精确匹配. 不做模糊匹配; 包含冒号的显式 model 被拒绝, thinking 是独立参数. 未找到或拒绝时工具抛明确错误, 不替换为父模型. bare-id 跨 provider 歧义是现有兼容语义, 不应被文档描述成全局唯一.
+[model-resolver](../../../../src/models/model-resolver.ts) 负责显式模型的精确解析, 不承担授权. canonical provider/id 使用 registry.find; bare id 优先父 provider, 否则取 catalogue 中第一个精确匹配. 不做模糊匹配; 包含冒号的显式 model 被拒绝, thinking 是独立参数. 未找到或拒绝时工具抛明确错误, 不替换为父模型. bare-id 跨 provider 歧义是现有兼容语义, 不应被文档描述成全局唯一.
 
 [thinking-resolver](../../../../src/models/thinking-resolver.ts) 的次序是工具参数 > agent frontmatter > scope pin > 全局 defaultThinking > 父 thinking. 前两项是显式意图, 不支持的 level 抛错, 非 reasoning 模型仅允许显式 off. 后三项按继承处理: 非 reasoning 返回 undefined, reasoning 模型保留受支持值, 否则采用 supported levels 的最后一项. 这不是一律钳制为 off, 也不是数值上最邻近的低等级. enum/模型能力来自 Pi, 接受时固定于 [执行快照](2026-09-10-isolated-child-resources-and-tool-gates.md).
 
@@ -47,4 +47,4 @@ future calls 使用当前授权, running/queued 使用接受时快照. authoriza
 
 ## Verification
 
-[model access](../../../../test/unit/models/model-access.test.ts)、[scope](../../../../test/unit/models/model-scope.test.ts)、[thinking](../../../../test/unit/models/thinking-resolver.test.ts)、[tool execution](../../../../test/scenarios/runtime.test.ts)、[model routing menu](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 和 [queued invocation](../../../../test/scenarios/runtime.test.ts) 验证授权、可用目录、显式拒绝和快照.
+[model resolution](../../../../test/unit/models/model-resolver.test.ts)、[model access](../../../../test/unit/models/model-access.test.ts)、[scope](../../../../test/unit/models/model-scope.test.ts)、[thinking](../../../../test/unit/models/thinking-resolver.test.ts)、[tool execution](../../../../test/scenarios/runtime.test.ts)、[model routing menu](../../../../test/unit/ui/menu/menu-model-routing.test.ts) 和 [queued invocation](../../../../test/scenarios/runtime.test.ts) 验证授权、可用目录、显式拒绝和快照.

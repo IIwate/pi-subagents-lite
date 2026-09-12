@@ -26,7 +26,7 @@ Pi 的 `session.prompt()` 可以正常 resolve, 同时最后一条 assistant mes
 
 maxTurns 未设置或为 0 表示不限, 接受边界解析为正整数预算. 达到软上限后以原生 steer 提醒停止工具调用并汇总, grace 默认为 6, 0 或 1 仍留一个汇总回合. before_request 达到 maxTurns + max(1, grace) 时请求原生 abort. policy work 的失败与真实 drive 一起收敛, 不让事件回调产生未处理 rejection.
 
-继续执行建立新 operation 并重新计算回合预算; maxTokens 通过 Driver 的模型请求视图与原生 stream options 生效, 不修改父模型. 显式 StopAgent 或用户停止保存 operation 的 stoppedBy, 与预算 abort 区分. [状态说明](../../../../src/status-note.ts) 将停止后的文本标为部分输出.
+继续执行建立新 operation 并重新计算回合预算; maxTokens 通过 Driver 的模型请求视图与原生 stream options 生效, 不修改父模型. 显式 StopAgent 或用户停止保存 operation 的 stoppedBy, 与预算 abort 区分. [状态说明](../../../../src/agents/status-note.ts) 将停止后的文本标为部分输出.
 
 ## Alternatives considered
 
@@ -53,6 +53,6 @@ maxTurns 未设置或为 0 表示不限, 接受边界解析为正整数预算. �
 
 ## Verification
 
-[原生执行场景](../../../../test/scenarios/agents/execution-adapters.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 与 [状态说明](../../../../test/unit/status-note.test.ts) 覆盖结果、预算、停止发起者、资源交接和独立执行. 流场景使用可控的离线 Provider 和虚拟时钟, 验证首字前长等待、思考保活、120 秒闲置取消、原生退避后恢复交付、重试耗尽后释放配额以及用户停止静默.
+[原生执行场景](../../../../test/scenarios/drivers/harness-driver.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 与 [状态说明](../../../../test/unit/agents/status-note.test.ts) 覆盖结果、预算、停止发起者、资源交接和独立执行. 流场景使用可控的离线 Provider 和虚拟时钟, 验证首字前长等待、思考保活、120 秒闲置取消、原生退避后恢复交付、重试耗尽后释放配额以及用户停止静默.
 
 [看门狗单测](../../../../test/unit/drivers/stream-watchdog.test.ts) 覆盖空事件、工具调用、思考与正文切换、取消后不再发终止事件的 Provider、迟到修改隔离和定时器清理. 这些检查不连接在线模型或模拟实际代理的 TCP 行为.

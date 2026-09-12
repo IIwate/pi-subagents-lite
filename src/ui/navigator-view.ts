@@ -323,6 +323,7 @@ export function renderPending(record: NavigationAgent | undefined, width: number
     truncateToWidth(theme.fg("dim", "↳ Alt+Up to edit all queued messages"), width)];
 }
 
+// Note: see .agents/notes/implemented/bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md
 export function renderRetry(record: NavigationAgent | undefined, width: number, theme: Theme, now: number): string[] {
   const retry = record?.execution.retryState;
   if (!retry) return [];

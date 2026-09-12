@@ -107,8 +107,8 @@ AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形�
 
 ## Verification
 
-[Execution adapter scenarios](../../../../test/scenarios/agents/execution-adapters.test.ts) 覆盖 Quota 与观察取消、队列和预算映射、显式 Takeover、选择快照、文件重开、operation 结果边界、关闭时的活体工具和不安全重放.
+[Execution adapter scenarios](../../../../test/scenarios/drivers/harness-driver.test.ts) 覆盖 Quota 与观察取消、队列和预算映射、显式 Takeover、选择快照、文件重开、operation 结果边界、关闭时的活体工具和不安全重放.
 
-[Parent delivery scenarios](../../../../test/scenarios/spawn/delivery-channel.test.ts) 使用官方扩展工厂、AgentSession、ModelRuntime 和真实文件, 覆盖父工具派发、子执行、父空闲接收、父错误后的 ACK、丢失响应/确认、导航/接管竞争及父 append 只更新内存的失败边界. 这些场景不验证物理终端或在线 Provider.
+[Parent delivery scenarios](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 使用官方扩展工厂、AgentSession、ModelRuntime 和真实文件, 覆盖父工具派发、子执行、父空闲接收、父错误后的 ACK、丢失响应/确认、导航/接管竞争及父 append 只更新内存的失败边界. 这些场景不验证物理终端或在线 Provider.
 
 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 通过子屏 Escape 路由停止运行中的工具, 验证控制模式、前台观察等待、stoppedBy=user、空 outbox、父消息零发送、父模型调用数与日志不变. 文件重开后保留片段并支持 Alt+S, 后续运行按原控制模式自动交付. Agent 发起的停止场景保留自动交付. 父交付场景覆盖用户停止先于和后于自动提交, 旧 outbox 读取延迟至新 operation 后仍不能发送, 重开存储也不能重建已停止运行的自动结果.

@@ -38,4 +38,4 @@ export interface QuotaLimits {
 
 ## Verification
 
-[Domain checks](../../../../test/unit/domain/task-domain.test.ts)、[原生执行场景](../../../../test/scenarios/agents/execution-adapters.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 和 [菜单](../../../../test/unit/ui/menu/menu-concurrency.test.ts) 覆盖双层上限、真实占用、继续拒绝、接受时快照及实例隔离.
+[Domain checks](../../../../test/unit/domain/task-domain.test.ts)、[原生执行场景](../../../../test/scenarios/drivers/harness-driver.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 和 [菜单](../../../../test/unit/ui/menu/menu-concurrency.test.ts) 覆盖双层上限、真实占用、继续拒绝、接受时快照及实例隔离.

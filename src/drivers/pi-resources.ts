@@ -7,16 +7,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
   type AgentHarnessTool, type ExecutionToolContext, type JsonValue } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
-import type { AcceptedRunPolicy, EnvInfo, ThinkingLevel } from "../types.js";
+import type { Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
+import type { AcceptedRunPolicy } from "../agents/types.js";
 import type { TaskBinding } from "../engine/contracts.js";
 import type { NativeTaskStore } from "./native-task-store.js";
 import { EXCLUDED_TOOL_NAMES, resolveVisibleTools } from "../agents/agent-types.js";
 import { extractText } from "../prompt/context.js";
-import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
+import { buildAgentPrompt, type EnvInfo, type PromptExtras } from "../prompt/prompts.js";
 import { loadSkillMeta, preloadSkills } from "../prompt/skill-loader.js";
-import { GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 
+const GIT_EXEC_TIMEOUT_MS = 5000;
 const context = BACKGROUND_CONTEXT;
 const extensionState = value<unknown>("subagents-lite.v3", "extension-state");
 

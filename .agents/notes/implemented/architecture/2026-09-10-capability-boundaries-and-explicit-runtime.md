@@ -16,6 +16,8 @@ ExecutionDriver 的 HarnessDriver 实现在扩展内部调度原生 `@earendil-w
 
 [领域 API](2026-09-11-task-policy-and-quota-domain.md)、[原生执行/父交付](2026-09-11-native-execution-and-parent-delivery-adapters.md)、[声明式导航](2026-09-11-declarative-navigation-and-input-actions.md) 和 [Runtime 所有权](2026-09-12-explicit-runtime-and-native-task-ownership.md) 分别维护各自契约. 正式工具、事件与设置入口捕获同一个所属 Runtime, 原生任务快照驱动展示.
 
+src 根目录只承担 index、runtime、registration 和 events 的装配职责. Agent 调用的目录解析、资源准备策略与结果说明归属 agents; 精确模型解析与 thinking 归属 models; prompt 环境值归属 prompt; Git 探测的执行限制归属资源 Driver. 仅有一个调用方的辅助逻辑在所属模块内表达, 跨模块依赖直接指向实际所有者.
+
 ## Host adapters and facet boundaries
 
 当前核心与官方宿主验证版本是 `0.85.1`, 依赖范围由 [package.json](../../../../package.json) 声明. 官方 coding-agent 的常规 [SDK](https://github.com/earendil-works/pi/blob/d12cd92e45e308d4af000554292165ef1984253b/packages/coding-agent/src/core/sdk.ts) 创建 Agent 与 AgentSession, 并不向插件提供父 Harness. 因此, 当前父会话由 Pi 持有, 子任务原生 Session/Harness 由扩展持有. 两者通过 PiDeliveryChannel 交付, 不描述为同一个物理 Session.
@@ -52,6 +54,8 @@ HarnessDriver 为每个任务持有独立子 Session/Harness 和具名 Lane, 使
 TaskEngine 读取 Driver 事实, 不复制原生 operation 的持久状态机. taskId、operationId 和 deliveryId 分别标识任务、一次运行及一次交付. 继续已有任务创建新 operation, 恢复未完成 operation 沿用原身份.
 
 Queued、Running、Waiting、Cancelling 和 Settled 是领域投影. Settled 区分完成、失败、取消和 turn limit. 原生 accept 不代表已经获得 Quota 或开始执行. 调用方停止等待不代表真实执行停止; suspended/deferred 不视为终态, close 不代替取消. Quota 作用域为当前 Runtime/父 Session, 每次占用最多释放一次, 观察 Promise 的取消不提前释放活体占用.
+
+TaskState 与 TaskOutcome 定义任务状态和结算结果, engine/contracts 定义执行快照与交付边界. Agent 的结果说明直接消费 TaskOutcome; NavigationStatus 从领域状态派生, NavigationAgent 只保存展示投影及局部展示字段. 展示契约不承担任务转换或持久结果的所有权.
 
 ## Accepted policy and validation
 
@@ -100,9 +104,9 @@ v3 作为标准 npm 插件运行于未经修改的官方 Pi, 只管理按 v3 契
 
 [Domain unit tests](../../../../test/unit/domain/task-domain.test.ts) 验证所属策略快照、Task operation 隔离、控制模式、单次配额释放、限额更新和实例隔离. 当前领域 API 的事实由 [领域 Note](2026-09-11-task-policy-and-quota-domain.md) 维护.
 
-[Native Harness scenarios](../../../../test/scenarios/agents/harness-lanes.test.ts) 使用公开入口、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源. 它们覆盖真实并行与 Steer 消费、分支写入和重复交付反例, 以及官方 JSONL 后端关闭重开后继续原 operation 并保存结果.
+[Native Harness scenarios](../../../../test/scenarios/drivers/harness-lanes.test.ts) 使用公开入口、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源. 它们覆盖真实并行与 Steer 消费、分支写入和重复交付反例, 以及官方 JSONL 后端关闭重开后继续原 operation 并保存结果.
 
-[执行 Adapter 场景](../../../../test/scenarios/agents/execution-adapters.test.ts)、[父交付场景](../../../../test/scenarios/spawn/delivery-channel.test.ts) 和 [原生 UI 场景](../../../../test/scenarios/ui/task-navigation.test.ts) 覆盖 Driver、TaskEngine、真实官方父会话以及 UI 输入/选择闭环. 正式产品入口使用 ExtensionRuntime、TaskEngine 和 NavigationSource. Runtime 场景覆盖双实例、迟到准备、关闭、原生恢复与扩展资源边界. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
+[执行 Adapter 场景](../../../../test/scenarios/drivers/harness-driver.test.ts)、[父交付场景](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 和 [原生 UI 场景](../../../../test/scenarios/ui/task-navigation.test.ts) 覆盖 Driver、TaskEngine、真实官方父会话以及 UI 输入/选择闭环. 正式产品入口使用 ExtensionRuntime、TaskEngine 和 NavigationSource. Runtime 场景覆盖双实例、迟到准备、关闭、原生恢复与扩展资源边界. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
 
 origin/re@5db0c90 仅为局部设计参考. a8e9625 修复 UI tick 复制 accepted policy 的问题, 表明无关 SDK 数据的重复投影具有实际成本. 不整批迁入该分支的产品策略.
 
@@ -112,6 +116,7 @@ origin/re@5db0c90 仅为局部设计参考. a8e9625 修复 UI tick 复制 accept
 - **扩展管理原生子执行, 使用父交付及 TUI Adapter.** 可以在当前官方宿主中使用原生队列和 operation, 并把宿主差异集中在明确边界. 代价是父子会话独立, 交付必须继续验证来源与持久接收, 采用此路径.
 - **让底层树隐式决定父交付.** 数据模型直观, 可以省去业务归属与交付状态. 但当前父子不在同一原生 Session, 即使同树也允许显式错投或重复追加, 已有反例覆盖.
 - **当前就引入 Chord RPC 与双进程运行结构.** 能接近实验架构的装配形式. 但现有标准宿主提供同进程扩展入口, 并不需要这些部署和传输机制; 当前先明确执行与展示边界.
+- **将资源准备配置和展示字段全部并入 Task.** 导入位置统一, 可减少若干类型名. 但会让纯领域契约承载 Agent 定义、宿主资源选择与 UI 局部状态. 各层保留职责明确的契约, 任务状态由领域定义并供其他层投影.
 - **整批合入 origin/re 或给所有旧类套统一 interface.** 前者包含较多现成代码, 后者减少调用点变化. 但前者具有不同产品策略和重型 schema 投影, 后者保留原有职责混合; 仅复用符合当前契约的局部实现.
 
 ## Quality gates

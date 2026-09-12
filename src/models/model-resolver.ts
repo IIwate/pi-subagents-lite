@@ -1,27 +1,4 @@
-/**
- * utils.ts — Security helpers and general utilities.
- */
 import type { Model } from "@earendil-works/pi-ai";
-
-/**
- * Returns true if a name contains characters not allowed in agent/skill names.
- * Uses a whitelist: only alphanumeric, hyphens, underscores, and dots (no leading dot).
- */
-export function isUnsafeName(name: string): boolean {
-  return !name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
-}
-
-/** Normalize input before model-aware validation at the Agent entry point. */
-export function parseThinkingLevel(raw: string | undefined): string | undefined {
-  return raw?.trim().toLowerCase() || undefined;
-}
-
-/**
- * Safely extract a human-readable error message from an unknown exception.
- */
-export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /**
  * Parse a "provider/model-id" string into { provider, modelId }.
@@ -38,7 +15,7 @@ export interface ModelLookupRegistry {
   find(provider: string, modelId: string): Model<any> | undefined;
   /** Full loaded catalogue, used for exact bare-ID resolution before authorization. */
   getAll?: () => Array<Model<any>>;
-  /** Compatibility fallback for minimal registries in tests/integrations. */
+  /** Available catalogue when the registry has no full-catalogue query. */
   getAvailable?: () => Array<Model<any>>;
 }
 
@@ -46,7 +23,7 @@ export interface ModelLookupRegistry {
  * Resolve an explicit model ref with exact matching only (no silent fallback).
  *
  * - "provider/id" → registry.find(provider, id)
- * - bare id → available models where model.id === bare id (exact)
+ * - bare id → catalogue models where model.id === bare id (exact)
  *
  * When multiple providers share the same id, prefer preferredProvider if set,
  * otherwise the first match.
@@ -85,6 +62,3 @@ export function unknownModelError(modelRef: string): string {
     `List available models first (e.g. via your model list / list-models), then retry with a valid id.`
   );
 }
-
-/** Timeout for git commands during child resource preparation and worktree validation (ms). */
-export const GIT_EXEC_TIMEOUT_MS = 5000;

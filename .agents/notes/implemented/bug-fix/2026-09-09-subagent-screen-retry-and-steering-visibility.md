@@ -10,15 +10,7 @@ A steering message accepted while Pi waits in retry backoff may not enter sessio
 
 ExecutionSnapshot carries the native retry attempt and deadline together with queued entry IDs. TaskNavigationSource derives the countdown and projects it with the selected task's transcript. The source owns its subscription, and dispose releases it without affecting another runtime.
 
-```ts type-equiv: AgentRetryState from src/types.ts
-export interface AgentRetryState {
-  attempt: number;
-  maxAttempts: number;
-  delayMs: number;
-  startAt: number;
-  errorMessage?: string;
-}
-```
+[ExecutionSnapshot.retry](../../../../src/engine/contracts.ts) owns the attempt, maximum attempts, and native retry deadline. [NavigationAgent.execution.retryState](../../../../src/ui/navigation.ts) contains the attempt and a delay/start-time pair for rendering. [renderRetry](../../../../src/ui/navigator-view.ts) computes the visible countdown from that projection; it neither schedules retries nor changes execution state.
 
 Pending input remains visible before checkpoint consumption. Enter adds steering without changing control mode or cancelling backoff. Esc targets the selected operation, including an operation waiting in retry. Its cancellation follows native operation ownership and retains actual quota until execution returns.
 

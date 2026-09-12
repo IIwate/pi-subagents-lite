@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "../types.js";
+import type { ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
@@ -49,4 +49,19 @@ export interface AgentInvocation {
   /** Provider id shown immediately after the model. */
   readonly providerName?: string;
   readonly thinkingLevel?: ThinkingLevel;
+}
+
+// Note: see .agents/notes/implemented/architecture/2026-09-10-isolated-child-resources-and-tool-gates.md
+export interface AcceptedRunPolicy {
+  /** Deep-copied definition resolved when the Agent call is accepted. */
+  definition: AgentConfig;
+  registeredTools: string[];
+  restrictToRegisteredTools: boolean;
+  tools?: true | string[] | false;
+  extensions: true | string[] | false;
+  skills: true | string[] | false;
+  systemPromptMode: SystemPromptMode;
+  includeContextFiles: boolean;
+  /** Canonical parent model identity used when this call was authorized. */
+  parentModelKey: string;
 }

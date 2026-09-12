@@ -4,11 +4,12 @@ Status: implemented
 
 ## Problem
 
-Pure delivery formatting, selector navigation, and manager/coordinator lifecycle scenarios share setup in feature-sized test files. Changing a scenario fixture can break unrelated unit assertions. A file whitelist in the test TypeScript configuration leaves other tests outside the compiler contract, and documentation links couple verification instructions to that accidental layout.
+Pure delivery formatting, selector navigation, and native lifecycle scenarios need different setup and failure boundaries. Mixing them makes a scenario fixture affect unrelated unit assertions. A file whitelist in the test TypeScript configuration can leave tests outside the compiler contract, while documentation links can couple verification instructions to an accidental layout.
 
 ## Decision
 
 - Module invariants live under [test/unit](../../../../test/unit/). Cross-module, filesystem, reload, and real Pi session checks live under [test/scenarios](../../../../test/scenarios/). The boundary exercised determines placement; file length and `describe` nesting do not define a layer. Mixed delivery, discovery, skill, and UI assertions reside with the module they verify.
+- Within each layer, directories follow the production owner: Agent directory validation and result notes live under agents, model parsing under models, skill loading under prompt, and native execution/delivery adapters under drivers. Cross-module Runtime scenarios stay at the composition root. Moving a production owner includes its tests and active documentation links.
 - [test/support](../../../../test/support/) contains configuration, catalogue instances, resource disposal, and focused module fixtures. `createTestHarness` owns temporary directories, asynchronous disposal, mocks, and clocks. Runtime scenarios use official parent sessions, offline providers, and native session files. The delivery adapter verifies receipts in the real parent log; memory-only publication is not an acknowledgement.
 - Offline provider fixtures supply responses and failures to the real Pi agent loop; rendering tests supply navigation snapshots. Scheduling, retries, and delivery follow the production paths. Fixture gates control when a provider response becomes available and release during teardown. [Runtime scenarios](../../../../test/scenarios/runtime.test.ts) verify failure, explicit continuation, and the resulting durable output.
 - [vitest.config.mts](../../../../vitest.config.mts) defines disjoint projects named `unit` and `scenarios`. `bun run test:unit` and `bun run test:scenarios` select one layer; `bun run test` includes both. Scenarios run offline and do not provide physical terminal or live provider coverage.

@@ -9,8 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import type { AcceptedRunPolicy } from "../types.js";
-import type { AgentConfig, SystemPromptMode } from "./types.js";
+import type { AcceptedRunPolicy, AgentConfig, SystemPromptMode } from "./types.js";
 
 /**
  * Check if bash is available on the current host.

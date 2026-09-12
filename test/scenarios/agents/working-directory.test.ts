@@ -1,7 +1,7 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveWorkingDirectory } from "../../../src/spawn/working-directory.js";
+import { resolveWorkingDirectory } from "../../../src/agents/working-directory.js";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
 
 describe("resolveWorkingDirectory", () => {

@@ -10,7 +10,9 @@ Status: implemented
 
 [Agent 工具入口](../../../../src/agents/tool-execution.ts) 解析名称、授权和 thinking, 在异步准备前记录父来源锚点. [ExtensionRuntime](2026-09-12-explicit-runtime-and-native-task-ownership.md) 准备子 prompt、资源和工具, 然后把冻结的 TaskPolicy 交给原生 Driver. queued 任务不重新查找定义、scope 或授权.
 
-```ts type-equiv: AcceptedRunPolicy from src/types.ts
+[AcceptedRunPolicy](../../../../src/agents/types.ts) 保存 Catalogue 已解析的定义及资源选择, 供 PiResources 准备执行环境. 已准备好的执行值进入冻结的 TaskPolicy; 资源准备配置不参与任务状态转换或替代持久任务契约.
+
+```ts type-equiv: AcceptedRunPolicy from src/agents/types.ts
 export interface AcceptedRunPolicy {
   /** Deep-copied definition resolved when the Agent call is accepted. */
   definition: AgentConfig;

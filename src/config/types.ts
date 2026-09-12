@@ -7,7 +7,7 @@
  */
 
 import type { SystemPromptMode } from "../agents/types.js";
-import type { ThinkingLevel } from "../types.js";
+import type { ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 
 export interface ProviderModelAccess {
   /** Omitted = all current provider models; non-empty = exact model IDs. */

@@ -98,7 +98,7 @@ export class TaskNavigationSource implements NavigationSource {
               id: current.taskId, operationId: current.operationId,
               display: Object.freeze({ type: current.policy.agent, name: binding.display?.name ?? current.policy.agent,
                 description: binding.display?.description ?? snapshot.messages.find(message => message.role === "user")?.text.split("\n")[0] ?? current.policy.agent }),
-              lifecycle: Object.freeze({ status: outcome?.status ?? current.state.status as NavigationStatus,
+              lifecycle: Object.freeze({ status: current.state.status === "settled" ? current.state.outcome.status : current.state.status,
                 startedAt: snapshot.operation?.startedAt ?? snapshot.lastResult?.startedAt ?? now,
                 completedAt: current.state.status === "settled" ? snapshot.lastResult?.completedAt : undefined,
                 pinnedAt: this.pins.get(current.taskId), takenOver: current.control === "manual" }),

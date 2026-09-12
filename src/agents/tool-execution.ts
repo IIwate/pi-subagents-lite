@@ -1,4 +1,3 @@
-import { getStatusNote } from "../status-note.js";
 /**
  * tool-execution.ts — Agent tool execution handlers.
  *
@@ -12,14 +11,14 @@ import { join } from "node:path";
 
 import type { TaskOutcome } from "../domain/task.js";
 import type { ExtensionRuntime } from "../runtime.js";
-import { SHORT_ID_LENGTH } from "../types.js";
-import { resolveWorkingDirectory } from "../spawn/working-directory.js";
+import { getStatusNote } from "./status-note.js";
+import { resolveWorkingDirectory } from "./working-directory.js";
 
 import {
   parseModelKey,
   resolveExactModel,
   unknownModelError,
-} from "../utils.js";
+} from "../models/model-resolver.js";
 import {
   scopedModelKeys,
   missingParentModelError,
@@ -36,6 +35,7 @@ import {
 import { authorizeModel } from "../models/model-access.js";
 import { resolveThinkingLevel } from "../models/thinking-resolver.js";
 
+const SHORT_ID_LENGTH = 8;
 
 // ============================================================================
 // Tool result helpers
@@ -57,7 +57,7 @@ function errorResult(text: string) {
  */
 export function formatResultContent(outcome: TaskOutcome): string {
   if (outcome.status === "error") return `Agent failed: ${outcome.error}${outcome.result ? `\n\n${outcome.result}` : ""}`;
-  return (outcome.result ?? "") + getStatusNote({ status: outcome.status, startedAt: 0, stoppedBy: "stoppedBy" in outcome ? outcome.stoppedBy : undefined });
+  return (outcome.result ?? "") + getStatusNote(outcome);
 }
 
 // ============================================================================

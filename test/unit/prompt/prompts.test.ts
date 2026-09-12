@@ -10,9 +10,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { buildAgentPrompt } from "../../../src/prompt/prompts.js";
+import { buildAgentPrompt, type EnvInfo } from "../../../src/prompt/prompts.js";
 import type { AgentConfig } from "../../../src/agents/types.js";
-import type { EnvInfo } from "../../../src/types.js";
 
 // Stub only formatSkillsForPrompt — do not importActual the full pi package (multi-second tax).
 vi.mock("@earendil-works/pi-coding-agent", async importOriginal => ({

@@ -26,7 +26,6 @@ import {
   getAgentDir,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
-import { isUnsafeName } from "../utils.js";
 
 export interface PreloadedSkill {
   name: string;
@@ -158,7 +157,7 @@ function canonicalizePath(filePath: string): string {
 export function preloadSkills(skillNames: string[], cwd: string, projectTrusted = true, agentDir = getAgentDir()): PreloadedSkill[] {
   const skills = loadAllSkills(cwd, projectTrusted, agentDir);
   return skillNames.map((name) => {
-    if (isUnsafeName(name)) {
+    if (!name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) {
       return { name, description: "", content: `(Skill "${name}" skipped: name contains path traversal characters)` };
     }
     const match = skills.find((s) => s.name === name);

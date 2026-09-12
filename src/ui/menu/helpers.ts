@@ -12,7 +12,7 @@ import type { Component, SettingsListTheme, SelectListTheme } from "@earendil-wo
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "../types.js";
 import { SearchableSelectDialog, type SelectOption } from "../searchable-select.js";
-import { errorMessage, parseModelKey } from "../../utils.js";
+import { parseModelKey } from "../../models/model-resolver.js";
 import { displayText } from "../format.js";
 
 /** Keep a failed settings update open for correction or retry. */
@@ -21,7 +21,7 @@ export function saveSetting(ctx: ExtensionCommandContext, update: () => void): b
     update();
     return true;
   } catch (error) {
-    ctx.ui.notify(`Failed to save settings: ${displayText(errorMessage(error))}`, "error");
+    ctx.ui.notify(`Failed to save settings: ${displayText(error instanceof Error ? error.message : String(error))}`, "error");
     return false;
   }
 }

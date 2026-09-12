@@ -2,13 +2,17 @@
  * prompts.ts — System prompt builder for agents.
  *
  * Every agent gets a fresh context — no inherited parent identity.
- * EnvInfo is imported from types.ts — branch is a string (empty when unknown).
  */
 
-import type { EnvInfo } from "../types.js";
 import type { AgentConfig, SystemPromptMode } from "../agents/types.js";
 import type { SkillMeta, PreloadedSkill } from "./skill-loader.js";
 import { formatSkillsForPrompt, type Skill } from "@earendil-works/pi-coding-agent";
+
+export interface EnvInfo {
+  isGitRepo: boolean | undefined;
+  branch: string | null;
+  platform: string;
+}
 
 /** Extra sections to inject into the system prompt (skills). */
 export interface PromptExtras {

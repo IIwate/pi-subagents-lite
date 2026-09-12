@@ -28,6 +28,8 @@ Pass a file or directory to a layer command for focused execution, for example `
 
 Choose a layer by the behavior and resources exercised, rather than file size or filename. The [testing Note](../.agents/notes/implemented/testing/2026-09-09-test-layers-and-scenario-harness.md) owns fixture design and the reasons for the split. [vitest.config.mts](../vitest.config.mts) selects disjoint projects, and [tsconfig.test.json](../tsconfig.test.json) includes tests and fixtures by directory.
 
+Within each layer, place tests with the production module they exercise: agents, models, prompt, drivers, or UI. Cross-module Runtime scenarios belong at the composition root; filesystem checks remain scenarios even when their source module is small.
+
 The [Test workflow](../.github/workflows/test.yml) checks types, lint, and npm package contents, and runs both layers on Linux and Windows in normal order and with fixed-seed shuffling. Its matrix and seed live in the workflow. The [Verify Notes workflow](../.github/workflows/verify-notes.yml) checks documentation for main-branch updates and pull requests. The [Publish workflow](../.github/workflows/publish.yml) repeats the quality gates, including Notes, before publishing.
 
 ## Worktrees

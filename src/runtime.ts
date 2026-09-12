@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import { AgentCatalogue } from "./agents/agent-types.js";
+import type { AcceptedRunPolicy } from "./agents/types.js";
+import { resolveWorkingDirectory } from "./agents/working-directory.js";
 import { ConfigStore, type ConfigIO } from "./config/config-store.js";
 import { loadConfig, saveConfigAtomic } from "./config/config-io.js";
 import { HarnessDriver } from "./drivers/harness-driver.js";
@@ -14,8 +16,6 @@ import { PiResources } from "./drivers/pi-resources.js";
 import { TaskEngine } from "./engine/task-engine.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { TaskNavigationSource } from "./ui/task-source.js";
-import type { AcceptedRunPolicy, ThinkingLevel } from "./types.js";
-import { resolveWorkingDirectory } from "./spawn/working-directory.js";
 
 interface RuntimeOptions {
   agentDir?: string;
