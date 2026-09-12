@@ -358,7 +358,7 @@ export class AgentCatalogue {
     return mergeAgents(defaults, userAgents, projectAgents);
   }
 
-  async discoverNewAgents(worktreeDir?: string): Promise<number> {
+  async discoverNewAgents(targetAgentDir?: string): Promise<number> {
     const merged = await this.scanAndMerge({ disableDefaultAgents: this.defaultAgentsDisabled });
 
     let count = 0;
@@ -369,11 +369,10 @@ export class AgentCatalogue {
       }
     }
 
-    // Scan worktree-local agents (only when worktreeDir is provided)
-    if (worktreeDir) {
-      const worktreeAgents = await scanAgentFilesInDir(worktreeDir, "project");
-      const wtMerged = mergeAgents(new Map(), [], worktreeAgents);
-      for (const [name, config] of wtMerged) {
+    if (targetAgentDir) {
+      const targetAgents = await scanAgentFilesInDir(targetAgentDir, "project");
+      const targetMerged = mergeAgents(new Map(), [], targetAgents);
+      for (const [name, config] of targetMerged) {
         if (!this.agents.has(name)) {
           this.agents.set(name, structuredClone(config));
           count++;

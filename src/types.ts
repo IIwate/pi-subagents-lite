@@ -13,7 +13,7 @@ export interface AgentRetryState {
 }
 
 export interface EnvInfo {
-  isGitRepo: boolean;
+  isGitRepo: boolean | undefined;
   branch: string | null;
   platform: string;
 }

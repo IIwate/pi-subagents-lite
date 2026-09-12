@@ -8,7 +8,7 @@ import {
 import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
   type AgentHarnessTool, type ExecutionToolContext, type JsonValue } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
-import type { AcceptedRunPolicy, ThinkingLevel } from "../types.js";
+import type { AcceptedRunPolicy, EnvInfo, ThinkingLevel } from "../types.js";
 import type { TaskBinding } from "../engine/contracts.js";
 import type { NativeTaskStore } from "./native-task-store.js";
 import { EXCLUDED_TOOL_NAMES, resolveVisibleTools } from "../agents/agent-types.js";
@@ -36,6 +36,7 @@ interface ResourceOptions {
   parent: ExtensionContext;
   agentDir: string;
   cwd: string;
+  projectTrusted: boolean;
   model: Model<any>;
   thinking: ThinkingLevel;
   policy?: AcceptedRunPolicy;
@@ -73,7 +74,7 @@ export class PiResources {
 
   static async open(options: ResourceOptions): Promise<PiResources> {
     const { parent, agentDir, cwd, policy, restored } = options;
-    const settings = SettingsManager.create(cwd, agentDir);
+    const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: options.projectTrusted });
     const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), signal: options.signal });
     for (const id of parent.modelRegistry.getRegisteredProviderIds()) {
       const provider = parent.modelRegistry.getRegisteredNativeProvider(id);
@@ -96,7 +97,7 @@ export class PiResources {
     });
     const resources = new PiResources(models, settings, loader, options);
     try {
-      await loader.reload({ resolveProjectTrust: async () => restored?.resources?.trusted ?? parent.isProjectTrusted() });
+      await loader.reload({ resolveProjectTrust: async () => options.projectTrusted });
       options.signal?.throwIfAborted();
       const loaded = loader.getExtensions();
       if (loaded.errors.length) throw new Error(loaded.errors.map(error => `${error.path}: ${error.error}`).join("\n"));
@@ -131,7 +132,7 @@ export class PiResources {
   get toolNames(): readonly string[] { return this.tools.map(tool => tool.name); }
 
   private bind(): void {
-    const { cwd, policy, restored, model, thinking, parent } = this.options;
+    const { cwd, policy, restored, model, thinking } = this.options;
     const builtins: AgentTool<any>[] = [createReadTool(cwd), createBashTool(cwd), createPowerShellTool(cwd), createEditTool(cwd),
       createWriteTool(cwd), createGrepTool(cwd), createFindTool(cwd)];
     for (const tool of builtins) this.definitions.set(tool.name, { ...tool,
@@ -188,7 +189,7 @@ export class PiResources {
       setModel: unsupported, getThinkingLevel: () => thinking, setThinkingLevel: unsupported,
     }, {
       getModel: () => model, getScopedModels: () => [{ model, thinkingLevel: thinking }],
-      isIdle: () => !this.snapshot?.operation, isProjectTrusted: () => restored?.resources?.trusted ?? parent.isProjectTrusted(),
+      isIdle: () => !this.snapshot?.operation, isProjectTrusted: () => this.options.projectTrusted,
       getSignal: () => this.abortSignal, abort: () => { this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane!.abort(context)); }); },
       hasPendingMessages: () => (this.snapshot?.queues.length ?? 0) > 0, shutdown: () => { this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane!.abort(context)); }); },
       getContextUsage: () => undefined, compact: unsupported, getSystemPrompt: () => this.systemPrompt,
@@ -299,8 +300,20 @@ export class PiResources {
 
   private async buildPrompt(policy: AcceptedRunPolicy): Promise<string> {
     const { cwd, agentDir, parent, pi } = this.options;
-    const git = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
-    const branch = git.code === 0 ? await pi.exec("git", ["branch", "--show-current"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS }) : undefined;
+    const env: EnvInfo = { isGitRepo: undefined, branch: null, platform: process.platform };
+    try {
+      const git = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
+      if (git.code === 0) {
+        env.isGitRepo = git.stdout.trim() === "true";
+        if (env.isGitRepo) {
+          const branch = await pi.exec("git", ["branch", "--show-current"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
+          if (branch.code === 0) env.branch = branch.stdout.trim() || null;
+        }
+      } else if (git.stderr.includes("not a git repository")) env.isGitRepo = false;
+    } catch {
+      // Git may be absent or unavailable; directory metadata does not own task admission.
+      this.options.signal?.throwIfAborted();
+    }
     const extras: PromptExtras = {};
     try {
       if (policy.systemPromptMode === "inherit") extras.parentSystemPrompt = parent.getSystemPrompt();
@@ -310,15 +323,15 @@ export class PiResources {
       }
     } catch (error) { this.warn(`Prompt source is unavailable; using the default header: ${error}`); }
     if (policy.includeContextFiles) {
-      try { extras.contextFiles = loadProjectContextFiles({ cwd, agentDir }).filter(file => parent.isProjectTrusted() || file.path.startsWith(agentDir + sep)); }
+      try { extras.contextFiles = loadProjectContextFiles({ cwd, agentDir }).filter(file => this.options.projectTrusted || file.path.startsWith(agentDir + sep)); }
       catch (error) { this.warn(`Supplementary context files are unavailable: ${error}`); }
     }
-    if (Array.isArray(policy.definition.preloadSkills)) extras.skillBlocks = preloadSkills(policy.definition.preloadSkills, cwd);
-    if (Array.isArray(policy.skills)) extras.skillMetas = loadSkillMeta(policy.skills, cwd);
+    if (Array.isArray(policy.definition.preloadSkills)) extras.skillBlocks = preloadSkills(policy.definition.preloadSkills, cwd, this.options.projectTrusted, agentDir);
+    if (Array.isArray(policy.skills)) extras.skillMetas = loadSkillMeta(policy.skills, cwd, this.options.projectTrusted, agentDir);
     else if (policy.skills === true) extras.skillMetas = this.loader.getSkills().skills.map(skill => ({
       name: skill.name, description: skill.description, location: skill.filePath, disableModelInvocation: skill.disableModelInvocation,
     }));
-    return buildAgentPrompt(policy.definition, cwd, { isGitRepo: git.code === 0, branch: branch?.stdout.trim() ?? null, platform: process.platform }, extras, policy.systemPromptMode);
+    return buildAgentPrompt(policy.definition, cwd, env, extras, policy.systemPromptMode);
   }
 
   private enqueue(action: () => Promise<unknown>): void {

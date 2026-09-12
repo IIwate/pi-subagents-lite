@@ -15,6 +15,7 @@ import { TaskEngine } from "./engine/task-engine.js";
 import { AgentNavigator } from "./ui/agent-navigator.js";
 import { TaskNavigationSource } from "./ui/task-source.js";
 import type { AcceptedRunPolicy, ThinkingLevel } from "./types.js";
+import { resolveWorkingDirectory } from "./spawn/working-directory.js";
 
 interface RuntimeOptions {
   agentDir?: string;
@@ -111,10 +112,12 @@ export class ExtensionRuntime {
         this.assertActive();
         if (store.binding.parent.sessionId !== this.parentId) throw new Error("Restored task belongs to another parent");
         const policy = store.binding.policy;
+        await resolveWorkingDirectory(policy.cwd, policy.cwd);
         const model = this.context.modelRegistry.find(policy.model.provider, policy.model.id);
         if (!model) throw new Error(`Accepted model is unavailable: ${policy.model.provider}/${policy.model.id}`);
         resources = await PiResources.open({ pi: this.pi, parent: this.context, agentDir: this.agentDir,
-          cwd: policy.cwd, model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal });
+          cwd: policy.cwd, projectTrusted: store.binding.resources?.trusted ?? this.context.isProjectTrusted(),
+          model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal });
         this.resources.add(resources);
         this.assertActive();
         transferred = true;
@@ -140,13 +143,12 @@ export class ExtensionRuntime {
   async spawn(options: {
     ctx: ExtensionContext; parentEntryId: string | null; prompt: string; description: string; acceptedPolicy: AcceptedRunPolicy;
     model: Model<any>; thinkingLevel: ThinkingLevel; graceTurns: number;
-    worktreePath?: string; runInBackground: boolean; signal?: AbortSignal;
+    cwd: string; projectTrusted: boolean; runInBackground: boolean; signal?: AbortSignal;
   }) {
     this.assertContext(options.ctx);
     const task = await this.track(async () => {
-      const { acceptedPolicy, model, thinkingLevel, runInBackground } = options;
+      const { acceptedPolicy, model, thinkingLevel, runInBackground, cwd, projectTrusted } = options;
       const signal = options.signal && !runInBackground ? AbortSignal.any([this.lifetime.signal, options.signal]) : this.lifetime.signal;
-      const cwd = options.worktreePath ?? options.ctx.cwd;
       const parent = { sessionId: this.parentId!, entryId: options.parentEntryId };
       const maxTurns = acceptedPolicy.definition.maxTurns;
       const maxTokens = acceptedPolicy.definition.maxTokens;
@@ -156,7 +158,7 @@ export class ExtensionRuntime {
         if (value !== undefined && !Number.isSafeInteger(value)) throw new Error("Task limits must be safe integers");
       }
       const resources = await PiResources.open({ pi: this.pi, parent: options.ctx, agentDir: this.agentDir,
-        cwd, model, thinking: thinkingLevel, policy: acceptedPolicy, signal });
+        cwd, projectTrusted, model, thinking: thinkingLevel, policy: acceptedPolicy, signal });
       this.resources.add(resources);
       let transferred = false;
       let attached = false;
@@ -170,7 +172,7 @@ export class ExtensionRuntime {
         const driver = await HarnessDriver.open({ session, models: resources.models, piResources: resources,
           binding: { taskId: randomUUID(), parent, mode: runInBackground ? "background" : "foreground", control: "autonomous",
             display: { name: acceptedPolicy.definition.displayName ?? acceptedPolicy.definition.name, description: options.description },
-            resources: { extensions: resources.extensionPaths, trusted: options.ctx.isProjectTrusted() },
+            resources: { extensions: resources.extensionPaths, trusted: projectTrusted },
             policy: { agent: acceptedPolicy.definition.name, model: { provider: model.provider, id: model.id }, thinkingLevel,
               cwd, tools: resources.toolNames, systemPrompt: resources.systemPrompt,
               limits } },

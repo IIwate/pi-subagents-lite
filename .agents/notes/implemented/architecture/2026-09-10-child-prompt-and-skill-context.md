@@ -12,9 +12,9 @@ Status: implemented
 
 共享顺序为 header + 子工作目录环境 + project_context, 之后才放 active_agent、agent_instructions 和 skills. inherited/custom header 中 Pi 的 project_context、available_skills、Current date 和 Current working directory 段先剥离, 再由子环境重新组装. 该剥离依赖文本格式, 不是结构化 parser, 不保证识别未来 Pi 的所有 header 变化. 顺序有助于保持共享前缀, 不承诺任何 provider 的缓存命中率.
 
-includeContextFiles 控制 Pi `loadProjectContextFiles` 的补充上下文. inherited prompt 读取失败、自定义文件缺失/空/不可读时回退通用 header 并报告 warning; context 文件读取失败为非致命. loader 关闭自身的 context、prompt template、theme 和 appendSystemPrompt, 避免重复装配. 这一回退是当前可用性选择, 不保证保持原 persona.
+includeContextFiles 控制 Pi `loadProjectContextFiles` 的补充上下文, 项目文件使用 [目标 cwd 的资源决定](2026-09-12-task-working-directory.md), 全局文件保持可用. inherited prompt 读取失败、自定义文件缺失/空/不可读时回退通用 header 并报告 warning; context 文件读取失败为非致命. loader 关闭自身的 context、prompt template、theme 和 appendSystemPrompt, 避免重复装配. 这一回退是当前可用性选择, 不保证保持原 persona. Git 是可选的环境元数据, 检测失败时省略未知信息, 资源准备的取消继续传播.
 
-[skill-loader](../../../../src/prompt/skill-loader.ts) 复用 Pi `loadSkills`/`loadSkillsFromDir`, 按 cwd 到 Git root 的祖先 `.agents/skills`、用户 `.agents/skills`、Pi global/project defaults 顺序收集. 路径以 realpath 尝试去重, 失败时保留原路径; 名字首次出现获胜. `.agents/skills` 顶层散落 `.md` 被过滤, 因 Pi 的对应内部模式没有公开导出. 没有 Git root 时祖先遍历到文件系统根.
+[skill-loader](../../../../src/prompt/skill-loader.ts) 复用 Pi `loadSkills`/`loadSkillsFromDir`, 按 cwd 到 Git root 的祖先 `.agents/skills`、用户 `.agents/skills`、Pi global/project defaults 顺序收集. 显式 whitelist/preload 使用子资源的 agentDir 和同一个 projectTrusted 决定; 未可信目录只装入用户全局来源. 路径以 realpath 尝试去重, 失败时保留原路径; 名字首次出现获胜. `.agents/skills` 顶层散落 `.md` 被过滤, 因 Pi 的对应内部模式没有公开导出. 没有 Git root 时祖先遍历到文件系统根.
 
 skills whitelist 加载名称、描述和路径供按需读取; preload 读取显式指定技能全文. 显式集合/预加载时关闭 loader 的自动 skills, 由本扩展装入一个 available_skills 块. 元数据格式交给 Pi 处理 XML escaping 和 disableModelInvocation; 显式预加载按用户配置保留全文, 不自动套用元数据隐藏规则. preload 名称限制阻止 path traversal, 不把任意名字拼接为文件路径. 缺失/不可读技能形成可见占位说明.
 

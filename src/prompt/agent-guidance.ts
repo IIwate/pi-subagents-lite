@@ -43,7 +43,7 @@ export function buildCurrentAgentGuidance(options: AgentGuidanceOptions): string
     forceBackground
       ? "- Continue independent work while agents run. If the next action depends on an agent's result, end your turn and resume when it is delivered."
       : "- Prefer background for independent work; use foreground when the result gates the next parent action.",
-    "- `worktree_path` must be the parent repository's main checkout or a linked worktree.",
+    "- Set `cwd` to the task's working directory; relative paths resolve from the parent cwd. Omit it to use the parent cwd. Git is not required.",
     "- Omit `model` to use the exact parent model.",
     "- For an alternate, pass one exact model key listed below; do not invent or abbreviate model IDs.",
     "- Never silently replace a rejected explicit model.",

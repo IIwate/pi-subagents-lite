@@ -2,11 +2,15 @@
 
 Status: implemented
 
+Archived: 2026-09-12
+
 ## Problem
 
 通用 cwd 容易让调用方传入任意目录, 而当前能力只允许父仓库的 checkout/worktree. Git 的 common-dir 输出可能是相对路径, Windows 还有盘符大小写和斜杠差异. 直接比较字符串会拒绝合法工作树或误认另一仓库.
 
 ## Decision
+
+本参数与同仓限制由 [任务工作目录](2026-09-12-task-working-directory.md) 取代.
 
 Agent schema 使用 worktree_path 并给出同仓库说明, 不承诺仅靠名字就能避免模型错误. [validateWorktreePath](../../../../src/spawn/worktree-validator.ts) 把省略/空白视为父 cwd, 相对路径按父 cwd 解析, 检查存在和目录类型, 用 realpath 跟随目标 symlink, 然后比较父/目标 `git rev-parse --git-common-dir` 的规范化结果.
 

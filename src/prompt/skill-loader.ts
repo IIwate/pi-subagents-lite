@@ -54,11 +54,11 @@ export interface SkillMeta {
  *
  * Deduplication: by canonical path (symlink dedup) and by name (first match wins).
  */
-export function loadAllSkills(cwd: string): Skill[] {
+export function loadAllSkills(cwd: string, projectTrusted = true, agentDir = getAgentDir()): Skill[] {
   const resolvedCwd = resolve(cwd);
 
   // Ancestor .agents/skills (highest precedence)
-  const ancestorsSkills = loadAncestorAgentsSkills(resolvedCwd);
+  const ancestorsSkills = projectTrusted ? loadAncestorAgentsSkills(resolvedCwd) : [];
 
   // ~/.agents/skills
   const homeAgentsResult = loadSkillsFromDir({
@@ -73,9 +73,9 @@ export function loadAllSkills(cwd: string): Skill[] {
   // Pi defaults share the child session's configured agent directory.
   const defaultsResult = loadSkills({
     cwd: resolvedCwd,
-    agentDir: getAgentDir(),
-    skillPaths: [],
-    includeDefaults: true,
+    agentDir,
+    skillPaths: projectTrusted ? [] : [join(agentDir, "skills")],
+    includeDefaults: projectTrusted,
   });
 
   // Merge in precedence order: ancestors first, then home, then defaults.
@@ -155,8 +155,8 @@ function canonicalizePath(filePath: string): string {
   try { return realpathSync(filePath); } catch { return filePath; }
 }
 
-export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill[] {
-  const skills = loadAllSkills(cwd);
+export function preloadSkills(skillNames: string[], cwd: string, projectTrusted = true, agentDir = getAgentDir()): PreloadedSkill[] {
+  const skills = loadAllSkills(cwd, projectTrusted, agentDir);
   return skillNames.map((name) => {
     if (isUnsafeName(name)) {
       return { name, description: "", content: `(Skill "${name}" skipped: name contains path traversal characters)` };
@@ -177,8 +177,8 @@ export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill
  * Load skill metadata only (name, description, location) without full content.
  * Used for the skills whitelist — agent can read full content on-demand.
  */
-export function loadSkillMeta(skillNames: string[], cwd: string): SkillMeta[] {
-  const skills = loadAllSkills(cwd);
+export function loadSkillMeta(skillNames: string[], cwd: string, projectTrusted = true, agentDir = getAgentDir()): SkillMeta[] {
+  const skills = loadAllSkills(cwd, projectTrusted, agentDir);
   return skillNames.map((name) => {
     const match = skills.find((s) => s.name === name);
     if (!match) {

@@ -21,7 +21,7 @@ export interface AgentGuidanceOptions {
 }
 ```
 
-固定规则说明 fresh conversation、后台结果自动报告和不轮询、error 后不擅自派发替代任务、worktree_path 约束、精确父模型默认值和显式拒绝. alternate keys 使用 [model access](2026-09-09-model-routing-and-access-policy.md) 的同一交集计算, 排除精确父模型、不可用/未授权/超 scope 项. all-model grant 仍展开实际 provider/model keys, 不输出 wildcard.
+固定规则说明 fresh conversation、后台结果自动报告和不轮询、error 后不擅自派发替代任务、cwd 的默认目录与相对路径语义、精确父模型默认值和显式拒绝. alternate keys 使用 [model access](2026-09-09-model-routing-and-access-policy.md) 的同一交集计算, 排除精确父模型、不可用/未授权/超 scope 项. all-model grant 仍展开实际 provider/model keys, 不输出 wildcard.
 
 执行模式规则使用当前 forceBackground: 开启时说明所有 Agent 调用均在后台执行, 可继续独立工作, 依赖结果时结束当前轮并在结果送达后继续; 关闭时按任务依赖选择前台或后台. 英文 guidance 随下一次正常父请求刷新, 同一有效配置保持字节稳定.
 

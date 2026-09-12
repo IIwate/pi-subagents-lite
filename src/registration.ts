@@ -39,8 +39,8 @@ export function registerAgentTool(pi: ExtensionAPI, runtime: ExtensionRuntime): 
         description: "Thinking level supported by the selected model.",
       })),
       run_in_background: Type.Optional(Type.Boolean()),
-      worktree_path: Type.Optional(Type.String({
-        description: "Path to the parent repository's main checkout or a linked worktree; not an arbitrary cwd or another repository.",
+      cwd: Type.Optional(Type.String({
+        description: "Existing working directory for the subagent. Absolute or relative to the parent cwd; defaults to the parent cwd. Git is not required.",
       })),
     }, { additionalProperties: false }),
     execute: (...args) => executeAgentTool(runtime, ...args),

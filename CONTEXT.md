@@ -72,14 +72,10 @@ _Avoid_: Quick assignment, quick default
 Additional turns allowed after the soft turn limit steer message before hard abort. Default 6, configurable via `/agents` > Spawn options.
 _Avoid_: Grace period, extra turns
 
-### Worktrees
+### Working directory
 
-**Worktree**:
-A linked git worktree of the same repository as the parent, distinguished by its `--git-dir` pointing outside the worktree root. The target of the `worktree_path` Agent tool param.
-_Avoid_: Git worktree, sibling worktree
-
-**Worktree path**:
-The resolved absolute filesystem path passed through `worktree_path`. Used as the subagent's working directory for its session, resource loader, and system prompt.
+**Working directory**:
+The existing directory selected by the Agent tool's optional `cwd` parameter. Relative paths resolve from the parent session directory; omission selects that directory. The physical absolute path anchors the subagent's tools, resource loader, session, and system prompt, and is retained in its accepted policy. It may be a repository, a worktree, or a plain directory. File access follows Pi's full-access execution model.
 
 ### Runtime
 
@@ -110,7 +106,7 @@ A user stop applies to the current operation and preserves the task's control mo
 - An **Unavailable model rule** can be batch-cleaned only from a reliable **Model catalogue**; credential loss and out-of-scope rules cannot
 - Accepted running and queued work uses an **Accepted run policy**
 - **Agent guidance** communicates current effective access to the parent LLM before each run
-- A **Subagent** may run in a **Worktree** of the parent's repository
+- A **Subagent** runs in its accepted **Working directory**, independently of its parent-session and delivery identities
 - A **Background result delivery** entry is persisted when an autonomous background agent reaches a terminal state, and is automatically eligible only inside its origin-entry subtree
 - **Human takeover** routes subsequent output through explicit selection before parent-session persistence and delivery
 - **Grace turns** are added to the max-turn limit before a steered agent is hard-aborted

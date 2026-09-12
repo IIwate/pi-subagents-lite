@@ -18,7 +18,7 @@ preload_skills 仅接受显式技能名字列表或 false, 无效类型报错, �
 
 文件按文件名排序, 同目录同名定义依此顺序逐字段覆盖, 层间仍为 built-in < global < project. [resolveType](../../../../src/agents/agent-types.ts) 依次执行 exact canonical、唯一 case-fold canonical、唯一 displayName 匹配. 同一层存在多个候选时, 抛出包含排序后 canonical 名称的错误, 不继续按未知名称发现或选择首项.
 
-按需发现保留会话补名契约: 仅在类型未找到时扫描, worktree 只补当前 registry 缺少的 canonical 名称. 已注册定义优先, 新发现项可供本会话后续调用使用. 按 worktree 覆盖同名定义属于另一个产品契约; [已接受策略](../architecture/2026-09-10-isolated-child-resources-and-tool-gates.md) 始终使用接受时副本.
+按需发现保留会话补名契约: 仅在类型未找到时扫描, 目标 cwd 只补当前 registry 缺少的 canonical 名称. 已注册定义优先, 新发现项可供本会话后续调用使用. 按目录覆盖同名定义属于另一个产品契约; [已接受策略](../architecture/2026-09-10-isolated-child-resources-and-tool-gates.md) 始终使用接受时副本.
 
 ## Alternatives considered
 

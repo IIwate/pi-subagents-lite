@@ -1,7 +1,7 @@
-import { existsSync, globSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, ProjectTrustStore, SessionManager, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
 import { ExtensionRuntime } from "../../src/runtime.js";
 import { registerTools } from "../../src/registration.js";
@@ -19,8 +19,9 @@ describe("ExtensionRuntime ownership", () => {
   beforeEach(() => { harness = createTestHarness(); });
   afterEach(() => harness.dispose());
 
-  async function host(name: string, agentBody = "tools: [read]\nextensions: false\nskills: false") {
+  async function host(name: string, agentBody = "tools: [read]\nextensions: false\nskills: false", cwd?: string) {
     const directory = harness.createTempDir(`pi-runtime-${name}-`);
+    cwd ??= directory;
     mkdirSync(join(directory, "agents"));
     writeFileSync(join(directory, "agents", "worker.md"), `---\nname: worker\ndescription: ${name} worker\nregistered_tools: [read]\n${agentBody}\n---\nComplete the delegated task.\n`);
     const parentProvider = fauxProvider({ provider: `${name}-parent`, api: `${name}-parent`, tokensPerSecond: 100000, models: [{ id: "main" }] });
@@ -31,7 +32,7 @@ describe("ExtensionRuntime ownership", () => {
     let runtime!: ExtensionRuntime;
     let api!: ExtensionAPI;
     const errors: string[] = [];
-    const loader = new DefaultResourceLoader({ cwd: directory, agentDir: directory, noExtensions: true, noSkills: true,
+    const loader = new DefaultResourceLoader({ cwd, agentDir: directory, noExtensions: true, noSkills: true,
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
       extensionFactories: [pi => {
         api = pi; runtime = new ExtensionRuntime(pi, { agentDir: directory });
@@ -41,8 +42,8 @@ describe("ExtensionRuntime ownership", () => {
     await loader.reload();
     const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } });
     writeFileSync(join(directory, "settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
-    const { session } = await createAgentSession({ cwd: directory, agentDir: directory, modelRuntime: models,
-      model: parentProvider.getModel(), sessionManager: SessionManager.create(directory, join(directory, "parent")),
+    const { session } = await createAgentSession({ cwd, agentDir: directory, modelRuntime: models,
+      model: parentProvider.getModel(), sessionManager: SessionManager.create(cwd, join(directory, "parent")),
       settingsManager: settings, resourceLoader: loader });
     harness.onDispose(async () => { await session.abort(); session.dispose(); await settings.flush(); });
     harness.onDispose(async () => { if (runtime.active) await runtime.dispose(); });
@@ -100,6 +101,199 @@ describe("ExtensionRuntime ownership", () => {
     expect(readFileSync(parent.session.sessionManager.getSessionFile()!, "utf8")).toContain("Native child result");
     expect(requests[0]).not.toContain("Parent private context");
     expect(parent.errors).toEqual([]);
+  });
+
+  it("executes concurrent cwd tasks with independent tools, extensions, skills, and project context", async () => {
+    const root = realpathSync(harness.createTempDir());
+    const main = join(root, "main");
+    const targets = [join(root, "other-repository"), join(root, "plain-directory")];
+    for (const directory of [main, ...targets]) mkdirSync(directory);
+    const shell = process.platform === "win32" ? "powershell" : "bash";
+    const parent = await host("cwd-concurrent", `tools: [read, write, ${shell}, probe/where]\nextensions: [probe]\nskills: false\npreload_skills: [task-context]`, main);
+    for (const directory of [main, targets[0]]) {
+      expect((await parent.api.exec("git", ["init", "--quiet"], { cwd: directory, timeout: 5000 })).code).toBe(0);
+    }
+    writeFileSync(join(main, "input.txt"), "Parent file");
+    writeFileSync(join(main, "AGENTS.md"), "Parent project instructions");
+    parent.runtime.store.mutate.agent.setIncludeContextFiles(true);
+    parent.runtime.store.mutate.agent.setSystemPromptMode("inherit");
+    for (const [index, directory] of targets.entries()) {
+      new ProjectTrustStore(parent.directory).set(directory, true);
+      mkdirSync(join(directory, ".pi", "extensions"), { recursive: true });
+      mkdirSync(join(directory, ".pi", "skills", "task-context"), { recursive: true });
+      writeFileSync(join(directory, "input.txt"), `Target file ${index}`);
+      writeFileSync(join(directory, "AGENTS.md"), `Target instructions ${index}`);
+      writeFileSync(join(directory, ".pi", "skills", "task-context", "SKILL.md"), `---\nname: task-context\ndescription: Target skill\n---\nTarget skill body ${index}`);
+      writeFileSync(join(directory, ".pi", "extensions", "probe.ts"), `export default function (pi) {
+        pi.registerTool({ name: "where", label: "Where", description: "Inspect the execution directory", parameters: { type: "object", properties: {} },
+          execute: async (_id, _args, _signal, _update, ctx) => {
+            const result = await pi.exec(process.execPath, ["-e", "process.stdout.write(process.cwd())"]);
+            return { content: [{ type: "text", text: JSON.stringify({ cwd: ctx.cwd, sessionCwd: ctx.sessionManager.getCwd(), execCwd: result.stdout }) }], details: {} };
+          } });
+      }`);
+    }
+    const entered = new Set<string>();
+    const together = Promise.withResolvers<void>();
+    harness.onDispose(() => together.resolve());
+    const requests = new Map<string, ProviderContext>();
+    const respond = async (request: ProviderContext) => {
+      const directory = targets.find(target => request.systemPrompt?.includes(`Working directory: ${target}\n`))!;
+      expect(directory).toBeDefined();
+      if (request.messages.some(message => message.role === "toolResult")) {
+        requests.set(directory, request);
+        return fauxAssistantMessage("Directory task completed");
+      }
+      entered.add(directory);
+      if (entered.size === targets.length) together.resolve();
+      await together.promise;
+      return fauxAssistantMessage([
+        fauxToolCall("read", { path: "input.txt" }),
+        fauxToolCall("write", { path: "output.txt", content: directory }),
+        fauxToolCall(shell, { command: shell === "powershell" ? "(Get-Location).ProviderPath" : "pwd -P" }),
+        fauxToolCall("where", {}),
+      ], { stopReason: "toolUse" });
+    };
+    parent.worker.setResponses(Array.from({ length: 4 }, () => respond));
+    const processCwd = process.cwd();
+    await Promise.all(targets.map(cwd => executeAgentTool(parent.runtime, cwd, {
+      agent: "worker", prompt: "Read and write relative files, then inspect the execution directory", model: "cwd-concurrent-worker/child", cwd,
+    }, undefined, undefined, parent.runtime.context)));
+    expect(process.cwd()).toBe(processCwd);
+    expect(entered.size).toBe(2);
+    expect(existsSync(join(main, "output.txt"))).toBe(false);
+    expect(readFileSync(join(main, "input.txt"), "utf8")).toBe("Parent file");
+    for (const [index, directory] of targets.entries()) {
+      const request = requests.get(directory)!;
+      expect(readFileSync(join(directory, "output.txt"), "utf8")).toBe(directory);
+      expect(request.systemPrompt).toContain(`Target instructions ${index}`);
+      expect(request.systemPrompt).toContain(`Target skill body ${index}`);
+      expect(request.systemPrompt).not.toContain("Parent project instructions");
+      expect(request.systemPrompt).not.toContain(`Current working directory: ${main}`);
+      expect(request.systemPrompt).toContain(index === 0 ? "Git repository: yes" : "Not a git repository");
+      expect(request.messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
+        content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining(`Target file ${index}`) })]) }));
+      expect(request.messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: shell, isError: false,
+        content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining(directory) })]) }));
+      expect(request.messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "where", isError: false,
+        content: [{ type: "text", text: JSON.stringify({ cwd: directory, sessionCwd: directory, execCwd: directory }) }] }));
+      expect(parent.runtime.engine.list().find(task => task.policy.cwd === directory)?.state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
+    }
+    expect(parent.errors).toEqual([]);
+  });
+
+  it.each([
+    { saved: true, defaultTrust: "never", trusted: true },
+    { saved: false, defaultTrust: "always", trusted: false },
+    { saved: undefined, defaultTrust: "always", trusted: true },
+    { saved: undefined, defaultTrust: "ask", trusted: false },
+  ])("loads cwd project resources with saved=$saved and default=$defaultTrust while preserving file access", async ({ saved, defaultTrust, trusted }) => {
+    const parent = await host("cwd-trust", "tools: [read]\nextensions: true\nskills: [target-skill, global-skill]\npreload_skills: [target-skill, global-skill]");
+    const directory = realpathSync(harness.createTempDir());
+    writeFileSync(join(parent.directory, "settings.json"), JSON.stringify({ defaultProjectTrust: defaultTrust,
+      retry: { enabled: false }, compaction: { enabled: false } }));
+    if (saved !== undefined) new ProjectTrustStore(parent.directory).set(directory, saved);
+    mkdirSync(join(directory, ".pi", "extensions"), { recursive: true });
+    mkdirSync(join(directory, ".pi", "skills", "target-skill"), { recursive: true });
+    mkdirSync(join(parent.directory, "skills", "global-skill"), { recursive: true });
+    writeFileSync(join(directory, "input.txt"), "Target file remains accessible");
+    writeFileSync(join(directory, "AGENTS.md"), "Target project context");
+    writeFileSync(join(directory, ".pi", "skills", "target-skill", "SKILL.md"), "---\nname: target-skill\ndescription: Target skill\n---\nTarget skill body");
+    writeFileSync(join(parent.directory, "skills", "global-skill", "SKILL.md"), "---\nname: global-skill\ndescription: Global skill\n---\nGlobal skill body");
+    writeFileSync(join(directory, ".pi", "extensions", "probe.ts"), `export default function (pi) {
+      pi.on("before_agent_start", event => ({ systemPrompt: event.systemPrompt + "\\nTarget extension loaded" }));
+    }`);
+    parent.runtime.store.mutate.agent.setIncludeContextFiles(true);
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      fauxAssistantMessage(fauxToolCall("read", { path: "input.txt" }), { stopReason: "toolUse" }),
+      request => { requests.push(request); return fauxAssistantMessage("Target inspected"); },
+    ]);
+    await executeAgentTool(parent.runtime, "cwd-trust", { agent: "worker", prompt: "Inspect the target", model: "cwd-trust-worker/child", cwd: directory }, undefined, undefined, parent.runtime.context);
+    expect(requests[0].systemPrompt).toContain("Global skill body");
+    for (const text of ["Target project context", "Target skill body", "Target extension loaded"]) {
+      expect(requests[0].systemPrompt?.includes(text)).toBe(trusted);
+    }
+    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Target file remains accessible") })]) }));
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("keeps an accepted cwd through queueing, alias changes, reload, and explicit resume", async () => {
+    const parent = await host("cwd-reload");
+    const root = realpathSync(harness.createTempDir());
+    const target = join(root, "accepted");
+    const other = join(root, "other");
+    const alias = join(root, "alias");
+    mkdirSync(target); mkdirSync(other);
+    writeFileSync(join(target, "input.txt"), "Accepted directory result");
+    writeFileSync(join(other, "input.txt"), "Wrong directory result");
+    symlinkSync(target, alias, process.platform === "win32" ? "junction" : "dir");
+    parent.runtime.store.mutate.concurrency.setDefault(1);
+    const gate = holdRead();
+    parent.worker.setResponses([fauxAssistantMessage(fauxToolCall("read", { path: "wait" }), { stopReason: "toolUse" })]);
+    await spawn(parent); await gate.entered.promise;
+    await executeAgentTool(parent.runtime, "cwd-queued", { agent: "worker", prompt: "Inspect the accepted directory", model: "cwd-reload-worker/child",
+      cwd: alias, run_in_background: true }, undefined, undefined, parent.runtime.context);
+    const queued = parent.runtime.engine.list().at(-1)!;
+    expect(queued.state.status).toBe("queued");
+    expect(queued.policy.cwd).toBe(target);
+    renameSync(alias, join(root, "old-alias"));
+    symlinkSync(other, alias, process.platform === "win32" ? "junction" : "dir");
+    const ctx = { ...parent.runtime.context, cwd: other };
+    const closing = parent.runtime.dispose(); gate.release.resolve(); await closing;
+    vi.mocked(PiResources.prototype.attach).mockRestore();
+    const calls = parent.worker.state.callCount;
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.engine.get(queued.taskId)).toMatchObject({ policy: queued.policy, operationId: queued.operationId, state: { status: "waiting" } });
+    expect(parent.worker.state.callCount).toBe(calls);
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      fauxAssistantMessage(fauxToolCall("read", { path: "input.txt" }), { stopReason: "toolUse" }),
+      request => { requests.push(request); return fauxAssistantMessage("Accepted cwd resumed"); },
+    ]);
+    parent.parentProvider.setResponses([fauxAssistantMessage("Resumed result received")]);
+    await replacement.source!.dispatch({ type: "steer", taskId: queued.taskId, operationId: queued.operationId, input: { text: "Continue" } });
+    await settled(replacement, queued.taskId);
+    expect(requests[0].systemPrompt).toContain(`Working directory: ${target}`);
+    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Accepted directory result") })]) }));
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("rejects an invalid cwd before publishing a task and runs without Git metadata", async () => {
+    const parent = await host("cwd-errors");
+    const directory = realpathSync(harness.createTempDir());
+    writeFileSync(join(directory, "input.txt"), "Readable without Git");
+    const parameters = { agent: "worker", prompt: "Read the file", model: "cwd-errors-worker/child" };
+    await expect(executeAgentTool(parent.runtime, "invalid", { ...parameters, cwd: join(directory, "missing") }, undefined, undefined, parent.runtime.context)).rejects.toThrow("Cannot use cwd");
+    expect(parent.runtime.engine.list()).toEqual([]);
+    expect(parent.worker.state.callCount).toBe(0);
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(parent.api, "exec").mockRejectedValue(new Error("spawn git ENOENT"));
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      fauxAssistantMessage(fauxToolCall("read", { path: "input.txt" }), { stopReason: "toolUse" }),
+      request => { requests.push(request); return fauxAssistantMessage("Result without Git"); },
+    ]);
+    await executeAgentTool(parent.runtime, "cwd-valid", { ...parameters, cwd: directory }, undefined, undefined, parent.runtime.context);
+    expect(requests[0].systemPrompt).toContain(`Working directory: ${directory}`);
+    expect(requests[0].systemPrompt).not.toContain("Git repository:");
+    expect(requests[0].systemPrompt).not.toContain("Not a git repository");
+    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false }));
+    const task = parent.runtime.engine.list()[0];
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    renameSync(directory, `${directory}-moved`);
+    harness.onDispose(() => renameSync(`${directory}-moved`, directory));
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    expect(replacement.engine.list()).toEqual([]);
+    expect(diagnostics).toHaveBeenCalledWith("[subagents]", expect.stringContaining("Cannot use cwd"));
+    const result = await executeAgentStatusTool(replacement, "status", { agent_id: task.taskId }, undefined, undefined, ctx);
+    expect(result.content[0].text).toContain("Result without Git");
   });
 
   it.each([

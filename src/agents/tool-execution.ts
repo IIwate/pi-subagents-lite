@@ -6,16 +6,16 @@ import { getStatusNote } from "../status-note.js";
  * Accepted policy and native execution are owned by the activation runtime.
  */
 
-import { CONFIG_DIR_NAME, type ExtensionContext, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionContext, ProjectTrustStore, SettingsManager, getAgentDir, hasTrustRequiringProjectResources } from "@earendil-works/pi-coding-agent";
+import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { TaskOutcome } from "../domain/task.js";
 import type { ExtensionRuntime } from "../runtime.js";
 import { SHORT_ID_LENGTH } from "../types.js";
-import { validateWorktreePath } from "../spawn/worktree-validator.js";
+import { resolveWorkingDirectory } from "../spawn/working-directory.js";
 
 import {
-  errorMessage,
   parseModelKey,
   resolveExactModel,
   unknownModelError,
@@ -74,37 +74,21 @@ export async function executeAgentTool(
 ): Promise<any> {
   runtime.assertContext(ctx);
   const parentEntryId = ctx.sessionManager.getLeafId();
-  // Validate worktree_path early — needed for on-demand agent discovery
-  const rawWorktreePath = params.worktree_path as string | undefined;
-  let validatedWorktreePath: string | undefined;
-  if (rawWorktreePath && rawWorktreePath.trim() !== "") {
-    const parentCwd = runtime.context?.cwd ?? ctx.cwd;
-    const warnings: string[] = [];
-    const onWarning = (msg: string) => { warnings.push(msg); };
-    let validation;
-    try {
-      validation = await validateWorktreePath(runtime.pi, rawWorktreePath, parentCwd, onWarning);
-    } catch (err: unknown) {
-      throw new Error(`worktree_path validation failed: ${errorMessage(err)}`, { cause: err });
-    }
-    if (!validation.ok) {
-      for (const msg of warnings) {
-        if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
-      }
-      throw new Error(validation.error);
-    }
-    validatedWorktreePath = validation.resolvedPath;
-  }
+  const cwd = await resolveWorkingDirectory(params.cwd, ctx.cwd);
+  // Session-only trust belongs to the parent's directory. Other directories use Pi's saved decisions and global default.
+  const projectTrusted = cwd === await realpath(ctx.cwd) ? ctx.isProjectTrusted()
+    : new ProjectTrustStore(runtime.agentDir).get(cwd)
+      ?? (!hasTrustRequiringProjectResources(cwd)
+        || SettingsManager.create(cwd, runtime.agentDir, { projectTrusted: false }).getDefaultProjectTrust() === "always");
 
   const type = (params.agent as string) || "general-purpose";
   let resolvedType = runtime.catalogue.resolveType(type);
   if (!resolvedType) {
     // Not found in registry — try scanning filesystem for agents added during the session.
-    // When worktree_path is set, also scan the worktree's .pi/agents/ directory.
-    const worktreeDir = validatedWorktreePath && ctx.isProjectTrusted?.() !== false
-      ? join(validatedWorktreePath, CONFIG_DIR_NAME, "agents")
+    const targetAgentDir = projectTrusted
+      ? join(cwd, CONFIG_DIR_NAME, "agents")
       : undefined;
-    await runtime.catalogue.discoverNewAgents(worktreeDir);
+    await runtime.catalogue.discoverNewAgents(targetAgentDir);
     resolvedType = runtime.catalogue.resolveType(type);
   }
   if (!resolvedType) {
@@ -209,7 +193,7 @@ export async function executeAgentTool(
   });
 
   const { task, detached } = await runtime.spawn({ ctx, parentEntryId, prompt, description, acceptedPolicy, model: acceptedModel,
-    thinkingLevel: thinkingLevel ?? "off", graceTurns: store.agent.graceTurns, worktreePath: validatedWorktreePath,
+    thinkingLevel: thinkingLevel ?? "off", graceTurns: store.agent.graceTurns, cwd, projectTrusted,
     runInBackground, signal: runInBackground ? undefined : signal });
   if (detached) return successResult("[Subagent detached: User took over this session. Wait for user delivery or explicit status lookup.]");
   if (runInBackground) return successResult(`[Agent ${task.state.status}] The result will be delivered automatically when the parent can accept a turn. Do NOT poll, sleep, timeout, check status, or redo the delegated work.\n\nAgent ID: ${task.taskId}`);

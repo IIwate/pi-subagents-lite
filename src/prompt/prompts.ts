@@ -87,7 +87,7 @@ export function buildAgentPrompt(
   const envLines = [
     "# Environment",
     `Working directory: ${cwd}`,
-    env.isGitRepo ? "Git repository: yes" : "Not a git repository",
+    ...(env.isGitRepo === undefined ? [] : [env.isGitRepo ? "Git repository: yes" : "Not a git repository"]),
   ];
   if (env.isGitRepo && env.branch) {
     envLines.push(`Branch: ${env.branch}`);

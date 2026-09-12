@@ -42,7 +42,8 @@ describe("buildCurrentAgentGuidance", () => {
     expect(guidance).toContain("anthropic/sonnet");
     expect(guidance).toContain("run_in_background: true");
     expect(guidance).toContain("Do not poll");
-    expect(guidance).toContain("worktree_path");
+    expect(guidance).toContain("Set `cwd` to the task's working directory");
+    expect(guidance).toContain("Git is not required");
     expect(guidance).toContain("pass one exact model key listed below");
     expect(guidance).toContain("Never silently replace");
     expect(guidance).toContain("A background Agent error is final");

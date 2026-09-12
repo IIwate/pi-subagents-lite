@@ -56,9 +56,13 @@ In an active child editor, ordinary submissions queue steering input and retain 
 
 The extension registers three tools for the parent model:
 
-- `Agent({ prompt, agent?, model?, thinking?, run_in_background?, worktree_path? })`: Spawn a specialized subagent.
+- `Agent({ prompt, agent?, model?, thinking?, run_in_background?, cwd? })`: Spawn a specialized subagent.
 - `StopAgent({ agent_id })`: Terminate a running or queued subagent.
 - `AgentStatus({ agent_id? })`: Inspect active subagents or retrieve an exact completion result.
+
+Set `cwd` to an existing directory, including another repository, a worktree, or a plain directory. Relative paths resolve from the parent session's cwd; omitting it uses the parent directory. Invalid paths fail before the task starts. The resolved directory anchors tools, project resources, and the system prompt, and remains fixed through queueing and reload. This is a working directory, not a filesystem sandbox; Pi retains full access.
+
+Project resource loading uses the current Pi trust decision for the parent directory, or Pi's saved directory decisions and global trust default for another directory. Directories without trust-requiring Pi resources need no additional decision. When resources require trust and no decision is saved, the `ask` default leaves project resources unloaded while file tools remain available. Global resources remain available, and accepted tasks retain their resource decision on reload.
 
 ## Custom Agents
 

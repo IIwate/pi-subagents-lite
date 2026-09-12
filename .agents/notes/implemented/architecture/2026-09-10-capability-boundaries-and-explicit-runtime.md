@@ -59,7 +59,7 @@ Queued、Running、Waiting、Cancelling 和 Settled 是领域投影. Settled 区
 
 同进程可信调用直接使用类型与函数. 工具 JSON、配置、持久应用数据和不可信宿主输入在入口校验. 不在内部调用或 UI tick 重复运行全量 DTO/schema 转换, 不复制整份模型目录. Quota 的限额更新在控制入口校验并整体发布, 实际准入路径只检查容量.
 
-原生 model、thinking 和 active tool names 可以按 Lane 设置. Harness 级工具实现、资源与 hooks 的作用域通过 Driver 明确处理. Agent 定义发现、项目信任、worktree、prompt/skills、full-access 自治和递归 Agent 排除继续保持其产品含义.
+原生 model、thinking 和 active tool names 可以按 Lane 设置. Harness 级工具实现、资源与 hooks 的作用域通过 Driver 明确处理. [任务工作目录](2026-09-12-task-working-directory.md) 可独立于父仓库选择, 作为已接受执行值使用. Agent 定义发现、项目信任、prompt/skills、full-access 自治和递归 Agent 排除保持各自产品含义.
 
 父任务的因果归属与子 Provider 上下文准备分开. 接收父指令不意味着复制完整父 conversation, 子请求必须具有有效的 tool-call/tool-result 序列.
 

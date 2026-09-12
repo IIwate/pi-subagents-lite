@@ -101,6 +101,9 @@ describe("Agent tool schema — stealth", () => {
   it.each([
     { params: { prompt: "Inspect" }, valid: true },
     { params: { prompt: "Inspect", agent: "Explore", thinking: "off", run_in_background: true }, valid: true },
+    { params: { prompt: "Inspect", cwd: "../test workspace" }, valid: true },
+    { params: { prompt: "Inspect", cwd: 1 }, valid: false },
+    { params: { prompt: "Inspect", worktree_path: "../worktree" }, valid: false },
     { params: {}, valid: false },
     { params: { prompt: 1 }, valid: false },
     { params: { prompt: "Inspect", thinking: "invalid" }, valid: false },
@@ -170,11 +173,10 @@ describe("Agent tool schema — stealth", () => {
     expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
   });
 
-  it("describes worktree_path as a same-repository worktree", () => {
-    expect(hasParam(agentTool()!.parameters, "worktree_path")).toBe(true);
-    const wtSchema = agentTool()!.parameters?.properties?.worktree_path;
-    expect(wtSchema?.description).toContain("parent repository");
-    expect(wtSchema?.description).toContain("not an arbitrary cwd");
+  it("describes cwd as an optional execution directory", () => {
+    const schema = agentTool()!.parameters.properties.cwd;
+    expect(schema.description).toContain("relative to the parent cwd");
+    expect(schema.description).toContain("Git is not required");
   });
 
 
@@ -315,33 +317,5 @@ describe("event listener registration", () => {
     expect(api.listeners.some((l) => l.event === "session_shutdown")).toBe(true);
     expect(api.listeners.some((l) => l.event === "session_tree")).toBe(true);
     expect(api.listeners.some((l) => l.event === "before_agent_start")).toBe(true);
-  });
-
-
-});
-
-
-// worktree_path schema tests (merged from worktree-schema-briefing)
-describe("Agent tool schema — worktree_path", () => {
-  let api: MockExtensionAPI;
-
-  beforeAll(async () => {
-    api = createMockExtensionAPI();
-    await loadExtension(api.api);
-  });
-
-  it("worktree_path is optional in the schema", () => {
-    const tool = api.tools.find((t) => t.name === "Agent")!;
-    const required = tool.parameters.required ?? [];
-    expect(required).not.toContain("worktree_path");
-  });
-
-  it("worktree_path is a described string type in the schema", () => {
-    const tool = api.tools.find((t) => t.name === "Agent")!;
-    const prop = tool.parameters.properties?.worktree_path;
-    expect(prop).toBeDefined();
-    expect(prop.type).toBe("string");
-    expect(prop.description).toContain("linked worktree");
-    expect(prop.description).toContain("another repository");
   });
 });

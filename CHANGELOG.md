@@ -7,6 +7,7 @@ Subagents use native Pi Harness execution with isolated runtimes and durable res
 ### Breaking changes
 
 - Requires Pi 0.85.1 and Node.js 22.19+.
+- The Agent tool uses `cwd` in place of `worktree_path`. It accepts any existing directory; relative paths resolve from the parent cwd. Existing native tasks retain their saved working directory.
 - Settings use `subagents-lite-v3.json` in Pi's agent directory. Configure v3 through `/agents`; v2 settings are not imported. Existing v3 files with invalid JSON, unknown fields, or invalid values fail visibly.
 - Native tasks use `subagents-lite-v3/sessions`. v2 unfinished tasks and undelivered results are not restored; finish pending work before upgrading.
 - Ordinary input in a subagent queues steering and preserves automatic delivery. Use `Alt+T` for explicit takeover, then select output with `Alt+S` while the list is focused.
