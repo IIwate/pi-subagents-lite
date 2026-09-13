@@ -36,4 +36,4 @@ Status: implemented
 
 ## Verification
 
-[discovery unit tests](../../../../test/unit/agents/agent-discovery.test.ts)、[definition resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[disable defaults](../../../../test/unit/agents/disable-default-agents.test.ts) 验证解析、歧义和覆盖规则. [file discovery](../../../../test/scenarios/agents/agent-file-discovery.test.ts)、[type discovery](../../../../test/scenarios/agents/agent-types-discovery.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts) 验证文件、Pi override 与信任入口.
+[discovery unit tests](../../../../test/unit/agents/agent-discovery.test.ts)、[definition resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[disable defaults](../../../../test/unit/agents/disable-default-agents.test.ts) 验证解析、歧义和覆盖规则. [file discovery](../../../../test/scenarios/agents/agent-file-discovery.test.ts)、[type discovery](../../../../test/scenarios/agents/agent-types-discovery.test.ts)、[资源场景](../../../../test/scenarios/runtime-resources.test.ts) 验证文件、Pi override 与信任入口.

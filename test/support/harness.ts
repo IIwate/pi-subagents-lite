@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -53,7 +53,7 @@ export function createTestHarness(options: { initialConfig?: SubagentsConfig; se
       if (disposal) throw new Error("Cannot create resources after disposal");
       const directory = mkdtempSync(join(tmpdir(), prefix));
       directories.push(directory);
-      return directory;
+      return realpathSync.native(directory);
     },
     dispose(): Promise<void> {
       disposal ??= (async () => {

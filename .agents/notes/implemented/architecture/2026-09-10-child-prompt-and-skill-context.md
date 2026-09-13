@@ -41,4 +41,4 @@ skills whitelist 加载名称、描述和路径供按需读取; preload 读取�
 
 ## Verification
 
-[prompt tests](../../../../test/unit/prompt/prompts.test.ts)、[skill unit tests](../../../../test/unit/prompt/skill-loader.test.ts)、[filesystem skills](../../../../test/scenarios/prompt/skill-loader.test.ts) 和 [PiResources setup](../../../../test/scenarios/runtime.test.ts) 覆盖正文顺序、技能去重、隐藏元数据、文件来源及诊断边界.
+[prompt tests](../../../../test/unit/prompt/prompts.test.ts)、[skill unit tests](../../../../test/unit/prompt/skill-loader.test.ts)、[filesystem skills](../../../../test/scenarios/prompt/skill-loader.test.ts) 和 [PiResources setup](../../../../test/scenarios/runtime-resources.test.ts) 覆盖正文顺序、技能去重、隐藏元数据、文件来源及诊断边界.

@@ -46,4 +46,4 @@ Pi 的完整交互式信任解析还包含会话 override 与 project_trust hook
 
 ## Verification
 
-[目录场景](../../../../test/scenarios/agents/working-directory.test.ts) 覆盖省略、绝对与相对路径、目录别名及无效输入. [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 使用官方资源工厂、真实文件和离线模型, 验证不同仓库及普通目录的并发相对读写、shell/扩展 cwd、技能和项目指令、Pi 保存信任与默认值、排队与原生文件重开、别名改指向、Git 缺失及目标目录失效后的持久结果读取. Windows junction 与工具分支由 Windows CI 执行.
+[目录场景](../../../../test/scenarios/agents/working-directory.test.ts) 覆盖省略、绝对与相对路径、目录别名及无效输入. [资源场景](../../../../test/scenarios/runtime-resources.test.ts) 使用官方资源工厂、真实文件和离线模型, 验证不同仓库及普通目录的并发相对读写、shell/扩展 cwd、技能和项目指令、Pi 保存信任与默认值、排队与原生文件重开、别名改指向、Git 缺失及目标目录失效后的持久结果读取. Windows junction 与工具分支由 Windows CI 执行.

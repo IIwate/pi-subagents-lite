@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveWorkingDirectory } from "../../../src/agents/working-directory.js";
@@ -9,7 +9,7 @@ describe("resolveWorkingDirectory", () => {
   let directory: string;
   beforeEach(() => {
     harness = createTestHarness();
-    directory = realpathSync(harness.createTempDir());
+    directory = harness.createTempDir();
   });
   afterEach(() => harness.dispose());
 

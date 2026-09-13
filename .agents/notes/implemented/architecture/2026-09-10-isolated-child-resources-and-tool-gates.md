@@ -73,6 +73,6 @@ prompt 正文、技能和上下文在任务发布前准备, 原生队列保存�
 
 ## Verification
 
-[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [Runtime 场景](../../../../test/scenarios/runtime.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求工具过滤、可用子集恢复、hook 异常隔离和缺资源时的数据读取. 延迟注册恢复场景从真实原生文件重开运行中的任务, 验证 resume 读取子侧状态与消息且只派发一次, 任务保持 Waiting, 显式输入后模型能调用恢复的工具. 状态写入失败场景验证工具副作用被阻止且关闭仍报告 flush 失败.
+[policy resolver](../../../../test/unit/agents/agent-types-resolver.test.ts)、[PowerShell policy](../../../../test/unit/agents/powershell-policy.test.ts) 与 [资源场景](../../../../test/scenarios/runtime-resources.test.ts) 覆盖定义快照、平台工具选择、延迟注册、独立扩展状态、请求工具过滤、可用子集恢复、hook 异常隔离和缺资源时的数据读取. 延迟注册恢复场景从真实原生文件重开运行中的任务, 验证 resume 读取子侧状态与消息且只派发一次, 任务保持 Waiting, 显式输入后模型能调用恢复的工具. 状态写入失败场景验证工具副作用被阻止且关闭仍报告 flush 失败.
 
 异步工具刷新场景通过官方扩展 registerTool 在工具准备完成后替换描述、schema 和执行函数, 验证首次运行和文件重开后的模型都实际调用更新实现. 隐藏的已授权工具保持隐藏, 新注册的未授权工具和 Agent 不进入模型请求. 该离线场景复现 MCP 的异步注册路径, 不验证远程 MCP 服务的连接状态.
