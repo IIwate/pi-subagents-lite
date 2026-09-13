@@ -8,7 +8,6 @@ import { homedir } from "node:os";
 vi.mock("node:fs", async importOriginal => ({
   ...await importOriginal<typeof import("node:fs")>(),
   readdirSync: () => [".git"],
-  realpathSync: (path: string) => path,
 }));
 
 const tmpDir = resolve("skill-fixture");
