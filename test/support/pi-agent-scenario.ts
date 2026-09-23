@@ -94,6 +94,7 @@ export async function createPiAgentScenario() {
   scenario.ctx.modelRegistry = {
     find: vi.fn((provider: string, id: string) => models.find(model => model.provider === provider && model.id === id)),
     getAll: vi.fn(() => models), getAvailable: vi.fn(() => models),
+    getRegisteredProviderIds: vi.fn(() => []),
   };
   scenario.ctx.scopedModels = [{ model: models[0] }, { model: models[2], thinkingLevel: "high" }];
   scenario.ctx.getSystemPrompt = () => "Parent prompt";

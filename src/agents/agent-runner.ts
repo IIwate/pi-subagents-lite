@@ -16,6 +16,7 @@ import {
   type ExtensionAPI,
   getAgentDir,
   loadProjectContextFiles,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -482,6 +483,34 @@ function inheritCustomSessionEntries(
   }
 }
 
+/**
+ * Build the child's model runtime from Pi's auth/model files plus a spawn-time
+ * copy of every provider the parent's extensions registered.
+ *
+ * Extension providers (e.g. cliproxyapi) exist only in the parent runtime, so a
+ * child that loads no extensions would otherwise fail with "No API key found".
+ * The parent runtime is not shared: child extensions may unregister and
+ * re-register providers, `unregisterProvider` ignores ownership, and a disposed
+ * child's closures would then replace the parent's registration.
+ */
+// Note: see .agents/notes/implemented/bug-fix/2026-09-23-child-model-runtime-extension-providers.md
+async function createChildModelRuntime(
+  registry: ExtensionContext["modelRegistry"],
+  agentDir: string,
+): Promise<ModelRuntime> {
+  const runtime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  for (const providerId of registry.getRegisteredProviderIds()) {
+    const config = registry.getRegisteredProviderConfig(providerId);
+    if (config) runtime.registerProvider(providerId, config);
+    const native = registry.getRegisteredNativeProvider(providerId);
+    if (native) runtime.registerNativeProvider(native);
+  }
+  return runtime;
+}
+
 /** Create an agent session with the resolved model and thinking level. */
 async function initSession(
   ctx: ExtensionContext,
@@ -505,6 +534,7 @@ async function initSession(
     cwd, agentDir,
     sessionManager,
     settingsManager: SettingsManager.create(cwd, agentDir),
+    modelRuntime: await createChildModelRuntime(ctx.modelRegistry, agentDir),
     model,
     thinkingLevel: options.thinkingLevel,
     tools: resolveSessionAllowedTools({

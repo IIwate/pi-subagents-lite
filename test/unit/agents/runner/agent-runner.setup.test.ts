@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { fauxProvider } from "@earendil-works/pi-ai";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { CUSTOM_PROMPT_PATH } from "../../../../src/config/config-io.js";
 import { ctx, pi, policy, run, runner, session, message } from "../../../support/runner.js";
 import { makeResolvablePromise } from "../../../support/fixtures.js";
@@ -30,6 +32,25 @@ describe("runner setup", () => {
     expect(entries[1].data).toEqual(nested);
     entries[1].data.nested.value = 7;
     expect(nested.nested.value).toBe(1);
+  });
+
+  it("gives the child a private runtime with the parent's extension providers", async () => {
+    const parent = await ModelRuntime.create();
+    parent.registerProvider("ext", {
+      baseUrl: "http://127.0.0.1:9", apiKey: "ext-key", api: "openai-completions",
+      models: [{
+        id: "ext-model", name: "Ext", reasoning: false, input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 100,
+      }],
+    });
+    parent.registerNativeProvider(fauxProvider({ provider: "native-ext", models: [{ id: "faux-model" }] }).provider);
+    ctx.modelRegistry = new ModelRegistry(parent);
+    await run();
+    const child: ModelRuntime = runner.createSession.mock.calls[0][0].modelRuntime;
+    expect(child).not.toBe(parent);
+    expect(child.getModel("ext", "ext-model")).toBeDefined();
+    expect(child.hasConfiguredAuth("ext")).toBe(true);
+    expect(child.getModel("native-ext", "faux-model")).toBeDefined();
   });
 
   it("disposes setup when the parent signal is already aborted", async () => {

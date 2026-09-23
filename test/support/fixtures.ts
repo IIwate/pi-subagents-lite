@@ -244,7 +244,10 @@ export function fakeCtx(): any {
   return {
     cwd: "/home/test/project",
     sessionManager: { getBranch: () => [] },
-    modelRegistry: { find: vi.fn(), getAll: vi.fn(() => []), getAvailable: vi.fn(() => []) },
+    modelRegistry: {
+      find: vi.fn(), getAll: vi.fn(() => []), getAvailable: vi.fn(() => []),
+      getRegisteredProviderIds: vi.fn(() => []),
+    },
     model: { provider: "test", id: "model" },
     scopedModels: [],
     getSystemPrompt: vi.fn(),

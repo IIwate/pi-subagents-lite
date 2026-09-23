@@ -24,10 +24,16 @@ export const runner = _runner;
 
 vi.mock("@earendil-works/pi-coding-agent", async importOriginal => {
   const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+  const { InMemoryCredentialStore, InMemoryModelsStore } = await import("@earendil-works/pi-ai");
   return {
     ...actual,
     createAgentSession: _runner.createSession,
     SettingsManager: { create: () => actual.SettingsManager.inMemory() },
+    // Real runtime without auth.json/models.json side effects in the test agent dir.
+    ModelRuntime: { create: () => actual.ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(), modelsStore: new InMemoryModelsStore(),
+      modelsPath: null, refreshOnCreate: false,
+    }) },
     getAgentDir: () => _runner.agentDir,
     loadProjectContextFiles: _runner.contextFiles,
     DefaultResourceLoader: class {
