@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmdirSync } from "
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { JsonValue } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../../../src/agents/agent-manager.js";
 import { runAgent } from "../../../src/agents/agent-runner.js";
@@ -62,7 +63,7 @@ describe("durable result delivery", () => {
     session.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
   }
 
-  function toolResult(details: unknown, toolName = "AgentStatus") {
+  function toolResult(details: JsonValue | undefined, toolName = "AgentStatus") {
     return {
       role: "toolResult" as const,
       toolCallId: "status-call",

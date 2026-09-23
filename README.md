@@ -14,7 +14,7 @@ Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent
 
 ## Install
 
-Requires Pi 0.84.3+.
+Requires Pi 0.87.1+.
 
 ```bash
 pi install npm:@iiwate/pi-subagents-lite
