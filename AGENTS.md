@@ -1,6 +1,6 @@
 # AGENTS.md
 
-pi-subagents-lite is a Pi extension for isolated subagent sessions, model access, and parent result delivery. [README.md](README.md) owns product usage; [CONTEXT.md](CONTEXT.md) owns terminology and product boundaries.
+pi-subagents-lite is a Pi extension for isolated subagent sessions, model access, and parent result delivery. [README.md](README.md) owns product usage; [.agents/notes/](.agents/notes/README.md) owns architectural decisions and boundaries.
 
 ## Repository layout
 
