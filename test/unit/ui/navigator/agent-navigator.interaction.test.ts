@@ -421,4 +421,68 @@ describe("AgentNavigator — Interaction", () => {
 
     expect(parentDequeue).toHaveBeenCalledOnce();
   });
+
+  it("freezes list order while inside a child screen and applies global re-sorting only upon returning to Main", () => {
+    const recordA = makeRecord("agent-aaaa", "running");
+    const recordB = makeRecord("agent-bbbb", "running");
+    const recordC = makeRecord("agent-cccc", "running");
+    recordA.display.name = "agent-aaaa";
+    recordB.display.name = "agent-bbbb";
+    recordC.display.name = "agent-cccc";
+    recordA.lifecycle.startedAt = 1000;
+    recordB.lifecycle.startedAt = 2000;
+    recordC.lifecycle.startedAt = 3000;
+
+    const allRecords = [recordA, recordB, recordC];
+    const source = makeSource(allRecords);
+    source.listAgents = () => {
+      return [...allRecords].sort((a, b) => {
+        const rank = (s: string) => (s === "aborted" ? 0 : 1);
+        return rank(a.lifecycle.status) - rank(b.lifecycle.status) || a.lifecycle.startedAt - b.lifecycle.startedAt;
+      }).map(r => source.getRecord(r.id));
+    };
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(source);
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    // In Main: initial order is A, B, C (all running, sorted by startedAt)
+    let lines = selector.render(120);
+    expect(lines.join("\n")).toMatch(/Main[\s\S]*agent-aaaa[\s\S]*agent-bbbb[\s\S]*agent-cccc/);
+
+    // Enter child screen for agent B
+    navigator.handleTerminalInput("\x1b[B"); // focus Main
+    navigator.handleTerminalInput("\x1b[B"); // highlight A
+    navigator.handleTerminalInput("\x1b[B"); // highlight B
+    navigator.handleTerminalInput("\r");     // activate B
+    expect(navigator.selectedId()).toBe("agent-bbbb");
+
+    // Manually stop agent B (status becomes aborted, which normally ranks highest at 0)
+    recordB.lifecycle.status = "aborted";
+    navigator.update();
+
+    // Order must remain FROZEN (A, B, C) while viewing child screen; B must not jump to index 0
+    lines = selector.render(120);
+    expect(lines.join("\n")).toMatch(/agent-aaaa[\s\S]*agent-bbbb[\s\S]*agent-cccc/);
+    expect(lines.join("\n")).toContain("agent-bbbb (Aborted)");
+
+    // Even if a new agent D is spawned in the background, it appends to the end
+    const recordD = makeRecord("agent-dddd", "running");
+    recordD.display.name = "agent-dddd";
+    recordD.lifecycle.startedAt = 500; // earlier startedAt, but should not displace existing
+    allRecords.push(recordD);
+    navigator.update();
+
+    lines = selector.render(120);
+    expect(lines.join("\n")).toMatch(/agent-aaaa[\s\S]*agent-bbbb[\s\S]*agent-cccc[\s\S]*agent-dddd/);
+
+    // Return to Main: order unfreezes and re-sorts by rank (aborted B moves to top!)
+    navigator.activateMain();
+    expect(navigator.selectedId()).toBeNull();
+
+    lines = selector.render(120);
+    // B (aborted, rank 0) is now at the top of subagents, followed by running agents
+    expect(lines.join("\n")).toMatch(/Main[\s\S]*agent-bbbb[\s\S]*agent-dddd[\s\S]*agent-aaaa[\s\S]*agent-cccc/);
+  });
 });

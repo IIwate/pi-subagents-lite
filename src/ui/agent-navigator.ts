@@ -31,6 +31,7 @@ export class AgentNavigator {
   private errorWarningShown = false;
   private disposed = false;
   private readonly stopSource: () => void;
+  private frozenOrder?: string[];
 
   constructor(
     private readonly source: NavigationSource,
@@ -60,6 +61,7 @@ export class AgentNavigator {
     if (ctx === this.uiCtx) return;
     this.stopTranscript?.(); this.stopTranscript = undefined;
     this.selectedAgentId = null; this.highlightedAgentId = null; this.listFocused = false;
+    this.frozenOrder = undefined;
     this.interactionRequestId++;
     this.screen.setContext(ctx);
     this.footerStatus = undefined;
@@ -68,7 +70,7 @@ export class AgentNavigator {
   }
 
   toggleList(): void {
-    if (!this.source.listAgents().length && !this.pendingResultState()) return;
+    if (!this.orderedRecords().length && !this.pendingResultState()) return;
     this.listExpanded = !this.listExpanded;
     if (!this.listExpanded) { this.listFocused = false; this.confirmingClearId = null; this.highlightedAgentId = this.selectedAgentId; }
     this.lastRenderSig = ""; this.update();
@@ -438,16 +440,49 @@ export class AgentNavigator {
       this.update();
     });
   }
+  private orderedRecords(): readonly NavigationAgent[] {
+    const live = this.source.listAgents();
+    if (this.selectedAgentId === null) {
+      this.frozenOrder = undefined;
+      return live;
+    }
+    const liveMap = new Map(live.map(record => [record.id, record]));
+    if (!this.frozenOrder) {
+      this.frozenOrder = live.map(record => record.id);
+      return live;
+    }
+    const frozenSet = new Set(this.frozenOrder);
+    let mutated = false;
+    const activeFrozen = this.frozenOrder.filter(id => {
+      const exists = liveMap.has(id);
+      if (!exists) mutated = true;
+      return exists;
+    });
+    for (const record of live) {
+      if (!frozenSet.has(record.id)) {
+        activeFrozen.push(record.id);
+        frozenSet.add(record.id);
+        mutated = true;
+      }
+    }
+    if (mutated) this.frozenOrder = activeFrozen;
+    return activeFrozen.map(id => liveMap.get(id)!);
+  }
+
   private navigationEntries(): Array<{ id: string | null; record?: NavigationAgent }> {
-    return [{ id: null }, ...this.source.listAgents().map(record => ({ id: record.id, record }))];
+    return [{ id: null }, ...this.orderedRecords().map(record => ({ id: record.id, record }))];
   }
   private activate(id: string | null): boolean {
     if (id === this.selectedAgentId) return true;
     if (id && (!this.source.getRecord(id) || !this.screen.showChild())) return false;
     this.stopTranscript?.(); this.stopTranscript = undefined;
     this.selectedAgentId = id;
-    if (!id) this.screen.showMain();
-    else this.stopTranscript = this.source.watchTranscript(id, () => { if (!this.disposed) { this.screen.requestRender(); this.update(); } });
+    if (!id) {
+      this.frozenOrder = undefined;
+      this.screen.showMain();
+    } else {
+      this.stopTranscript = this.source.watchTranscript(id, () => { if (!this.disposed) { this.screen.requestRender(); this.update(); } });
+    }
     this.transcript.invalidate();
     this.interactionRequestId++; this.interactionNotice = id && this.withdrawn.has(id) ? "Withdrawn input is ready. Alt+Up restores it." : undefined; this.highlightedAgentId = id;
     this.screen.clearAndRender();
@@ -495,7 +530,7 @@ export class AgentNavigator {
   }
 
   private state(): NavigatorViewState {
-    return { records: this.source.listAgents(), selectedId: this.selectedAgentId, highlightedId: this.highlightedAgentId,
+    return { records: this.orderedRecords(), selectedId: this.selectedAgentId, highlightedId: this.highlightedAgentId,
       confirmingClearId: this.confirmingClearId, listFocused: this.listFocused, listExpanded: this.listExpanded,
       notice: this.interactionNotice, pending: this.pendingResultState(), parentModel: this.getParentModelInfo?.(),
       statsVisibility: this.statsVisibility, theme: this.uiCtx!.theme, now: Date.now() };
@@ -505,7 +540,7 @@ export class AgentNavigator {
   update(): void {
     if (!this.uiCtx || this.disposed) return;
     try {
-      const records = this.source.listAgents();
+      const records = this.orderedRecords();
       if (this.selectedAgentId && !records.some(record => record.id === this.selectedAgentId)) this.activate(null);
       if (this.highlightedAgentId && !records.some(record => record.id === this.highlightedAgentId)) this.highlightedAgentId = this.selectedAgentId;
       if (this.confirmingClearId && !records.some(record => record.id === this.confirmingClearId)) this.confirmingClearId = null;
@@ -533,6 +568,7 @@ export class AgentNavigator {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true; this.interactionRequestId++; this.stopTimer();
+    this.frozenOrder = undefined;
     const ui = this.uiCtx;
     const failures: unknown[] = [];
     for (const release of [this.stopSource, this.stopTranscript, () => this.screen.dispose(), () => this.source.dispose(), () => this.transcript.invalidate()]) {
