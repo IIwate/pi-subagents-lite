@@ -52,9 +52,14 @@ function parseBinding(input: unknown): TaskBinding {
   if (data.mode !== "foreground" && data.mode !== "background") throw new Error("Invalid task delivery mode");
   if (data.control !== "autonomous" && data.control !== "manual") throw new Error("Invalid task control mode");
   if (typeof policy.systemPrompt !== "string") throw new Error("Invalid task system prompt");
+  if (policy.toolSources !== undefined && !Array.isArray(policy.toolSources)) throw new Error("Invalid task tool sources");
   const accepted: TaskPolicy = {
     agent: string(policy.agent), model: { provider: string(model.provider), id: string(model.id) },
     thinkingLevel, tools: strings(policy.tools), cwd: string(policy.cwd), systemPrompt: policy.systemPrompt,
+    ...(policy.toolSources === undefined ? {} : { toolSources: (policy.toolSources as unknown[]).map(input => {
+      const grant = object(input);
+      return { source: string(grant.source), tools: grant.tools === true ? true as const : strings(grant.tools), exclude: strings(grant.exclude) };
+    }) }),
     limits: {
       maxTurns: limits.maxTurns === undefined ? undefined : number(limits.maxTurns, 1),
       graceTurns: number(limits.graceTurns),

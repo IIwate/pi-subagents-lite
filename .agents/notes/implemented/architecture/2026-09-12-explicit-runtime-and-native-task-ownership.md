@@ -34,7 +34,7 @@ export interface TaskBinding {
 
 ## Resource preparation and teardown
 
-[PiResources](../../../../src/drivers/pi-resources.ts) 加载当前官方 Pi 的资源与工具, 为每个子任务建立独立 ModelRuntime 和 ExtensionRunner. 它把扩展工具和关键请求 hook 接到原生 Harness, 并将 custom state 保存到原生应用 values. 给扩展的同步 SessionManager 是原生消息及扩展状态的读取投影, 不运行模型, 也不是子任务的持久化后端.
+[PiResources](../../../../src/drivers/pi-resources.ts) 加载当前官方 Pi 的资源与工具, 为每个子任务建立独立 ModelRuntime 和 ExtensionRunner. 它把扩展工具和关键请求 hook 接到原生 Harness, 并将按顺序追加的 custom state 保存到原生应用 values. [工具宿主](2026-09-30-native-pi-tool-host-and-source-grants.md) 接入官方 MCP/codemode/tool-search 工厂、来源授权、独立声明和嵌套调用. 给扩展的同步 SessionManager 是原生消息及扩展状态的读取投影, 不运行模型, 也不是子任务的持久化后端.
 
 资源准备在原生任务发布之前完成. Runtime 跟踪未完成的接受操作, 每个异步边界核对生命周期. HarnessDriver 接过 Native Session 与 PiResources 后承担其失败关闭责任. 迟到返回的资源被关闭, 不进入已关闭 Runtime 的 TaskEngine.
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { ExtensionRuntime } from "../../src/runtime.js";
 import { executeAgentTool, executeStopAgentTool } from "../../src/agents/tool-execution.js";
 import { executeAgentStatusTool } from "../../src/agents/agent-status.js";
@@ -77,7 +77,7 @@ describe("ExtensionRuntime ownership", () => {
     for (const enabled of [false, true, true, false]) {
       parent.runtime.store.mutate.agent.setForceBackground(enabled);
       parent.parentProvider.setResponses([context => {
-        prompts.push(context.systemPrompt ?? "");
+        prompts.push(getCurrentSystemPrompt(context.messages));
         return fauxAssistantMessage("Settings applied");
       }]);
       await parent.session.prompt("Use the current agent settings");

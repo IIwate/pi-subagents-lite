@@ -1,3 +1,4 @@
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Type } from "typebox";
@@ -141,9 +142,9 @@ describe("Native Harness lane contracts", () => {
     expect(JSON.stringify(childRequests[1].messages)).toContain("Probe finished");
     expect(JSON.stringify(childRequests[1].messages)).not.toContain("Withdraw this instruction");
     expect(childOptions.map(options => options?.reasoning)).toEqual(["high", "high"]);
-    expect(childRequests[1].systemPrompt).toBe("Policy for child");
-    expect(childRequests[1].tools?.map(tool => tool.name)).toEqual(["probe"]);
-    expect(mainRequests[0].systemPrompt).toBe("Policy for main");
+    expect(getCurrentSystemPrompt(childRequests[1].messages)).toBe("Policy for child");
+    expect(getCurrentTools(childRequests[1].messages).map(tool => tool.name)).toEqual(["probe"]);
+    expect(getCurrentSystemPrompt(mainRequests[0].messages)).toBe("Policy for main");
     expect(mainRequests[0].tools ?? []).toEqual([]);
     expect(getOrThrow(await child.cancelQueued(queued.entryId, context)).kind).toBe("already_consumed");
 

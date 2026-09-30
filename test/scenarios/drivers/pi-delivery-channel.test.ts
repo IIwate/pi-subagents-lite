@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { BACKGROUND_CONTEXT, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
 import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
   type ExtensionAPI, type ExtensionContext, type ExtensionError, type ExtensionFactory,
@@ -153,7 +153,7 @@ describe("Native task delivery to an official Pi parent", () => {
     await tasks.flushDeliveries();
     expect(receipts(parent)).toHaveLength(0);
     expect((await worker.store.deliveries())[0].receipt).toBeUndefined();
-    expect(childRequests[0].systemPrompt).toBe("Child context only");
+    expect(getCurrentSystemPrompt(childRequests[0].messages)).toBe("Child context only");
     expect(JSON.stringify(childRequests[0].messages)).not.toContain("native_child");
     releaseParent.resolve();
     await run;

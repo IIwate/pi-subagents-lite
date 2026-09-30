@@ -5,12 +5,20 @@ export interface ModelIdentity {
 
 export type TaskThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+// Note: see .agents/notes/implemented/architecture/2026-09-30-native-pi-tool-host-and-source-grants.md
+export interface ToolSourceGrant {
+  readonly source: string;
+  readonly tools: true | readonly string[];
+  readonly exclude: readonly string[];
+}
+
 /** Resolved execution values supplied after catalogue, model, and input validation. */
 export interface TaskPolicy {
   readonly agent: string;
   readonly model: ModelIdentity;
   readonly thinkingLevel: TaskThinkingLevel;
   readonly tools: readonly string[];
+  readonly toolSources?: readonly ToolSourceGrant[];
   readonly cwd: string;
   readonly systemPrompt: string;
   readonly limits: {
@@ -27,6 +35,10 @@ export function freezePolicy(policy: TaskPolicy): TaskPolicy {
     model: Object.freeze({ provider: policy.model.provider, id: policy.model.id }),
     thinkingLevel: policy.thinkingLevel,
     tools: Object.freeze([...policy.tools]),
+    ...(policy.toolSources ? { toolSources: Object.freeze(policy.toolSources.map(grant => Object.freeze({
+      source: grant.source, tools: grant.tools === true ? true : Object.freeze([...grant.tools]),
+      exclude: Object.freeze([...grant.exclude]),
+    }))) } : {}),
     cwd: policy.cwd,
     systemPrompt: policy.systemPrompt,
     limits: Object.freeze({

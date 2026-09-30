@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { basename, dirname, extname, join, sep } from "node:path";
 import {
+  createMcpExtension, createCodemodeExtension, createToolSearchExtension,
   createBashTool, createEditTool, createFindTool, createGrepTool, createPowerShellTool, createReadTool, createWriteTool,
   DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
-  loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry, type ToolDefinition,
+  loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
-  type AgentHarnessTool, type ExecutionToolContext, type JsonValue } from "@earendil-works/pi-agent-core";
-import type { Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
+  type ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { Context as ProviderContext, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AcceptedRunPolicy } from "../agents/types.js";
 import type { TaskBinding } from "../engine/contracts.js";
 import type { NativeTaskStore } from "./native-task-store.js";
@@ -15,12 +16,15 @@ import { EXCLUDED_TOOL_NAMES, resolveVisibleTools } from "../agents/agent-types.
 import { extractText } from "../prompt/context.js";
 import { buildAgentPrompt, type EnvInfo, type PromptExtras } from "../prompt/prompts.js";
 import { loadSkillMeta, preloadSkills } from "../prompt/skill-loader.js";
+import { PiToolHost } from "./pi-tool-host.js";
+import type { ToolSourceGrant } from "../domain/policy.js";
 
 const GIT_EXEC_TIMEOUT_MS = 5000;
 const context = BACKGROUND_CONTEXT;
 const extensionState = value<unknown>("subagents-lite.v3", "extension-state");
 
 function extensionName(file: string): string {
+  if (file.startsWith("builtin:")) return file;
   const parts = file.split(sep);
   const npm = parts.lastIndexOf("node_modules");
   if (npm >= 0) return parts[npm + (parts[npm + 1].startsWith("@") ? 2 : 1)];
@@ -58,18 +62,23 @@ export class PiResources {
   private snapshot?: LaneSnapshot;
   private abortSignal?: AbortSignal;
   private readonly stops: Array<() => void> = [];
-  private activeTools: string[] = [];
-  private toolsReady = false;
-  private readonly definitions = new Map<string, ToolDefinition<any, any>>();
-  private readonly safeTools = new Set(["read", "grep", "find"]);
-  private readonly customState = new Map<string, unknown>();
-  readonly tools: AgentHarnessTool<ExecutionToolContext>[] = [];
+  private readonly toolHost: PiToolHost;
+  private initialTools: readonly string[] = [];
+  toolSources: readonly ToolSourceGrant[] = [];
+  private readonly customState: Array<[string, unknown]> = [];
+  get tools() { return this.toolHost.tools; }
+  get activeTools() { return this.toolHost.activeTools; }
+  projectRequest(request: ProviderContext): ProviderContext { return this.toolHost.projectRequest(request); }
   systemPrompt = "";
   extensionPaths: string[] = [];
 
   private constructor(readonly models: ModelRuntime, readonly settings: SettingsManager,
     private readonly loader: DefaultResourceLoader, private readonly options: ResourceOptions) {
     this.view = SessionManager.inMemory(options.cwd);
+    this.toolHost = new PiToolHost({ assertOpen: () => this.assertOpen(), flush: () => this.flush(),
+      changed: () => this.publishTools(), warn: message => this.warn(message),
+      messages: () => this.view.getBranch().flatMap(entry => entry.type === "message" ? [entry.message] : []),
+    });
   }
 
   static async open(options: ResourceOptions): Promise<PiResources> {
@@ -86,6 +95,11 @@ export class PiResources {
     const denied = new Set(policy?.definition.excludeExtensions ?? []);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
       noExtensions: restored !== undefined || policy?.extensions === false,
+      extensionFactories: [
+        { name: "mcp", factory: createMcpExtension(), builtin: true, replaceable: true },
+        { name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
+        { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
+      ],
       additionalExtensionPaths: restored?.resources ? [...restored.resources.extensions] : undefined,
       noSkills: restored !== undefined || policy?.skills === false || Array.isArray(policy?.skills) || Array.isArray(policy?.definition.preloadSkills),
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
@@ -108,22 +122,24 @@ export class PiResources {
       resources.systemPrompt = restored?.policy.systemPrompt ?? await resources.buildPrompt(policy!);
       resources.bind();
       if (!restored) {
+        const inherited = new Map<string, unknown>();
         for (const entry of parent.sessionManager.getBranch()) {
           if (entry.type === "custom" && !entry.customType.startsWith("subagents-lite")) {
-            resources.customState.set(entry.customType, structuredClone(entry.data));
+            inherited.set(entry.customType, structuredClone(entry.data));
           }
         }
+        resources.customState.push(...inherited);
         for (const [type, data] of resources.customState) resources.view.appendCustomEntry(type, data);
         await resources.runner.emit({ type: "session_start", reason: "new" });
-        resources.collectDefinitions();
+        resources.toolHost.refresh();
         const extTools = new Map(loaded.extensions.map(extension => [extensionName(extension.path), [...extension.tools.keys()]]));
-        const all = [...resources.definitions.keys()];
-        resources.activeTools = resolveVisibleTools({
-          activeTools: Array.isArray(policy!.tools) ? all : resources.activeTools,
+        const all = resources.toolHost.allTools().map(tool => tool.name);
+        const active = resolveVisibleTools({ activeTools: Array.isArray(policy!.tools) ? all : resources.activeTools,
           tools: policy!.tools, excludeTools: policy!.definition.excludeTools, extToolMap: extTools,
           notify: message => resources.warn(message),
         }) ?? resources.activeTools;
-        resources.collectTools(resources.activeTools);
+        resources.toolHost.setActiveTools(active);
+        resources.initialTools = resources.toolHost.toolNames;
       }
       return resources;
     } catch (error) { await resources.close(); throw error; }
@@ -135,8 +151,10 @@ export class PiResources {
     const { cwd, policy, restored, model, thinking } = this.options;
     const builtins: AgentTool<any>[] = [createReadTool(cwd), createBashTool(cwd), createPowerShellTool(cwd), createEditTool(cwd),
       createWriteTool(cwd), createGrepTool(cwd), createFindTool(cwd)];
-    for (const tool of builtins) this.definitions.set(tool.name, { ...tool,
-      execute: (id, args, signal, update) => tool.execute(id, args, signal, update) });
+    for (const tool of builtins) this.toolHost.register({ definition: { ...tool, defaultActive: false,
+      execute: (id, args, signal, update) => tool.execute(id, args, signal, update) },
+      sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${tool.name}` },
+    }, ["read", "grep", "find"].includes(tool.name));
     const loaded = this.loader.getExtensions();
     // The runner's synchronous session API reads a projection; only the native session persists child state.
     const view = new Proxy({} as SessionManager, { get: (_target, key) => {
@@ -147,12 +165,34 @@ export class PiResources {
     this.stops.push(this.runner.onError(error => {
       this.warn(`Child extension ${error.extensionPath} (${error.event}): ${error.error}`);
     }));
-    this.activeTools = policy?.registeredTools.filter(name => !EXCLUDED_TOOL_NAMES.includes(name)) ?? [...restored!.policy.tools];
+    this.toolHost.bind(this.runner);
+    const selected = policy?.registeredTools.filter(name => !EXCLUDED_TOOL_NAMES.includes(name)) ?? [...restored!.policy.tools];
+    if (policy) {
+      this.toolSources = loaded.extensions.map(extension => {
+        const name = extensionName(extension.path);
+        const entries = (values: readonly string[]) => values.flatMap(entry => {
+          const slash = entry.indexOf("/");
+          return slash < 0 ? [entry] : entry.slice(0, slash) === name ? [entry.slice(slash + 1)] : [];
+        });
+        const tools = Array.isArray(policy.tools) ? entries(policy.tools)
+          : policy.tools === false ? [] : policy.restrictToRegisteredTools ? selected : true;
+        const exclude = Array.isArray(policy.tools) ? [] : entries(policy.definition.excludeTools ?? []);
+        return { source: extension.sourceInfo.path, tools: exclude.includes("*") ? [] : tools === true || tools.includes("*") ? true : tools, exclude };
+      });
+      const exact = resolveVisibleTools({ activeTools: Array.isArray(policy.tools) ? builtins.map(tool => tool.name) : selected,
+        tools: policy.tools, excludeTools: policy.definition.excludeTools }) ?? selected;
+      this.toolHost.accept(exact, this.toolSources);
+    } else {
+      this.toolSources = restored!.policy.toolSources ?? [];
+      this.initialTools = restored!.policy.tools;
+      this.toolHost.accept(restored!.policy.tools, restored!.policy.toolSources, true);
+    }
+    this.toolHost.setActiveTools(selected);
     const unsupported = () => { throw new Error("Child extensions cannot change the accepted execution policy"); };
     this.runner.bindCore({
       appendEntry: (type, data) => {
         if (this.closed) throw new Error("Child resources are closed");
-        this.customState.set(type, structuredClone(data)); this.view.appendCustomEntry(type, data);
+        this.customState.push([type, structuredClone(data)]); this.view.appendCustomEntry(type, data);
         if (this.store) this.enqueue(() => this.saveState());
       },
       sendMessage: (message, opts) => {
@@ -169,25 +209,16 @@ export class PiResources {
       },
       setSessionName: name => { this.view.appendSessionInfo(name); if (this.harness) this.enqueue(() => this.harness!.setName(name, context)); },
       getSessionName: () => this.view.getSessionName(), setLabel: (id, label) => { this.assertAttached(); this.enqueue(() => this.harness!.setLabel(id, label, context)); },
-      getActiveTools: () => [...this.activeTools],
-      getAllTools: () => [...this.definitions.values()].map(tool => ({ ...tool, sourceInfo: { source: "extension", scope: "temporary", origin: "top-level", path: cwd } })),
-      setActiveTools: names => {
-        this.assertOpen();
-        const allowed = this.store?.binding.policy.tools ?? (this.toolsReady ? this.toolNames : undefined);
-        const active = names.filter(name => !EXCLUDED_TOOL_NAMES.includes(name) && (!allowed || allowed.includes(name)));
-        this.activeTools = active;
-        if (this.lane) this.enqueue(() => this.lane!.setActiveTools(active, context));
-      },
-      refreshTools: () => {
-        this.assertOpen();
-        this.collectDefinitions();
-        if (!this.toolsReady) return;
-        this.collectTools(this.store?.binding.policy.tools ?? this.toolNames);
-        if (this.harness) this.enqueue(() => this.harness!.setTools([...this.tools], context));
-      },
+      getSettings: () => this.settings.getSettings(),
+      getActiveTools: () => this.activeTools,
+      getAllTools: () => this.toolHost.allTools(),
+      setActiveTools: names => this.toolHost.setActiveTools(names),
+      refreshTools: () => this.toolHost.refresh(),
       getCommands: () => [],
       setModel: unsupported, getThinkingLevel: () => thinking, setThinkingLevel: unsupported,
     }, {
+      getCallableTools: () => this.toolHost.callableTools(),
+      executeTool: (id, name, args, options) => this.toolHost.executeNested(id, name, args, options),
       getModel: () => model, getScopedModels: () => [{ model, thinkingLevel: thinking }],
       isIdle: () => !this.snapshot?.operation, isProjectTrusted: () => this.options.projectTrusted,
       getSignal: () => this.abortSignal, abort: () => { this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane!.abort(context)); }); },
@@ -195,43 +226,24 @@ export class PiResources {
       getContextUsage: () => undefined, compact: unsupported, getSystemPrompt: () => this.systemPrompt,
       getSystemPromptOptions: () => ({ cwd, selectedTools: [...this.activeTools] }),
     });
-    this.collectDefinitions();
+    this.toolHost.refresh();
   }
 
-  private collectDefinitions(): void {
-    for (const tool of this.runner.getAllRegisteredTools()) {
-      if (EXCLUDED_TOOL_NAMES.includes(tool.definition.name)) continue;
-      this.safeTools.delete(tool.definition.name);
-      this.definitions.set(tool.definition.name, tool.definition);
-      if (!this.toolsReady && !this.options.restored && !this.options.policy?.restrictToRegisteredTools
-        && !this.activeTools.includes(tool.definition.name)) this.activeTools.push(tool.definition.name);
-    }
-  }
-
-  private collectTools(names: readonly string[]): void {
-    const tools = names.map(name => {
-      const tool = this.definitions.get(name);
-      if (!tool) throw new Error(`Accepted tool is unavailable: ${name}`);
-      return {
-        name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
-        executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
-        execute: async (id, args, update, _toolContext, _invocation, callContext) => {
-          this.assertOpen(); await this.flush();
-          if (!this.activeTools.includes(tool.name)) throw new Error(`Tool is not active: ${tool.name}`);
-          const result = await tool.execute(id, args, callContext.abortSignal, update, this.runner.createContext());
-          await this.flush(); return result;
-        },
-      } satisfies AgentHarnessTool<ExecutionToolContext>;
+  private publishTools(): void {
+    if (!this.harness || !this.lane) return;
+    const tools = [...this.tools];
+    const active = this.activeTools.filter(name => this.toolHost.permits(name) && tools.some(tool => tool.name === name));
+    this.enqueue(async () => {
+      await this.harness!.setTools(tools, context);
+      await this.lane!.setActiveTools(active, context);
     });
-    this.tools.splice(0, this.tools.length, ...tools);
-    this.toolsReady = true;
   }
 
   async attach(harness: AgentHarness<ExecutionToolContext>, lane: AgentLane, store: NativeTaskStore): Promise<void> {
     const watch = await lane.watch(context);
     this.harness = harness; this.lane = lane; this.store = store;
     this.snapshot = watch.snapshot;
-    this.activeTools = [...watch.snapshot.configuration.activeToolNames];
+    this.toolHost.restoreActiveTools(watch.snapshot.configuration.activeToolNames);
     this.stops.push(() => watch.unsubscribe());
     watch.start(async event => {
       if (this.closing) return;
@@ -242,10 +254,10 @@ export class PiResources {
     const saved = await store.session.getValue(extensionState, context);
     if (saved) {
       if (!Array.isArray(saved.value)) throw new Error("Invalid persisted child extension state");
-      this.customState.clear();
+      this.customState.length = 0;
       for (const item of saved.value) {
         if (!Array.isArray(item) || item.length !== 2 || typeof item[0] !== "string") throw new Error("Invalid child extension state entry");
-        this.customState.set(item[0], item[1]);
+        this.customState.push([item[0], item[1]]);
       }
     } else await this.saveState();
     const refresh = async () => {
@@ -261,18 +273,17 @@ export class PiResources {
     if (this.options.restored) {
       // Resume hooks need the saved child view and may register accepted tools before execution is admitted.
       await this.runner.emit({ type: "session_start", reason: "resume" });
-      this.collectDefinitions();
-      this.collectTools(store.binding.policy.tools);
+      this.toolHost.refresh();
     }
     // Registration can finish between resource preparation and native attachment.
-    this.enqueue(() => harness.setTools([...this.tools], context));
+    this.publishTools();
     this.stops.push(harness.hooks.on("before_drive", async (_event, callContext) => { this.abortSignal = callContext.abortSignal; await refresh(); await this.flush(); }));
     this.stops.push(harness.hooks.on("before_run", async event => {
       const text = event.prompt.flatMap(message => "content" in message ? [typeof message.content === "string" ? message.content : extractText(message.content)] : []).join("\n");
-      const result = await this.runner.emitBeforeAgentStart(text, undefined, this.systemPrompt, { cwd: this.options.cwd, selectedTools: this.activeTools });
+      const result = await this.runner.emitBeforeAgentStart(text, undefined, { forceSystemPrompt: this.systemPrompt, cwd: this.options.cwd, selectedTools: this.activeTools });
       // The first native checkpoint must capture tool filtering performed by child hooks.
       await this.flush();
-      if (result?.systemPrompt) this.systemPrompt = result.systemPrompt;
+      this.systemPrompt = result.systemPromptOptions.forceSystemPrompt ?? this.systemPrompt;
       return result?.messages ? { messages: result.messages.map(message => ({ ...message, role: "custom" as const, timestamp: Date.now() })) } : undefined;
     }));
     this.stops.push(harness.hooks.on("transform_context", async event => { await refresh(); return { messages: await this.runner.emitContext(event.messages), systemPrompt: this.systemPrompt }; }));
@@ -285,17 +296,20 @@ export class PiResources {
       const message = await this.runner.emitMessageEnd({ type: "message_end", message: event.message });
       return message?.role === "assistant" ? { message: message as typeof event.message } : undefined;
     }));
-    this.stops.push(harness.hooks.on("before_tool", async (event, callContext) => {
-      this.abortSignal = callContext.abortSignal; await refresh();
-      const result = await this.runner.emitToolCall({ type: "tool_call", toolName: event.toolName, toolCallId: event.toolCallId, input: event.args });
-      return result?.block ? { block: { reason: result.reason ?? "Blocked by child extension" } } : undefined;
+    this.stops.push(harness.hooks.on("before_tool", async (_event, callContext) => {
+      this.abortSignal = callContext.abortSignal; await refresh(); await this.flush();
+      return undefined;
     }));
-    this.stops.push(harness.hooks.on("after_tool", async event => {
-      const result = await this.runner.emitToolResult({ type: "tool_result", toolName: event.toolName, toolCallId: event.toolCallId,
-        input: event.args, content: event.content, details: event.details, isError: event.isError });
-      return result ? { ...result, details: result.details as JsonValue | undefined } : undefined;
+    this.stops.push(harness.hooks.on("after_tool", event => this.toolHost.takeOutcome(event.toolCallId)));
+    this.stops.push(harness.events.on("turn_start", async () => {
+      await this.runner.emit({ type: "turn_start", turnIndex: this.snapshot!.transcript.filter(entry => entry.type === "message" && entry.message.role === "assistant").length, timestamp: Date.now() });
     }));
     await this.flush();
+    for (const name of this.initialTools) {
+      if (!this.toolHost.allTools().some(tool => tool.name === name) && !this.toolSources.some(grant => grant.tools === true || grant.tools.includes(name))) {
+        throw new Error(`Accepted tool is unavailable: ${name}`);
+      }
+    }
   }
 
   private async buildPrompt(policy: AcceptedRunPolicy): Promise<string> {
@@ -350,7 +364,9 @@ export class PiResources {
     if (this.closing) return this.closing;
     this.closing = Promise.resolve().then(async () => {
       try {
-        if (this.runner) await this.runner.emit({ type: "session_shutdown", reason: "reload" });
+        const closing = this.toolHost.close();
+        try { if (this.runner) await this.runner.emit({ type: "session_shutdown", reason: "reload" }); }
+        finally { await closing; }
         await this.flush();
       } finally {
         this.closed = true;

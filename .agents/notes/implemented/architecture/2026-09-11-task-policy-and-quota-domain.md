@@ -42,6 +42,7 @@ export interface TaskPolicy {
   readonly model: ModelIdentity;
   readonly thinkingLevel: TaskThinkingLevel;
   readonly tools: readonly string[];
+  readonly toolSources?: readonly ToolSourceGrant[];
   readonly cwd: string;
   readonly systemPrompt: string;
   readonly limits: {
@@ -52,9 +53,9 @@ export interface TaskPolicy {
 }
 ```
 
-TaskPolicy 保存已解析的模型身份、thinking、具体工具名、工作目录、system prompt 正文及运行限额. Catalogue、模型授权、资源加载和输入校验属于接受前的调用方. SDK 模型对象的其他字段、凭据、函数和会话句柄不进入策略.
+TaskPolicy 保存已解析的模型身份、thinking、初始精确工具名、可选来源授权、工作目录、system prompt 正文及运行限额. [工具宿主 Note](2026-09-30-native-pi-tool-host-and-source-grants.md) 定义 ToolSourceGrant 与异步目录边界; 原始客户端、凭据及实现仍归资源 Adapter. Catalogue、模型授权、资源加载和输入校验属于接受前的调用方. SDK 模型对象的其他字段、凭据、函数和会话句柄不进入策略.
 
-freezePolicy 显式复制所需标量、model identity、工具数组和 limits, 并冻结自己拥有的结构. 它不克隆完整 SDK 对象或冻结调用方对象. 状态变化和续聊共享接受时的策略, 不重复复制它. 凭据和工具实现的生命周期仍属于 Adapter.
+freezePolicy 显式复制所需标量、model identity、工具数组、来源规则和 limits, 并冻结自己拥有的结构. 它不克隆完整 SDK 对象或冻结调用方对象. 状态变化和续聊共享接受时的策略, 不重复复制它. 凭据和工具实现的生命周期仍属于 Adapter.
 
 ## Quota ownership
 

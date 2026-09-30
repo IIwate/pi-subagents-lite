@@ -174,7 +174,7 @@ export class ExtensionRuntime {
             display: { name: acceptedPolicy.definition.displayName ?? acceptedPolicy.definition.name, description: options.description },
             resources: { extensions: resources.extensionPaths, trusted: projectTrusted },
             policy: { agent: acceptedPolicy.definition.name, model: { provider: model.provider, id: model.id }, thinkingLevel,
-              cwd, tools: resources.toolNames, systemPrompt: resources.systemPrompt,
+              cwd, tools: resources.toolNames, toolSources: resources.toolSources, systemPrompt: resources.systemPrompt,
               limits } },
           retry: resources.settings.getRetrySettings(), compaction: resources.settings.getCompactionSettings(),
         });

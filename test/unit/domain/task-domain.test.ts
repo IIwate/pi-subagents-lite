@@ -16,12 +16,15 @@ describe("accepted task policy", () => {
     const model = { provider: "provider", id: "model", hostCallback: () => undefined };
     const tools = ["read"];
     const limits = { maxTurns: 8, graceTurns: 2, maxTokens: 2048 };
-    const input = { ...policy(), model, tools, limits };
+    const toolSources = [{ source: "builtin:mcp", tools: ["lookup"], exclude: ["remove"] }];
+    const input = { ...policy(), model, tools, toolSources, limits };
     const task = createTask("task", "first", input);
 
     model.provider = "other";
     model.id = "replacement";
     tools.push("write");
+    toolSources[0].tools.push("write");
+    toolSources[0].exclude.length = 0;
     limits.maxTurns = 1;
     limits.maxTokens = 512;
     input.cwd = "/another-workspace";
@@ -29,6 +32,7 @@ describe("accepted task policy", () => {
 
     expect(task.policy.model).toEqual({ provider: "provider", id: "model" });
     expect(task.policy.tools).toEqual(["read"]);
+    expect(task.policy.toolSources).toEqual([{ source: "builtin:mcp", tools: ["lookup"], exclude: ["remove"] }]);
     expect(task.policy.limits).toEqual({ maxTurns: 8, graceTurns: 2, maxTokens: 2048 });
     expect(task.policy.cwd).toBe("/workspace");
     expect(task.policy.systemPrompt).toBe("Inspect the project.");

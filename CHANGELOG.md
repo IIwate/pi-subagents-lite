@@ -6,7 +6,9 @@ Subagents use native Pi Harness execution with isolated runtimes and durable res
 
 ### Breaking changes
 
-- Requires Pi 0.85.1 and Node.js 22.19+.
+- Requires Pi 0.99.1 and Node.js 22.19+.
+- Native MCP, codemode, and tool search run in isolated children with accepted source grants, nested tool gates, structured results, and per-call cancellation.
+- Child extension entries retain append order, including codemode store updates. Existing exact-only task grants stay exact when reopened.
 - The Agent tool uses `cwd` in place of `worktree_path`. It accepts any existing directory; relative paths resolve from the parent cwd. Existing native tasks retain their saved working directory.
 - Settings use `subagents-lite-v3.json` in Pi's agent directory. Configure v3 through `/agents`; v2 settings are not imported. Existing v3 files with invalid JSON, unknown fields, or invalid values fail visibly.
 - Native tasks use `subagents-lite-v3/sessions`. v2 unfinished tasks and undelivered results are not restored; finish pending work before upgrading.

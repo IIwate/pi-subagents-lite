@@ -14,7 +14,7 @@ Lightweight subagents for [pi](https://pi.dev) with isolated sessions, per-agent
 
 ## Install
 
-Requires Pi 0.85.1 and Node.js 22.19+. Package peer ranges define dependency compatibility; development and adapter verification use Pi 0.85.1.
+Requires Pi 0.99.1 and Node.js 22.19+. Package peer ranges define dependency compatibility; development and adapter verification use Pi 0.99.1.
 
 ```bash
 pi install npm:@iiwate/pi-subagents-lite
@@ -88,6 +88,14 @@ Review the requested changes. Prioritize correctness, regressions, and missing t
 ```
 
 Supported frontmatter fields include `tools`, `exclude_tools`, `extensions`, `skills`, `preload_skills`, `thinking`, `max_turns`, and `max_tokens`. Built-in agents (`general-purpose`, `Explore`) can be customized or disabled.
+
+## MCP tools
+
+Subagents load Pi's native MCP, codemode, and tool-search extensions according to their extension and tool policy. With the default settings, general-purpose agents can use servers from Pi's global `mcp.json` and the trusted task directory's `.pi/mcp.json`. Configure servers and authenticate through Pi's `/mcp` or `pi mcp` commands. Explore and explicit tool allowlists retain their restrictions.
+
+The default MCP exposure uses `codemode`; deferred tools can be activated with `tool_search`. Each child owns its tools, discovery state, and connections. Child connections are independent of the parent, and servers registered only in the parent's private runtime are not automatically inherited. Tool providers that require an exclusive backend or interactive UI retain those requirements.
+
+For an explicit extension list, native source names are `builtin:mcp`, `builtin:codemode`, and `builtin:tool-search`. Tool lists can use these sources with `/*`, for example `builtin:mcp/*`. Disabling extension loading also disables these built-ins. Existing tasks retain their accepted tool rules; later tools from an accepted wildcard source can become available without changing the rules.
 
 ## Settings
 

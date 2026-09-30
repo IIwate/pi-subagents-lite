@@ -1,3 +1,4 @@
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
@@ -242,8 +243,8 @@ describe("Execution adapters", () => {
     expect(tasks.get("third").state.status).toBe("queued");
     expect(JSON.stringify(requests[1].messages)).toContain("Keep this correction");
     expect(JSON.stringify(requests[1].messages)).not.toContain("Withdraw this");
-    expect(requests[1].systemPrompt).toBe(policy.policy.systemPrompt);
-    expect(requests[1].tools ?? []).toEqual([]);
+    expect(getCurrentSystemPrompt(requests[1].messages)).toBe(policy.policy.systemPrompt);
+    expect(getCurrentTools(requests[1].messages) ?? []).toEqual([]);
     expect(options[1]).toMatchObject({ reasoning: "high", maxTokens: 73 });
     expect(await tasks.cancelQueued("second", queued)).toBe("already_consumed");
     expect(tasks.get("second").control).toBe("autonomous");

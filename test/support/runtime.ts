@@ -13,6 +13,7 @@ import type { TestHarness } from "./harness.js";
 
 export async function createRuntimeHost(harness: TestHarness, name: string, agentBody = "tools: [read]\nextensions: false\nskills: false", cwd?: string) {
   const directory = harness.createTempDir(`pi-runtime-${name}-`);
+  vi.stubEnv("PI_CODING_AGENT_DIR", directory);
   cwd ??= directory;
   mkdirSync(join(directory, "agents"));
   writeFileSync(join(directory, "agents", "worker.md"), `---\nname: worker\ndescription: ${name} worker\nregistered_tools: [read]\n${agentBody}\n---\nComplete the delegated task.\n`);

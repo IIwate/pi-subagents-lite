@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[TaskEngine](../../../../src/engine/task-engine.ts) 通过 [ExecutionDriver / DeliveryChannel](../../../../src/engine/contracts.ts) 组合领域策略、原生执行和父接收. 模块通过构造器传参. 实现以 pi-agent-core 和 coding-agent 0.85.1 的公开入口为依据, core 是生产 peer dependency.
+[TaskEngine](../../../../src/engine/task-engine.ts) 通过 [ExecutionDriver / DeliveryChannel](../../../../src/engine/contracts.ts) 组合领域策略、原生执行和父接收. 模块通过构造器传参. 实现以 pi-agent-core 和 coding-agent 0.99.1 的公开入口为依据, core 是生产 peer dependency.
 
 ```ts type-equiv: ExecutionDriver from src/engine/contracts.ts
 export interface ExecutionDriver {
@@ -80,7 +80,7 @@ export interface TaskDelivery {
 
 [PiDeliveryChannel](../../../../src/drivers/pi-delivery-channel.ts) 通过注入的 ExtensionAPI 与 ExtensionContext 接入父会话. 它捕获父 Session ID 和文件路径, 在最终写入前检查当前目标、自动交付的来源祖先及控制权. 来源使用官方 getBranch 查询, 没有长期 activeBranchIds 缓存.
 
-0.85.1 的公开 API 不能按 deliveryId 撤回父自定义消息. 因此结果正文保持在子 outbox, 父忙碌时返回 pending. 父空闲时, Adapter 同步检查资格、检查重复、调用 sendMessage(triggerTurn=false) 立即追加正文, 再核验磁盘 receipt. 这段写边界没有 await, 不把结果正文交给无法撤回的父 followUp 队列. completion 和父生命周期事件驱动 flush, 没有对账 timer.
+0.99.1 的公开 API 不能按 deliveryId 撤回父自定义消息. 因此结果正文保持在子 outbox, 父忙碌时返回 pending. 父空闲时, Adapter 同步检查资格、检查重复、调用 sendMessage(triggerTurn=false) 立即追加正文, 再核验磁盘 receipt. 这段写边界没有 await, 不把结果正文交给无法撤回的父 followUp 队列. completion 和父生命周期事件驱动 flush, 没有对账 timer.
 
 父 receipt 通过官方 parseSessionEntries 读取实际文件, 验证 header、完整记录、deliveryId、taskId、operationId 和正文. 文件检查属于当前父宿主的 Adapter, 不使用子 Session 的 single writer 宣称跨 Session 原子性. getEntries 中存在但磁盘缺失的 receipt 导致明确错误并保留 outbox; 在该活体父会话重发可能重复上下文, 因此需要父会话从实际文件重开后再重试. 当前 Pi append 没有额外 fsync 保证.
 

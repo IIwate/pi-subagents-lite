@@ -77,7 +77,7 @@ export class HarnessDriver implements ExecutionDriver {
       // The native engine resolves models again per request. Scope lookup and output limits without mutating the host catalogue.
       const getModel: Models["getModel"] = (provider, id) => provider === model.provider && id === model.id ? model : undefined;
       const streamSimple: Models["streamSimple"] = (requestModel, request, streamOptions) => withStreamWatchdog(requestModel, streamOptions?.signal,
-        signal => options.models.streamSimple(requestModel, request, {
+        signal => options.models.streamSimple(requestModel, options.piResources?.projectRequest(request) ?? request, {
           ...streamOptions, signal, ...(policy.limits.maxTokens === undefined ? {} : { maxTokens: policy.limits.maxTokens }),
         }));
       const completeSimple: Models["completeSimple"] = (requestModel, request, streamOptions) => withStreamWatchdog(requestModel, streamOptions?.signal,
@@ -106,7 +106,7 @@ export class HarnessDriver implements ExecutionDriver {
       });
       const attached = await AgentHarness.create<ExecutionToolContext>({
         session: executionSession, models, model, tools: [...tools], toolContext: { env },
-        systemPrompt: policy.systemPrompt, activeToolNames: [...policy.tools], thinkingLevel: policy.thinkingLevel,
+        systemPrompt: policy.systemPrompt, activeToolNames: options.piResources?.activeTools ?? [...policy.tools], thinkingLevel: policy.thinkingLevel,
         resources: options.resources, retry: options.retry, compaction: options.compaction,
       }, context);
       harness = attached.harness;
@@ -115,7 +115,7 @@ export class HarnessDriver implements ExecutionDriver {
       const activeTools = await lane.getActiveTools(context);
       if (configured?.provider !== policy.model.provider || configured.id !== policy.model.id
         || await lane.getThinkingLevel(context) !== policy.thinkingLevel
-        || activeTools.some(name => !policy.tools.includes(name))) {
+        || (!options.piResources && activeTools.some(name => !policy.tools.includes(name)))) {
         throw new Error("Native lane configuration differs from its accepted policy");
       }
       const driver = new HarnessDriver(store, harness, lane, env, options.piResources);
@@ -130,7 +130,7 @@ export class HarnessDriver implements ExecutionDriver {
       driver.installPolicy();
       await options.piResources?.attach(harness, lane, store);
       const available = new Set((await harness.getTools(context)).map(tool => tool.name));
-      for (const name of policy.tools) {
+      for (const name of options.piResources ? [] : policy.tools) {
         if (!available.has(name)) throw new Error(`Accepted tool is unavailable: ${name}`);
       }
       return driver;

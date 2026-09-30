@@ -20,9 +20,9 @@ src 根目录只承担 index、runtime、registration 和 events 的装配职责
 
 ## Host adapters and facet boundaries
 
-当前核心与官方宿主验证版本是 `0.85.1`, 依赖范围由 [package.json](../../../../package.json) 声明. 官方 coding-agent 的常规 [SDK](https://github.com/earendil-works/pi/blob/d12cd92e45e308d4af000554292165ef1984253b/packages/coding-agent/src/core/sdk.ts) 创建 Agent 与 AgentSession, 并不向插件提供父 Harness. 因此, 当前父会话由 Pi 持有, 子任务原生 Session/Harness 由扩展持有. 两者通过 PiDeliveryChannel 交付, 不描述为同一个物理 Session.
+当前核心与官方宿主验证版本是 `0.99.1`, 依赖范围由 [package.json](../../../../package.json) 声明. 官方 coding-agent 的常规 [SDK](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/core/sdk.ts) 创建 Agent 与 AgentSession, 并不向插件提供父 Harness. 因此, 当前父会话由 Pi 持有, 子任务原生 Session/Harness 由扩展持有. 两者通过 PiDeliveryChannel 交付, 不描述为同一个物理 Session.
 
-上游 [插件设计](https://github.com/earendil-works/pi/blob/d12cd92e45e308d4af000554292165ef1984253b/packages/agent/docs/plugins.md) 与 [experimental 服务边界](https://github.com/earendil-works/pi/blob/d12cd92e45e308d4af000554292165ef1984253b/packages/coding-agent/src/experimental/services/README.md) 将 Session Worker 和 Presentation 分开, 并按 src/session.ts、src/tui.ts 约定发现插件分面. 执行和展示的拆分与这个方向一致; 具体服务、RPC、加载及生命周期契约仍取决于届时的官方接口. 当前同进程内部调用直接使用 TypeScript 类型和函数, 不预建 RPC 层.
+上游 [插件设计](https://github.com/earendil-works/pi/blob/v0.99.1/packages/agent/docs/plugins.md) 与 [experimental 服务边界](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/experimental/services/README.md) 将 Session Worker 和 Presentation 分开, 并按 src/session.ts、src/tui.ts 约定发现插件分面. 执行和展示的拆分与这个方向一致; 具体服务、RPC、加载及生命周期契约仍取决于届时的官方接口. 当前同进程内部调用直接使用 TypeScript 类型和函数, 不预建 RPC 层.
 
 内部 Adapter 的职责如下:
 
@@ -59,11 +59,11 @@ TaskState 与 TaskOutcome 定义任务状态和结算结果, engine/contracts �
 
 ## Accepted policy and validation
 
-接受边界准备已解析的模型身份、thinking、工具名、工作目录、system prompt 正文和运行限额. Domain 为这些执行值建立独立、冻结的快照. Catalogue 定义、资源选择和模型授权由接受前的调用方完成; SDK 模型对象的无关字段、凭据与工具实现不进入领域策略.
+接受边界准备已解析的模型身份、thinking、初始工具名与来源授权、工作目录、system prompt 正文和运行限额. Domain 为这些执行值建立独立、冻结的快照. Catalogue 定义、资源选择和模型授权由接受前的调用方完成; SDK 模型对象的无关字段、凭据与工具实现不进入领域策略.
 
 同进程可信调用直接使用类型与函数. 工具 JSON、配置、持久应用数据和不可信宿主输入在入口校验. 不在内部调用或 UI tick 重复运行全量 DTO/schema 转换, 不复制整份模型目录. Quota 的限额更新在控制入口校验并整体发布, 实际准入路径只检查容量.
 
-原生 model、thinking 和 active tool names 可以按 Lane 设置. Harness 级工具实现、资源与 hooks 的作用域通过 Driver 明确处理. [任务工作目录](2026-09-12-task-working-directory.md) 可独立于父仓库选择, 作为已接受执行值使用. Agent 定义发现、项目信任、prompt/skills、full-access 自治和递归 Agent 排除保持各自产品含义.
+工具目录、模型声明和调用能力由 [原生工具宿主](2026-09-30-native-pi-tool-host-and-source-grants.md) 分别维护. 原生 model、thinking 和 active tool names 可以按 Lane 设置. Harness 级工具实现、资源与 hooks 的作用域通过 Driver 明确处理. [任务工作目录](2026-09-12-task-working-directory.md) 可独立于父仓库选择, 作为已接受执行值使用. Agent 定义发现、项目信任、prompt/skills、full-access 自治和递归 Agent 排除保持各自产品含义.
 
 父任务的因果归属与子 Provider 上下文准备分开. 接收父指令不意味着复制完整父 conversation, 子请求必须具有有效的 tool-call/tool-result 序列.
 

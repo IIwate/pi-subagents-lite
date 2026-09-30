@@ -1,3 +1,4 @@
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { existsSync, globSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +50,7 @@ describe("ExtensionRuntime child resources", () => {
     harness.onDispose(() => together.resolve());
     const requests = new Map<string, ProviderContext>();
     const respond = async (request: ProviderContext) => {
-      const lines = request.systemPrompt?.split(/\r?\n/);
+      const lines = getCurrentSystemPrompt(request.messages)?.split(/\r?\n/);
       const directory = targets.find(target => lines?.includes(`Working directory: ${target}`))!;
       expect(directory).toBeDefined();
       if (request.messages.some(message => message.role === "toolResult")) {
@@ -78,11 +79,11 @@ describe("ExtensionRuntime child resources", () => {
     for (const [index, directory] of targets.entries()) {
       const request = requests.get(directory)!;
       expect(readFileSync(join(directory, "output.txt"), "utf8")).toBe(directory);
-      expect(request.systemPrompt).toContain(`Target instructions ${index}`);
-      expect(request.systemPrompt).toContain(`Target skill body ${index}`);
-      expect(request.systemPrompt).not.toContain("Parent project instructions");
-      expect(request.systemPrompt).not.toContain(`Current working directory: ${main}`);
-      expect(request.systemPrompt).toContain(index === 0 ? "Git repository: yes" : "Not a git repository");
+      expect(getCurrentSystemPrompt(request.messages)).toContain(`Target instructions ${index}`);
+      expect(getCurrentSystemPrompt(request.messages)).toContain(`Target skill body ${index}`);
+      expect(getCurrentSystemPrompt(request.messages)).not.toContain("Parent project instructions");
+      expect(getCurrentSystemPrompt(request.messages)).not.toContain(`Current working directory: ${main}`);
+      expect(getCurrentSystemPrompt(request.messages)).toContain(index === 0 ? "Git repository: yes" : "Not a git repository");
       expect(request.messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
         content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining(`Target file ${index}`) })]) }));
       expect(request.messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: shell, isError: false,
@@ -122,9 +123,9 @@ describe("ExtensionRuntime child resources", () => {
       request => { requests.push(request); return fauxAssistantMessage("Target inspected"); },
     ]);
     await executeAgentTool(parent.runtime, "cwd-trust", { agent: "worker", prompt: "Inspect the target", model: "cwd-trust-worker/child", cwd: directory }, undefined, undefined, parent.runtime.context);
-    expect(requests[0].systemPrompt).toContain("Global skill body");
+    expect(getCurrentSystemPrompt(requests[0].messages)).toContain("Global skill body");
     for (const text of ["Target project context", "Target skill body", "Target extension loaded"]) {
-      expect(requests[0].systemPrompt?.includes(text)).toBe(trusted);
+      expect(getCurrentSystemPrompt(requests[0].messages)?.includes(text)).toBe(trusted);
     }
     expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
       content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Target file remains accessible") })]) }));
@@ -169,7 +170,7 @@ describe("ExtensionRuntime child resources", () => {
     parent.parentProvider.setResponses([fauxAssistantMessage("Resumed result received")]);
     await replacement.source!.dispatch({ type: "steer", taskId: queued.taskId, operationId: queued.operationId, input: { text: "Continue" } });
     await settled(harness, replacement, queued.taskId);
-    expect(requests[0].systemPrompt).toContain(`Working directory: ${target}`);
+    expect(getCurrentSystemPrompt(requests[0].messages)).toContain(`Working directory: ${target}`);
     expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
       content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Accepted directory result") })]) }));
     expect(parent.errors).toEqual([]);
@@ -191,9 +192,9 @@ describe("ExtensionRuntime child resources", () => {
       request => { requests.push(request); return fauxAssistantMessage("Result without Git"); },
     ]);
     await executeAgentTool(parent.runtime, "cwd-valid", { ...parameters, cwd: directory }, undefined, undefined, parent.runtime.context);
-    expect(requests[0].systemPrompt).toContain(`Working directory: ${directory}`);
-    expect(requests[0].systemPrompt).not.toContain("Git repository:");
-    expect(requests[0].systemPrompt).not.toContain("Not a git repository");
+    expect(getCurrentSystemPrompt(requests[0].messages)).toContain(`Working directory: ${directory}`);
+    expect(getCurrentSystemPrompt(requests[0].messages)).not.toContain("Git repository:");
+    expect(getCurrentSystemPrompt(requests[0].messages)).not.toContain("Not a git repository");
     expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false }));
     const task = parent.runtime.engine.list()[0];
     const ctx = parent.runtime.context;
@@ -249,7 +250,7 @@ describe("ExtensionRuntime child resources", () => {
       input: { text: "Continue searching with the restored tool" } })).toMatchObject({ accepted: true });
     await settled(harness, replacement, task.taskId);
     await replacement.flushDeliveries(); await parent.session.waitForIdle();
-    expect(requests[0].tools?.map(tool => tool.name)).toEqual(["read", "ffgrep"]);
+    expect(getCurrentTools(requests[0].messages).map(tool => tool.name)).toEqual(["read", "ffgrep"]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "ffgrep", isError: false,
       content: [{ type: "text", text: JSON.stringify({ reasons: ["parent", "new", "resume"], hasUser: true }) }] }));
     expect(replacement.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Restored search result" } });
@@ -267,7 +268,6 @@ describe("ExtensionRuntime child resources", () => {
       const initial = { name: "mcp", label: "MCP", description: "Cached MCP metadata", parameters: { type: "object", properties: { stale: { type: "string" } }, required: ["stale"] },
         execute: async () => ({ content: [{ type: "text", text: "Stale implementation" }], details: {} }) };
       pi.registerTool(initial);
-      pi.registerTool({ ...initial, name: "hidden" });
       let connect;
       let reason;
       const connected = new Promise(resolve => { connect = resolve; });
@@ -279,9 +279,9 @@ describe("ExtensionRuntime child resources", () => {
         pi.registerTool({ ...initial, name: "Agent" });
         pi.setActiveTools([...pi.getActiveTools(), "unapproved", "write", "Agent"]);
       });
-      pi.on("session_start", event => { reason = event.reason; });
+      pi.on("session_start", event => { reason = event.reason; pi.registerTool({ ...initial, name: "hidden" }); });
       pi.on("before_agent_start", async () => {
-        pi.setActiveTools(pi.getActiveTools().filter(name => name !== "hidden"));
+        if (reason === "new") pi.setActiveTools(pi.getActiveTools().filter(name => name !== "hidden"));
         connect();
         await initialization;
       });
@@ -294,7 +294,7 @@ describe("ExtensionRuntime child resources", () => {
     parent.worker.setResponses(responses());
     const task = await spawn(parent, "Use connected tools", false);
     expect(task.policy.tools).toEqual(["mcp", "hidden"]);
-    expect(requests[0].tools).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: new",
+    expect(getCurrentTools(requests[0].messages)).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: new",
       parameters: expect.objectContaining({ required: ["query"] }) })]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
       content: [{ type: "text", text: "Connected new: search" }] }));
@@ -307,10 +307,10 @@ describe("ExtensionRuntime child resources", () => {
     await replacement.engine.continue(task.taskId, { text: "Use refreshed tools after reload" });
     await replacement.engine.wait(task.taskId);
     expect(replacement.engine.get(task.taskId).policy.tools).toEqual(task.policy.tools);
-    expect(requests[2].tools).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: resume" })]);
+    expect(getCurrentTools(requests[2].messages)).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: resume" })]);
     expect(requests[3].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
       content: [{ type: "text", text: "Connected resume: search" }] }));
-    expect(requests.map(request => request.tools?.map(tool => tool.name))).toEqual([["mcp"], ["mcp"], ["mcp"], ["mcp"]]);
+    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([["mcp"], ["mcp"], ["mcp"], ["mcp"]]);
     expect(warnings).not.toHaveBeenCalled();
     expect(diagnostics).not.toHaveBeenCalled();
     expect(parent.errors).toEqual([]);
@@ -380,7 +380,7 @@ describe("ExtensionRuntime child resources", () => {
       request => { requests.push(request); return fauxAssistantMessage("Filtered child result"); },
     ]);
     const task = await spawn(parent, "Read the file", false);
-    expect(requests.map(request => request.tools?.map(tool => tool.name))).toEqual([["read"], ["read"]]);
+    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([["read"], ["read"]]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
       content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Readable without UI") })]) }));
     expect(task.policy.tools).toEqual(["read", "ask_user_question"]);
@@ -393,7 +393,7 @@ describe("ExtensionRuntime child resources", () => {
     parent.worker.setResponses([request => { requests.push(request); return fauxAssistantMessage("Restored filtered result"); }]);
     await replacement.engine.continue(task.taskId, { text: "Continue with the filtered tools" });
     await replacement.engine.wait(task.taskId);
-    expect(requests.at(-1)!.tools?.map(tool => tool.name)).toEqual(["read"]);
+    expect(getCurrentTools(requests.at(-1)!.messages).map(tool => tool.name)).toEqual(["read"]);
     expect(warnings).not.toHaveBeenCalled();
     expect(parent.errors).toEqual([]);
   });
