@@ -94,7 +94,7 @@ Navigation/View 仅读取展示状态. UI Adapter 复用当前 Pi TUI 组件及�
 
 ## Compatibility boundary
 
-v3 作为标准 npm 插件运行于未经修改的官方 Pi, 只管理按 v3 契约创建的任务. v2 未完成任务和未交付结果不自动导入; 升级前的用户操作由 [发布说明](../../../../CHANGELOG.md#300) 描述. 公共执行路径统一使用原生 Driver 与父交付 Adapter.
+v3 作为标准 npm 插件运行于未经修改的官方 Pi, 只管理按 v3 契约创建的任务. v2 未完成任务和未交付结果不自动导入; 升级前的用户操作在 README 与架构留痕中明确收敛. 公共执行路径统一使用原生 Driver 与父交付 Adapter.
 
 配置使用独立的 subagents-lite-v3.json, 不自动导入旧配置. 未配置时采用 v3 默认值, 已存在但格式错误时明确报错. 历史格式转换不进入新配置路径; 当前格式的校验及 validate/persist/publish 顺序仍然必要.
 

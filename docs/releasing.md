@@ -4,8 +4,8 @@
 
 ## Prepare and publish
 
-1. Set the package version and update [CHANGELOG.md](../CHANGELOG.md) with final user-visible features and breaking changes. Fold intermediate fixes, tests, and superseded implementations into the feature they completed.
-2. Before tagging, confirm that the release commit is on `origin/main`, the working tree is clean, the changelog is approved, and the normal [Test workflow](../.github/workflows/test.yml) passes for that commit.
+1. Set the package version in [package.json](../package.json) and verify all relevant Agent Notes are updated.
+2. Before tagging, confirm that the release commit is on `origin/main`, the working tree is clean, and the normal [Test workflow](../.github/workflows/test.yml) passes for that commit.
 3. Create and push the annotated tag. Replace `<version>` with the package version:
 
    ```sh
