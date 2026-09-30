@@ -60,6 +60,11 @@ export interface AgentSettings {
   showTime?: boolean;
 }
 
+export interface ExperimentalSettings {
+  /** Opt-in: replace large tool results (>10 KiB) with stable placeholders after 2 full sends. Default: false. */
+  observationPacking?: boolean;
+}
+
 export interface SubagentsConfig {
   modelRouting: ModelRoutingConfig;
   agent: AgentSettings;
@@ -68,4 +73,5 @@ export interface SubagentsConfig {
     providers?: Record<string, number>;
     models?: Record<string, number>;
   };
+  experimental?: ExperimentalSettings;
 }

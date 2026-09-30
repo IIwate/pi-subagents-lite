@@ -91,7 +91,7 @@ export function parseConfig(input: unknown): SubagentsConfig {
     return value;
   };
   const root = object(input, "root");
-  keys(root, ["agent", "concurrency", "modelRouting"], "root");
+  keys(root, ["agent", "concurrency", "modelRouting", "experimental"], "root");
   const rawAgent = object(root.agent === undefined ? {} : root.agent, "agent");
   keys(rawAgent, AGENT_SETTING_KEYS, "agent");
   for (const [key, value] of Object.entries(rawAgent)) {
@@ -106,6 +106,11 @@ export function parseConfig(input: unknown): SubagentsConfig {
   keys(concurrency, ["default", "providers", "models"], "concurrency");
   const overrides = (field: "providers" | "models") => concurrency[field] === undefined ? undefined
     : Object.fromEntries(Object.entries(object(concurrency[field], `concurrency.${field}`)).map(([key, value]) => [key, limit(value, key)]));
+  const rawExperimental = object(root.experimental === undefined ? {} : root.experimental, "experimental");
+  keys(rawExperimental, ["observationPacking"], "experimental");
+  if (rawExperimental.observationPacking !== undefined && typeof rawExperimental.observationPacking !== "boolean") {
+    throw new Error("Invalid boolean setting: experimental.observationPacking");
+  }
   const routing = object(root.modelRouting === undefined ? {} : root.modelRouting, "modelRouting");
   keys(routing, ["enabled", "enabledProviders", "agentAccess"], "modelRouting");
   if (routing.enabled !== undefined && typeof routing.enabled !== "boolean") throw new Error("Invalid model routing switch");
@@ -131,6 +136,9 @@ export function parseConfig(input: unknown): SubagentsConfig {
       providers: overrides("providers"), models: overrides("models") },
     modelRouting: { enabled: routing.enabled === true,
       enabledProviders: routing.enabledProviders === undefined ? [] : strings(routing.enabledProviders, "enabledProviders"), agentAccess },
+    experimental: {
+      observationPacking: rawExperimental.observationPacking === true,
+    },
   };
 }
 

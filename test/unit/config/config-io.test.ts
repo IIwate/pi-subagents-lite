@@ -7,6 +7,8 @@ describe("configuration input boundary", () => {
     { concurrency: { models: { "provider/model": 0 } } },
     { modelRouting: { agentAccess: { worker: { providers: { provider: { models: [] } } } } } },
     { modelRouting: { agentAccess: { worker: { providers: { provider: { models: "all" } } } } } },
+    { experimental: { observationPacking: "invalid" } },
+    { experimental: { unknownField: true } },
   ])("rejects malformed input without widening access: %j", input => {
     expect(() => parseConfig(input)).toThrow();
   });

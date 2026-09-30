@@ -79,6 +79,10 @@ export interface ResolvedRoutingConfig {
   readonly agentAccess: Record<string, AgentModelAccess>;
 }
 
+export interface ResolvedExperimentalSettings {
+  readonly observationPacking: boolean;
+}
+
 /** Side-effect targets, injected after construction. */
 export interface ConfigStoreDeps {
   navigator?: AgentNavigator;
@@ -148,6 +152,12 @@ export class ConfigStore {
       default: this.config.concurrency.default,
       providers: this.config.concurrency.providers ?? {},
       models: this.config.concurrency.models ?? {},
+    };
+  }
+
+  get experimental(): ResolvedExperimentalSettings {
+    return {
+      observationPacking: this.config.experimental?.observationPacking === true,
     };
   }
 
@@ -299,6 +309,13 @@ export class ConfigStore {
       reset: (): void => {
         this.commit(config => { config.concurrency = { ...DEFAULT_CONCURRENCY }; });
         this.applyConcurrency();
+      },
+    },
+    experimental: {
+      setObservationPacking: (enabled: boolean): void => {
+        this.commit(config => {
+          config.experimental = { ...config.experimental, observationPacking: enabled };
+        });
       },
     },
   };

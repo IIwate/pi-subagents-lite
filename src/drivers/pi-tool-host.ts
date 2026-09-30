@@ -74,7 +74,8 @@ export class PiToolHost {
 
   accept(tools: readonly string[], toolSources?: readonly ToolSourceGrant[], restoring = false): void {
     // The infrastructure union is memory-only; the persisted binding keeps the accepted list.
-    this.policy = { tools: [...new Set([...tools, OBS_RECALL_TOOL_NAME])], toolSources };
+    const recall = this.definitions.has(OBS_RECALL_TOOL_NAME) ? [OBS_RECALL_TOOL_NAME] : [];
+    this.policy = { tools: [...new Set([...tools, ...recall])], toolSources };
     this.restoring = restoring;
     this.active = this.active.filter(name => this.permits(name));
     this.rebuild();
@@ -111,8 +112,12 @@ export class PiToolHost {
   setActiveTools(names: readonly string[]): void {
     this.host.assertOpen();
     // Retain names during startup and resume while their accepted provider is connecting.
-    // The built-in recall tool stays active under every accepted policy.
-    this.active = [...new Set([...names, OBS_RECALL_TOOL_NAME])].filter(name => !EXCLUDED_TOOL_NAMES.includes(name)
+    // The built-in recall tool stays active under every accepted policy when registered.
+    const recall = this.definitions.has(OBS_RECALL_TOOL_NAME) ? [OBS_RECALL_TOOL_NAME] : [];
+    const sourceNames = this.definitions.has(OBS_RECALL_TOOL_NAME)
+      ? names
+      : names.filter(name => name !== OBS_RECALL_TOOL_NAME);
+    this.active = [...new Set([...sourceNames, ...recall])].filter(name => !EXCLUDED_TOOL_NAMES.includes(name)
       && (!this.definitions.has(name) || (this.permits(name) && this.exposure(name) !== "hidden")));
     this.rebuild();
     this.host.changed();
@@ -120,9 +125,14 @@ export class PiToolHost {
 
   restoreActiveTools(names: readonly string[]): void {
     for (const name of names) {
+      if (name === OBS_RECALL_TOOL_NAME && !this.definitions.has(OBS_RECALL_TOOL_NAME)) continue;
       const pending = !this.definitions.has(name) && this.policy?.toolSources?.some(grant =>
         !grant.exclude.includes(name) && (grant.tools === true || grant.tools.includes(name)));
       if (EXCLUDED_TOOL_NAMES.includes(name) || (!this.permits(name) && !pending)) {
+        // Sessions persisted while experimental packing was on still list its infrastructure
+        // tool; drop it when the flag is off. Stored history stays raw (projection is
+        // request-local), so no placeholder reference dangles and recall has no sink anyway.
+        if (name === OBS_RECALL_TOOL_NAME && !this.definitions.has(name)) continue;
         throw new Error(`Persisted active tool exceeds its accepted policy: ${name}`);
       }
     }

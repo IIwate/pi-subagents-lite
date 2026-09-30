@@ -5,6 +5,7 @@ import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type Context as Pr
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
 import { createRuntimeHost, resultEntries, settled, spawn } from "../../support/runtime.js";
+import { ExtensionRuntime } from "../../../src/runtime.js";
 
 const MARKER_MIDDLE = "payload line 0300";
 const MARKER_TAIL = "payload line 0599";
@@ -16,6 +17,7 @@ describe("Observation packing in a child session", () => {
 
   it("replaces a large result after two full sends, pages it back with a whitelisted read-only agent, packs the page itself, and keeps deliveries clean", async () => {
     const parent = await createRuntimeHost(harness, "obs-pack");
+    parent.runtime.store.mutate.experimental.setObservationPacking(true);
     const bigText = Array.from({ length: 600 }, (_, index) => `payload line ${String(index).padStart(4, "0")} ${"x".repeat(24)}`).join("\n") + "\n";
     writeFileSync(join(parent.directory, "big.txt"), bigText);
     writeFileSync(join(parent.directory, "small.txt"), "small note");
@@ -99,5 +101,67 @@ describe("Observation packing in a child session", () => {
     expect(archivedTexts.some(text => text.startsWith("[obs_recall id=obs_"))).toBe(true);
 
     await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+  });
+
+  it("keeps raw results and excludes obs_recall when experimental observation packing is disabled (default)", async () => {
+    const parent = await createRuntimeHost(harness, "obs-disabled");
+    const bigText = Array.from({ length: 600 }, (_, index) => `payload line ${String(index).padStart(4, "0")} ${"x".repeat(24)}`).join("\n") + "\n";
+    writeFileSync(join(parent.directory, "big.txt"), bigText);
+
+    const requests: ProviderContext[] = [];
+    parent.worker.setResponses([
+      request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("read", { path: "big.txt" }), { stopReason: "toolUse" }); },
+      request => { requests.push(request); return fauxAssistantMessage("First inspection"); },
+      request => { requests.push(request); return fauxAssistantMessage("Second inspection"); },
+      request => { requests.push(request); return fauxAssistantMessage("Third inspection"); },
+    ]);
+    const task = await spawn(parent, "Inspect big.txt without packing");
+    await settled(harness, parent.runtime, task.taskId);
+
+    const initialTools = getCurrentTools(requests[0].messages).map(tool => tool.name);
+    expect(initialTools).not.toContain("obs_recall");
+
+    await parent.runtime.engine.continue(task.taskId, { text: "Follow-up one" });
+    await parent.runtime.engine.wait(task.taskId);
+    await parent.runtime.engine.continue(task.taskId, { text: "Follow-up two" });
+    await parent.runtime.engine.wait(task.taskId);
+
+    expect(requests).toHaveLength(4);
+    for (let i = 1; i < requests.length; i++) {
+      const readResult = requests[i].messages.find(m => m.role === "toolResult" && m.toolName === "read") as ToolResultMessage | undefined;
+      if (readResult) {
+        const text = readResult.content.flatMap(b => b.type === "text" ? [b.text] : []).join("\n");
+        expect(text).not.toContain("[large tool result replaced");
+        expect(text).toContain("payload line 0000");
+      }
+    }
+    await parent.runtime.flushDeliveries(); await parent.session.waitForIdle();
+  });
+
+  it("restores tasks safely without error when a historical session had obs_recall but observationPacking is currently off", async () => {
+    const parent = await createRuntimeHost(harness, "obs-reload-safeguard");
+    parent.runtime.store.mutate.experimental.setObservationPacking(true);
+    parent.worker.setResponses([
+      _request => fauxAssistantMessage("Initial response"),
+    ]);
+    const task = await spawn(parent, "Initial run with packing");
+    await settled(harness, parent.runtime, task.taskId);
+
+    parent.runtime.store.mutate.experimental.setObservationPacking(false);
+
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+
+    await expect(replacement.start(ctx)).resolves.not.toThrow();
+
+    parent.worker.setResponses([
+      _request => fauxAssistantMessage("Post-reload continuation"),
+    ]);
+    await expect(replacement.engine.continue(task.taskId, { text: "Continue post-reload" })).resolves.toBeDefined();
+    await replacement.engine.wait(task.taskId);
+    expect(replacement.engine.get(task.taskId).state.status).toBe("settled");
+    expect(parent.errors).toEqual([]);
   });
 });

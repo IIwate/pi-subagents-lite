@@ -24,6 +24,7 @@ import { showConcurrencySettingsMenu } from "./menu-concurrency.js";
 import { showWidgetSettingsMenu } from "./menu-widget-settings.js";
 import { showSpawnOptionsMenu } from "./menu-spawn-options.js";
 import { showSystemPromptMenu } from "./menu-system-prompt.js";
+import { showExperimentalMenu } from "./menu-experimental.js";
 import type { MenuRuntime } from "./helpers.js";
 
 /**
@@ -64,6 +65,7 @@ export async function showAgentsMenu(
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "List defaults and stats visibility" },
+      { value: "experimental", label: "Experimental features", description: runtime.store.experimental.observationPacking ? "Observation packing: ON" : "Observation packing: OFF" },
     ];
   };
 
@@ -75,6 +77,7 @@ export async function showAgentsMenu(
       case "spawnoptions": await showSpawnOptionsMenu(ctx, runtime); break;
       case "systemprompt": await showSystemPromptMenu(ctx, runtime); break;
       case "display": await showWidgetSettingsMenu(ctx, runtime); break;
+      case "experimental": await showExperimentalMenu(ctx, runtime); break;
     }
   });
 }

@@ -43,3 +43,4 @@ temp/
 
 # Runtime test & scratchpad scripts
 runtime/
+scripts/audit/

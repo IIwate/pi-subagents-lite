@@ -49,6 +49,7 @@ interface ResourceOptions {
   restored?: TaskBinding;
   signal?: AbortSignal;
   warnedConflicts?: Set<string>;
+  observationPacking?: boolean;
 }
 
 /** Owns official Pi resource factories and adapts their tool hooks to the native child. */
@@ -66,6 +67,7 @@ export class PiResources {
   private abortSignal?: AbortSignal;
   private readonly stops: Array<() => void> = [];
   private readonly toolHost: PiToolHost;
+  private readonly packingEnabled: boolean;
   private sink?: ObservationSink;
   private initialTools: readonly string[] = [];
   toolSources: readonly ToolSourceGrant[] = [];
@@ -79,6 +81,7 @@ export class PiResources {
   private constructor(readonly models: ModelRuntime, readonly settings: SettingsManager,
     private readonly loader: DefaultResourceLoader, private readonly options: ResourceOptions) {
     this.view = SessionManager.inMemory(options.cwd);
+    this.packingEnabled = options.observationPacking ?? false;
     this.toolHost = new PiToolHost({ assertOpen: () => this.assertOpen(), flush: () => this.flush(),
       changed: () => this.publishTools(), warn: message => this.warn(message),
       messages: () => this.view.getBranch().flatMap(entry => entry.type === "message" ? [entry.message] : []),
@@ -170,21 +173,23 @@ export class PiResources {
       sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${tool.name}` },
     }, ["read", "grep", "find"].includes(tool.name));
     // Child infrastructure: recall pages of packed large tool results. Safe to replay: reads are idempotent.
-    this.toolHost.register({ definition: {
-      name: OBS_RECALL_TOOL_NAME,
-      label: "Recall Observation",
-      description: "Read a stored large tool result by observation id and byte offset.",
-      promptSnippet: "Recall a paged excerpt from a previously replaced large tool result",
-      parameters: Type.Object({
-        id: Type.String({ description: "Observation id from a placeholder" }),
-        offset: Type.Optional(Type.Integer({ minimum: 0, description: "Byte offset, default 0" })),
-      }),
-      defaultActive: false,
-      execute: (_id: string, args: { id: string; offset?: number }) => {
-        if (!this.sink) throw new Error("Observation storage is not attached");
-        return this.sink.recall(args.id, args.offset);
-      },
-    }, sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${OBS_RECALL_TOOL_NAME}` } }, true);
+    if (this.packingEnabled) {
+      this.toolHost.register({ definition: {
+        name: OBS_RECALL_TOOL_NAME,
+        label: "Recall Observation",
+        description: "Read a stored large tool result by observation id and byte offset.",
+        promptSnippet: "Recall a paged excerpt from a previously replaced large tool result",
+        parameters: Type.Object({
+          id: Type.String({ description: "Observation id from a placeholder" }),
+          offset: Type.Optional(Type.Integer({ minimum: 0, description: "Byte offset, default 0" })),
+        }),
+        defaultActive: false,
+        execute: (_id: string, args: { id: string; offset?: number }) => {
+          if (!this.sink) throw new Error("Observation storage is not attached");
+          return this.sink.recall(args.id, args.offset);
+        },
+      }, sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${OBS_RECALL_TOOL_NAME}` } }, true);
+    }
     const loaded = this.loader.getExtensions();
     // The runner's synchronous session API reads a projection; only the native session persists child state.
     const view = new Proxy({} as SessionManager, { get: (_target, key) => {
@@ -276,9 +281,9 @@ export class PiResources {
     // The archive is a sibling of the session file and shares its lifetime: durable
     // deliveries may reference placeholders long after the task settles.
     const sessionPath = (store.session.metadata as Partial<JsonlSessionMetadata>).path;
-    this.sink = typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
+    this.sink = this.packingEnabled && typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
       ? new ObservationSink(`${sessionPath.slice(0, -".jsonl".length)}.observations`) : undefined;
-    if (!this.sink) this.warn("Child session file path is unavailable; observation packing is disabled");
+    if (this.packingEnabled && !this.sink) this.warn("Child session file path is unavailable; observation packing is disabled");
     this.toolHost.restoreActiveTools(watch.snapshot.configuration.activeToolNames);
     this.stops.push(() => watch.unsubscribe());
     watch.start(async event => {

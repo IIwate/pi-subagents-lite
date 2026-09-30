@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -117,10 +118,15 @@ export class ExtensionRuntime {
         await resolveWorkingDirectory(policy.cwd, policy.cwd);
         const model = this.context.modelRegistry.find(policy.model.provider, policy.model.id);
         if (!model) throw new Error(`Accepted model is unavailable: ${policy.model.provider}/${policy.model.id}`);
+        const sessionPath = (session.metadata as { path?: string }).path;
+        const hadObservations = typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
+          && existsSync(`${sessionPath.slice(0, -".jsonl".length)}.observations`);
         resources = await PiResources.open({ pi: this.pi, parent: this.context, agentDir: this.agentDir,
           cwd: policy.cwd, projectTrusted: store.binding.resources?.trusted ?? this.context.isProjectTrusted(),
           model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal,
-          warnedConflicts: this.warnedConflicts });
+          warnedConflicts: this.warnedConflicts,
+          observationPacking: this.store.experimental.observationPacking
+            || store.binding.policy.tools.includes("obs_recall") || hadObservations });
         this.resources.add(resources);
         this.assertActive();
         transferred = true;
@@ -162,7 +168,8 @@ export class ExtensionRuntime {
       }
       const resources = await PiResources.open({ pi: this.pi, parent: options.ctx, agentDir: this.agentDir,
         cwd, projectTrusted, model, thinking: thinkingLevel, policy: acceptedPolicy, signal,
-        warnedConflicts: this.warnedConflicts });
+        warnedConflicts: this.warnedConflicts,
+        observationPacking: this.store.experimental.observationPacking });
       this.resources.add(resources);
       let transferred = false;
       let attached = false;
