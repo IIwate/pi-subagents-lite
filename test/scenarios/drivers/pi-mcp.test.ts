@@ -16,6 +16,7 @@ describe("Native Pi MCP child tools", () => {
   async function host(exposure = "codemode") {
     const parent = await createRuntimeHost(harness, "native-mcp");
     vi.stubEnv("PI_CODING_AGENT_DIR", parent.directory);
+    parent.runtime.store.mutate.agent.setLoadExtensionsImplicitly(false);
     parent.runtime.store.mutate.routing.configureAgentProviderAccess("general-purpose", parent.worker.provider.id);
     const server = join(parent.directory, "server.mjs");
     writeFileSync(server, `import { createInterface } from "node:readline";
@@ -45,8 +46,12 @@ describe("Native Pi MCP child tools", () => {
     return runtime.engine.list().at(-1)!;
   }
 
-  it("loads the default MCP codemode path, preserves structured errors, and records child nested calls", async () => {
+  it("loads native MCP with implicit extensions disabled, preserves structured errors, and records nested calls", async () => {
     const parent = await host();
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "extensions", "unselected.ts"), `export default function () {
+      throw new Error("Implicit third-party extensions must not execute");
+    }`);
     const requests: Context[] = [];
     parent.worker.setResponses([
       request => {
@@ -68,6 +73,43 @@ describe("Native Pi MCP child tools", () => {
     expect(JSON.stringify(result)).toContain('\\"value\\":42');
     expect(JSON.stringify(result)).toContain('\\"error\\":true');
     expect(JSON.stringify(requests[2].messages.at(-1))).toContain("42");
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("honors Pi's native extension exclusions with implicit extensions disabled", async () => {
+    const parent = await host("direct");
+    writeFileSync(join(parent.directory, "settings.json"), JSON.stringify({ ...parent.session.settingsManager.getSettings(),
+      extensions: ["-builtin:mcp", "-builtin:codemode", "-builtin:tool-search"] }));
+    let request!: Context;
+    parent.worker.setResponses([context => { request = context; return fauxAssistantMessage("Native services disabled"); }]);
+    const task = await run(parent);
+    expect(task.state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
+    const names = getCurrentTools(request.messages).map(tool => tool.name);
+    expect(names).toContain("read");
+    expect(names).not.toContain("mcp__docs__lookup");
+    expect(names).not.toContain("codemode");
+    expect(names).not.toContain("tool_search");
+    expect(parent.errors).toEqual([]);
+  });
+
+  it.each(["Explore", "worker"])("keeps native MCP outside %s's accepted tool limits", async agent => {
+    const parent = await host("direct");
+    parent.runtime.store.mutate.routing.configureAgentProviderAccess(agent, parent.worker.provider.id);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const requests: Context[] = [];
+    parent.worker.setResponses([
+      request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("mcp__docs__lookup", { query: "denied" }), { stopReason: "toolUse" }); },
+      request => { requests.push(request); return fauxAssistantMessage("Tool restriction inspected"); },
+    ]);
+    await executeAgentTool(parent.runtime, "restricted-call", { agent, prompt: "Inspect the tool boundary",
+      model: `${parent.worker.provider.id}/child` }, undefined, undefined, parent.runtime.context);
+    const names = getCurrentTools(requests[0].messages).map(tool => tool.name);
+    expect(names).toContain("read");
+    expect(names).not.toContain("mcp__docs__lookup");
+    expect(names).not.toContain("codemode");
+    expect(names).not.toContain("tool_search");
+    expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp__docs__lookup", isError: true }));
+    expect(warnings).not.toHaveBeenCalled();
     expect(parent.errors).toEqual([]);
   });
 
@@ -127,16 +169,19 @@ describe("Native Pi MCP child tools", () => {
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp__docs__lookup", isError: true }));
     const context = parent.runtime.context;
     await parent.runtime.dispose();
+    writeFileSync(join(parent.directory, "settings.json"), JSON.stringify({ ...parent.session.settingsManager.getSettings(),
+      extensions: ["-builtin:mcp", "-builtin:codemode", "-builtin:tool-search"] }));
     const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
     harness.onDispose(() => replacement.dispose());
     await replacement.start(context);
     parent.worker.setResponses([
       request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("mcp__docs__lookup", { query: "resume" }), { stopReason: "toolUse" }); },
-      fauxAssistantMessage("Restored service used"),
+      request => { requests.push(request); return fauxAssistantMessage("Restored service used"); },
     ]);
     await replacement.engine.continue(task.taskId, { text: "Use the previously discovered tool" });
     await replacement.engine.wait(task.taskId);
     expect(getCurrentTools(requests[2].messages).map(tool => tool.name)).toContain("mcp__docs__lookup");
+    expect(requests[3].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp__docs__lookup", isError: false }));
     expect(parent.session.getActiveToolNames()).not.toContain("mcp__docs__lookup");
     expect(parent.errors).toEqual([]);
   });

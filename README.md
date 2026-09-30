@@ -91,11 +91,11 @@ Supported frontmatter fields include `tools`, `exclude_tools`, `extensions`, `sk
 
 ## MCP tools
 
-Subagents load Pi's native MCP, codemode, and tool-search extensions according to their extension and tool policy. With the default settings, general-purpose agents can use servers from Pi's global `mcp.json` and the trusted task directory's `.pi/mcp.json`. Configure servers and authenticate through Pi's `/mcp` or `pi mcp` commands. Explore and explicit tool allowlists retain their restrictions.
+General-purpose agents can use Pi's native MCP, codemode, and tool-search even when `loadExtensionsImplicitly` is off or the agent sets `extensions: false`. These settings control ordinary extension loading. Servers come from Pi's global `mcp.json` and the trusted task directory's `.pi/mcp.json`; configure and authenticate them through Pi's `/mcp` or `pi mcp` commands. Explore and explicit tool allowlists retain their restrictions.
 
 The default MCP exposure uses `codemode`; deferred tools can be activated with `tool_search`. Each child owns its tools, discovery state, and connections. Child connections are independent of the parent, and servers registered only in the parent's private runtime are not automatically inherited. Tool providers that require an exclusive backend or interactive UI retain those requirements.
 
-For an explicit extension list, native source names are `builtin:mcp`, `builtin:codemode`, and `builtin:tool-search`. Tool lists can use these sources with `/*`, for example `builtin:mcp/*`. Disabling extension loading also disables these built-ins. Existing tasks retain their accepted tool rules; later tools from an accepted wildcard source can become available without changing the rules.
+For an explicit extension list, native source names are `builtin:mcp`, `builtin:codemode`, and `builtin:tool-search`. Tool lists can use these sources with `/*`, for example `builtin:mcp/*`. Explicit extension lists, `exclude_extensions`, and Pi's native extension exclusions still apply. Existing tasks retain their accepted sources and tool rules; later tools from an accepted wildcard source can become available without changing the rules.
 
 ## Settings
 

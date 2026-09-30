@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, sep } from "node:path";
 import {
   createMcpExtension, createCodemodeExtension, createToolSearchExtension,
   createBashTool, createEditTool, createFindTool, createGrepTool, createPowerShellTool, createReadTool, createWriteTool,
-  DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
+  DefaultPackageManager, DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
   loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
@@ -84,6 +84,20 @@ export class PiResources {
   static async open(options: ResourceOptions): Promise<PiResources> {
     const { parent, agentDir, cwd, policy, restored } = options;
     const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: options.projectTrusted });
+    const extensionFactories = [
+      { name: "mcp", factory: createMcpExtension(), builtin: true, replaceable: true },
+      { name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
+      { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
+    ];
+    let additionalExtensionPaths = restored?.resources ? [...restored.resources.extensions] : undefined;
+    if (!restored && policy?.extensions === false) {
+      // Keep native tool services available without executing implicitly discovered extensions.
+      const packages = new DefaultPackageManager({ cwd, agentDir, settingsManager: settings,
+        builtinExtensions: extensionFactories.map(extension => extension.name) });
+      const resolved = await packages.resolve();
+      additionalExtensionPaths = resolved.extensions.filter(extension => extension.enabled && extension.path.startsWith("builtin:"))
+        .map(extension => extension.path);
+    }
     const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), signal: options.signal });
     for (const id of parent.modelRegistry.getRegisteredProviderIds()) {
       const provider = parent.modelRegistry.getRegisteredNativeProvider(id);
@@ -95,12 +109,8 @@ export class PiResources {
     const denied = new Set(policy?.definition.excludeExtensions ?? []);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
       noExtensions: restored !== undefined || policy?.extensions === false,
-      extensionFactories: [
-        { name: "mcp", factory: createMcpExtension(), builtin: true, replaceable: true },
-        { name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
-        { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
-      ],
-      additionalExtensionPaths: restored?.resources ? [...restored.resources.extensions] : undefined,
+      extensionFactories,
+      additionalExtensionPaths,
       noSkills: restored !== undefined || policy?.skills === false || Array.isArray(policy?.skills) || Array.isArray(policy?.definition.preloadSkills),
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
       extensionsOverride: result => ({ ...result, extensions: result.extensions.filter(extension => {

@@ -222,9 +222,10 @@ export function resolveVisibleTools(opts: {
       }
     }
 
-    // Warn if a loaded extension has none of its tools in `tools`
+    // Native services are present independently of the agent's tool selection.
     if (extToolMap) {
       for (const [extName, extTools] of extToolMap) {
+        if (extName.startsWith("builtin:")) continue;
         const hasAny = extTools.some(t => allowedTools.has(t));
         if (!hasAny) {
           notify?.(`extension "${extName}" is loaded but none of its tools are in tools: [${tools.join(", ")}]`);
