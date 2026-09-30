@@ -95,6 +95,11 @@ export class PiToolHost {
       return;
     }
     this.definitions.set(tool.name, registered);
+    if (this.registrationWaiters.size) {
+      const waiters = [...this.registrationWaiters];
+      this.registrationWaiters.clear();
+      for (const resolve of waiters) resolve();
+    }
     if (safe) this.safeTools.add(tool.name); else this.safeTools.delete(tool.name);
     const exposure = tool.exposure ?? "direct";
     if (!this.restoring && !previous && tool.defaultActive !== false && (exposure === "direct" || exposure === "model-only")
@@ -126,9 +131,7 @@ export class PiToolHost {
   restoreActiveTools(names: readonly string[]): void {
     for (const name of names) {
       if (name === OBS_RECALL_TOOL_NAME && !this.definitions.has(OBS_RECALL_TOOL_NAME)) continue;
-      const pending = !this.definitions.has(name) && this.policy?.toolSources?.some(grant =>
-        !grant.exclude.includes(name) && (grant.tools === true || grant.tools.includes(name)));
-      if (EXCLUDED_TOOL_NAMES.includes(name) || (!this.permits(name) && !pending)) {
+      if (EXCLUDED_TOOL_NAMES.includes(name) || (!this.permits(name) && !this.pendingRegistration(name))) {
         // Sessions persisted while experimental packing was on still list its infrastructure
         // tool; drop it when the flag is off. Stored history stays raw (projection is
         // request-local), so no placeholder reference dangles and recall has no sink anyway.
@@ -138,6 +141,34 @@ export class PiToolHost {
     }
     this.setActiveTools(names);
   }
+
+  /** An accepted tool whose async source (e.g. MCP) has not finished registering it. */
+  private pendingRegistration(name: string): boolean {
+    return !this.definitions.has(name) && (this.policy?.toolSources?.some(grant =>
+      !grant.exclude.includes(name) && (grant.tools === true || grant.tools.includes(name))) ?? false);
+  }
+
+  /**
+   * Wait for retained active tools whose sources register asynchronously, bounded like Pi's own
+   * startup budget. Restored sessions must show their persisted tools in the first prompt; Pi
+   * 0.99.2 connects deferred/codemode MCP servers in the background, so this wait replaces the
+   * pre-0.99.2 before_agent_start coverage of non-direct servers. A source that never connects
+   * is dropped from declarations and fails visibly on use, as before.
+   */
+  async waitForPendingTools(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (!this.active.some(name => this.pendingRegistration(name))) return;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await Promise.race([
+        new Promise<void>(resolve => this.registrationWaiters.add(resolve)),
+        new Promise<void>(resolve => setTimeout(resolve, remaining)),
+      ]);
+    }
+  }
+
+  private readonly registrationWaiters = new Set<() => void>();
 
   allTools(): ToolInfo[] {
     return [...this.definitions.values()].filter(({ definition, sourceInfo }) => this.permits(definition.name, sourceInfo.path))

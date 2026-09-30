@@ -315,6 +315,9 @@ export class PiResources {
       // Resume hooks need the saved child view and may register accepted tools before execution is admitted.
       await this.runner.emit({ type: "session_start", reason: "resume" });
       this.toolHost.refresh();
+      // Pi's startup budget: deferred/codemode MCP sources connect in the background since 0.99.2,
+      // while the first restored prompt must still declare the persisted active tools.
+      await this.toolHost.waitForPendingTools(10_000);
     }
     // Registration can finish between resource preparation and native attachment.
     this.publishTools();
