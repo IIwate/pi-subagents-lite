@@ -113,8 +113,13 @@ export class AgentNavigator {
   setStatsVisibility(visible: StatsVisibility): void { this.statsVisibility = { ...visible }; this.lastRenderSig = ""; this.screen.requestRender(); }
   ensureTimer(): void {
     if (!this.uiCtx || this.disposed) return;
-    this.refreshTimer ??= setInterval(() => this.update(), 1000);
+    this.startRefreshTimer();
     this.update();
+  }
+  // Refresh timer creation lives in one place; update() semantics stay identical for both callers.
+  private startRefreshTimer(): void {
+    if (this.refreshTimer || !this.uiCtx || this.disposed) return;
+    this.refreshTimer = setInterval(() => this.update(), 1000);
   }
 
   handleEditorSubmit(text: string, kind: "steer" | "followUp" = "steer", images?: TaskInput["images"]): boolean {
@@ -318,7 +323,7 @@ export class AgentNavigator {
       // reuse its magnitude instead of running a parallel step scheme.
       const magnitude = Math.max(1, Math.round(Math.abs(event.wheelDelta)));
       const handled = this.scrollList(event.wheelDelta < 0 ? -magnitude : magnitude);
-      return handled ? { handled: true, render: true } : undefined;
+      return handled ? { handled: true } : undefined;
     }
 
     if (event.button !== "left" || (event.type !== "press" && event.type !== "click")) {
@@ -337,7 +342,7 @@ export class AgentNavigator {
       if (this.confirmingClearId !== null) {
         this.confirmingClearId = null;
         this.update();
-        if (target.type === "command") return { handled: true, render: true };
+        if (target.type === "command") return { handled: true };
       }
 
       switch (target.type) {
@@ -349,7 +354,7 @@ export class AgentNavigator {
           }
           this.listFocused = true;
           this.update();
-          return { handled: true, render: true };
+          return { handled: true };
         }
         case "agent": {
           if (!this.activate(target.id)) {
@@ -359,14 +364,14 @@ export class AgentNavigator {
           }
           this.listFocused = true;
           this.update();
-          return { handled: true, render: true };
+          return { handled: true };
         }
         case "scroll-up":
         case "scroll-down": {
           this.highlightedAgentId = target.targetAgentId;
           this.listFocused = true;
           this.update();
-          return { handled: true, render: true };
+          return { handled: true };
         }
         case "command": {
           return { handled: true };
@@ -474,6 +479,8 @@ export class AgentNavigator {
   }
   private activate(id: string | null): boolean {
     if (id === this.selectedAgentId) return true;
+    const wasChild = this.selectedAgentId !== null;
+    const isChild = id !== null;
     if (id && (!this.source.getRecord(id) || !this.screen.showChild())) return false;
     this.stopTranscript?.(); this.stopTranscript = undefined;
     this.selectedAgentId = id;
@@ -485,8 +492,12 @@ export class AgentNavigator {
     }
     this.transcript.invalidate();
     this.interactionRequestId++; this.interactionNotice = id && this.withdrawn.has(id) ? "Withdrawn input is ready. Alt+Up restores it." : undefined; this.highlightedAgentId = id;
-    this.screen.clearAndRender();
-    if (id) this.ensureTimer();
+    if (!wasChild || !isChild) {
+      this.screen.clearAndRender();
+    } else {
+      this.screen.requestRender();
+    }
+    if (id) this.startRefreshTimer();
     return true;
   }
   forceLayoutReflow(): void { this.lastRenderSig = ""; this.screen.requestRender(true); }

@@ -20,7 +20,7 @@ Pi regular/fullscreen renderer 共用 document 和 dock 组件, 直接替换 TUI
 
 ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内 3 个 children, chat 位于 document index 2, editor 和 below-editor selector 的容器关系也必须匹配. 切换仅替换 document 的 chat 槽和 pending/status/footer 的 render 方法, 保留 dock 容器实例, 因而两种 renderer 读取同一组对象. 布局未知或被其他扩展占用时拒绝激活并提示, 不做部分替换.
 
-恢复逐项检查当前引用仍是自己的 replacement, 不覆盖其他扩展后来安装的 chat/render/editor. Footer 每次从当前容器读取, 只裁减 Pi builtin footer 的重复行, 保留自定义 footer. 切屏清 scrollback 并 full render; 这一显示副作用不改变 session messages 或 result inbox. context replacement/dispose 还原 editor、组件和 clearOnShrink 设置; dispose 自身不直接写终端控制序列.
+恢复逐项检查当前引用仍是自己的 replacement, 不覆盖其他扩展后来安装的 chat/render/editor. Footer 每次从当前容器读取, 只裁减 Pi builtin footer 的重复行, 保留自定义 footer. Main 与子屏跨模态切换清 scrollback 并 full render; 子代理之间同级切换复用已激活视口进行差分更新, 避免冗余清屏与多帧闪烁. 同级差分不清 scrollback 亦无跨代理残留: pi-tui 主屏渲染器把溢出内容写入真实 scrollback, 但当新旧转录的首个差异行位于可视口上方时 (长转录互切或切向短转录) 会在单次同步输出 (`\x1b[?2026h/l`) 内回退 fullRender 并自行清屏与 scrollback; 转录整体落在可视口内时本不涉及 scrollback, 因此扩展层无需在同级切换补发 `\x1b[3J` (非同步单独写终端恰是差分切换要消除的反模式). 这一显示副作用不改变 session messages 或 result inbox. context replacement/dispose 还原 editor、组件和 clearOnShrink 设置; dispose 自身不直接写终端控制序列.
 
 ## Alternatives considered
 
@@ -41,4 +41,4 @@ ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内
 
 ## Verification
 
-[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复; input 套件同时覆盖鼠标点击切换、滚轮原生幅度导航与折叠行翻页; interaction 套件覆盖子屏期间冻结列表顺序、原地状态刷新、新任务末尾追加与返回 Main 重新全局排序. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.
+[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复; input 套件同时覆盖鼠标点击切换、滚轮原生幅度导航、折叠行翻页与同级子代理平滑差分切屏 (无冗余清屏序列); interaction 套件覆盖子屏期间冻结列表顺序、原地状态刷新、新任务末尾追加与返回 Main 重新全局排序. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.

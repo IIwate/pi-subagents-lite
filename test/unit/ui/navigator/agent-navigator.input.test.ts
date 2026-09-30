@@ -365,7 +365,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const clickResult = selector.handleMouse({
       type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
     });
-    expect(clickResult).toEqual({ handled: true, render: true });
+    expect(clickResult).toEqual({ handled: true });
     expect(navigator.selectedId()).toBe(record.id);
     expect(navigator.highlightedId()).toBe(record.id);
     expect(navigator.isListFocused()).toBe(true);
@@ -376,7 +376,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const clickMain = selector.handleMouse({
       type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
     });
-    expect(clickMain).toEqual({ handled: true, render: true });
+    expect(clickMain).toEqual({ handled: true });
     expect(navigator.selectedId()).toBeNull();
     expect(navigator.highlightedId()).toBeNull();
     expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
@@ -403,7 +403,7 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const wheel1 = selector.handleMouse({
       type: "wheel", button: "none", wheelDelta: 1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
     });
-    expect(wheel1).toEqual({ handled: true, render: true });
+    expect(wheel1).toEqual({ handled: true });
     expect(navigator.highlightedId()).toBe(record1.id);
     expect(navigator.isListFocused()).toBe(true);
 
@@ -411,14 +411,14 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
     const wheel2 = selector.handleMouse({
       type: "wheel", button: "none", wheelDelta: 1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
     });
-    expect(wheel2).toEqual({ handled: true, render: true });
+    expect(wheel2).toEqual({ handled: true });
     expect(navigator.highlightedId()).toBe(record2.id);
 
     // Wheel up moves highlight back to first subagent.
     const wheel3 = selector.handleMouse({
       type: "wheel", button: "none", wheelDelta: -1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
     });
-    expect(wheel3).toEqual({ handled: true, render: true });
+    expect(wheel3).toEqual({ handled: true });
     expect(navigator.highlightedId()).toBe(record1.id);
   });
 
@@ -442,6 +442,32 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
       type: "press", button: "left", x: 0, y: 0, screenX: 0, screenY: 0, width: 120, height: 3, shift: false, alt: false, ctrl: false,
     });
     expect(navigator.isListFocused()).toBe(false);
+  });
+
+  it("uses differential render without full clear when switching between subagents", () => {
+    const record1 = makeRecord("agent-11111111");
+    const record2 = makeRecord("agent-22222222");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource([record1, record2]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    // Click subagent 1 (transitions from Main to Child -> calls clearAndRender)
+    tui.terminal.write.mockClear();
+    selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.selectedId()).toBe(record1.id);
+    expect(tui.terminal.write).toHaveBeenCalledWith("\x1b[3J");
+
+    // Click subagent 2 (transitions from Child 1 to Child 2 -> must NOT call clearAndRender)
+    tui.terminal.write.mockClear();
+    selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 3, screenX: 2, screenY: 3, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.selectedId()).toBe(record2.id);
+    expect(tui.terminal.write).not.toHaveBeenCalledWith("\x1b[3J");
   });
 
   it("pages the list by clicking the hidden-row markers", () => {
