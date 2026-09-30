@@ -41,6 +41,8 @@ export class ExtensionRuntime {
   private readonly lifetime = new AbortController();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly resources = new Set<PiResources>();
+  // Dedupes built-in tool conflict warnings across this parent session's children.
+  private readonly warnedConflicts = new Set<string>();
   private readonly ownedSessions = new Set<string>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -117,7 +119,8 @@ export class ExtensionRuntime {
         if (!model) throw new Error(`Accepted model is unavailable: ${policy.model.provider}/${policy.model.id}`);
         resources = await PiResources.open({ pi: this.pi, parent: this.context, agentDir: this.agentDir,
           cwd: policy.cwd, projectTrusted: store.binding.resources?.trusted ?? this.context.isProjectTrusted(),
-          model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal });
+          model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal,
+          warnedConflicts: this.warnedConflicts });
         this.resources.add(resources);
         this.assertActive();
         transferred = true;
@@ -158,7 +161,8 @@ export class ExtensionRuntime {
         if (value !== undefined && !Number.isSafeInteger(value)) throw new Error("Task limits must be safe integers");
       }
       const resources = await PiResources.open({ pi: this.pi, parent: options.ctx, agentDir: this.agentDir,
-        cwd, projectTrusted, model, thinking: thinkingLevel, policy: acceptedPolicy, signal });
+        cwd, projectTrusted, model, thinking: thinkingLevel, policy: acceptedPolicy, signal,
+        warnedConflicts: this.warnedConflicts });
       this.resources.add(resources);
       let transferred = false;
       let attached = false;

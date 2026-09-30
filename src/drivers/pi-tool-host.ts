@@ -4,6 +4,7 @@ import type { AssistantMessage, Context as ProviderContext, NestedToolCallRecord
 import type { ExecuteToolOptions, ExtensionRunner, RegisteredTool, ToolDefinition, ToolInfo, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import type { TaskPolicy, ToolSourceGrant } from "../domain/policy.js";
 import { EXCLUDED_TOOL_NAMES } from "../agents/agent-types.js";
+import { OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
 
 interface CallScope {
   nextId: number;
@@ -37,6 +38,7 @@ export class PiToolHost {
   private policy?: Pick<TaskPolicy, "tools" | "toolSources">;
   private restoring = false;
   private runner!: ExtensionRunner;
+  private readonly warnedConflicts: Set<string>;
   readonly tools: AgentHarnessTool<ExecutionToolContext>[] = [];
 
   constructor(private readonly host: {
@@ -45,7 +47,10 @@ export class PiToolHost {
     changed(): void;
     messages(): AgentMessage[];
     warn(message: string): void;
-  }) {}
+  }, warnedConflicts?: Set<string>) {
+    // Shared across a parent session's children so one conflicting extension warns once.
+    this.warnedConflicts = warnedConflicts ?? new Set();
+  }
 
   bind(runner: ExtensionRunner): void { this.runner = runner; }
   get activeTools(): string[] { return [...this.active]; }
@@ -63,11 +68,13 @@ export class PiToolHost {
   }
 
   private safeBuiltin(source: string): boolean {
-    return ["read", "bash", "powershell", "edit", "write", "grep", "find"].some(name => source === `builtin:${name}`);
+    return ["read", "bash", "powershell", "edit", "write", "grep", "find", OBS_RECALL_TOOL_NAME]
+      .some(name => source === `builtin:${name}`);
   }
 
   accept(tools: readonly string[], toolSources?: readonly ToolSourceGrant[], restoring = false): void {
-    this.policy = { tools: [...tools], toolSources };
+    // The infrastructure union is memory-only; the persisted binding keeps the accepted list.
+    this.policy = { tools: [...new Set([...tools, OBS_RECALL_TOOL_NAME])], toolSources };
     this.restoring = restoring;
     this.active = this.active.filter(name => this.permits(name));
     this.rebuild();
@@ -77,6 +84,15 @@ export class PiToolHost {
     const { definition: tool } = registered;
     if (EXCLUDED_TOOL_NAMES.includes(tool.name)) return;
     const previous = this.definitions.get(tool.name);
+    // The built-in recall tool is child infrastructure; extensions cannot replace it.
+    if (previous && tool.name === OBS_RECALL_TOOL_NAME && previous.sourceInfo.path === `builtin:${OBS_RECALL_TOOL_NAME}`
+      && registered.sourceInfo.path !== previous.sourceInfo.path) {
+      if (!this.warnedConflicts.has(registered.sourceInfo.path)) {
+        this.warnedConflicts.add(registered.sourceInfo.path);
+        this.host.warn(`A child extension tool conflicts with the built-in ${OBS_RECALL_TOOL_NAME}: ${registered.sourceInfo.path}`);
+      }
+      return;
+    }
     this.definitions.set(tool.name, registered);
     if (safe) this.safeTools.add(tool.name); else this.safeTools.delete(tool.name);
     const exposure = tool.exposure ?? "direct";
@@ -95,7 +111,8 @@ export class PiToolHost {
   setActiveTools(names: readonly string[]): void {
     this.host.assertOpen();
     // Retain names during startup and resume while their accepted provider is connecting.
-    this.active = [...new Set(names)].filter(name => !EXCLUDED_TOOL_NAMES.includes(name)
+    // The built-in recall tool stays active under every accepted policy.
+    this.active = [...new Set([...names, OBS_RECALL_TOOL_NAME])].filter(name => !EXCLUDED_TOOL_NAMES.includes(name)
       && (!this.definitions.has(name) || (this.permits(name) && this.exposure(name) !== "hidden")));
     this.rebuild();
     this.host.changed();

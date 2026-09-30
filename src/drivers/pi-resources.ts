@@ -7,7 +7,8 @@ import {
   loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
-  type ExecutionToolContext } from "@earendil-works/pi-agent-core";
+  type ExecutionToolContext, type JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
+import { Type } from "typebox";
 import type { Context as ProviderContext, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AcceptedRunPolicy } from "../agents/types.js";
 import type { TaskBinding } from "../engine/contracts.js";
@@ -17,6 +18,7 @@ import { extractText } from "../prompt/context.js";
 import { buildAgentPrompt, type EnvInfo, type PromptExtras } from "../prompt/prompts.js";
 import { loadSkillMeta, preloadSkills } from "../prompt/skill-loader.js";
 import { PiToolHost } from "./pi-tool-host.js";
+import { ObservationSink, OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
 import type { ToolSourceGrant } from "../domain/policy.js";
 
 const GIT_EXEC_TIMEOUT_MS = 5000;
@@ -46,6 +48,7 @@ interface ResourceOptions {
   policy?: AcceptedRunPolicy;
   restored?: TaskBinding;
   signal?: AbortSignal;
+  warnedConflicts?: Set<string>;
 }
 
 /** Owns official Pi resource factories and adapts their tool hooks to the native child. */
@@ -63,6 +66,7 @@ export class PiResources {
   private abortSignal?: AbortSignal;
   private readonly stops: Array<() => void> = [];
   private readonly toolHost: PiToolHost;
+  private sink?: ObservationSink;
   private initialTools: readonly string[] = [];
   toolSources: readonly ToolSourceGrant[] = [];
   private readonly customState: Array<[string, unknown]> = [];
@@ -78,7 +82,7 @@ export class PiResources {
     this.toolHost = new PiToolHost({ assertOpen: () => this.assertOpen(), flush: () => this.flush(),
       changed: () => this.publishTools(), warn: message => this.warn(message),
       messages: () => this.view.getBranch().flatMap(entry => entry.type === "message" ? [entry.message] : []),
-    });
+    }, options.warnedConflicts);
   }
 
   static async open(options: ResourceOptions): Promise<PiResources> {
@@ -165,6 +169,22 @@ export class PiResources {
       execute: (id, args, signal, update) => tool.execute(id, args, signal, update) },
       sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${tool.name}` },
     }, ["read", "grep", "find"].includes(tool.name));
+    // Child infrastructure: recall pages of packed large tool results. Safe to replay: reads are idempotent.
+    this.toolHost.register({ definition: {
+      name: OBS_RECALL_TOOL_NAME,
+      label: "Recall Observation",
+      description: "Read a stored large tool result by observation id and byte offset.",
+      promptSnippet: "Recall a paged excerpt from a previously replaced large tool result",
+      parameters: Type.Object({
+        id: Type.String({ description: "Observation id from a placeholder" }),
+        offset: Type.Optional(Type.Integer({ minimum: 0, description: "Byte offset, default 0" })),
+      }),
+      defaultActive: false,
+      execute: (_id: string, args: { id: string; offset?: number }) => {
+        if (!this.sink) throw new Error("Observation storage is not attached");
+        return this.sink.recall(args.id, args.offset);
+      },
+    }, sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${OBS_RECALL_TOOL_NAME}` } }, true);
     const loaded = this.loader.getExtensions();
     // The runner's synchronous session API reads a projection; only the native session persists child state.
     const view = new Proxy({} as SessionManager, { get: (_target, key) => {
@@ -253,6 +273,12 @@ export class PiResources {
     const watch = await lane.watch(context);
     this.harness = harness; this.lane = lane; this.store = store;
     this.snapshot = watch.snapshot;
+    // The archive is a sibling of the session file and shares its lifetime: durable
+    // deliveries may reference placeholders long after the task settles.
+    const sessionPath = (store.session.metadata as Partial<JsonlSessionMetadata>).path;
+    this.sink = typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
+      ? new ObservationSink(`${sessionPath.slice(0, -".jsonl".length)}.observations`) : undefined;
+    if (!this.sink) this.warn("Child session file path is unavailable; observation packing is disabled");
     this.toolHost.restoreActiveTools(watch.snapshot.configuration.activeToolNames);
     this.stops.push(() => watch.unsubscribe());
     watch.start(async event => {
@@ -296,7 +322,12 @@ export class PiResources {
       this.systemPrompt = result.systemPromptOptions.forceSystemPrompt ?? this.systemPrompt;
       return result?.messages ? { messages: result.messages.map(message => ({ ...message, role: "custom" as const, timestamp: Date.now() })) } : undefined;
     }));
-    this.stops.push(harness.hooks.on("transform_context", async event => { await refresh(); return { messages: await this.runner.emitContext(event.messages), systemPrompt: this.systemPrompt }; }));
+    this.stops.push(harness.hooks.on("transform_context", async event => {
+      await refresh();
+      const messages = await this.runner.emitContext(event.messages);
+      // Packing projects after the extension context hooks and never rewrites stored history.
+      return { messages: this.sink ? await this.sink.project(messages) : messages, systemPrompt: this.systemPrompt };
+    }));
     this.stops.push(harness.hooks.on("before_payload", async event => ({ payload: await this.runner.emitBeforeProviderRequest(event.payload) })));
     this.stops.push(harness.hooks.on("before_request", async event => {
       await this.flush(); return { streamOptions: { headers: Object.fromEntries(Object.entries(await this.runner.emitBeforeProviderHeaders(event.streamOptions.headers ?? {})).map(([key, value]) => [key, value ?? undefined])) } };

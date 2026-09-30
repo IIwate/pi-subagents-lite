@@ -250,7 +250,7 @@ describe("ExtensionRuntime child resources", () => {
       input: { text: "Continue searching with the restored tool" } })).toMatchObject({ accepted: true });
     await settled(harness, replacement, task.taskId);
     await replacement.flushDeliveries(); await parent.session.waitForIdle();
-    expect(getCurrentTools(requests[0].messages).map(tool => tool.name)).toEqual(["read", "ffgrep"]);
+    expect(getCurrentTools(requests[0].messages).map(tool => tool.name)).toEqual(["read", "ffgrep", "obs_recall"]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "ffgrep", isError: false,
       content: [{ type: "text", text: JSON.stringify({ reasons: ["parent", "new", "resume"], hasUser: true }) }] }));
     expect(replacement.engine.get(task.taskId).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Restored search result" } });
@@ -293,9 +293,12 @@ describe("ExtensionRuntime child resources", () => {
     ];
     parent.worker.setResponses(responses());
     const task = await spawn(parent, "Use connected tools", false);
-    expect(task.policy.tools).toEqual(["mcp", "hidden"]);
-    expect(getCurrentTools(requests[0].messages)).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: new",
-      parameters: expect.objectContaining({ required: ["query"] }) })]);
+    expect(task.policy.tools).toEqual(["obs_recall", "mcp", "hidden"]);
+    expect(getCurrentTools(requests[0].messages)).toEqual([
+      expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: new",
+        parameters: expect.objectContaining({ required: ["query"] }) }),
+      expect.objectContaining({ name: "obs_recall" }),
+    ]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
       content: [{ type: "text", text: "Connected new: search" }] }));
     const ctx = parent.runtime.context;
@@ -307,10 +310,18 @@ describe("ExtensionRuntime child resources", () => {
     await replacement.engine.continue(task.taskId, { text: "Use refreshed tools after reload" });
     await replacement.engine.wait(task.taskId);
     expect(replacement.engine.get(task.taskId).policy.tools).toEqual(task.policy.tools);
-    expect(getCurrentTools(requests[2].messages)).toEqual([expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: resume" })]);
+    expect(getCurrentTools(requests[2].messages)).toEqual([
+      expect.objectContaining({ name: "mcp", description: "Connected MCP metadata: resume" }),
+      expect.objectContaining({ name: "obs_recall" }),
+    ]);
     expect(requests[3].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp", isError: false,
       content: [{ type: "text", text: "Connected resume: search" }] }));
-    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([["mcp"], ["mcp"], ["mcp"], ["mcp"]]);
+    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([
+      ["mcp", "obs_recall"],
+      ["mcp", "obs_recall"],
+      ["mcp", "obs_recall"],
+      ["mcp", "obs_recall"],
+    ]);
     expect(warnings).not.toHaveBeenCalled();
     expect(diagnostics).not.toHaveBeenCalled();
     expect(parent.errors).toEqual([]);
@@ -380,10 +391,13 @@ describe("ExtensionRuntime child resources", () => {
       request => { requests.push(request); return fauxAssistantMessage("Filtered child result"); },
     ]);
     const task = await spawn(parent, "Read the file", false);
-    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([["read"], ["read"]]);
+    expect(requests.map(request => getCurrentTools(request.messages).map(tool => tool.name))).toEqual([
+      ["read", "obs_recall"],
+      ["read", "obs_recall"],
+    ]);
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "read", isError: false,
       content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Readable without UI") })]) }));
-    expect(task.policy.tools).toEqual(["read", "ask_user_question"]);
+    expect(task.policy.tools).toEqual(["read", "obs_recall", "ask_user_question"]);
     const ctx = parent.runtime.context;
     await parent.runtime.dispose();
     const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
@@ -393,7 +407,7 @@ describe("ExtensionRuntime child resources", () => {
     parent.worker.setResponses([request => { requests.push(request); return fauxAssistantMessage("Restored filtered result"); }]);
     await replacement.engine.continue(task.taskId, { text: "Continue with the filtered tools" });
     await replacement.engine.wait(task.taskId);
-    expect(getCurrentTools(requests.at(-1)!.messages).map(tool => tool.name)).toEqual(["read"]);
+    expect(getCurrentTools(requests.at(-1)!.messages).map(tool => tool.name)).toEqual(["read", "obs_recall"]);
     expect(warnings).not.toHaveBeenCalled();
     expect(parent.errors).toEqual([]);
   });
