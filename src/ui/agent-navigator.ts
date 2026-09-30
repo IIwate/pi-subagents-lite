@@ -1,4 +1,4 @@
-import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { DeliverySelectorComponent } from "./delivery-selector.js";
 import type { StatsVisibility } from "./format.js";
@@ -81,6 +81,12 @@ export class AgentNavigator {
   }
   highlightedId(): string | null { return this.highlightedAgentId; }
   isListFocused(): boolean { return this.listFocused; }
+  unfocusList(): void {
+    if (!this.listFocused) return;
+    this.listFocused = false;
+    this.highlightedAgentId = this.selectedAgentId;
+    this.update();
+  }
 
   abortActiveRetry(): boolean {
     const record = this.selectedAgentId ? this.source.getRecord(this.selectedAgentId) : undefined;
@@ -286,6 +292,86 @@ export class AgentNavigator {
       this.highlightedAgentId = this.selectedAgentId;
       this.update();
     }
+    return undefined;
+  }
+
+  scrollList(delta: number): boolean {
+    const entries = this.navigationEntries();
+    if (entries.length <= 1) return false;
+    const currentId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
+    const currentIndex = Math.max(0, entries.findIndex(e => e.id === currentId));
+    const nextIndex = Math.max(0, Math.min(entries.length - 1, currentIndex + delta));
+    if (nextIndex === currentIndex && this.listFocused) return false;
+    this.listFocused = true;
+    this.highlightedAgentId = entries[nextIndex]?.id ?? null;
+    this.update();
+    return true;
+  }
+
+  handleMouse(event: TuiMouseEvent, terminalRows = 40): TuiMouseEventResult | undefined {
+    if (!this.listExpanded) return undefined;
+
+    if (event.type === "wheel" && event.wheelDelta) {
+      // pi-tui already folds Alt acceleration and flick velocity into wheelDelta;
+      // reuse its magnitude instead of running a parallel step scheme.
+      const magnitude = Math.max(1, Math.round(Math.abs(event.wheelDelta)));
+      const handled = this.scrollList(event.wheelDelta < 0 ? -magnitude : magnitude);
+      return handled ? { handled: true, render: true } : undefined;
+    }
+
+    if (event.button !== "left" || (event.type !== "press" && event.type !== "click")) {
+      return undefined;
+    }
+
+    const state = this.state();
+    const target = this.view.resolveRowTarget(state, event.y, terminalRows);
+    if (target.type === "none") return undefined;
+
+    if (event.type === "press") {
+      return { handled: true };
+    }
+
+    if (event.type === "click") {
+      if (this.confirmingClearId !== null) {
+        this.confirmingClearId = null;
+        this.update();
+        if (target.type === "command") return { handled: true, render: true };
+      }
+
+      switch (target.type) {
+        case "main": {
+          if (!this.activate(null)) {
+            this.highlightedAgentId = this.selectedAgentId;
+          } else {
+            this.highlightedAgentId = null;
+          }
+          this.listFocused = true;
+          this.update();
+          return { handled: true, render: true };
+        }
+        case "agent": {
+          if (!this.activate(target.id)) {
+            this.highlightedAgentId = this.selectedAgentId;
+          } else {
+            this.highlightedAgentId = target.id;
+          }
+          this.listFocused = true;
+          this.update();
+          return { handled: true, render: true };
+        }
+        case "scroll-up":
+        case "scroll-down": {
+          this.highlightedAgentId = target.targetAgentId;
+          this.listFocused = true;
+          this.update();
+          return { handled: true, render: true };
+        }
+        case "command": {
+          return { handled: true };
+        }
+      }
+    }
+
     return undefined;
   }
 

@@ -5,6 +5,7 @@
  *   - Focus movement (arrows, Enter, Esc, Ctrl+C)
  *   - Continuous navigation across subagent and Main views
  *   - Paste handling & focus release
+ *   - Mouse click switching, wheel navigation & hidden-row paging
  *   - Highlight state tracking via public highlightedId() API
  */
 
@@ -340,5 +341,140 @@ describe("AgentNavigator — Keyboard Input & Focus", () => {
 
     // Other keys are consumed only during confirmation; ordinary input returns to the editor after cancellation.
     expect(selector.render(120).join("\n")).toContain("↑↓ Move");
+  });
+
+  it("switches to subagent on mouse click and restores Main on clicking Main", () => {
+    const record = makeRecord("agent-11111111");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    // Initially at Main (selectedId is null, list not focused).
+    // Row 0 is Main, Row 1 is subagent-1.
+    expect(navigator.selectedId()).toBeNull();
+    expect(navigator.isListFocused()).toBe(false);
+
+    // Click subagent-1 (Row 1).
+    const pressResult = selector.handleMouse({
+      type: "press", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(pressResult).toEqual({ handled: true });
+
+    const clickResult = selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(clickResult).toEqual({ handled: true, render: true });
+    expect(navigator.selectedId()).toBe(record.id);
+    expect(navigator.highlightedId()).toBe(record.id);
+    expect(navigator.isListFocused()).toBe(true);
+    expect(tui.document.children[tui.chatIndex]).not.toBe(tui.originalChat);
+
+    // With listFocused=true: Row 0 is Command bar, Row 1 is Main, Row 2 is subagent-1.
+    // Click Main (Row 1).
+    const clickMain = selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(clickMain).toEqual({ handled: true, render: true });
+    expect(navigator.selectedId()).toBeNull();
+    expect(navigator.highlightedId()).toBeNull();
+    expect(tui.document.children[tui.chatIndex]).toBe(tui.originalChat);
+  });
+
+  it("supports mouse wheel navigation and ignores unhandled buttons", () => {
+    const record1 = makeRecord("agent-11111111");
+    const record2 = makeRecord("agent-22222222");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource([record1, record2]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    // Ignore right clicks or move events.
+    expect(selector.handleMouse({
+      type: "press", button: "right", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    })).toBeUndefined();
+    expect(selector.handleMouse({
+      type: "move", button: "none", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    })).toBeUndefined();
+
+    // Wheel down moves highlight to first subagent.
+    const wheel1 = selector.handleMouse({
+      type: "wheel", button: "none", wheelDelta: 1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(wheel1).toEqual({ handled: true, render: true });
+    expect(navigator.highlightedId()).toBe(record1.id);
+    expect(navigator.isListFocused()).toBe(true);
+
+    // Wheel down moves highlight to second subagent.
+    const wheel2 = selector.handleMouse({
+      type: "wheel", button: "none", wheelDelta: 1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(wheel2).toEqual({ handled: true, render: true });
+    expect(navigator.highlightedId()).toBe(record2.id);
+
+    // Wheel up moves highlight back to first subagent.
+    const wheel3 = selector.handleMouse({
+      type: "wheel", button: "none", wheelDelta: -1, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(wheel3).toEqual({ handled: true, render: true });
+    expect(navigator.highlightedId()).toBe(record1.id);
+  });
+
+  it("unfocuses the subagent list when clicking the editor", () => {
+    const record = makeRecord("agent-11111111");
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource([record]));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { tui, selector } = mountSelector(ui);
+
+    // Focus the list via click.
+    selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 1, screenX: 2, screenY: 1, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.isListFocused()).toBe(true);
+
+    // Click editor to release list focus.
+    const editor = tui.children[tui.editorIndex].children[0];
+    editor.handleMouse?.({
+      type: "press", button: "left", x: 0, y: 0, screenX: 0, screenY: 0, width: 120, height: 3, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.isListFocused()).toBe(false);
+  });
+
+  it("pages the list by clicking the hidden-row markers", () => {
+    const records = Array.from({ length: 8 }, (_, index) => makeRecord(`agent-${index}1111111`));
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource(records));
+    navigator.setUICtx(ui.ctx as any);
+    navigator.ensureTimer();
+    const { selector } = mountSelector(ui);
+
+    // One wheel event with magnitude 8 reuses pi-tui's native wheelDelta:
+    // Main (index 0) jumps straight to the last agent (index 8).
+    selector.handleMouse({
+      type: "wheel", button: "none", wheelDelta: 8, x: 2, y: 0, screenX: 2, screenY: 0, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.highlightedId()).toBe(records[7].id);
+    expect(navigator.isListFocused()).toBe(true);
+
+    // rows=40 shows 6 of 8 agents centered on the highlight:
+    // Row 0 Command bar, Row 1 Main, Row 2 "↑ 2 hidden", Rows 3-8 agents[2..7].
+    expect(selector.render(120).join("\n")).toContain("↑ 2 hidden");
+    selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 2, screenX: 2, screenY: 2, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.highlightedId()).toBe(records[1].id);
+    expect(navigator.selectedId()).toBeNull();
+
+    // Window now starts at 0: Rows 2-7 agents[0..5], Row 8 "↓ 2 hidden".
+    expect(selector.render(120).join("\n")).toContain("↓ 2 hidden");
+    selector.handleMouse({
+      type: "click", button: "left", x: 2, y: 8, screenX: 2, screenY: 8, width: 120, height: 10, shift: false, alt: false, ctrl: false,
+    });
+    expect(navigator.highlightedId()).toBe(records[6].id);
+    expect(navigator.selectedId()).toBeNull();
   });
 });

@@ -90,7 +90,15 @@ function renderAgentStatus(
   return theme.fg(color, agentStatusLabel(statusValue));
 }
 
-function computeListWindow(
+export type NavigatorRowTarget =
+  | { type: "command" }
+  | { type: "main" }
+  | { type: "agent"; id: string }
+  | { type: "scroll-up"; targetAgentId: string | null }
+  | { type: "scroll-down"; targetAgentId: string | null }
+  | { type: "none" };
+
+export function computeListWindow(
   entryCount: number,
   focusIndex: number,
   rows: number,
@@ -295,6 +303,52 @@ export class NavigatorView {
     }
 
     return lines;
+  }
+
+  resolveRowTarget(state: NavigatorViewState, y: number, rows: number): NavigatorRowTarget {
+    const records = state.records;
+    const pending = state.pending;
+    if ((records.length === 0 && !pending) || !state.listExpanded || y < 0) return { type: "none" };
+
+    const entries = [{ id: null, record: undefined }, ...records.map(record => ({ id: record.id, record }))];
+    const agentEntries = entries.slice(1);
+    const focusId = state.listFocused ? state.highlightedId : state.selectedId;
+    const agentFocusIndex = Math.max(0, agentEntries.findIndex(entry => entry.id === focusId));
+    const { start, end } = computeListWindow(agentEntries.length, agentFocusIndex, rows);
+    const visibleEntries = agentEntries.slice(start, end);
+
+    let currentY = 0;
+    if (state.listFocused) {
+      if (y === currentY) return { type: "command" };
+      currentY++;
+    }
+
+    if (y === currentY) return { type: "main" };
+    currentY++;
+
+    if (start > 0) {
+      if (y === currentY) {
+        const targetIndex = Math.max(0, start - 1);
+        return { type: "scroll-up", targetAgentId: agentEntries[targetIndex]?.id ?? null };
+      }
+      currentY++;
+    }
+
+    const agentIndex = y - currentY;
+    if (agentIndex >= 0 && agentIndex < visibleEntries.length) {
+      const entry = visibleEntries[agentIndex];
+      if (entry?.id) return { type: "agent", id: entry.id };
+    }
+    currentY += visibleEntries.length;
+
+    if (end < agentEntries.length) {
+      if (y === currentY) {
+        const targetIndex = Math.min(agentEntries.length - 1, end);
+        return { type: "scroll-down", targetAgentId: agentEntries[targetIndex]?.id ?? null };
+      }
+    }
+
+    return { type: "none" };
   }
 
   collapsed(state: NavigatorViewState): string | undefined {

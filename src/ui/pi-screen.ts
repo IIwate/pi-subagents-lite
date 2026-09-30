@@ -1,5 +1,14 @@
 import { CustomEditor, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { CURSOR_MARKER, type AutocompleteProvider, type Component, type EditorComponent, type Focusable, type TUI } from "@earendil-works/pi-tui";
+import {
+  CURSOR_MARKER,
+  type AutocompleteProvider,
+  type Component,
+  type EditorComponent,
+  type Focusable,
+  type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+} from "@earendil-works/pi-tui";
 import type { Theme } from "./types.js";
 
 const SELECTOR_WIDGET_KEY = "agent-navigator-selector";
@@ -13,6 +22,8 @@ interface NavigationInput {
   handleEditorSubmit(text: string, kind?: "steer" | "followUp"): boolean;
   handleEditorDequeue(): boolean;
   handleTerminalInput(data: string): { consume?: boolean } | undefined;
+  handleMouse?(event: TuiMouseEvent, terminalRows?: number): TuiMouseEventResult | undefined;
+  unfocusList?(): void;
   abortActiveRetry(): boolean;
   abortActiveSubagent(): boolean;
   isListFocused(): boolean;
@@ -249,6 +260,13 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
     this.base.handleInput(data);
   }
 
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (this.navigator.isListFocused() && (event.type === "press" || event.type === "click")) {
+      this.navigator.unfocusList?.();
+    }
+    return (this.base as unknown as { handleMouse?: (event: TuiMouseEvent) => TuiMouseEventResult | undefined }).handleMouse?.(event);
+  }
+
   invalidate(): void {
     this.base.invalidate();
   }
@@ -341,6 +359,10 @@ export class PiScreen {
         render: () => {
           try { this.capture(tui, selector); return render(tui, theme); }
           catch (error) { onError(error); return []; }
+        },
+        handleMouse: (event: TuiMouseEvent) => {
+          try { return this.input.handleMouse?.(event, tui.terminal.rows); }
+          catch (error) { onError(error); return undefined; }
         },
         invalidate: () => {},
       };

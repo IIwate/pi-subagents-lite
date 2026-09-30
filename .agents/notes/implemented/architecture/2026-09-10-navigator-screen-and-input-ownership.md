@@ -10,6 +10,8 @@ Pi regular/fullscreen renderer 共用 document 和 dock 组件, 直接替换 TUI
 
 [AgentNavigator](../../../../src/ui/agent-navigator.ts) 是消费 NavigationSource 的交互 Controller, 保留 selectedAgentId、highlightedAgentId 和 listFocused 三种状态. [声明式导航与 Action](2026-09-11-declarative-navigation-and-input-actions.md) 定义只读展示和执行动作边界. 空 editor 的 Down 进入列表; Up/Down 只移动候选, Enter 确认切换. 有草稿且目标未变时 Enter 交还 editor 提交, 切换到不同目标时该 Enter 只切换并保留草稿. 普通文字、Unicode 批量输入和 bracketed paste 释放列表焦点后传递给 editor.
 
+鼠标输入走同一所有权: below-editor selector 与 AgentNavigationEditor 都实现 handleMouse. 左键点击 Main/子代理行直接 activate 切换并聚焦列表, 点击 ↑/↓ hidden 折叠行只移动高亮翻页不切换, 删除确认中点击他行先取消确认; 列表聚焦时点击 editor 释放焦点并恢复光标标记. 滚轮直接复用宿主 wheelDelta 的幅度与符号 (Alt 加速和滑动速度已由 pi-tui 折入), 不另设步进方案. 行命中由 NavigatorView.resolveRowTarget 按与 render 相同的行序和 computeListWindow 窗口解析, 坐标为组件局部 y.
+
 [PiScreen](../../../../src/ui/pi-screen.ts) 的 AgentNavigationEditor 包裹宿主已有 editor, 不另建一套输入实现. 它转发 focused、提交、change、autocomplete、图片、Ctrl+D、扩展快捷键和 actionHandlers, 包括 Pi 在包装之后注册的 followUp/dequeue handler. 子屏普通提交在 Main 排队前派发 Steer Action, `app.message.followUp` 使用独立的 FollowUp Action, `app.message.dequeue` 只操作当前子任务. 按键匹配使用宿主提供的键位表并保留 Alt+Up 撤回别名, Alt+T 显式接管. slash 和 `!` 命令仍由 Pi 处理. retry Esc 与子任务 abort 的优先级见 [retry UI](../bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md).
 
 异步交互使用 requestId 与 selectedAgentId 校验回调. 旧回调不能改变新选中会话的提示或草稿; 拒绝只在当前 editor 为空时恢复原输入, 不覆盖用户新写的内容. Ctrl+D 仅清理非活动子记录且需要 Enter 确认; Ctrl+C 取消确认并向上透传, 不切断宿主中断/退出链.
@@ -37,4 +39,4 @@ ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内
 
 ## Verification
 
-[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.
+[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复; input 套件同时覆盖鼠标点击切换、滚轮原生幅度导航与折叠行翻页. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.
