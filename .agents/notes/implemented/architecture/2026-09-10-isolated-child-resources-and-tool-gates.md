@@ -67,6 +67,7 @@ prompt 正文、技能和上下文在任务发布前准备, 原生队列保存�
 - `3494a5e`, `47b4177`, `0b7325e`, `7ca5d0d`, `97b8e1e`, `ea4fcb3`, `616f8a8`, `59f5d17`: 工具 whitelist、扩展过滤及延迟注册边界.
 - `b2afecd`: 按 customType 复制父扩展状态. `5b71727`, `19ed1dd`: 接受时模型与完整策略锁定.
 - `3909432`, `e526f02`: defaultTools/PowerShell 适配及独立 thinking 参数.
+- `316fbbe`: Pi 0.99.2 适配; 恢复路径按启动预算等待已授权来源注册.
 
 ## Verification
 
