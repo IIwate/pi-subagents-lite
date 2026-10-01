@@ -660,10 +660,10 @@ describe("AgentNavigator — Transcript & Footer", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     const transcript = tui.document.children[tui.chatIndex];
-    const lines = transcript.render(120);
+    const lines: string[] = transcript.render(120);
 
-    const firstIndex = lines.findIndex(line => line.includes("First reasoning paragraph."));
-    const secondIndex = lines.findIndex(line => line.includes("Second reasoning paragraph."));
+    const firstIndex = lines.findIndex((line: string) => line.includes("First reasoning paragraph."));
+    const secondIndex = lines.findIndex((line: string) => line.includes("Second reasoning paragraph."));
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
     expect(lines[firstIndex + 1]).toBe("");
@@ -698,10 +698,10 @@ describe("AgentNavigator — Transcript & Footer", () => {
     navigator.handleTerminalInput("\x1b[B");
     navigator.handleTerminalInput("\r");
     const transcript = tui.document.children[tui.chatIndex];
-    const lines = transcript.render(120);
+    const lines: string[] = transcript.render(120);
 
-    const callLine = lines.find(line => line.includes("write") && line.includes("▸"));
-    const resultLine = lines.find(line => line.includes("write") && line.includes("✓"));
+    const callLine = lines.find((line: string) => line.includes("write") && line.includes("▸"));
+    const resultLine = lines.find((line: string) => line.includes("write") && line.includes("✓"));
     expect(callLine).toBeDefined();
     expect(callLine).toContain('("src/main.ts", 4 chars)');
     expect(callLine).toContain("  \x1b[1m▸ write");
