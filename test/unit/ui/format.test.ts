@@ -369,4 +369,10 @@ describe("UI tool arguments summarizer edge cases (summarizeToolArgs)", () => {
     expect(summarizeToolArgs("powershell", { command: null as any })).toBe('("")');
     expect(summarizeToolArgs("powershell", { command: 12345 as any })).toBe('("")');
   });
+
+  it("summarizes write tool arguments with standard path and content size", () => {
+    expect(summarizeToolArgs("write", { path: "src/index.ts", content: "hello" })).toBe('("src/index.ts", 5 chars)');
+    expect(summarizeToolArgs("write", { file_path: "src/fallback.ts", content: "fallback" })).toBe('("src/fallback.ts", 8 chars)');
+    expect(summarizeToolArgs("write", { path: null as any })).toBe('("", 0 chars)');
+  });
 });

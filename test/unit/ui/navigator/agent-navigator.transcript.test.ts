@@ -670,4 +670,43 @@ describe("AgentNavigator — Transcript & Footer", () => {
     expect(lines[firstIndex]).toContain("\x1b[2m");
     expect(lines[secondIndex]).toContain("\x1b[2m");
   });
+
+  it("renders tool call header and execution status line with bold emphasis", () => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    session.messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", name: "write", arguments: { path: "src/main.ts", content: "code" } },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolName: "write",
+        content: [{ type: "text", text: "Successfully written" }],
+        isError: false,
+      },
+    ];
+    const ui = makeUI({ value: "" });
+    ui.ctx.theme.bold = vi.fn((text: string) => `\x1b[1m${text}\x1b[22m`);
+    ui.ctx.theme.fg = vi.fn((color: string, text: string) => (color === "success" ? `\x1b[32m${text}\x1b[39m` : text));
+    navigator = new AgentNavigator(makeSource([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    const lines = transcript.render(120);
+
+    const callLine = lines.find(line => line.includes("write") && line.includes("▸"));
+    const resultLine = lines.find(line => line.includes("write") && line.includes("✓"));
+    expect(callLine).toBeDefined();
+    expect(callLine).toContain('("src/main.ts", 4 chars)');
+    expect(callLine).toContain("  \x1b[1m▸ write");
+    expect(resultLine).toBeDefined();
+    expect(resultLine).toContain("\x1b[1mwrite\x1b[22m");
+    expect(resultLine).toContain("  \x1b[32m\x1b[1m✓\x1b[22m\x1b[39m");
+  });
 });

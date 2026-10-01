@@ -61,14 +61,17 @@ export class TranscriptView {
             appendWrapped(content, theme.fg("dim", displayText(part.thinking).trim()), width);
           } else if (part.type === "toolCall") {
             const name = displayText(part.name);
-            appendWrapped(content, theme.fg("dim", `▸ ${name}${displayText(summarizeToolArgs(part.name, part.arguments))}`), width);
+            const callSummary = displayText(summarizeToolArgs(part.name, part.arguments));
+            appendWrapped(content, theme.bold(`▸ ${name}${callSummary}`), width);
           }
         }
         if (content.length) lines.push("", theme.bold("Assistant"), ...content);
         break;
       }
       case "toolResult": {
-        lines.push(`${message.isError ? theme.fg("error", "✗") : theme.fg("success", "✓")} ${theme.fg("dim", displayText(message.toolName ?? "tool"))}`);
+        const statusSymbol = message.isError ? theme.fg("error", theme.bold("✗")) : theme.fg("success", theme.bold("✓"));
+        const statusText = theme.bold(displayText(message.toolName ?? "tool"));
+        lines.push(`  ${statusSymbol} ${statusText}`);
         const clipped = text.length > 4000 ? `${text.slice(0, 4000)}\n… (tool result truncated)` : text;
         if (clipped) appendWrapped(lines, theme.fg("dim", clipped), width);
         break;
