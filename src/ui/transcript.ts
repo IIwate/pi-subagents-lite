@@ -1,4 +1,4 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExecutionMessage } from "../engine/contracts.js";
 import type { NavigationAgent, TranscriptSnapshot } from "./navigation.js";
 import { plainAgentStatus, renderPending, renderRetry } from "./navigator-view.js";
@@ -6,9 +6,9 @@ import { displayText, summarizeToolArgs } from "./format.js";
 import type { Theme } from "./types.js";
 
 function appendWrapped(lines: string[], text: string, width: number): void {
-  for (const line of text.split("\n")) {
-    if (!line) lines.push("");
-    else lines.push(...wrapTextWithAnsi(line, Math.max(1, width - 2)).map(part => `  ${part}`));
+  for (const line of wrapTextWithAnsi(text, Math.max(1, width - 2))) {
+    if (visibleWidth(line) === 0) lines.push("");
+    else lines.push(`  ${line}`);
   }
 }
 

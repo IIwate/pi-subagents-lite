@@ -65,7 +65,7 @@ export async function showAgentsMenu(
       { value: "spawnoptions", label: "Spawn options", description: "Default thinking, background, and grace turns" },
       { value: "systemprompt", label: "System prompt", description: "Prompt mode, custom prompt file, AGENTS.md" },
       { value: "display", label: "Display settings", description: "List defaults and stats visibility" },
-      { value: "experimental", label: "Experimental features", description: runtime.store.experimental.observationPacking ? "Observation packing: ON" : "Observation packing: OFF" },
+      { value: "experimental", label: "Experimental features", description: "Opt-in runtime features and experiments" },
     ];
   };
 

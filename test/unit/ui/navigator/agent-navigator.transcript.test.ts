@@ -639,4 +639,35 @@ describe("AgentNavigator — Transcript & Footer", () => {
     expect(statusLines).toContain("Retrying (1/3)");
     expect(statusLines).toContain("Esc to cancel");
   });
+
+  it("preserves dim styling across multi-paragraph thinking separated by blank lines", () => {
+    const record = makeRecord();
+    const session = record.execution.session;
+    session.messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "First reasoning paragraph.\n\nSecond reasoning paragraph." },
+        ],
+      },
+    ];
+    const ui = makeUI({ value: "" });
+    ui.ctx.theme.fg = vi.fn((color: string, text: string) => (color === "dim" ? `\x1b[2m${text}\x1b[22m` : text));
+    navigator = new AgentNavigator(makeSource([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const transcript = tui.document.children[tui.chatIndex];
+    const lines = transcript.render(120);
+
+    const firstIndex = lines.findIndex(line => line.includes("First reasoning paragraph."));
+    const secondIndex = lines.findIndex(line => line.includes("Second reasoning paragraph."));
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+    expect(lines[firstIndex + 1]).toBe("");
+    expect(lines[firstIndex]).toContain("\x1b[2m");
+    expect(lines[secondIndex]).toContain("\x1b[2m");
+  });
 });
