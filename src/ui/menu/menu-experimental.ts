@@ -24,6 +24,13 @@ export async function showExperimentalMenu(ctx: ExtensionCommandContext, runtime
       values: ["ON", "OFF"],
       description: "Compress large tool results into stable placeholders after 2 full sends, with paged recall via obs_recall.",
     },
+    {
+      id: "actionFusion",
+      label: "Action fusion",
+      currentValue: store.experimental.actionFusion ? "ON" : "OFF",
+      values: ["ON", "OFF"],
+      description: "Let edit/write take an optional then_run command, fusing a mutation and its verification into one turn.",
+    },
   ];
 
   let settingsList: SettingsList;
@@ -34,10 +41,14 @@ export async function showExperimentalMenu(ctx: ExtensionCommandContext, runtime
           store.mutate.experimental.setObservationPacking(newValue === "ON");
           ctx.ui.notify(`Observation packing set to ${newValue}`, "info");
           break;
+        case "actionFusion":
+          store.mutate.experimental.setActionFusion(newValue === "ON");
+          ctx.ui.notify(`Action fusion set to ${newValue}`, "info");
+          break;
       }
     });
     if (!saved) {
-      const original = store.experimental.observationPacking ? "ON" : "OFF";
+      const original = (id === "actionFusion" ? store.experimental.actionFusion : store.experimental.observationPacking) ? "ON" : "OFF";
       settingsList.updateValue(id, original);
     }
   };

@@ -53,6 +53,7 @@
 
 ### 3.5 项目本地保留层（不归源上游）
 - **ObservationPack**：实现为 pico3 请求局部 hook（request-local 语义）；归档落点为 custom entry kind（`defineEntry`）或外部内容寻址存储，`obs_recall` 为 safe 工具。
+- **Action Fusion**：edit/write 的 `then_run` 参数融合，纯执行期装饰、零持久足迹；命令经嵌套执行路由接受策略门控。迁移形态 = 在新工具构造点重新包装（`pi.tool` 须声明 `replay: unsafe`），M4 时重评估是否改以 `pi.post_tools` 的 `afterTools` 钩子原生落地。
 - **并发天花板**：准入策略层，实现于 task kind 的 `after` 依赖 + 准入时 `busy`/配额检查，一个 commit 内 check-and-record。
 - **虚拟模型调度**：实现于 pico3 `Models` 适配器（resolve/stream 拦截），router state 经 custom entry 持久，遵守黏性规则与 retry/failed 语义。
 
@@ -94,4 +95,4 @@
 - **不替换父会话宿主**：父会话始终由上游 coding-agent（v1 harness）拥有；本扩展只拥有子会话执行底座。上游 coding-agent 自身的 pico3 迁移（Micro 方向）发生后另行评估。
 - **不发明跨进程锁**：单进程单 Session 拥有一个 Storage 路径（hardening-handoff.md §7）；多进程共享不在范围内。
 - **不扩展核心权限**：`pi.*` kind、`boundary`/`resolveInputs`/核心 entry 追加为内核保留；扩展只用 ordinary kind + 注册能力（plugins.md §1 原则 4）。
-- **项目本地概念显式标注**：ToolSourceGrant、并发配额租约、ObservationPack 为本扩展差异化能力，文档与代码中不得归源于上游规范。
+- **项目本地概念显式标注**：ToolSourceGrant、并发配额租约、ObservationPack、Action Fusion 为本扩展差异化能力，文档与代码中不得归源于上游规范。

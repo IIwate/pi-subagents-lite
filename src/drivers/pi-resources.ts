@@ -19,6 +19,7 @@ import { buildAgentPrompt, type EnvInfo, type PromptExtras } from "../prompt/pro
 import { loadSkillMeta, preloadSkills } from "../prompt/skill-loader.js";
 import { PiToolHost } from "./pi-tool-host.js";
 import { ObservationSink, OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
+import { wrapMutationWithThenRun, type FusedFileQueue } from "./action-fusion.js";
 import type { ToolSourceGrant } from "../domain/policy.js";
 
 const GIT_EXEC_TIMEOUT_MS = 5000;
@@ -50,6 +51,9 @@ interface ResourceOptions {
   signal?: AbortSignal;
   warnedConflicts?: Set<string>;
   observationPacking?: boolean;
+  actionFusion?: boolean;
+  /** Runtime-owned fused file queue, shared across all child sessions. Required when actionFusion is on. */
+  fusedFileQueue?: FusedFileQueue;
 }
 
 /** Owns official Pi resource factories and adapts their tool hooks to the native child. */
@@ -166,8 +170,19 @@ export class PiResources {
 
   private bind(): void {
     const { cwd, policy, restored, model, thinking } = this.options;
-    const builtins: AgentTool<any>[] = [createReadTool(cwd), createBashTool(cwd), createPowerShellTool(cwd), createEditTool(cwd),
-      createWriteTool(cwd), createGrepTool(cwd), createFindTool(cwd)];
+    // Fused commands route through the tool host's nested execution, so the accepted-policy
+    // and active-set gates apply exactly as they would to a model-issued shell call.
+    const fusionShell = {
+      available: () => ["bash", "powershell"].find(name => this.toolHost.permits(name) && this.toolHost.activeTools.includes(name)),
+      run: (id: string, name: string, input: { command: string; timeout?: number }, signal: AbortSignal | undefined) =>
+        this.toolHost.executeNested(id, name, input, { signal }),
+    };
+    const mutations: AgentTool<any>[] = [createEditTool(cwd), createWriteTool(cwd)].map(tool =>
+      this.options.actionFusion
+        ? wrapMutationWithThenRun(tool, { cwd, queue: this.options.fusedFileQueue ?? new Map(), shell: fusionShell })
+        : tool);
+    const builtins: AgentTool<any>[] = [createReadTool(cwd), createBashTool(cwd), createPowerShellTool(cwd), ...mutations,
+      createGrepTool(cwd), createFindTool(cwd)];
     for (const tool of builtins) this.toolHost.register({ definition: { ...tool, defaultActive: false,
       execute: (id, args, signal, update) => tool.execute(id, args, signal, update) },
       sourceInfo: { source: "builtin", scope: "temporary", origin: "top-level", path: `builtin:${tool.name}` },

@@ -107,9 +107,12 @@ export function parseConfig(input: unknown): SubagentsConfig {
   const overrides = (field: "providers" | "models") => concurrency[field] === undefined ? undefined
     : Object.fromEntries(Object.entries(object(concurrency[field], `concurrency.${field}`)).map(([key, value]) => [key, limit(value, key)]));
   const rawExperimental = object(root.experimental === undefined ? {} : root.experimental, "experimental");
-  keys(rawExperimental, ["observationPacking"], "experimental");
+  keys(rawExperimental, ["observationPacking", "actionFusion"], "experimental");
   if (rawExperimental.observationPacking !== undefined && typeof rawExperimental.observationPacking !== "boolean") {
     throw new Error("Invalid boolean setting: experimental.observationPacking");
+  }
+  if (rawExperimental.actionFusion !== undefined && typeof rawExperimental.actionFusion !== "boolean") {
+    throw new Error("Invalid boolean setting: experimental.actionFusion");
   }
   const routing = object(root.modelRouting === undefined ? {} : root.modelRouting, "modelRouting");
   keys(routing, ["enabled", "enabledProviders", "agentAccess"], "modelRouting");
@@ -138,6 +141,7 @@ export function parseConfig(input: unknown): SubagentsConfig {
       enabledProviders: routing.enabledProviders === undefined ? [] : strings(routing.enabledProviders, "enabledProviders"), agentAccess },
     experimental: {
       observationPacking: rawExperimental.observationPacking === true,
+      actionFusion: rawExperimental.actionFusion === true,
     },
   };
 }

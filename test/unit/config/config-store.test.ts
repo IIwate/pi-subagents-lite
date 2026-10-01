@@ -277,12 +277,16 @@ describe("ConfigStore non-routing behavior", () => {
     expect(concurrencies.length).toBeGreaterThan(1);
   });
 
-  it("defaults experimental settings to off and mutates observationPacking", () => {
+  it("defaults experimental settings to off and mutates observationPacking and actionFusion", () => {
     const { io, current } = memIO();
     const store = new ConfigStore(io);
     expect(store.experimental.observationPacking).toBe(false);
+    expect(store.experimental.actionFusion).toBe(false);
     store.mutate.experimental.setObservationPacking(true);
     expect(store.experimental.observationPacking).toBe(true);
     expect(current().experimental?.observationPacking).toBe(true);
+    store.mutate.experimental.setActionFusion(true);
+    expect(store.experimental.actionFusion).toBe(true);
+    expect(current().experimental?.actionFusion).toBe(true);
   });
 });

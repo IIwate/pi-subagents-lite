@@ -81,6 +81,7 @@ export interface ResolvedRoutingConfig {
 
 export interface ResolvedExperimentalSettings {
   readonly observationPacking: boolean;
+  readonly actionFusion: boolean;
 }
 
 /** Side-effect targets, injected after construction. */
@@ -158,6 +159,7 @@ export class ConfigStore {
   get experimental(): ResolvedExperimentalSettings {
     return {
       observationPacking: this.config.experimental?.observationPacking === true,
+      actionFusion: this.config.experimental?.actionFusion === true,
     };
   }
 
@@ -315,6 +317,11 @@ export class ConfigStore {
       setObservationPacking: (enabled: boolean): void => {
         this.commit(config => {
           config.experimental = { ...config.experimental, observationPacking: enabled };
+        });
+      },
+      setActionFusion: (enabled: boolean): void => {
+        this.commit(config => {
+          config.experimental = { ...config.experimental, actionFusion: enabled };
         });
       },
     },

@@ -11,6 +11,7 @@ import { resolveWorkingDirectory } from "./agents/working-directory.js";
 import { ConfigStore, type ConfigIO } from "./config/config-store.js";
 import { loadConfig, saveConfigAtomic } from "./config/config-io.js";
 import { HarnessDriver } from "./drivers/harness-driver.js";
+import type { FusedFileQueue } from "./drivers/action-fusion.js";
 import { NativeTaskStore } from "./drivers/native-task-store.js";
 import { PiDeliveryChannel } from "./drivers/pi-delivery-channel.js";
 import { PiResources } from "./drivers/pi-resources.js";
@@ -44,6 +45,8 @@ export class ExtensionRuntime {
   private readonly resources = new Set<PiResources>();
   // Dedupes built-in tool conflict warnings across this parent session's children.
   private readonly warnedConflicts = new Set<string>();
+  // Serializes fused mutation+command operations per file across all child sessions.
+  private readonly fusedFileQueue: FusedFileQueue = new Map();
   private readonly ownedSessions = new Set<string>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -126,7 +129,8 @@ export class ExtensionRuntime {
           model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal,
           warnedConflicts: this.warnedConflicts,
           observationPacking: this.store.experimental.observationPacking
-            || store.binding.policy.tools.includes("obs_recall") || hadObservations });
+            || store.binding.policy.tools.includes("obs_recall") || hadObservations,
+          actionFusion: this.store.experimental.actionFusion, fusedFileQueue: this.fusedFileQueue });
         this.resources.add(resources);
         this.assertActive();
         transferred = true;
@@ -169,7 +173,8 @@ export class ExtensionRuntime {
       const resources = await PiResources.open({ pi: this.pi, parent: options.ctx, agentDir: this.agentDir,
         cwd, projectTrusted, model, thinking: thinkingLevel, policy: acceptedPolicy, signal,
         warnedConflicts: this.warnedConflicts,
-        observationPacking: this.store.experimental.observationPacking });
+        observationPacking: this.store.experimental.observationPacking,
+        actionFusion: this.store.experimental.actionFusion, fusedFileQueue: this.fusedFileQueue });
       this.resources.add(resources);
       let transferred = false;
       let attached = false;
