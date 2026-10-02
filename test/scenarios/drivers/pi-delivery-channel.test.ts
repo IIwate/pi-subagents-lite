@@ -2,20 +2,18 @@ import { mkdirSync, readFileSync, renameSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
-import { BACKGROUND_CONTEXT, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
 import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
   type ExtensionAPI, type ExtensionContext, type ExtensionError, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
-import { HarnessDriver } from "../../../src/drivers/harness-driver.js";
+import { DurableDriver } from "../../../src/drivers/durable-driver.js";
 import { PiDeliveryChannel, RESULT_MESSAGE_TYPE } from "../../../src/drivers/pi-delivery-channel.js";
 import { TaskEngine } from "../../../src/engine/task-engine.js";
 import type { DeliveryChannel, TaskBinding, TaskDelivery } from "../../../src/engine/contracts.js";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
 
-const context = BACKGROUND_CONTEXT;
 
 describe("Native task delivery to an official Pi parent", () => {
   let resources: TestHarness;
@@ -62,18 +60,14 @@ describe("Native task delivery to an official Pi parent", () => {
   type Host = Awaited<ReturnType<typeof host>>;
 
   async function child(parent: Host, taskId = "child-task") {
-    const env = new NodeExecutionEnv({ cwd: directory });
-    const repository = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(directory, taskId) });
-    resources.onDispose(() => env.cleanup(context));
-    resources.onDispose(() => repository.close(context));
-    const session = await repository.create({ cwd: directory, parentSessionId: parent.ctx.sessionManager.getSessionId() }, context);
+    const path = join(directory, `${taskId}.sqlite`);
     const binding: TaskBinding = {
       taskId, mode: "background", control: "autonomous", parent: { sessionId: parent.ctx.sessionManager.getSessionId(), entryId: parent.origin },
       policy: { agent: "worker", model: { provider: "worker", id: "child" }, thinkingLevel: "low", tools: [],
         cwd: directory, systemPrompt: "Child context only", limits: { graceTurns: 1 } },
     };
     const open = async (restore = false) => {
-      const driver = await HarnessDriver.open({ session: restore ? await repository.open(session.metadata, context) : session,
+      const driver = await DurableDriver.open({ path,
         models: parent.runtime, binding: restore ? undefined : binding, retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
         compaction: { enabled: false, reserveTokens: 1000, keepRecentTokens: 1000 } });
       resources.onDispose(() => driver.close());
@@ -120,7 +114,7 @@ describe("Native task delivery to an official Pi parent", () => {
 
   it("dispatches through the extension tool entry, waits for parent idle, and verifies receipt before the parent answers", async () => {
     let tasks!: TaskEngine;
-    let worker!: HarnessDriver;
+    let worker!: DurableDriver;
     const parentTool = Promise.withResolvers<void>();
     const releaseParent = Promise.withResolvers<void>();
     const parent = await host(pi => {

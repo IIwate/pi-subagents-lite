@@ -18,7 +18,7 @@ pi-subagents-lite is a Pi extension for isolated subagent sessions, model access
 
 ## Runtime invariants
 
-- **Execution records and durable results have separate owners.** `TaskEngine` and its drivers own execution resources; native session values own saved deliveries. Never reconstruct executable records from outbox entries or apply the UI retention timer to durable results ([delivery](.agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md)).
+- **Execution records and durable results have separate owners.** `TaskEngine` and its drivers own execution resources; native session documents own saved deliveries. Never reconstruct executable records from outbox entries or apply the UI retention timer to durable results ([delivery](.agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md)).
 - **ACK requires a durable receipt.** Verify the matching delivery in the parent session log before acknowledging it; sending a message, rendering it, or completing a model turn is insufficient. Preserve results when persistence or acknowledgement fails.
 - **Delivery retains its origin.** Automatic delivery requires the original parent session and active origin branch; explicit `AgentStatus` reads are session-wide. Native task discovery remains isolated by parent session ID.
 - **Human takeover leaves subsequent output for explicit selection.** The editor sends instructions; the delivery selector selects existing messages. A taken-over terminal run does not automatically create a automatic outbox entry or wake Main ([takeover](.agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md)).

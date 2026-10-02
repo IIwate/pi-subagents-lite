@@ -94,7 +94,7 @@ describe("Observation packing in a child session", () => {
     const readResult = requests[1].messages.find((message): message is ToolResultMessage =>
       message.role === "toolResult" && message.toolName === "read")!;
     const observedText = readResult.content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n");
-    const archived = globSync(join(parent.directory, "subagents-lite-v3", "sessions", "**", "*.observations", "obs_*.txt"));
+    const archived = globSync(join(parent.directory, "subagents-lite-v3", "durable", "**", "*.observations", "obs_*.txt"));
     expect(archived).toHaveLength(2);
     const archivedTexts = archived.map(path => readFileSync(path, "utf8"));
     expect(archivedTexts).toContain(observedText);

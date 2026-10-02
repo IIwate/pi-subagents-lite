@@ -14,7 +14,7 @@ Agent 工具使用可选 cwd 参数. [resolveWorkingDirectory](../../../../src/a
 
 ## Execution and recovery
 
-[Runtime](../../../../src/runtime.ts) 将确定的 cwd 传给 PiResources、原生 Session 和 TaskPolicy. [HarnessDriver](../../../../src/drivers/harness-driver.ts) 的 NodeExecutionEnv、Pi 内建工具、扩展 ctx.cwd 与默认 pi.exec 使用各自任务的目录. 路径解析和资源装配位于执行侧, Domain 只保存已经解析的值, UI 消费状态和派发动作. 进程 cwd 不随子任务切换.
+[Runtime](../../../../src/runtime.ts) 将确定的 cwd 传给 PiResources、原生 Session 和 TaskPolicy. [DurableDriver](../../../../src/drivers/durable-driver.ts) 的 NodeExecutionEnv、Pi 内建工具、扩展 ctx.cwd 与默认 pi.exec 使用各自任务的目录. 路径解析和资源装配位于执行侧, Domain 只保存已经解析的值, UI 消费状态和派发动作. 进程 cwd 不随子任务切换.
 
 queued、reload 和后续 operation 使用接受时保存的 cwd 与 prompt. 恢复验证已保存目录仍可使用, 不重新解释原始相对路径或符号链接入口. 目录不可用时报告恢复失败, 原生数据保留, AgentStatus 仍可读取保存结果. realpath 不保证目录 inode 在校验后保持不变.
 

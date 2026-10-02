@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { KeybindingsManager } from "@earendil-works/pi-tui";
-import { BACKGROUND_CONTEXT, MemorySessionRepo } from "@earendil-works/pi-agent-core";
+import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore, type Context as ProviderContext } from "@earendil-works/pi-ai";
-import { HarnessDriver, type HarnessDriverOptions } from "../../../src/drivers/harness-driver.js";
+import { DurableDriver, type DurableDriverOptions } from "../../../src/drivers/durable-driver.js";
 import { TaskEngine } from "../../../src/engine/task-engine.js";
 import { AgentNavigator } from "../../../src/ui/agent-navigator.js";
 import { DeliverySelectorComponent } from "../../../src/ui/delivery-selector.js";
@@ -16,12 +16,11 @@ describe("Native task navigation", () => {
   beforeEach(() => { resources = createTestHarness(); });
   afterEach(() => resources.dispose());
 
-  async function scene(provider: ReturnType<typeof fauxProvider>, tools: HarnessDriverOptions["tools"] = [], release?: () => void) {
+  async function scene(provider: ReturnType<typeof fauxProvider>, tools: DurableDriverOptions["tools"] = [], release?: () => void) {
     const directory = resources.createTempDir("pi-task-navigation-");
     const models = createModels({ credentials: new InMemoryCredentialStore(), modelsStore: new InMemoryModelsStore() });
     models.setProvider(provider.provider);
-    const session = await new MemorySessionRepo().create({ parentSessionId: "parent" }, BACKGROUND_CONTEXT);
-    const driver = await HarnessDriver.open({ session, models, tools,
+    const driver = await DurableDriver.open({ storage: new MemoryStorage(), models, tools,
       binding: { taskId: "worker", parent: { sessionId: "parent", entryId: "origin" }, mode: "foreground", control: "autonomous",
         policy: { agent: "Worker", model: { provider: provider.provider.id, id: provider.getModel().id }, thinkingLevel: "off",
           tools: tools?.map(tool => tool.name) ?? [], cwd: directory, systemPrompt: "Offline worker", limits: { graceTurns: 1 } } },
@@ -71,7 +70,7 @@ describe("Native task navigation", () => {
       request => { requests.push(request); return fauxAssistantMessage("Steered report"); },
       request => { requests.push(request); return fauxAssistantMessage("Final report\x07"); },
     ]);
-    const state = await scene(provider, [{ name: "probe", label: "Probe", description: "Hold a task checkpoint.", parameters: Type.Object({}), replay: "never",
+    const state = await scene(provider, [{ name: "probe", description: "Hold a task checkpoint.", parameters: Type.Object({}), replay: "unsafe",
       execute: async () => { entered.resolve(); await release.promise; return { content: [{ type: "text", text: "Done" }], details: {} }; } }], release.resolve);
     await entered.promise;
     const editor = state.fixture.tui.children[state.fixture.tui.editorIndex].children[0];

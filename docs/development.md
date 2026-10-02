@@ -32,6 +32,25 @@ Within each layer, place tests with the production module they exercise: agents,
 
 The [Test workflow](../.github/workflows/test.yml) checks types, lint, and npm package contents, and runs both layers on Linux and Windows in normal order and with fixed-seed shuffling. Its matrix and seed live in the workflow. The [Verify Notes workflow](../.github/workflows/verify-notes.yml) checks documentation for main-branch updates and pull requests. The [Publish workflow](../.github/workflows/publish.yml) repeats the quality gates, including Notes, before publishing.
 
+## Pi 1.0 durable boundary spike
+
+[scripts/spikes/pi-durable-boundaries/](../scripts/spikes/pi-durable-boundaries/run.ts) pins an isolated Pi 1.0.0 dependency graph. From the repository root on Linux with Node.js 24:
+
+```sh
+export SPIKE_PROJECT="$PWD"
+spike_dir=$(mktemp -d /tmp/pi-durable-boundaries-XXXXXX)
+cp scripts/spikes/pi-durable-boundaries/{run.ts,package.json,bun.lock} "$spike_dir/"
+cd "$spike_dir"
+timeout 120s bun install --frozen-lockfile --ignore-scripts
+timeout 90s node --import tsx run.ts
+```
+
+The script runs seven boundary checks with offline faux providers and real Pi extension dispatch, durable SQLite, and native read/write tools. Its spike-only `Agent(name, action)` tool exercises `pi.registerTool` through the parent model loop; it does not load the production `src/index.ts` or implement the complete production Agent schema. The current `Quota` and `PiDeliveryChannel` sources are copied into the temporary dependency tree so their runtime imports resolve against Pi 1.0.0.
+
+Explicit tasks read `input.txt` and, where requested, attempt to write `output.txt`. Deferred gates coordinate concurrency and interruption without polling. Fault injection suppresses a parent log append and rejects a child ACK storage commit. The process prints the path to retained `evidence.json`, parent JSONL, child SQLite files, and fixture outputs under `/tmp/pi-durable-run-*`. All opened sessions and environments are closed before exit; artifact files remain for inspection.
+
+Coverage includes background execution, direct-tool authorization, persisted takeover with explicit selection, orderly close/reopen, queued recovery admission, and delivery deduplication. It does not exercise a live provider, the production navigator/keyboard routes, nested extension tools, SIGKILL recovery, or Windows. Model validation uses offline providers throughout the migration; live provider calls and credentials are not part of the verification workflow.
+
 ## Worktrees
 
 Keep the main checkout and worktree on the same filesystem side: both Windows or both WSL/Linux. Link reusable dependency directories such as `node_modules` to the main checkout; do not copy, reinstall, move, or share them across Windows and WSL.

@@ -1,15 +1,27 @@
-import type { TaskOutcome } from "../domain/task.js";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { extractText } from "../prompt/context.js";
-import { BACKGROUND_CONTEXT, deleteValue, laneState, operationResult, setValue, value, type OperationResultRecord, type Session, type Write } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { defineDoc, type Session, type ConversationId, type EntryRecord, type Cursor } from "@earendil-works/pi-durable";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { freezePolicy, type TaskPolicy } from "../domain/policy.js";
-import type { ExecutionResult, DeliveryReceipt, ParentOrigin, StoredDelivery, TaskBinding, TaskDelivery, TaskStore } from "../engine/contracts.js";
+import type { ExecutionResult, DeliveryReceipt, ParentOrigin, StoredDelivery, TaskBinding, TaskDelivery, TaskStore, TaskInput } from "../engine/contracts.js";
 
-const namespace = "subagents-lite.v3";
-const taskAddress = value<unknown>(namespace, "task");
-const deliveryAddress = (id = "") => value<unknown>(namespace, `delivery/${id}`);
-const stopAddress = (operationId: string) => value<unknown>(namespace, `stop/${operationId}`);
+export const TaskDocument = defineDoc<any>({ kind: "subagents-lite.task", version: 1, scope: "session",
+  initial: () => ({ operations: {}, queue: [], deliveries: {}, extensionState: [], labels: {} }) });
 const context = BACKGROUND_CONTEXT;
+
+export interface PendingInput { id: string; kind: "steer" | "followUp"; input: TaskInput; }
+// Note: see .agents/notes/implemented/architecture/2026-10-02-pi-1-0-execution-layer-migration-to-pi-durable.md
+export interface Operation {
+  id: string;
+  input: TaskInput;
+  startedAt: number;
+  fromEntryId: number | null;
+  stoppedBy?: "user" | "agent";
+  cancelled?: boolean;
+  result?: ExecutionResult;
+}
 
 function object(input: unknown): Record<string, unknown> {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error("Invalid task data object");
@@ -96,132 +108,175 @@ function parseStoredDelivery(input: unknown): StoredDelivery {
   return { delivery, receipt: { deliveryId: delivery.deliveryId, parentSessionId: delivery.parent.sessionId, entryId: string(receipt.entryId) } };
 }
 
+/** Accepted input and application receipts have a lifetime independent of native tool tasks. */
 export class NativeTaskStore implements TaskStore {
-  private constructor(readonly session: Session, private current: TaskBinding) {}
+  private constructor(readonly session: Session, private current: TaskBinding, readonly path?: string) {}
 
-  static async open(session: Session, binding?: TaskBinding): Promise<NativeTaskStore> {
-    const saved = await session.getValue(taskAddress, context);
-    let accepted: TaskBinding;
-    if (saved) {
-      if (binding) throw new Error("The native session already owns a task");
-      accepted = parseBinding(saved.value);
-    } else {
-      if (!binding) throw new Error("The native session has no task binding");
-      accepted = Object.freeze({ ...binding, policy: freezePolicy(binding.policy), parent: Object.freeze({ ...binding.parent }) });
-    }
-    if (session.metadata.parentSessionId !== accepted.parent.sessionId) throw new Error("Native task parent session mismatch");
-    if (session.metadata.cwd !== undefined && session.metadata.cwd !== accepted.policy.cwd) throw new Error("Native task working directory mismatch");
-    if (!saved) await session.setValue(taskAddress, accepted, context);
-    return new NativeTaskStore(session, accepted);
-  }
-
-  async latestResult(): Promise<ExecutionResult | undefined> {
-    const state = await this.session.getValue(laneState(this.current.taskId), context);
-    if (!state || state.value.currentOperationId || !state.value.lastOperationId) return;
-    const result = await this.session.getValue(operationResult(state.value.lastOperationId), context);
-    return result ? this.result(result.value) : undefined;
-  }
-
-  // Note: see .agents/notes/implemented/bug-fix/2026-09-10-assistant-outcomes-retries-and-turn-budgets.md
-  async result(record: OperationResultRecord): Promise<ExecutionResult> {
-    const lane = await this.session.branch(this.current.taskId, context);
-    if (!lane) throw new Error("Native task lane is missing");
-    // Native stop bounds follow traversal order; scan back from this operation's tip.
-    const entries = record.tipId === null ? [] : (await lane.findEntries({
-      start: record.tipId, ...(record.fromTipId === null ? {} : { stopAtId: record.fromTipId }),
-    }, context)).filter(entry => entry.id !== record.fromTipId);
-    const assistant = entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
-    const text = assistant?.type === "message" && "content" in assistant.message ? typeof assistant.message.content === "string" ? assistant.message.content.trim() : extractText(assistant.message.content).trim() : "";
-    const stoppedBy = stopInitiator((await this.session.getValue(stopAddress(record.operationId), context))?.value);
-    let outcome: TaskOutcome;
-    if (record.status === "failed") outcome = { status: "error", error: record.error?.message ?? "Native operation failed", result: text };
-    else if (record.status === "aborted") outcome = { status: stoppedBy ? "stopped" : "aborted", result: text, stoppedBy };
-    else if (record.status === "declined") outcome = { status: "stopped", result: text };
-    else if (!text) outcome = { status: "error", error: "Subagent completed without final assistant text" };
-    else outcome = {
-      status: this.current.policy.limits.maxTurns !== undefined && entries.filter(entry => entry.type === "message" && entry.message.role === "assistant" && !["error", "aborted", "pending", "deferred"].includes(entry.message.stopReason)).length >= this.current.policy.limits.maxTurns ? "turn_limited" : "completed",
-      result: text,
-    };
-    return Object.freeze({ operationId: record.operationId, outcome: Object.freeze(outcome), stopRequestedBy: stoppedBy, completedAt: record.endedAt, startedAt: record.startedAt,
-      sourceEntryIds: Object.freeze(assistant ? [assistant.id] : []) });
+  static async open(session: Session, binding?: TaskBinding, path?: string): Promise<NativeTaskStore> {
+    const saved = await session.snapshot(TaskDocument, context);
+    if (saved?.binding && binding) throw new Error("The native session already owns a task");
+    if (!saved?.binding && !binding) throw new Error("The native session has no task binding");
+    const accepted = parseBinding(saved?.binding ?? JSON.parse(JSON.stringify(binding)));
+    if (!saved?.binding) await session.commit(async tx => { (await tx.doc(TaskDocument)).binding = JSON.parse(JSON.stringify(accepted)); }, context);
+    const store = new NativeTaskStore(session, accepted, path);
+    await store.operations();
+    await store.deliveries();
+    await store.pending();
+    await store.currentOperation();
+    return store;
   }
 
   get binding(): TaskBinding { return this.current; }
-
-  async recordStop(operationId: string, initiator: "user" | "agent"): Promise<void> {
-    await this.session.mutate(async writer => {
-      const address = stopAddress(operationId);
-      const previous = stopInitiator((await writer.getValue(address, context))?.value);
-      const stoppedBy = previous === "user" ? previous : initiator;
-      const writes: Write[] = [setValue(address, stoppedBy)];
-      if (stoppedBy === "user") {
-        const automatic = deliveryAddress(`automatic:${this.current.taskId}:${operationId}`);
-        const saved = await writer.getValue(automatic, context);
-        if (saved) {
-          const stored = parseStoredDelivery(saved.value);
-          this.checkDelivery(stored.delivery);
-          if (stored.delivery.kind !== "automatic" || stored.delivery.operationId !== operationId) throw new Error("Automatic delivery operation mismatch");
-          // A stop and revocation share the same commit; source messages and durable receipts retain their owners.
-          if (!stored.receipt) writes.push(deleteValue(automatic));
-        }
+  async data() { return (await this.session.snapshot(TaskDocument, context))!; }
+  async operations(): Promise<Record<string, Operation>> {
+    const data = object((await this.data()).operations);
+    for (const [id, raw] of Object.entries(data)) {
+      const op = object(raw); if (string(op.id) !== id) throw new Error("Operation identity mismatch");
+      number(op.startedAt); if (op.fromEntryId !== null) number(op.fromEntryId);
+      const input = object(op.input); if (typeof input.text !== "string") throw new Error("Invalid task input");
+      if (input.images !== undefined && (!Array.isArray(input.images) || input.images.some(raw => {
+        const image = object(raw); return image.type !== "image" || typeof image.data !== "string" || typeof image.mimeType !== "string";
+      }))) throw new Error("Invalid task images");
+      if (op.result !== undefined) {
+        const result = object(op.result); const outcome = object(result.outcome);
+        if (result.operationId !== id || !["completed", "turn_limited", "error", "aborted", "stopped"].includes(string(outcome.status))) throw new Error("Invalid saved task result");
+        if (outcome.result !== undefined && typeof outcome.result !== "string") throw new Error("Invalid saved task result text");
+        if (outcome.error !== undefined && typeof outcome.error !== "string") throw new Error("Invalid saved task error");
+        number(result.startedAt); number(result.completedAt); strings(result.sourceEntryIds);
+        stopInitiator(result.stopRequestedBy); stopInitiator(outcome.stoppedBy);
       }
-      await writer.commit(writes, context);
+      stopInitiator(op.stoppedBy);
+      if (op.cancelled !== undefined && typeof op.cancelled !== "boolean") throw new Error("Invalid task cancellation");
+    }
+    return data as unknown as Record<string, Operation>;
+  }
+  async currentOperation(): Promise<Operation | undefined> {
+    const data = await this.data();
+    if (data.current === undefined) return;
+    const operations = await this.operations(); const id = string(data.current);
+    if (!Object.hasOwn(operations, id)) throw new Error("Current task operation is missing");
+    return operations[id];
+  }
+  async accept(input: TaskInput, fromEntryId: number | null): Promise<string> {
+    const id = randomUUID();
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument);
+      if (data.current && !data.operations[data.current].result) throw new Error("Task is already running");
+      data.operations[id] = JSON.parse(JSON.stringify({ id, input, fromEntryId, startedAt: Date.now() })); data.current = id;
+    }, context);
+    return id;
+  }
+  async latestResult(): Promise<ExecutionResult | undefined> {
+    const operation = await this.currentOperation();
+    if (!operation || operation.result) return operation?.result;
+    const root = await this.session.commit(async tx => (await tx.scanConversations({}, 1)).items[0], context);
+    if (!root) return;
+    const submission = await this.session.commit(tx => tx.submissionByRequest(root.id, operation.id), context);
+    if (submission?.status === "done" || submission?.status === "unanswered") return this.result(operation.id, root.id);
+  }
+  async result(operationId: string, conversationId: ConversationId, requestError?: string): Promise<ExecutionResult> {
+    const operation = (await this.operations())[operationId];
+    if (!operation) throw new Error("Unknown task operation");
+    if (operation.result) return operation.result;
+    const { submission, entries } = await this.session.commit(async tx => {
+      const submission = await tx.submissionByRequest(conversationId, operationId);
+      const entries: EntryRecord[] = []; let cursor: Cursor | undefined;
+      do {
+        const page = await tx.scanEntries({ conversationId }, 256, cursor);
+        entries.push(...page.items.filter(entry => operation.fromEntryId === null || entry.id > operation.fromEntryId)); cursor = page.next;
+      } while (cursor !== undefined);
+      return { submission, entries: entries.sort((a, b) => a.id - b.id) };
+    }, context);
+    const assistant = [...entries].reverse().find(entry => entry.model?.some(message => message.role === "assistant"));
+    const message = assistant?.model?.find(message => message.role === "assistant") as AssistantMessage | undefined;
+    const text = message ? extractText(message.content).trim() : "";
+    const turns = entries.filter(entry => entry.model?.some(message => message.role === "assistant" && !["error", "aborted", "pending", "deferred"].includes(message.stopReason))).length;
+    const max = this.binding.policy.limits.maxTurns;
+    const error = requestError ?? message?.errorMessage;
+    const cancelled = operation.cancelled || submission?.reason === "aborted";
+    const outcome: ExecutionResult["outcome"] = cancelled ? { status: operation.stoppedBy ? "stopped" : "aborted", stoppedBy: operation.stoppedBy, result: text }
+      : error?.includes("turn limit reached") ? { status: "aborted", result: text }
+      : max !== undefined && turns >= max && submission?.status === "done" ? { status: "turn_limited", result: text }
+      : submission?.status !== "done" || !text || requestError ? { status: "error", error: error ?? submission?.reason ?? "Subagent completed without final assistant text", result: text }
+      : { status: "completed", result: text };
+    const result = { operationId, outcome, startedAt: operation.startedAt, completedAt: message?.timestamp ?? Date.now(),
+      stopRequestedBy: operation.stoppedBy, sourceEntryIds: assistant ? [String(assistant.id)] : [] };
+    await this.saveResult(result); return result;
+  }
+  async saveResult(result: ExecutionResult): Promise<void> {
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument);
+      if (!data.operations[result.operationId]) throw new Error("Unknown task operation");
+      const operation = data.operations[result.operationId];
+      operation.result = JSON.parse(JSON.stringify({ ...result, stopRequestedBy: operation.stoppedBy ?? result.stopRequestedBy }));
     }, context);
   }
-
-  async takeOver(): Promise<void> {
-    if (this.current.control === "manual") return;
-    const next: TaskBinding = Object.freeze({ ...this.current, control: "manual" });
-    await this.session.setValue(taskAddress, next, context);
-    this.current = next;
+  async pending(): Promise<PendingInput[]> {
+    const queue = (await this.data()).queue;
+    if (!Array.isArray(queue)) throw new Error("Invalid pending input queue");
+    for (const raw of queue) {
+      const item = object(raw); string(item.id);
+      if (item.kind !== "steer" && item.kind !== "followUp") throw new Error("Invalid pending input kind");
+      if (typeof object(item.input).text !== "string") throw new Error("Invalid pending input");
+    }
+    return queue;
   }
-
+  async enqueue(kind: PendingInput["kind"], input: TaskInput): Promise<string> {
+    const id = randomUUID();
+    await this.session.commit(async tx => { (await tx.doc(TaskDocument)).queue.push(JSON.parse(JSON.stringify({ id, kind, input }))); }, context);
+    return id;
+  }
+  async removePending(id: string): Promise<boolean> {
+    let removed = false;
+    await this.session.commit(async tx => { const data = await tx.doc(TaskDocument); const index = data.queue.findIndex((item: PendingInput) => item.id === id);
+      if (index >= 0) { data.queue.splice(index, 1); removed = true; }
+    }, context);
+    return removed;
+  }
+  async recordStop(operationId: string, initiator?: "user" | "agent"): Promise<void> {
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument); const operation = data.operations[operationId];
+      if (!operation) throw new Error("Unknown task operation");
+      operation.cancelled = true;
+      if (operation.stoppedBy !== "user" && initiator) operation.stoppedBy = initiator;
+      if (operation.result && operation.stoppedBy) operation.result.stopRequestedBy = operation.stoppedBy;
+      const id = `automatic:${this.current.taskId}:${operationId}`;
+      if (operation.stoppedBy === "user" && data.deliveries[id] && !data.deliveries[id].receipt) delete data.deliveries[id];
+    }, context);
+  }
+  async takeOver(): Promise<void> {
+    await this.session.commit(async tx => { (await tx.doc(TaskDocument)).binding.control = "manual"; }, context);
+    this.current = Object.freeze({ ...this.current, control: "manual" });
+  }
   async saveDelivery(delivery: TaskDelivery, eligible: () => boolean = () => true): Promise<void> {
     this.checkDelivery(delivery);
-    await this.session.mutate(async writer => {
-      const address = deliveryAddress(delivery.deliveryId);
-      const existing = await writer.getValue(address, context);
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument); const existing = data.deliveries[delivery.deliveryId];
       if (existing) {
-        if (!isDeepStrictEqual(parseStoredDelivery(existing.value).delivery, delivery)) {
-          throw new Error("Delivery ID already belongs to a different result");
-        }
+        if (!isDeepStrictEqual(parseStoredDelivery(existing).delivery, delivery)) throw new Error("Delivery ID already belongs to a different result");
         return;
       }
-      const stoppedBy = delivery.kind === "automatic"
-        ? stopInitiator((await writer.getValue(stopAddress(delivery.operationId), context))?.value) : undefined;
-      if (stoppedBy === "user" || !eligible()) return;
-      await writer.commit([setValue(address, { delivery })], context);
+      if ((delivery.kind === "automatic" && data.operations[delivery.operationId]?.stoppedBy === "user") || !eligible()) return;
+      data.deliveries[delivery.deliveryId] = JSON.parse(JSON.stringify({ delivery }));
     }, context);
   }
-
   async deliveries(): Promise<readonly StoredDelivery[]> {
-    return (await this.session.scanValues(deliveryAddress(), context)).map(row => {
-      const stored = parseStoredDelivery(row.value);
-      this.checkDelivery(stored.delivery);
-      return stored;
+    return Object.values(object((await this.data()).deliveries)).map(raw => {
+      const stored = parseStoredDelivery(raw); this.checkDelivery(stored.delivery); return stored;
     });
   }
-
   async acknowledge(receipt: DeliveryReceipt): Promise<void> {
-    await this.session.mutate(async writer => {
-      const address = deliveryAddress(receipt.deliveryId);
-      const saved = await writer.getValue(address, context);
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument); const saved = data.deliveries[receipt.deliveryId];
       if (!saved) throw new Error("Cannot acknowledge an unknown delivery");
-      const stored = parseStoredDelivery(saved.value);
-      this.checkDelivery(stored.delivery);
+      const stored = parseStoredDelivery(saved); this.checkDelivery(stored.delivery);
       if (receipt.parentSessionId !== stored.delivery.parent.sessionId) throw new Error("Delivery receipt parent mismatch");
-      if (stored.receipt) {
-        if (stored.receipt.entryId !== receipt.entryId) throw new Error("Delivery already has a different durable receipt");
-        return;
-      }
-      await writer.commit([setValue(address, { delivery: stored.delivery, receipt })], context);
+      if (stored.receipt && stored.receipt.entryId !== receipt.entryId) throw new Error("Delivery already has a different durable receipt");
+      saved.receipt = { ...receipt };
     }, context);
   }
-
   private checkDelivery(delivery: TaskDelivery): void {
     if (delivery.taskId !== this.current.taskId || delivery.parent.sessionId !== this.current.parent.sessionId
-      || (delivery.kind === "automatic" && delivery.parent.entryId !== this.current.parent.entryId)) {
-      throw new Error("Delivery does not belong to this task");
-    }
+      || (delivery.kind === "automatic" && delivery.parent.entryId !== this.current.parent.entryId)) throw new Error("Delivery does not belong to this task");
   }
 }

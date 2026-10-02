@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[HarnessDriver](../../../../src/drivers/harness-driver.ts) 从原生 Session 的 usage 读取累计 input、output 和 cost, 原生统计在 compaction 与继续执行后保留. 不用 token 数估算金额, 也不重复累计已写入的原生 usage. Provider 的 cacheRead 不计入新增输入, cacheWrite 仍保存在原生 usage 中.
+[DurableDriver](../../../../src/drivers/durable-driver.ts) 从原生 Conversation 的 UsageDoc 读取累计 input、output 和 cost, 原生统计在 compaction 与继续执行后保留. 不用 token 数估算金额, 也不重复累计已写入的原生 usage. Provider 的 cacheRead 不计入新增输入, cacheWrite 仍保存在原生 usage 中.
 
 ```ts type-equiv: LifetimeUsage from src/agents/usage.ts
 export type LifetimeUsage = { input: number; output: number; cacheWrite: number; cost: number };
@@ -39,4 +39,4 @@ toolUses 按原生分支中的工具结果计数, turnCount 表示当前 operati
 
 ## Verification
 
-[usage tests](../../../../test/unit/agents/usage.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts)、[原生执行](../../../../test/scenarios/drivers/harness-driver.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 覆盖累计来源与显示边界. 离线测试不代表 Provider 实际账单.
+[usage tests](../../../../test/unit/agents/usage.test.ts)、[Runtime 场景](../../../../test/scenarios/runtime.test.ts)、[原生执行](../../../../test/scenarios/drivers/durable-driver.test.ts) 和 [format tests](../../../../test/unit/ui/format.test.ts) 覆盖累计来源与显示边界. 离线测试不代表 Provider 实际账单.

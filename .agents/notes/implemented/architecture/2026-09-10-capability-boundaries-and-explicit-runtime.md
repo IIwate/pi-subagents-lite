@@ -6,13 +6,13 @@ Status: implemented
 
 执行资源、配额、持久交付和终端展示具有不同生命周期. 全局服务反查让迟到回调可能操作另一个父会话, UI 持有活体执行句柄则使资源释放与展示耦合. 行数不是缺陷本身, 拆文件也不构成解耦证据.
 
-官方 coding-agent 的父会话与原生 AgentHarness 具有不同接入表面. 扩展需要作为标准 npm 插件运行在未经修改的官方宿主中, 将执行、父交付和终端差异集中在内部 Adapter, 使任务策略与展示可以独立维护.
+官方 coding-agent 的父会话与pi-durable Harness 具有不同接入表面. 扩展需要作为标准 npm 插件运行在未经修改的官方宿主中, 将执行、父交付和终端差异集中在内部 Adapter, 使任务策略与展示可以独立维护.
 
 ## Decision
 
 v3 的实现与修改范围限于 pi-subagents-lite 仓库. [扩展入口](../../../../src/index.ts) 为每次激活创建 ExtensionRuntime, 通过构造器和注册闭包传入窄依赖. TaskEngine 与执行 Driver 管理后台工作, Navigation/View 管理前端交互, 两者使用只读状态和明确动作交流.
 
-ExecutionDriver 的 HarnessDriver 实现在扩展内部调度原生 `@earendil-works/pi-agent-core`. PiDeliveryChannel 接入官方父会话 API, PiScreen 复用现有 Pi TUI 视图与键盘机制. catalogue、配置、任务和 UI 状态属于 Runtime 实例, 不使用全局服务定位器.
+ExecutionDriver 的 DurableDriver 实现在扩展内部调度原生 `@earendil-works/pi-agent-core`. PiDeliveryChannel 接入官方父会话 API, PiScreen 复用现有 Pi TUI 视图与键盘机制. catalogue、配置、任务和 UI 状态属于 Runtime 实例, 不使用全局服务定位器.
 
 [领域 API](2026-09-11-task-policy-and-quota-domain.md)、[原生执行/父交付](2026-09-11-native-execution-and-parent-delivery-adapters.md)、[声明式导航](2026-09-11-declarative-navigation-and-input-actions.md) 和 [Runtime 所有权](2026-09-12-explicit-runtime-and-native-task-ownership.md) 分别维护各自契约. 正式工具、事件与设置入口捕获同一个所属 Runtime, 原生任务快照驱动展示.
 
@@ -20,20 +20,20 @@ src 根目录只承担 index、runtime、registration 和 events 的装配职责
 
 ## Host adapters and facet boundaries
 
-当前核心与官方宿主验证版本是 `0.99.1`, 依赖范围由 [package.json](../../../../package.json) 声明. 官方 coding-agent 的常规 [SDK](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/core/sdk.ts) 创建 Agent 与 AgentSession, 并不向插件提供父 Harness. 因此, 当前父会话由 Pi 持有, 子任务原生 Session/Harness 由扩展持有. 两者通过 PiDeliveryChannel 交付, 不描述为同一个物理 Session.
+当前执行底座与官方宿主验证版本是 `1.0.0`, 依赖范围由 [package.json](../../../../package.json) 声明. 官方 coding-agent 的常规 [SDK](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/core/sdk.ts) 创建 Agent 与 AgentSession, 并不向插件提供父 Harness. 因此, 当前父会话由 Pi 持有, 子任务原生 Session/Harness 由扩展持有. 两者通过 PiDeliveryChannel 交付, 不描述为同一个物理 Session.
 
 上游 [插件设计](https://github.com/earendil-works/pi/blob/v0.99.1/packages/agent/docs/plugins.md) 与 [experimental 服务边界](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/experimental/services/README.md) 将 Session Worker 和 Presentation 分开, 并按 src/session.ts、src/tui.ts 约定发现插件分面. 执行和展示的拆分与这个方向一致; 具体服务、RPC、加载及生命周期契约仍取决于届时的官方接口. 当前同进程内部调用直接使用 TypeScript 类型和函数, 不预建 RPC 层.
 
 内部 Adapter 的职责如下:
 
-- HarnessDriver 拥有子执行资源、原生队列、订阅、取消和关闭, 将原生事实投影给 TaskEngine.
+- DurableDriver 拥有子执行资源、原生队列、订阅、取消和关闭, 将原生事实投影给 TaskEngine.
 - PiDeliveryChannel 拥有父会话来源检查、结果接收、持久 receipt 查询与父唤醒.
 - UI Adapter 拥有宿主视图替换、键盘拦截、焦点与恢复; View 只消费展示状态并派发 Action.
 - Runtime 释放自己持有的资源, 不关闭宿主父会话或其他 Runtime 的任务.
 
 跨两个 Session 不具备一个原生事务. 父交付需要明确保存顺序、稳定身份、重试和实际消费边界; Adapter 本身不能代替这些证明. 这些边界在本仓库内实现和验证, 不以宿主修改或 experimental 扩展点为前置.
 
-HarnessDriver 为每个任务持有独立子 Session/Harness 和具名 Lane, 使 Harness 级工具实现、hooks 与 cwd 保持隔离. NativeTaskStore 使用原生应用 values 保存任务和 outbox. PiDeliveryChannel 在父空闲时同步追加并核验正文, 忙碌期间不向不可撤回的父队列发送结果. 父日志校验通过官方 parser 收拢在 Adapter 内, 不宣称当前宿主可以免除磁盘 receipt 验证.
+DurableDriver 为每个任务持有独立子 Session/Harness 和具名 Lane, 使 Harness 级工具实现、hooks 与 cwd 保持隔离. NativeTaskStore 使用原生应用 values 保存任务和 outbox. PiDeliveryChannel 在父空闲时同步追加并核验正文, 忙碌期间不向不可撤回的父队列发送结果. 父日志校验通过官方 parser 收拢在 Adapter 内, 不宣称当前宿主可以免除磁盘 receipt 验证.
 
 ## State ownership
 
@@ -104,9 +104,9 @@ v3 作为标准 npm 插件运行于未经修改的官方 Pi, 只管理按 v3 契
 
 [Domain unit tests](../../../../test/unit/domain/task-domain.test.ts) 验证所属策略快照、Task operation 隔离、控制模式、单次配额释放、限额更新和实例隔离. 当前领域 API 的事实由 [领域 Note](2026-09-11-task-policy-and-quota-domain.md) 维护.
 
-[Native Harness scenarios](../../../../test/scenarios/drivers/harness-lanes.test.ts) 使用公开入口、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源. 它们覆盖真实并行与 Steer 消费、分支写入和重复交付反例, 以及官方 JSONL 后端关闭重开后继续原 operation 并保存结果.
+[执行场景](../../../../test/scenarios/drivers/durable-driver.test.ts) 使用生产 Driver、真实 Models 和离线 Provider, 通过 createTestHarness 管理资源, 覆盖准入、队列、关闭重开、安全重放边界以及应用结果落盘失败后的原生答案恢复.
 
-[执行 Adapter 场景](../../../../test/scenarios/drivers/harness-driver.test.ts)、[父交付场景](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 和 [原生 UI 场景](../../../../test/scenarios/ui/task-navigation.test.ts) 覆盖 Driver、TaskEngine、真实官方父会话以及 UI 输入/选择闭环. 正式产品入口使用 ExtensionRuntime、TaskEngine 和 NavigationSource. Runtime 场景覆盖双实例、迟到准备、关闭、原生恢复与扩展资源边界. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
+[执行 Adapter 场景](../../../../test/scenarios/drivers/durable-driver.test.ts)、[父交付场景](../../../../test/scenarios/drivers/pi-delivery-channel.test.ts) 和 [原生 UI 场景](../../../../test/scenarios/ui/task-navigation.test.ts) 覆盖 Driver、TaskEngine、真实官方父会话以及 UI 输入/选择闭环. 正式产品入口使用 ExtensionRuntime、TaskEngine 和 NavigationSource. Runtime 场景覆盖双实例、迟到准备、关闭、原生恢复与扩展资源边界. 相应验证随各自公共路径完成, 不无故重复已通过且未受改动影响的检查.
 
 origin/re@5db0c90 仅为局部设计参考. a8e9625 修复 UI tick 复制 accepted policy 的问题, 表明无关 SDK 数据的重复投影具有实际成本. 不整批迁入该分支的产品策略.
 

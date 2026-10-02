@@ -14,7 +14,7 @@ Status: implemented
 
 ## Persistence and discovery
 
-任务使用 getAgentDir 下 subagents-lite-v3/sessions 的官方 JsonlSessionRepo. TaskBinding 与 outbox 位于原生应用 values, operation、队列和执行结果由 Harness 持久化. Runtime 按 parentSessionId 发现属于当前父会话的任务; 没有接受 operation 的准备记录不进入执行列表.
+任务使用 getAgentDir 下 subagents-lite-v3/durable/<encoded-parent-session-id>/<task-id>.sqlite. TaskBinding、接受请求、控制权和 outbox 位于 session-scoped document, 执行队列和答案由原生 Submission/Task 持久化. Runtime 只扫描当前父目录, 并校验文档中的父身份; 没有接受 operation 的准备记录不进入执行列表. 0.99.x JSONL 子会话不兼容, 不读取或迁移.
 
 ```ts type-equiv: TaskBinding from src/engine/contracts.ts
 export interface TaskBinding {
@@ -36,9 +36,9 @@ export interface TaskBinding {
 
 [PiResources](../../../../src/drivers/pi-resources.ts) 加载当前官方 Pi 的资源与工具, 为每个子任务建立独立 ModelRuntime 和 ExtensionRunner. 它把扩展工具和关键请求 hook 接到原生 Harness, 并将按顺序追加的 custom state 保存到原生应用 values. [工具宿主](2026-09-30-native-pi-tool-host-and-source-grants.md) 接入官方 MCP/codemode/tool-search 工厂、来源授权、独立声明和嵌套调用. 给扩展的同步 SessionManager 是原生消息及扩展状态的读取投影, 不运行模型, 也不是子任务的持久化后端.
 
-资源准备在原生任务发布之前完成. Runtime 跟踪未完成的接受操作, 每个异步边界核对生命周期. HarnessDriver 接过 Native Session 与 PiResources 后承担其失败关闭责任. 迟到返回的资源被关闭, 不进入已关闭 Runtime 的 TaskEngine.
+资源准备在原生任务发布之前完成. Runtime 跟踪未完成的接受操作, 每个异步边界核对生命周期. DurableDriver 接过 Native Session 与 PiResources 后承担其失败关闭责任. 迟到返回的资源被关闭, 不进入已关闭 Runtime 的 TaskEngine.
 
-关闭先封闭 Runtime、配置写入和迟到 UI 回调, 解除导航订阅并恢复宿主组件, 再关闭 TaskEngine、仍在准备的资源、仓库和执行环境. 每一项清理单独尝试, 失败聚合返回. Harness 的 Session 能力借自 Driver, 关闭 Harness 先封闭执行, Session writer 仍由 Driver 保留给子扩展 shutdown 保存应用状态. Driver 随后等待已进入的执行, 关闭原生 Session 并释放环境; 同一关闭 Promise 在可重入操作之前登记.
+关闭先封闭 Runtime、配置写入和迟到 UI 回调, 解除导航订阅并恢复宿主组件, 再关闭 TaskEngine 与仍在准备的资源. 每项清理单独尝试, 失败聚合返回. Driver 先封闭效果入口并取消自有传输, 让子扩展 shutdown 在 SQLite writer 关闭前保存状态, 再关闭 Harness 并等待已接纳执行退出, 最后释放环境. 同一关闭 Promise 在可重入操作前登记.
 
 UI 的十分钟保留窗口只隐藏已结算的展示项, pin 暂停剩余窗口, 显式移除仍可隐藏已 pin 的任务. 原生任务数据与 outbox 不被该计时器删除. 任务和扩展资源的最终释放归 Runtime, 父会话不由它关闭.
 
@@ -53,7 +53,7 @@ Steer 和 FollowUp 保持控制模式. Takeover 持久改为 manual 并解除前
 - **维持共享 Shell 与内存 handoff.** 单父会话路径已有丰富验证, 修改面小. 但服务目标和生命周期仍可被另一激活覆盖, 进程退出也无法保留内存交接. [原组合根](../../archived/architecture/2026-09-09-composition-root-and-shell-singleton.md) 记录该方案的边界.
 - **给原 AgentSession 路径增加统一 Runtime 外壳.** 可以快速消除全局 getter, 但执行、队列与恢复仍由另一套生命周期承担. 正式入口使用已验证的原生 Driver 和 TaskEngine.
 - **恢复时自动启动所有未完成操作.** 后台恢复更方便, 但重新取得外部执行权限和处理未知工具效果需要明确动作. 当前发现与执行准入分开, replay 安全由原生引擎裁决.
-- **结果读取时重新构造完整执行环境.** 可复用全部展示方法, 但一个不可用扩展或模型就会遮蔽持久结果. 数据读取直接使用原生 Session values 和结果记录.
+- **结果读取时重新构造完整执行环境.** 可复用全部展示方法, 但一个不可用扩展或模型就会遮蔽持久结果. 数据读取直接使用原生 Session documents 和结果记录.
 - **先删除引用再等待清理.** UI 能更快消失, 但无法证明迟到准备或已进入工具的资源归属. 关闭封闭入口并等待各自所有者完成释放.
 
 ## Consequences

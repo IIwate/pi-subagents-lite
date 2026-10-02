@@ -67,8 +67,8 @@ export function holdRead(harness: TestHarness) {
   const release = Promise.withResolvers<void>();
   harness.onDispose(() => release.resolve());
   const attach = PiResources.prototype.attach;
-  vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, childHarness, lane, store) {
-    await attach.call(this, childHarness, lane, store);
+  vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, driver) {
+    await attach.call(this, driver);
     const read = this.tools.find(tool => tool.name === "read")!;
     read.execute = async () => { entered.resolve(); await release.promise; return { content: [{ type: "text", text: "Checkpoint released" }], details: {} }; };
   });

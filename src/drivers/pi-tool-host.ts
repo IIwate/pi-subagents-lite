@@ -1,5 +1,7 @@
-import { runToolCall, type AgentHarnessTool, type AgentMessage, type AgentTool, type AgentToolCallOutcome,
-  type ExecutionToolContext, type JsonValue } from "@earendil-works/pi-agent-core";
+import type { JsonValue } from "@earendil-works/chord";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
+import { runToolCall, type AgentMessage, type AgentTool, type AgentToolCallOutcome,
+  } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Context as ProviderContext, NestedToolCallRecord, Usage } from "@earendil-works/pi-ai";
 import type { ExecuteToolOptions, ExtensionRunner, RegisteredTool, ToolDefinition, ToolInfo, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import type { TaskPolicy, ToolSourceGrant } from "../domain/policy.js";
@@ -27,7 +29,6 @@ function addUsage(left: Usage | undefined, right: Usage): Usage {
 export class PiToolHost {
   private readonly definitions = new Map<string, RegisteredTool>();
   private readonly safeTools = new Set<string>();
-  private readonly outcomes = new Map<string, boolean>();
   private readonly scopes = new Map<string, CallScope>();
   private readonly inflight = new Set<Promise<unknown>>();
   private readonly lifetime = new AbortController();
@@ -39,10 +40,11 @@ export class PiToolHost {
   private restoring = false;
   private runner!: ExtensionRunner;
   private readonly warnedConflicts: Set<string>;
-  readonly tools: AgentHarnessTool<ExecutionToolContext>[] = [];
+  readonly tools: ToolRegistration[] = [];
 
   constructor(private readonly host: {
     assertOpen(): void;
+    enter(signal?: AbortSignal): void;
     flush(): Promise<void>;
     changed(): void;
     messages(): AgentMessage[];
@@ -205,22 +207,22 @@ export class PiToolHost {
       } catch (error) { this.host.warn(`Child tool ${tool.name} (prepare_loadout): ${error}`); }
     }
     const tools = registered.filter(tool => this.exposure(tool.name) !== "hidden").map(tool => ({
-      name: tool.name, label: tool.label, description: this.descriptions.get(tool.name) ?? tool.description,
-      parameters: tool.parameters, executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "never",
-      execute: async (id, args, update, _toolContext, _invocation, callContext) => {
-        const operation = this.run(id, tool.name, args, { signal: callContext.abortSignal, onUpdate: update });
+      name: tool.name, description: this.descriptions.get(tool.name) ?? tool.description,
+      parameters: tool.parameters, executionMode: tool.executionMode, replay: this.safeTools.has(tool.name) ? "safe" : "unsafe",
+      execute: async (args, api, callContext) => {
+        const operation = this.run(api.callId, tool.name, args, { signal: callContext.abortSignal,
+          onUpdate: async partial => { if (partial.details !== undefined) await api.details(JSON.parse(JSON.stringify(partial.details)), callContext); } });
         this.inflight.add(operation);
         try {
           const outcome = await operation;
-          this.outcomes.set(id, outcome.isError);
-          return outcome.result;
+          return { ...outcome.result, details: outcome.result.details === undefined ? undefined : JSON.parse(JSON.stringify(outcome.result.details)), isError: outcome.isError };
         } finally { this.inflight.delete(operation); }
       },
-    } satisfies AgentHarnessTool<ExecutionToolContext>));
+    } satisfies ToolRegistration));
     this.tools.splice(0, this.tools.length, ...tools);
   }
 
-  /** Request-only declaration changes leave the lane's persisted active set intact. */
+  /** Request-only declaration changes leave the conversation's persisted active set intact. */
   projectRequest(request: ProviderContext): ProviderContext {
     const visible = (name: string) => this.active.includes(name) && this.permits(name)
       && this.exposure(name) !== "hidden" && !this.hidden.has(name);
@@ -228,11 +230,6 @@ export class PiToolHost {
     return { ...request, ...(request.tools ? { tools: request.tools.filter(tool => visible(tool.name)).map(project) } : {}),
       messages: request.messages.map(message => message.role !== "system" ? message : { ...message,
         ...(message.toolsAdded ? { toolsAdded: message.toolsAdded.filter(tool => visible(tool.name)).map(project) } : {}) }) };
-  }
-
-  takeOutcome(id: string): { isError: boolean } | undefined {
-    const isError = this.outcomes.get(id); this.outcomes.delete(id);
-    return isError === undefined ? undefined : { isError };
   }
 
   executeNested(callerId: string, name: string, args: unknown, options: ExecuteToolOptions = {}): Promise<AgentToolCallOutcome> {
@@ -248,7 +245,7 @@ export class PiToolHost {
 
   private async run(id: string, name: string, args: unknown, options: ExecuteToolOptions,
     parentToolCallId?: string, root: CallScope["root"] = { calls: [], bytes: 0, complete: true }): Promise<AgentToolCallOutcome> {
-    this.host.assertOpen(); await this.host.flush();
+    this.host.assertOpen(); this.host.enter(options.signal); await this.host.flush();
     const signal = options.signal ? AbortSignal.any([options.signal, this.lifetime.signal]) : this.lifetime.signal;
     const scope: CallScope = { nextId: 1, pending: new Set(), root,
       holdsQueue: parentToolCallId ? this.scopes.get(parentToolCallId)?.holdsQueue ?? false : false };
@@ -331,6 +328,5 @@ export class PiToolHost {
   async close(): Promise<void> {
     this.lifetime.abort();
     await Promise.allSettled([...this.inflight]);
-    this.outcomes.clear();
   }
 }

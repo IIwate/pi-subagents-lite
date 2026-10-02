@@ -16,6 +16,25 @@ describe("ExtensionRuntime child resources", () => {
   beforeEach(() => { harness = createTestHarness(); });
   afterEach(() => harness.dispose());
 
+  it("runs fused commands through durable tool execution and rejects an ungranted shell", async () => {
+    for (const allowed of [true, false]) {
+      const parent = await createRuntimeHost(harness, `fusion-${allowed}`, `tools: [write${allowed ? ", bash" : ""}]\nextensions: false\nskills: false`);
+      parent.runtime.store.mutate.experimental.setActionFusion(true);
+      const requests: ProviderContext[] = [];
+      parent.worker.setResponses([
+        fauxAssistantMessage(fauxToolCall("write", { path: "fused.txt", content: "fusion-check", then_run: { command: `node -e "require('node:fs').copyFileSync('fused.txt', 'shell.txt')"` } }), { stopReason: "toolUse" }),
+        request => { requests.push(request); return fauxAssistantMessage("Fusion result inspected"); },
+      ]);
+      await spawn(parent, "Call write for fused.txt and then run the Node copy command to verify shell authorization", false);
+      const result = requests[0].messages.find(message => message.role === "toolResult" && message.toolName === "write");
+      expect(result).toMatchObject({ isError: !allowed });
+      if (allowed) {
+        expect(readFileSync(join(parent.directory, "shell.txt"), "utf8")).toBe("fusion-check");
+      } else expect(existsSync(join(parent.directory, "shell.txt"))).toBe(false);
+      expect(readFileSync(join(parent.directory, "fused.txt"), "utf8")).toBe("fusion-check");
+    }
+  });
+
   it("executes concurrent cwd tasks with independent tools, extensions, skills, and project context", async () => {
     const root = harness.createTempDir();
     const main = join(root, "main");
@@ -346,9 +365,9 @@ describe("ExtensionRuntime child resources", () => {
     expect(parent.session.sessionManager.getBranch().filter(entry => entry.type === "custom" && entry.customType === "probe.state").at(-1)).toMatchObject({ data: { count: 4 } });
     const ctx = parent.runtime.context;
     await parent.runtime.dispose();
-    const taskRoot = join(parent.directory, "subagents-lite-v3", "sessions");
-    const [taskFile] = globSync("**/*.jsonl", { cwd: taskRoot });
-    expect(readFileSync(join(taskRoot, taskFile), "utf8")).toContain("probe.shutdown");
+    const taskRoot = join(parent.directory, "subagents-lite-v3", "durable");
+    const [taskFile] = globSync("**/*.sqlite", { cwd: taskRoot });
+    expect(readFileSync(join(taskRoot, taskFile)).toString("utf8")).toContain("probe.shutdown");
     unlinkSync(extension);
     const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
     const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
@@ -438,18 +457,17 @@ describe("ExtensionRuntime child resources", () => {
       }`);
     const writeFailure = new Error("Child state persistence failed");
     const attach = PiResources.prototype.attach;
-    vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, childHarness, lane, store) {
-      await attach.call(this, childHarness, lane, store);
-      vi.spyOn(store.session, "setValue").mockRejectedValue(writeFailure);
+    vi.spyOn(PiResources.prototype, "attach").mockImplementation(async function (this: PiResources, driver) {
+      await attach.call(this, driver);
+      vi.spyOn(this as unknown as { saveState(): Promise<void> }, "saveState").mockRejectedValue(writeFailure);
     });
     const requests: ProviderContext[] = [];
     parent.worker.setResponses([
       fauxAssistantMessage(fauxToolCall("inspect", {}), { stopReason: "toolUse" }),
       request => { requests.push(request); return fauxAssistantMessage("Tool execution was blocked"); },
     ]);
-    await spawn(parent, "Attempt the tool after saving state", false);
-    expect(requests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "inspect", isError: true,
-      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining(writeFailure.message) })]) }));
+    await expect(spawn(parent, "Attempt the tool after saving state", false)).rejects.toThrow(writeFailure.message);
+    expect(parent.worker.state.callCount).toBe(0);
     expect(existsSync(join(parent.directory, "executed.txt"))).toBe(false);
     await expect(parent.runtime.dispose()).rejects.toThrow("cleanup failed");
   });

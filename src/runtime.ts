@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createSession } from "@earendil-works/pi-durable";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import { AgentCatalogue } from "./agents/agent-types.js";
@@ -10,7 +11,7 @@ import type { AcceptedRunPolicy } from "./agents/types.js";
 import { resolveWorkingDirectory } from "./agents/working-directory.js";
 import { ConfigStore, type ConfigIO } from "./config/config-store.js";
 import { loadConfig, saveConfigAtomic } from "./config/config-io.js";
-import { HarnessDriver } from "./drivers/harness-driver.js";
+import { DurableDriver } from "./drivers/durable-driver.js";
 import type { FusedFileQueue } from "./drivers/action-fusion.js";
 import { NativeTaskStore } from "./drivers/native-task-store.js";
 import { PiDeliveryChannel } from "./drivers/pi-delivery-channel.js";
@@ -36,8 +37,7 @@ export class ExtensionRuntime {
   private ctx?: ExtensionContext;
   private parentId?: string;
   private parentFile?: string;
-  private repository?: JsonlSessionRepo;
-  private env?: NodeExecutionEnv;
+  private sessionsRoot!: string;
   private starting?: Promise<void>;
   private closing?: Promise<void>;
   private readonly lifetime = new AbortController();
@@ -86,8 +86,8 @@ export class ExtensionRuntime {
     const definitions = await this.catalogue.scanAndMerge({ disableDefaultAgents: this.store.agent.disableDefaultAgents });
     this.assertActive();
     this.catalogue.registerAgents(definitions, { disableDefaultAgents: this.store.agent.disableDefaultAgents });
-    this.env = new NodeExecutionEnv({ cwd: ctx.cwd });
-    this.repository = new JsonlSessionRepo({ fileSystem: this.env, sessionsRoot: this.options.sessionsRoot ?? join(this.agentDir, "subagents-lite-v3", "sessions") });
+    this.sessionsRoot = join(this.options.sessionsRoot ?? join(this.agentDir, "subagents-lite-v3", "durable"), encodeURIComponent(this.parentId!));
+    mkdirSync(this.sessionsRoot, { recursive: true });
     this.engine = new TaskEngine(this.store.concurrency, new PiDeliveryChannel(this.pi, () => this.context));
     this.source = new TaskNavigationSource(this.engine);
     this.navigator = new AgentNavigator(this.source, undefined, () => this.engine.pendingResults(), () => ({
@@ -95,61 +95,43 @@ export class ExtensionRuntime {
     }), this.store.agent.expandListByDefault);
     this.store.setDeps({ engine: this.engine, navigator: this.navigator, catalogue: this.catalogue });
     if (ctx.mode === "tui") this.navigator.setUICtx(ctx.ui);
-    for (const metadata of await this.repository.list(undefined, BACKGROUND_CONTEXT)) {
+    for (const file of readdirSync(this.sessionsRoot).filter(file => file.endsWith(".sqlite"))) {
       this.assertActive();
-      if (metadata.parentSessionId !== this.parentId) continue;
-      try { await this.restore(metadata); } catch (error) { this.assertActive(); this.report(error); }
+      try { await this.restore(join(this.sessionsRoot, file)); } catch (error) { this.assertActive(); this.report(error); }
     }
     this.assertActive();
     await this.source.refresh();
     await this.flushDeliveries();
   }
 
-  private restore(metadata: Awaited<ReturnType<JsonlSessionRepo["list"]>>[number]): Promise<void> {
+  private restore(path: string): Promise<void> {
     return this.track(async () => {
-      const session = await this.repository!.open(metadata, BACKGROUND_CONTEXT);
-      this.ownedSessions.add(session.metadata.id);
-      let resources: PiResources | undefined;
-      let transferred = false;
-      let attached = false;
+      const session = createSession(await openNodeSqliteStorage(path));
+      let binding;
+      try { binding = (await NativeTaskStore.open(session, undefined, path)).binding; }
+      finally { await session.close(BACKGROUND_CONTEXT); }
+      if (binding.parent.sessionId !== this.parentId) throw new Error("Restored task belongs to another parent");
+      const policy = binding.policy;
+      await resolveWorkingDirectory(policy.cwd, policy.cwd);
+      const model = this.context.modelRegistry.find(policy.model.provider, policy.model.id);
+      if (!model) throw new Error(`Accepted model is unavailable: ${policy.model.provider}/${policy.model.id}`);
+      const resources = await PiResources.open({ pi: this.pi, parent: this.context, agentDir: this.agentDir,
+        cwd: policy.cwd, projectTrusted: binding.resources?.trusted ?? this.context.isProjectTrusted(),
+        model, thinking: policy.thinkingLevel, restored: binding, signal: this.lifetime.signal,
+        warnedConflicts: this.warnedConflicts,
+        observationPacking: this.store.experimental.observationPacking || policy.tools.includes("obs_recall") || existsSync(`${path}.observations`),
+        actionFusion: this.store.experimental.actionFusion, fusedFileQueue: this.fusedFileQueue });
+      this.resources.add(resources);
       try {
-        this.assertActive();
-        const store = await NativeTaskStore.open(session);
-        this.assertActive();
-        if (store.binding.parent.sessionId !== this.parentId) throw new Error("Restored task belongs to another parent");
-        const policy = store.binding.policy;
-        await resolveWorkingDirectory(policy.cwd, policy.cwd);
-        const model = this.context.modelRegistry.find(policy.model.provider, policy.model.id);
-        if (!model) throw new Error(`Accepted model is unavailable: ${policy.model.provider}/${policy.model.id}`);
-        const sessionPath = (session.metadata as { path?: string }).path;
-        const hadObservations = typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
-          && existsSync(`${sessionPath.slice(0, -".jsonl".length)}.observations`);
-        resources = await PiResources.open({ pi: this.pi, parent: this.context, agentDir: this.agentDir,
-          cwd: policy.cwd, projectTrusted: store.binding.resources?.trusted ?? this.context.isProjectTrusted(),
-          model, thinking: policy.thinkingLevel, restored: store.binding, signal: this.lifetime.signal,
-          warnedConflicts: this.warnedConflicts,
-          observationPacking: this.store.experimental.observationPacking
-            || store.binding.policy.tools.includes("obs_recall") || hadObservations,
-          actionFusion: this.store.experimental.actionFusion, fusedFileQueue: this.fusedFileQueue });
-        this.resources.add(resources);
-        this.assertActive();
-        transferred = true;
-        const driver = await HarnessDriver.open({ session, models: resources.models, piResources: resources,
+        const driver = await DurableDriver.open({ path, models: resources.models, piResources: resources,
           retry: resources.settings.getRetrySettings(), compaction: resources.settings.getCompactionSettings() });
         try {
           this.assertActive();
           const snapshot = await driver.snapshot();
-          if (!snapshot.operation && !snapshot.lastResult) { await driver.close(); this.ownedSessions.delete(session.metadata.id); return; }
-          await this.engine.restore(driver);
-          attached = true;
-        } catch (error) { await driver.close(); this.ownedSessions.delete(session.metadata.id); throw error; }
-      } finally {
-        if (!transferred) {
-          try { await resources?.close(); } finally { await session.close(BACKGROUND_CONTEXT); this.ownedSessions.delete(session.metadata.id); }
-        }
-        if (!attached) this.ownedSessions.delete(session.metadata.id);
-        if (resources) this.resources.delete(resources);
-      }
+          if (!snapshot.operation && !snapshot.lastResult) { await driver.close(); return; }
+          await this.engine.restore(driver); this.ownedSessions.add(path);
+        } catch (error) { await driver.close(); throw error; }
+      } finally { this.resources.delete(resources); }
     });
   }
 
@@ -181,12 +163,13 @@ export class ExtensionRuntime {
       let nativeId: string | undefined;
       try {
         signal.throwIfAborted(); this.assertContext(options.ctx);
-        const session = await this.repository!.create({ cwd, parentSessionId: parent.sessionId }, BACKGROUND_CONTEXT);
-        this.ownedSessions.add(session.metadata.id);
-        nativeId = session.metadata.id;
+        const taskId = randomUUID();
+        const path = join(this.sessionsRoot, `${taskId}.sqlite`);
+        this.ownedSessions.add(path);
+        nativeId = path;
         transferred = true;
-        const driver = await HarnessDriver.open({ session, models: resources.models, piResources: resources,
-          binding: { taskId: randomUUID(), parent, mode: runInBackground ? "background" : "foreground", control: "autonomous",
+        const driver = await DurableDriver.open({ path, models: resources.models, piResources: resources,
+          binding: { taskId, parent, mode: runInBackground ? "background" : "foreground", control: "autonomous",
             display: { name: acceptedPolicy.definition.displayName ?? acceptedPolicy.definition.name, description: options.description },
             resources: { extensions: resources.extensionPaths, trusted: projectTrusted },
             policy: { agent: acceptedPolicy.definition.name, model: { provider: model.provider, id: model.id }, thinkingLevel,
@@ -195,7 +178,7 @@ export class ExtensionRuntime {
           retry: resources.settings.getRetrySettings(), compaction: resources.settings.getCompactionSettings(),
         });
         try { signal.throwIfAborted(); this.assertActive(); const accepted = await this.engine.accept(driver, { text: options.prompt }); attached = true; return accepted; }
-        catch (error) { await driver.close(); this.ownedSessions.delete(session.metadata.id); throw error; }
+        catch (error) { await driver.close(); this.ownedSessions.delete(path); throw error; }
       } finally {
         this.resources.delete(resources);
         if (!attached && nativeId) this.ownedSessions.delete(nativeId);
@@ -216,12 +199,14 @@ export class ExtensionRuntime {
 
   async storedResult(taskId: string) {
     this.assertActive();
-    for (const metadata of await this.repository!.list(undefined, BACKGROUND_CONTEXT)) {
+    for (const file of readdirSync(this.sessionsRoot).filter(file => file.endsWith(".sqlite"))) {
       this.assertActive();
-      if (metadata.parentSessionId !== this.parentId || this.ownedSessions.has(metadata.id)) continue;
-      const session = await this.repository!.open(metadata, BACKGROUND_CONTEXT);
+      const path = join(this.sessionsRoot, file);
+      if (this.ownedSessions.has(path)) continue;
+      const session = createSession(await openNodeSqliteStorage(path));
       try {
-        const store = await NativeTaskStore.open(session);
+        const store = await NativeTaskStore.open(session, undefined, path);
+        if (store.binding.parent.sessionId !== this.parentId) throw new Error("Stored task belongs to another parent");
         if (store.binding.taskId !== taskId) continue;
         return { binding: store.binding, result: await store.latestResult(), deliveries: await store.deliveries() };
       } finally { await session.close(BACKGROUND_CONTEXT); }
@@ -267,8 +252,6 @@ export class ExtensionRuntime {
       await cleanup(() => this.engine?.close());
       await Promise.allSettled([...this.pending]);
       for (const resources of this.resources) await cleanup(() => resources.close());
-      await cleanup(() => this.repository?.close(BACKGROUND_CONTEXT));
-      await cleanup(() => this.env?.cleanup(BACKGROUND_CONTEXT));
       this.resources.clear();
       if (failures.length) throw new AggregateError(failures, "Subagent runtime cleanup failed");
     });

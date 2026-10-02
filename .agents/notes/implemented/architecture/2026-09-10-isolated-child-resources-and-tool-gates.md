@@ -28,17 +28,17 @@ export interface AcceptedRunPolicy {
 }
 ```
 
-[PiResources](../../../../src/drivers/pi-resources.ts) 为子任务加载独立的 ModelRuntime、ExtensionRunner 和官方 Pi 工具. 父当前分支中各 customType 的最后状态经过独立复制, 子侧每次 appendEntry 按序保存在原生 Session values, 投影重建保留 codemode-store 等增量记录. 父 conversation 不进入子模型请求; 扩展读取的同步 SessionManager 是原生消息及 custom state 的投影.
+[PiResources](../../../../src/drivers/pi-resources.ts) 为子任务加载独立的 ModelRuntime、ExtensionRunner 和官方 Pi 工具. 父当前分支中各 customType 的最后状态经过独立复制, 子侧每次 appendEntry 按序保存在会话级 TaskDocument, 投影重建保留 codemode-store 等增量记录. 父 conversation 不进入子模型请求; 扩展读取的同步 SessionManager 是原生消息及 custom state 的投影.
 
 extensions=false 关闭普通扩展加载, 官方原生工具服务仍按 Pi 来源配置加载. extensions 的数组按扩展名过滤, 内建来源使用 builtin:mcp、builtin:codemode 和 builtin:tool-search. tools 数组支持 ext/*; tools=false 表达空工具集合, whitelist 优先于对应 blacklist. Agent 始终排除, 本扩展不参加子资源的 session_start, 因而没有递归 Runtime 初始化.
 
 [原生工具宿主与来源授权](2026-09-30-native-pi-tool-host-and-source-grants.md) 部分取代初始化时冻结完整工具名的选择, 维护 TaskPolicy.tools 与 toolSources 的联合权限、exposure、声明投影、嵌套调用、错误标志及官方工厂接入. 本 Note 继续维护定义接受和资源隔离. 选定来源和过滤规则在接受时固定, 授权范围内的延迟发现不要求重新接受任务.
 
-恢复先附着原生 Lane, 建立已保存消息与 custom state 的同步投影, 再派发一次 session_start(reason=resume). 已保存的声明子集与异步工具实现分别恢复. 恢复的首个请求按 Pi 启动预算(10s)等待已授权来源完成注册: Pi 0.99.2 起 deferred/codemode MCP 后台连接, before_agent_start 只等 direct 来源, 等待由 PiToolHost.waitForPendingTools 在 resume refresh 后补齐, 超时容忍与调用时明确失败不变. 重新注册同名实现不重新启用隐藏工具. 缺少扩展文件阻止恢复执行, 原生数据保留; 尚在连接的来源不能据此获得可调用实现, 不可用调用明确失败.
+恢复先附着原生 Conversation, 建立已保存消息与 custom state 的同步投影, 再派发一次 session_start(reason=resume). 已保存的声明子集与异步工具实现分别恢复. 恢复的首个请求按 Pi 启动预算(10s)等待已授权来源完成注册: Pi 0.99.2 起 deferred/codemode MCP 后台连接, before_agent_start 只等 direct 来源, 等待由 PiToolHost.waitForPendingTools 在 resume refresh 后补齐, 超时容忍与调用时明确失败不变. 重新注册同名实现不重新启用隐藏工具. 缺少扩展文件阻止恢复执行, 原生数据保留; 尚在连接的来源不能据此获得可调用实现, 不可用调用明确失败.
 
-PiToolHost 按已接受的来源规则处理 registerTool 与 setActiveTools. 当前注册实现、activeTools 和 callable tools 分开, 原生 Lane 配置保存模型声明集合. refreshTools 在异步连接完成时更新描述、schema 与实现, hidden 撤回工具. before_agent_start 完成后 flush 配置, 然后原生 checkpoint 捕获工具集合; 调用前再次检查权限与可用性.
+PiToolHost 按已接受的来源规则处理 registerTool 与 setActiveTools. 当前注册实现、activeTools 和 callable tools 分开, 原生 AgentDoc 配置保存模型声明集合. refreshTools 在异步连接完成时更新描述、schema 与实现, hidden 撤回工具. before_agent_start 完成后 flush 配置, 然后原生 checkpoint 捕获工具集合; 调用前再次检查权限与可用性.
 
-工具数组按当前已授权集合替换. Harness.setTools 与 Lane.setActiveTools 通过串行写入队列发布, 请求和调用边界的 flush 保留状态写入失败. 已经开始的工具使用选中的实现. 附着再次发布资源准备之后完成的注册, 不通过新增来源授权来修复缺失资源.
+工具数组按当前已授权集合替换. Registry.install 与 Conversation.configure 通过串行写入队列发布, 请求和调用边界的 flush 保留状态写入失败. 已经开始的工具使用选中的实现. 附着再次发布资源准备之后完成的注册, 不通过新增来源授权来修复缺失资源.
 
 默认工具采用宿主 defaultTools 或内建默认集合. 内建 Explore 按 Windows Bash 可用性和宿主 PowerShell 偏好调整, 显式工具名单保留其含义. shell 工具本身具有文件写入能力, 提示中的只读职责不构成操作系统 sandbox.
 

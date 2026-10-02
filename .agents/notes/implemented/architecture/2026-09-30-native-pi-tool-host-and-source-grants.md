@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-Pi 0.99.1 的 MCP 在 session_start 返回后连接和发现工具. codemode 与 deferred 工具可以不向模型声明, 仍通过工具上下文调用. 启动瞬间的具体工具名不能同时表达授权范围、异步资源目录和模型声明. 只转发 execute 也不能保留嵌套工具的权限 hooks、结构化结果和错误标志.
+Pi 的 MCP 在 session_start 返回后连接和发现工具. codemode 与 deferred 工具可以不向模型声明, 仍通过工具上下文调用. 启动瞬间的具体工具名不能同时表达授权范围、异步资源目录和模型声明. 只转发 execute 也不能保留嵌套工具的权限 hooks、结构化结果和错误标志.
 
 ## Decision
 
@@ -32,7 +32,7 @@ registerTool 的 refreshTools 重建已授权实现, 由 PiResources 的串行�
 
 直接与嵌套执行都使用公开 runToolCall 和 ExtensionRunner.createToolContext, 应用参数校验、tool_call 和 tool_result. 嵌套调用携带 parentToolCallId, 使用父调用的取消信号, 发出子侧 tool_execution 事件, 不追加孤立的顶层 toolResult. 串行嵌套调用使用可重入队列, 普通嵌套调用可以并行. 保持模型与 Provider 配额的既有作用域, 不把它当作共享 MCP 后端的互斥锁.
 
-Pi 0.99.1 的 Lane Harness 在 execute 返回时仍将结果视为成功. PiToolHost 保存标准管线的最终错误标志, 通过 after_tool 映射到原生结果, 而不是抛错丢弃结构化内容. tool_result 修改正文且未替换 structuredContent 时, 标准管线清除旧的结构化内容. MCP 的 CallToolResult、普通工具的 outputSchema 和程序化结果遵循官方语义.
+PiToolHost 将标准管线的 content、details、usage 和 isError 返回为原生 ToolExecutionResult, 不通过抛错丢弃结构化内容. 每次工具进入时更新该调用的 signal, 避免将已结束 Generation invocation 的取消信号传给异步 MCP 发现. tool_result 修改正文且未替换 structuredContent 时, 标准管线清除旧的结构化内容. MCP 的 CallToolResult、普通工具的 outputSchema 和程序化结果遵循官方语义.
 
 嵌套调用正文只返回编排工具. 有界诊断位于顶层工具结果 details.nestedCalls, 不伪造原生引擎尚未提供的 nestedCalls 持久入口. 记录至多 256 项, 参数每项 8 KiB、累计 32 KiB, 超限标记 incomplete; usage 汇总到顶层结果且每层只计一次. 外层返回或资源关闭仍等待已接纳的嵌套效果退出. 编排和扩展工具采用 replay=never, 不把服务器 annotations 当作重放证明.
 

@@ -6,12 +6,16 @@ import {
   DefaultPackageManager, DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
   loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry,
 } from "@earendil-works/pi-coding-agent";
-import { BACKGROUND_CONTEXT, getOrThrow, reduceLaneSnapshot, value, type LaneSnapshot, type AgentHarness, type AgentLane, type AgentTool,
-  type ExecutionToolContext, type JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentMessage } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { AgentDoc } from "@earendil-works/pi-durable";
+import { TaskDocument } from "./native-task-store.js";
+import type { DurableDriver } from "./durable-driver.js";
 import { Type } from "typebox";
-import type { Context as ProviderContext, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Context as ProviderContext, SimpleStreamOptions, AssistantMessage, Message, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AcceptedRunPolicy } from "../agents/types.js";
-import type { TaskBinding } from "../engine/contracts.js";
+import type { TaskBinding, TaskInput, ExecutionSnapshot } from "../engine/contracts.js";
 import type { NativeTaskStore } from "./native-task-store.js";
 import { EXCLUDED_TOOL_NAMES, resolveVisibleTools } from "../agents/agent-types.js";
 import { extractText } from "../prompt/context.js";
@@ -24,7 +28,6 @@ import type { ToolSourceGrant } from "../domain/policy.js";
 
 const GIT_EXEC_TIMEOUT_MS = 5000;
 const context = BACKGROUND_CONTEXT;
-const extensionState = value<unknown>("subagents-lite.v3", "extension-state");
 
 function extensionName(file: string): string {
   if (file.startsWith("builtin:")) return file;
@@ -60,14 +63,13 @@ interface ResourceOptions {
 export class PiResources {
   private runner!: ExtensionRunner;
   private view: SessionManager;
-  private lane?: AgentLane;
-  private harness?: AgentHarness<ExecutionToolContext>;
+  private driver?: DurableDriver;
   private store?: NativeTaskStore;
   private writes: Promise<void> = Promise.resolve();
   private writeError?: unknown;
   private closed = false;
   private closing?: Promise<void>;
-  private snapshot?: LaneSnapshot;
+  private snapshot?: ExecutionSnapshot;
   private abortSignal?: AbortSignal;
   private readonly stops: Array<() => void> = [];
   private readonly toolHost: PiToolHost;
@@ -86,7 +88,7 @@ export class PiResources {
     private readonly loader: DefaultResourceLoader, private readonly options: ResourceOptions) {
     this.view = SessionManager.inMemory(options.cwd);
     this.packingEnabled = options.observationPacking ?? false;
-    this.toolHost = new PiToolHost({ assertOpen: () => this.assertOpen(), flush: () => this.flush(),
+    this.toolHost = new PiToolHost({ enter: signal => { this.abortSignal = signal; }, assertOpen: () => this.assertOpen(), flush: async () => { await this.refresh(); await this.flush(); },
       changed: () => this.publishTools(), warn: message => this.warn(message),
       messages: () => this.view.getBranch().flatMap(entry => entry.type === "message" ? [entry.message] : []),
     }, options.warnedConflicts);
@@ -245,20 +247,21 @@ export class PiResources {
         this.customState.push([type, structuredClone(data)]); this.view.appendCustomEntry(type, data);
         if (this.store) this.enqueue(() => this.saveState());
       },
-      sendMessage: (message, opts) => {
+      sendMessage: message => {
         this.assertAttached();
-        this.enqueue(async () => { getOrThrow(await this.lane![opts?.deliverAs === "followUp" ? "followUp" : "steer"]({
-          role: "custom", customType: message.customType, content: message.content, display: message.display,
-          details: message.details, timestamp: Date.now(),
-        }, undefined, context)); });
+        this.enqueue(() => this.driver!.conversation.submit({ type: "write", entry: {
+          kind: "subagents-lite.message", model: convertToLlm([{ role: "custom", ...message, timestamp: Date.now() }]),
+        } }, context));
       },
-      sendUserMessage: (content, opts) => {
-        this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane![opts?.deliverAs ?? "steer"]({
-          role: "user", content, timestamp: Date.now(),
-        }, undefined, context)); });
+      sendUserMessage: (value, opts) => {
+        this.assertAttached(); this.enqueue(() => this.driver!.queue(opts?.deliverAs ?? "steer", { text: typeof value === "string" ? value : extractText(value),
+          images: typeof value === "string" ? undefined : value.filter(part => part.type === "image") }));
       },
-      setSessionName: name => { this.view.appendSessionInfo(name); if (this.harness) this.enqueue(() => this.harness!.setName(name, context)); },
-      getSessionName: () => this.view.getSessionName(), setLabel: (id, label) => { this.assertAttached(); this.enqueue(() => this.harness!.setLabel(id, label, context)); },
+      setSessionName: name => { this.view.appendSessionInfo(name); if (this.store) this.enqueue(() => this.store!.session.commit(async tx => { (await tx.doc(TaskDocument)).name = name; }, context)); },
+      getSessionName: () => this.view.getSessionName(),
+      setLabel: (id, label) => { this.assertAttached(); this.enqueue(() => this.store!.session.commit(async tx => {
+        const data = await tx.doc(TaskDocument); if (label === undefined) delete data.labels[id]; else data.labels[id] = label;
+      }, context)); },
       getSettings: () => this.settings.getSettings(),
       getActiveTools: () => this.activeTools,
       getAllTools: () => this.toolHost.allTools(),
@@ -271,8 +274,8 @@ export class PiResources {
       executeTool: (id, name, args, options) => this.toolHost.executeNested(id, name, args, options),
       getModel: () => model, getScopedModels: () => [{ model, thinkingLevel: thinking }],
       isIdle: () => !this.snapshot?.operation, isProjectTrusted: () => this.options.projectTrusted,
-      getSignal: () => this.abortSignal, abort: () => { this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane!.abort(context)); }); },
-      hasPendingMessages: () => (this.snapshot?.queues.length ?? 0) > 0, shutdown: () => { this.assertAttached(); this.enqueue(async () => { getOrThrow(await this.lane!.abort(context)); }); },
+      getSignal: () => this.abortSignal, abort: () => { this.assertAttached(); this.enqueue(async () => { const operation = await this.store!.currentOperation(); if (operation) await this.driver!.requestAbort(operation.id, "agent"); }); },
+      hasPendingMessages: () => (this.snapshot?.queued.length ?? 0) > 0, shutdown: () => { this.assertAttached(); this.enqueue(async () => { const operation = await this.store!.currentOperation(); if (operation) await this.driver!.requestAbort(operation.id, "agent"); }); },
       getContextUsage: () => undefined, compact: unsupported, getSystemPrompt: () => this.systemPrompt,
       getSystemPromptOptions: () => ({ cwd, selectedTools: [...this.activeTools] }),
     });
@@ -280,100 +283,90 @@ export class PiResources {
   }
 
   private publishTools(): void {
-    if (!this.harness || !this.lane) return;
+    if (!this.driver) return;
     const tools = [...this.tools];
     const active = this.activeTools.filter(name => this.toolHost.permits(name) && tools.some(tool => tool.name === name));
-    this.enqueue(async () => {
-      await this.harness!.setTools(tools, context);
-      await this.lane!.setActiveTools(active, context);
-    });
+    this.enqueue(async () => { this.driver!.installTools(tools); await this.driver!.setActiveTools(active); });
   }
 
-  async attach(harness: AgentHarness<ExecutionToolContext>, lane: AgentLane, store: NativeTaskStore): Promise<void> {
-    const watch = await lane.watch(context);
-    this.harness = harness; this.lane = lane; this.store = store;
-    this.snapshot = watch.snapshot;
-    // The archive is a sibling of the session file and shares its lifetime: durable
-    // deliveries may reference placeholders long after the task settles.
-    const sessionPath = (store.session.metadata as Partial<JsonlSessionMetadata>).path;
-    this.sink = this.packingEnabled && typeof sessionPath === "string" && sessionPath.endsWith(".jsonl")
-      ? new ObservationSink(`${sessionPath.slice(0, -".jsonl".length)}.observations`) : undefined;
+  async attach(driver: DurableDriver): Promise<void> {
+    this.driver = driver; this.store = driver.store;
+    this.sink = this.packingEnabled && this.store.path ? new ObservationSink(`${this.store.path}.observations`) : undefined;
     if (this.packingEnabled && !this.sink) this.warn("Child session file path is unavailable; observation packing is disabled");
-    this.toolHost.restoreActiveTools(watch.snapshot.configuration.activeToolNames);
-    this.stops.push(() => watch.unsubscribe());
-    watch.start(async event => {
-      if (this.closing) return;
-      if (reduceLaneSnapshot(this.snapshot!, event) === "rebase") {
-        try { this.snapshot = await watch.resnapshot(context); } catch (error) { if (!this.closing) this.writeError = error; }
-      }
-    });
-    const saved = await store.session.getValue(extensionState, context);
-    if (saved) {
-      if (!Array.isArray(saved.value)) throw new Error("Invalid persisted child extension state");
+    const agent = await driver.harness.snapshot(AgentDoc, driver.conversation.id, context);
+    this.toolHost.restoreActiveTools(Array.isArray(agent?.tools) ? agent.tools : this.initialTools);
+    const saved = (await this.store.data()).extensionState;
+    if (this.options.restored) {
+      if (!Array.isArray(saved)) throw new Error("Invalid persisted child extension state");
       this.customState.length = 0;
-      for (const item of saved.value) {
+      for (const item of saved) {
         if (!Array.isArray(item) || item.length !== 2 || typeof item[0] !== "string") throw new Error("Invalid child extension state entry");
         this.customState.push([item[0], item[1]]);
       }
     } else await this.saveState();
-    const refresh = async () => {
-      const entries: FileEntry[] = [{ type: "session", id: store.session.metadata.id, cwd: store.binding.policy.cwd,
-        version: 3, timestamp: new Date(store.session.metadata.createdAt).toISOString() }];
-      for (const entry of this.snapshot!.transcript) {
-        if (entry.type === "message" || entry.type === "custom") entries.push({ ...entry, timestamp: new Date(entry.timestamp).toISOString() });
-      }
-      this.view = SessionManager.inMemory(store.binding.policy.cwd, undefined, entries);
-      for (const [type, data] of this.customState) this.view.appendCustomEntry(type, data);
-    };
-    await refresh();
+    await this.refresh();
+    this.stops.push(await driver.observe(() => {
+      if (!this.closing) void this.refresh().catch(error => { if (!this.closing) this.writeError = error; });
+    }));
     if (this.options.restored) {
-      // Resume hooks need the saved child view and may register accepted tools before execution is admitted.
       await this.runner.emit({ type: "session_start", reason: "resume" });
       this.toolHost.refresh();
-      // Pi's startup budget: deferred/codemode MCP sources connect in the background since 0.99.2,
-      // while the first restored prompt must still declare the persisted active tools.
       await this.toolHost.waitForPendingTools(10_000);
     }
-    // Registration can finish between resource preparation and native attachment.
-    this.publishTools();
-    this.stops.push(harness.hooks.on("before_drive", async (_event, callContext) => { this.abortSignal = callContext.abortSignal; await refresh(); await this.flush(); }));
-    this.stops.push(harness.hooks.on("before_run", async event => {
-      const text = event.prompt.flatMap(message => "content" in message ? [typeof message.content === "string" ? message.content : extractText(message.content)] : []).join("\n");
-      const result = await this.runner.emitBeforeAgentStart(text, undefined, { forceSystemPrompt: this.systemPrompt, cwd: this.options.cwd, selectedTools: this.activeTools });
-      // The first native checkpoint must capture tool filtering performed by child hooks.
-      await this.flush();
-      this.systemPrompt = result.systemPromptOptions.forceSystemPrompt ?? this.systemPrompt;
-      return result?.messages ? { messages: result.messages.map(message => ({ ...message, role: "custom" as const, timestamp: Date.now() })) } : undefined;
-    }));
-    this.stops.push(harness.hooks.on("transform_context", async event => {
-      await refresh();
-      const messages = await this.runner.emitContext(event.messages);
-      // Packing projects after the extension context hooks and never rewrites stored history.
-      return { messages: this.sink ? await this.sink.project(messages) : messages, systemPrompt: this.systemPrompt };
-    }));
-    this.stops.push(harness.hooks.on("before_payload", async event => ({ payload: await this.runner.emitBeforeProviderRequest(event.payload) })));
-    this.stops.push(harness.hooks.on("before_request", async event => {
-      await this.flush(); return { streamOptions: { headers: Object.fromEntries(Object.entries(await this.runner.emitBeforeProviderHeaders(event.streamOptions.headers ?? {})).map(([key, value]) => [key, value ?? undefined])) } };
-    }));
-    this.stops.push(harness.hooks.on("after_response", async event => {
-      if (event.status !== undefined) await this.runner.emit({ type: "after_provider_response", status: event.status, headers: event.headers ?? {} });
-      const message = await this.runner.emitMessageEnd({ type: "message_end", message: event.message });
-      return message?.role === "assistant" ? { message: message as typeof event.message } : undefined;
-    }));
-    this.stops.push(harness.hooks.on("before_tool", async (_event, callContext) => {
-      this.abortSignal = callContext.abortSignal; await refresh(); await this.flush();
-      return undefined;
-    }));
-    this.stops.push(harness.hooks.on("after_tool", event => this.toolHost.takeOutcome(event.toolCallId)));
-    this.stops.push(harness.events.on("turn_start", async () => {
-      await this.runner.emit({ type: "turn_start", turnIndex: this.snapshot!.transcript.filter(entry => entry.type === "message" && entry.message.role === "assistant").length, timestamp: Date.now() });
-    }));
-    await this.flush();
+    this.publishTools(); await this.flush();
     for (const name of this.initialTools) {
-      if (!this.toolHost.allTools().some(tool => tool.name === name) && !this.toolSources.some(grant => grant.tools === true || grant.tools.includes(name))) {
-        throw new Error(`Accepted tool is unavailable: ${name}`);
+      if (!this.toolHost.allTools().some(tool => tool.name === name) && !this.toolSources.some(grant => grant.tools === true || grant.tools.includes(name))) throw new Error(`Accepted tool is unavailable: ${name}`);
+    }
+  }
+
+  private async refresh(): Promise<void> {
+    if (!this.driver || !this.store) return;
+    const snapshot = await this.driver.snapshot();
+    const view = await this.driver.view();
+    const entries: FileEntry[] = [{ type: "session", id: this.store.binding.taskId, cwd: this.store.binding.policy.cwd, version: 3, timestamp: new Date(0).toISOString() }];
+    let parentId: string | null = null;
+    for (const entry of view.entries) {
+      for (const [index, message] of (entry.model ?? []).entries()) {
+        const id = `${entry.id}:${index}`;
+        entries.push({ type: "message", id, parentId, timestamp: new Date(message.timestamp ?? 0).toISOString(), message }); parentId = id;
       }
     }
+    this.view = SessionManager.inMemory(this.store.binding.policy.cwd, undefined, entries);
+    for (const [type, data] of this.customState) this.view.appendCustomEntry(type, data);
+    const saved = await this.store.data();
+    if (typeof saved.name === "string") this.view.appendSessionInfo(saved.name);
+    for (const [id, label] of Object.entries(saved.labels)) {
+      if (typeof label !== "string") throw new Error("Invalid child entry label");
+      this.view.appendLabelChange(id, label);
+    }
+    this.snapshot = snapshot;
+  }
+  async beforeRun(input: TaskInput): Promise<void> {
+    await this.refresh(); await this.flush();
+    const result = await this.runner.emitBeforeAgentStart(input.text, input.images ? [...input.images] : undefined,
+      { forceSystemPrompt: this.systemPrompt, cwd: this.options.cwd, selectedTools: this.activeTools });
+    this.systemPrompt = result.systemPromptOptions.forceSystemPrompt ?? this.systemPrompt;
+    this.publishTools(); await this.flush();
+    for (const message of result.messages ?? []) await this.driver!.conversation.commit(tx => tx.appendEntry(this.driver!.conversation.id, {
+      kind: "subagents-lite.message", model: convertToLlm([{ ...message, role: "custom", timestamp: Date.now() }]),
+    }), context);
+  }
+  async prepareContext(messages: Message[], signal?: AbortSignal): Promise<Message[]> {
+    this.abortSignal = signal; await this.refresh(); await this.flush();
+    await this.runner.emit({ type: "turn_start", turnIndex: this.snapshot?.stats.turnCount ?? 0, timestamp: Date.now() });
+    const transformed = await this.runner.emitContext(messages as AgentMessage[]);
+    return convertToLlm(this.sink ? await this.sink.project(transformed) : transformed);
+  }
+  async prepareStream(options?: SimpleStreamOptions): Promise<SimpleStreamOptions> {
+    await this.flush();
+    return { headers: await this.runner.emitBeforeProviderHeaders(options?.headers ?? {}),
+      onPayload: payload => this.runner.emitBeforeProviderRequest(payload),
+      onResponse: response => this.runner.emit({ type: "after_provider_response", status: response.status, headers: response.headers }),
+    };
+  }
+  async afterResponse(message: AssistantMessage): Promise<AssistantMessage> {
+    const changed = await this.runner.emitMessageEnd({ type: "message_end", message });
+    return changed?.role === "assistant" ? changed : message;
   }
 
   private async buildPrompt(policy: AcceptedRunPolicy): Promise<string> {
@@ -415,14 +408,14 @@ export class PiResources {
   private enqueue(action: () => Promise<unknown>): void {
     this.writes = this.writes.then(action).then(() => {}).catch(error => { this.writeError = error; });
   }
-  private saveState(): Promise<void> { return this.store!.session.setValue(extensionState, [...this.customState], context); }
+  private saveState(): Promise<void> { return this.store!.session.commit(async tx => { (await tx.doc(TaskDocument)).extensionState = JSON.parse(JSON.stringify(this.customState)); }, context); }
   async flush(): Promise<void> { await this.writes; if (this.writeError) throw this.writeError; }
   private warn(message: string): void {
     if (this.options.parent.hasUI) this.options.parent.ui.notify(`[subagents] ${message}`, "warning");
     else console.warn(`[subagents] ${message}`);
   }
   private assertOpen(): void { if (this.closed || this.closing) throw new Error("Child resources are closed"); }
-  private assertAttached(): void { this.assertOpen(); if (!this.lane) throw new Error("Child execution is not attached"); }
+  private assertAttached(): void { this.assertOpen(); if (!this.driver) throw new Error("Child execution is not attached"); }
 
   close(): Promise<void> {
     if (this.closing) return this.closing;

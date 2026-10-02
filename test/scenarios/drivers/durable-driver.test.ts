@@ -2,13 +2,15 @@ import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
-import { BACKGROUND_CONTEXT, JsonlSessionRepo, MemorySessionRepo, value, type Session } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { MemoryStorage, createSession } from "@earendil-works/pi-durable";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { TaskDocument, NativeTaskStore } from "../../../src/drivers/native-task-store.js";
 import {
   createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, InMemoryCredentialStore, InMemoryModelsStore,
   type Context as ProviderContext, type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { HarnessDriver, type HarnessDriverOptions } from "../../../src/drivers/harness-driver.js";
+import { DurableDriver, type DurableDriverOptions } from "../../../src/drivers/durable-driver.js";
 import { TaskEngine } from "../../../src/engine/task-engine.js";
 import type { TaskBinding } from "../../../src/engine/contracts.js";
 import type { TaskPolicy } from "../../../src/domain/policy.js";
@@ -43,9 +45,8 @@ describe("Execution adapters", () => {
     };
   }
 
-  async function driver(accepted: TaskBinding, options: Partial<HarnessDriverOptions> = {}) {
-    const session = options.session ?? await new MemorySessionRepo().create({ parentSessionId: "parent" }, context);
-    const result = await HarnessDriver.open({ session, models, binding: accepted,
+  async function driver(accepted: TaskBinding, options: Partial<DurableDriverOptions> = {}) {
+    const result = await DurableDriver.open({ ...(options.path ? {} : { storage: new MemoryStorage() }), models, binding: accepted,
       retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
       compaction: { enabled: false, reserveTokens: 1000, keepRecentTokens: 1000 }, ...options });
     resources.onDispose(() => result.close());
@@ -66,14 +67,6 @@ describe("Execution adapters", () => {
     check();
     await done.promise;
     unsubscribe();
-  }
-
-  function fileRepository() {
-    const env = new NodeExecutionEnv({ cwd: directory });
-    const repository = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(directory, "sessions") });
-    resources.onDispose(() => env.cleanup(context));
-    resources.onDispose(() => repository.close(context));
-    return repository;
   }
 
   function modelStreams(count: number) {
@@ -216,7 +209,7 @@ describe("Execution adapters", () => {
     provider.setResponses(Array.from({ length: 6 }, () => respond));
     const tasks = engine();
     const first = await driver(binding("first", { tools: ["probe"] }), { tools: [{
-      name: "probe", label: "Probe", description: "Hold an admitted tool.", parameters: Type.Object({}), replay: "never",
+      name: "probe", description: "Hold an admitted tool.", parameters: Type.Object({}), replay: "unsafe",
       execute: async () => { entered.resolve(); await release.promise; return { content: [{ type: "text", text: "Tool finished" }], details: {} }; },
     }] });
     const policy = binding("second", { model: { provider: "workers", id: "two" }, limits: { graceTurns: 1, maxTokens: 73 } });
@@ -266,7 +259,7 @@ describe("Execution adapters", () => {
     ]);
     const tasks = engine();
     const child = await driver(binding("interactive", { tools: ["probe"] }, "foreground"), { tools: [{
-      name: "probe", label: "Probe", description: "Pause a tool.", parameters: Type.Object({}), replay: "never",
+      name: "probe", description: "Pause a tool.", parameters: Type.Object({}), replay: "unsafe",
       execute: async () => { entered.resolve(); await release.promise; return { content: [{ type: "text", text: "Done" }], details: {} }; },
     }] });
     resources.onDispose(() => { release.resolve(); });
@@ -295,14 +288,13 @@ describe("Execution adapters", () => {
   });
 
   it("restores accepted work and keeps each operation's result and delivery identity separate", async () => {
-    const repository = fileRepository();
-    const session = await repository.create({ cwd: directory, parentSessionId: "parent" }, context);
-    const first = await driver(binding("restored"), { session });
+    const path = join(directory, "task.sqlite");
+    const first = await driver(binding("restored"), { path });
     const operationId = await first.accept({ text: "Persist this work" });
     const queuedId = await first.queue("steer", { text: "Persist this correction" });
     await first.close();
 
-    const reopened = await driver(binding("unused"), { session: await repository.open(session.metadata, context), binding: undefined });
+    const reopened = await driver(binding("unused"), { path, binding: undefined });
     const tasks = engine();
     await tasks.restore(reopened);
     expect(provider.state.callCount).toBe(0);
@@ -320,7 +312,7 @@ describe("Execution adapters", () => {
     expect(saved.find(item => item.delivery.operationId === second.operationId)?.delivery.text).not.toContain("First operation output");
     await tasks.close();
 
-    const restored = await driver(binding("unused"), { session: await repository.open(session.metadata, context), binding: undefined });
+    const restored = await driver(binding("unused"), { path, binding: undefined });
     const restoredEngine = engine();
     await restoredEngine.restore(restored);
     expect(await restored.store.deliveries()).toEqual(saved);
@@ -328,26 +320,19 @@ describe("Execution adapters", () => {
   });
 
   it("closes admitted effects before releasing ownership and never replays an unsafe interrupted tool", async () => {
-    const repository = fileRepository();
-    const session = await repository.create({ cwd: directory, parentSessionId: "parent" }, context);
+    const path = join(directory, "task.sqlite");
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const fileClosed = Promise.withResolvers<void>();
-    let first: HarnessDriver | undefined;
-    let reentrantClose: Promise<void> | undefined;
-    const closeSession = session.close.bind(session);
-    vi.spyOn(session, "close").mockImplementation(async ctx => {
-      reentrantClose = first?.close();
-      await closeSession(ctx); fileClosed.resolve();
-    });
+    const storage = await openNodeSqliteStorage(path);
+    const closeStorage = vi.spyOn(storage, "close");
     const execute = vi.fn(async () => {
       entered.resolve(); await release.promise;
       return { content: [{ type: "text" as const, text: "External effect completed" }], details: {} };
     });
-    const tools: HarnessDriverOptions["tools"] = [{ name: "effect", label: "Effect", description: "Perform a non-repeatable effect.",
-      parameters: Type.Object({}), replay: "never", execute }];
+    const tools: DurableDriverOptions["tools"] = [{ name: "effect", description: "Perform a non-repeatable effect.",
+      parameters: Type.Object({}), replay: "unsafe", execute }];
     provider.setResponses([fauxAssistantMessage(fauxToolCall("effect", {}), { stopReason: "toolUse" }), fauxAssistantMessage("Recovered with an unknown effect")]);
-    first = await driver(binding("interrupted", { tools: ["effect"] }), { session, tools });
+    const first = await driver(binding("interrupted", { tools: ["effect"] }), { storage, tools });
     resources.onDispose(() => { release.resolve(); });
     const operationId = await first.accept({ text: "Run the effect" });
     const run = first.drive(operationId);
@@ -356,17 +341,17 @@ describe("Execution adapters", () => {
     let fullyClosed = false;
     const ownedClose = first.close();
     const closing = ownedClose.then(() => { fullyClosed = true; });
-    await fileClosed.promise;
-    expect(reentrantClose).toBe(ownedClose);
+    expect(first.close()).toBe(ownedClose);
+    expect(closeStorage).not.toHaveBeenCalled();
     expect(fullyClosed).toBe(false);
     release.resolve();
     await Promise.all([failedRun, closing]);
 
-    const recovered = await driver(binding("unused"), { session: await repository.open(session.metadata, context), binding: undefined, tools });
+    const recovered = await driver(binding("unused"), { path, binding: undefined, tools });
     expect((await recovered.snapshot()).operation?.operationId).toBe(operationId);
     expect((await recovered.drive(operationId)).kind).toBe("settled");
     expect(execute).toHaveBeenCalledOnce();
-    expect((await recovered.snapshot()).messages.some(message => message.role === "toolResult" && message.text.includes("external outcome is unknown"))).toBe(true);
+    expect((await recovered.snapshot()).messages.some(message => message.role === "toolResult" && message.text.includes("interrupt"))).toBe(true);
   });
 
   it("enforces graceful and hard turn limits through native checkpoints", async () => {
@@ -376,7 +361,7 @@ describe("Execution adapters", () => {
       return fauxAssistantMessage(fauxToolCall("probe", {}), { stopReason: "toolUse" });
     }));
     const child = await driver(binding("limited", { tools: ["probe"], limits: { maxTurns: 1, graceTurns: 1 } }), { tools: [{
-      name: "probe", label: "Probe", description: "Return a value.", parameters: Type.Object({}), replay: "safe",
+      name: "probe", description: "Return a value.", parameters: Type.Object({}), replay: "safe",
       execute: async () => ({ content: [{ type: "text", text: "Done" }], details: {} }),
     }] });
     const result = await child.drive(await child.accept({ text: "Keep calling tools" }));
@@ -385,11 +370,36 @@ describe("Execution adapters", () => {
     expect(JSON.stringify(requests[1].messages)).toContain("You have reached your turn limit");
   });
 
+  it("recovers a native answer after the application result write fails without loading execution resources", async () => {
+    const path = join(directory, "result-gap.sqlite");
+    const child = await driver(binding("result-gap"), { path });
+    provider.setResponses([fauxAssistantMessage("Durable answer")]);
+    vi.spyOn(child.store, "saveResult").mockRejectedValueOnce(new Error("Application result write failed"));
+    await expect(child.drive(await child.accept({ text: "Return the durable answer" }))).rejects.toThrow("Application result write failed");
+    await child.close();
+    const session = createSession(await openNodeSqliteStorage(path));
+    resources.onDispose(() => session.close(context));
+    const store = await NativeTaskStore.open(session, undefined, path);
+    expect(await store.latestResult()).toMatchObject({ outcome: { status: "completed", result: "Durable answer" } });
+    expect(provider.state.callCount).toBe(1);
+  });
+
+  it("rejects a restored model change before any provider request", async () => {
+    const path = join(directory, "changed-model.sqlite");
+    const child = await driver(binding("changed-model"), { path });
+    await child.accept({ text: "Use only the accepted model" });
+    await child.conversation.configure({ model: { provider: "workers", modelId: "two" } }, context);
+    await child.close();
+    await expect(DurableDriver.open({ path, models })).rejects.toThrow("Durable configuration differs from its accepted policy");
+    expect(provider.state.callCount).toBe(0);
+  });
+
   it("rejects corrupt persisted policy before model execution and closes the supplied session", async () => {
-    const session: Session = await new MemorySessionRepo().create({ parentSessionId: "parent" }, context);
-    await session.setValue(value("subagents-lite.v3", "task"), { ...binding("corrupt"), policy: { ...binding("corrupt").policy, tools: [42] } }, context);
-    const close = vi.spyOn(session, "close");
-    await expect(HarnessDriver.open({ session, models })).rejects.toThrow("Invalid task data string");
+    const storage = new MemoryStorage();
+    const session = createSession(storage);
+    await session.commit(async tx => { (await tx.doc(TaskDocument)).binding = { ...binding("corrupt"), policy: { ...binding("corrupt").policy, tools: [42] } }; }, context);
+    const close = vi.spyOn(storage, "close");
+    await expect(DurableDriver.open({ storage, models })).rejects.toThrow("Invalid task data string");
     expect(close).toHaveBeenCalledOnce();
     expect(provider.state.callCount).toBe(0);
   });

@@ -60,7 +60,7 @@ TaskNavigationSource 在每批异步快照发布前及 listAgents/getRecord 读�
 
 ## Transcript and selection snapshots
 
-[message projection](../../../../src/drivers/message-projection.ts) 在 Adapter 边界提取 text、thinking、工具展示与图片标记, 保留原始正文. HarnessDriver 按不可变 Entry ID 复用消息投影, Source 持有原生观察订阅, View 对消息、theme 和 width 缓存折行.
+[message projection](../../../../src/drivers/message-projection.ts) 在 Adapter 边界提取 text、thinking、工具展示与图片标记, 保留原始正文. DurableDriver 按不可变 Entry ID 复用消息投影, Source 持有原生观察订阅, View 对消息、theme 和 width 缓存折行.
 
 TaskNavigationSource 合并脏任务的刷新, 一次读取完成后即可返回, 后到更新进入下一次刷新. 连续输出不要求调用者等待全局静默. View 按只读消息对象、theme 和 width 缓存折行, 键盘重绘不重新读取宿主历史或克隆模型目录. Native streaming 与统计也通过 ExecutionSnapshot 提供.
 

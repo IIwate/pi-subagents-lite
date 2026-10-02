@@ -15,7 +15,9 @@ Lightweight subagents for [Pi](https://pi.dev) with isolated sessions, per-agent
 
 ## Install
 
-Requires Pi 0.99.2+ and Node.js 22.19+.
+Requires Pi 1.x and Node.js 22.19+.
+
+Child tasks use independent pi-durable SQLite sessions under `~/.pi/agent/subagents-lite-v3/durable/`. Existing 0.99.x JSONL child sessions are not read or migrated. Parent Pi sessions and extension configuration keep their own storage.
 
 ```bash
 pi install npm:@iiwate/pi-subagents-lite
