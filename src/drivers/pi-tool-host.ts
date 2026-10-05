@@ -197,7 +197,8 @@ export class PiToolHost {
     const registered = this.available().map(({ definition }) => this.wrap(definition));
     const declared = registered.filter(tool => this.active.includes(tool.name) && this.exposure(tool.name) !== "hidden");
     const loadout: ToolLoadout = { registered, declared, callable: registered.filter(tool => this.callable(tool.name)),
-      getExposure: name => this.exposure(name), getNamespace: name => this.definitions.get(name)?.definition.namespace };
+      getExposure: name => this.exposure(name), getNamespace: name => this.definitions.get(name)?.definition.namespace,
+      getPromptGuidelines: name => this.definitions.get(name)?.definition.promptGuidelines ?? [] };
     this.hidden = new Set(); this.descriptions = new Map();
     for (const tool of declared) {
       try {

@@ -48,6 +48,9 @@ describe("Native Pi MCP child tools", () => {
 
   it("loads native MCP with implicit extensions disabled, preserves structured errors, and records nested calls", async () => {
     const parent = await host();
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    writeFileSync(join(parent.directory, "settings.json"), JSON.stringify({ ...parent.session.settingsManager.getSettings(),
+      codemode: { mode: "only" } }));
     mkdirSync(join(parent.directory, "extensions"));
     writeFileSync(join(parent.directory, "extensions", "unselected.ts"), `export default function () {
       throw new Error("Implicit third-party extensions must not execute");
@@ -63,8 +66,10 @@ describe("Native Pi MCP child tools", () => {
     ]);
     const task = await run(parent);
     expect(task.state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
-    const names = getCurrentTools(requests[0].messages).map(tool => tool.name);
+    const tools = getCurrentTools(requests[0].messages);
+    const names = tools.map(tool => tool.name);
     expect(names).toContain("codemode");
+    expect(names).not.toContain("read");
     expect(names).not.toContain("mcp__docs__lookup");
     expect(names).not.toContain("Agent");
     const result = requests[1].messages.find(message => message.role === "toolResult");
@@ -73,6 +78,25 @@ describe("Native Pi MCP child tools", () => {
     expect(JSON.stringify(result)).toContain('\\"value\\":42');
     expect(JSON.stringify(result)).toContain('\\"error\\":true');
     expect(JSON.stringify(requests[2].messages.at(-1))).toContain("42");
+    expect(warnings).not.toHaveBeenCalled();
+    expect(parent.errors).toEqual([]);
+  });
+
+  it("includes extension tool guidelines in codemode declarations", async () => {
+    const parent = await host();
+    parent.runtime.store.mutate.agent.setLoadExtensionsImplicitly(true);
+    mkdirSync(join(parent.directory, "extensions"));
+    writeFileSync(join(parent.directory, "extensions", "probe.ts"), `export default function (pi) {
+      pi.registerTool({ name: "inspect", label: "Inspect", description: "Inspect a document", exposure: "codemode",
+        promptGuidelines: ["Inspect only documents selected by the user."],
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ content: [{ type: "text", text: "Document inspected" }], details: {} }) });
+    }`);
+    let request!: Context;
+    parent.worker.setResponses([context => { request = context; return fauxAssistantMessage("Tool guidelines inspected"); }]);
+    await run(parent);
+    const codemode = getCurrentTools(request.messages).find(tool => tool.name === "codemode");
+    expect(codemode?.description).toContain("Inspect only documents selected by the user.");
     expect(parent.errors).toEqual([]);
   });
 
