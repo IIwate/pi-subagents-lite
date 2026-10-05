@@ -10,6 +10,7 @@ import fs from "node:fs";
 import { scanAgentFilesInDir, mergeAgents } from "./agent-discovery.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AcceptedRunPolicy, AgentConfig, SystemPromptMode } from "./types.js";
+import { matchesToolPattern } from "../domain/policy.js";
 
 /**
  * Check if bash is available on the current host.
@@ -122,16 +123,13 @@ function isBuiltinDefault(name: string, config: AgentConfig): boolean {
 }
 
 /**
- * Resolve tool entries (with ext/* syntax) into concrete tool names.
- * Supports:
- *   - bare tool names: "read" → "read"
- *   - ext/* syntax: "tavily/*" → all tools from the tavily extension
- *   - ext/tool syntax: "tavily/web_search" → "web_search"
+ * Resolve tool patterns against the current catalogue; source grants retain patterns for later registrations.
  */
 function resolveToolEntries(
   entries: string[],
   extToolMap: Map<string, string[]> | undefined,
   notify?: (msg: string) => void,
+  available: readonly string[] = [],
 ): Set<string> {
   const resolved = new Set<string>();
 
@@ -141,10 +139,10 @@ function resolveToolEntries(
       // ext/* or ext/tool syntax
       const extName = entry.slice(0, slashIdx);
       const toolPart = entry.slice(slashIdx + 1);
-      if (toolPart === "*") {
+      if (toolPart.includes("*")) {
         const extTools = extToolMap?.get(extName);
-        if (extTools && extTools.length > 0) {
-          for (const t of extTools) resolved.add(t);
+        if (extTools) {
+          for (const t of extTools) if (matchesToolPattern(t, toolPart)) resolved.add(t);
         } else {
           notify?.(`extension "${extName}" is not loaded, "${entry}" will have no effect`);
         }
@@ -152,6 +150,8 @@ function resolveToolEntries(
         // ext/tool syntax: e.g. "tavily/web_search"
         resolved.add(toolPart);
       }
+    } else if (entry.includes("*")) {
+      for (const name of available) if (matchesToolPattern(name, entry)) resolved.add(name);
     } else {
       // Bare tool name
       resolved.add(entry);
@@ -186,7 +186,7 @@ export function resolveVisibleTools(opts: {
 
   // Blacklist mode: excludeTools set and tools not set as whitelist
   if (excludeTools && !Array.isArray(tools)) {
-    const excludeSet = resolveToolEntries(excludeTools, extToolMap, notify);
+    const excludeSet = resolveToolEntries(excludeTools, extToolMap, notify, activeTools);
     const filtered = activeTools.filter(t =>
       !EXCLUDED_TOOL_NAMES.includes(t) && !excludeSet.has(t)
     );
@@ -196,12 +196,12 @@ export function resolveVisibleTools(opts: {
   if (Array.isArray(tools)) {
     // Whitelist mode: resolve entries with ext/* expansion
     const allBuiltinSet = new Set(BUILTIN_TOOL_NAMES);
-    const allowedTools = resolveToolEntries(tools, extToolMap, notify);
+    const allowedTools = resolveToolEntries(tools, extToolMap, notify, activeTools);
 
     // Warn about unknown entries
     for (const entry of tools) {
       const slashIdx = entry.indexOf("/");
-      if (slashIdx === -1 && !allBuiltinSet.has(entry)) {
+      if (slashIdx === -1 && !entry.includes("*") && !allBuiltinSet.has(entry)) {
         // Bare name, not a known built-in — check if it's an extension tool
         let foundInExt = false;
         for (const [, extToolNames] of extToolMap ?? []) {
@@ -262,7 +262,7 @@ export function resolveSessionAllowedTools(opts: {
   if (opts.tools === false) return [];
 
   if (Array.isArray(opts.tools)) {
-    if (opts.tools.some(tool => tool.endsWith("/*"))) return undefined;
+    if (opts.tools.some(tool => tool.includes("*"))) return undefined;
     return [...resolveToolEntries(opts.tools, undefined)]
       .filter(tool => !EXCLUDED_TOOL_NAMES.includes(tool));
   }

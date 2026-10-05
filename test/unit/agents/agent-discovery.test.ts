@@ -17,6 +17,17 @@ import {
 import type { AgentConfigFromMd } from "../../../src/agents/agent-discovery.js";
 import { makeAgentMd } from "../../support/fixtures.js";
 
+describe("MCP policy", () => {
+  it("preserves explicit disabling through layered agent definitions", () => {
+    const user = parseAgentFile("---\nname: worker\nmcp: false\n---\n", "user");
+    const project = parseAgentFile("---\nname: worker\n---\n", "project");
+    expect(mergeAgents(new Map(), [user], [project]).get("worker")?.mcp).toBe(false);
+    expect(mergeAgents(new Map(), [user], [{ ...project, mcp: true }]).get("worker")?.mcp).toBe(true);
+    expect(project.mcp).toBeUndefined();
+    expect(() => parseAgentFile("---\nname: worker\nmcp: [docs]\n---\n", "user")).toThrow("Agent field mcp must be a boolean.");
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /*  parseExtensions                                                    */
 /* ------------------------------------------------------------------ */

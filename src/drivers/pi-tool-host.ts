@@ -5,6 +5,7 @@ import { runToolCall, type AgentMessage, type AgentTool, type AgentToolCallOutco
 import type { AssistantMessage, Context as ProviderContext, NestedToolCallRecord, Usage } from "@earendil-works/pi-ai";
 import type { ExecuteToolOptions, ExtensionRunner, RegisteredTool, ToolDefinition, ToolInfo, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import type { TaskPolicy, ToolSourceGrant } from "../domain/policy.js";
+import { permitsSourceTool } from "../domain/policy.js";
 import { EXCLUDED_TOOL_NAMES } from "../agents/agent-types.js";
 import { OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
 
@@ -63,7 +64,7 @@ export class PiToolHost {
     if (!this.policy) return true;
     source ??= this.definitions.get(name)?.sourceInfo.path;
     const grant = this.policy.toolSources?.find(item => item.source === source);
-    if (grant) return !grant.exclude.includes(name) && (grant.tools === true || grant.tools.includes(name));
+    if (grant) return permitsSourceTool(grant, name);
     if (this.policy.toolSources && source && !this.safeBuiltin(source)) return false;
     // Exact grants also serve hosts that have no extension resources.
     return this.policy.tools.includes(name);
@@ -146,8 +147,7 @@ export class PiToolHost {
 
   /** An accepted tool whose async source (e.g. MCP) has not finished registering it. */
   private pendingRegistration(name: string): boolean {
-    return !this.definitions.has(name) && (this.policy?.toolSources?.some(grant =>
-      !grant.exclude.includes(name) && (grant.tools === true || grant.tools.includes(name))) ?? false);
+    return !this.definitions.has(name) && (this.policy?.toolSources?.some(grant => permitsSourceTool(grant, name)) ?? false);
   }
 
   /**

@@ -12,6 +12,17 @@ export interface ToolSourceGrant {
   readonly exclude: readonly string[];
 }
 
+/** Tool patterns recognize only '*'; all other characters are literal. */
+export function matchesToolPattern(name: string, pattern: string): boolean {
+  if (!pattern.includes("*")) return name === pattern;
+  return new RegExp(`^${pattern.split("*").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(name);
+}
+
+export function permitsSourceTool(grant: ToolSourceGrant, name: string): boolean {
+  return !grant.exclude.some(pattern => matchesToolPattern(name, pattern))
+    && (grant.tools === true || grant.tools.some(pattern => matchesToolPattern(name, pattern)));
+}
+
 /** Resolved execution values supplied after catalogue, model, and input validation. */
 export interface TaskPolicy {
   readonly agent: string;

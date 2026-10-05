@@ -27,6 +27,7 @@ export interface AgentConfigFromMd {
   exclude_tools?: string[];
   extensions?: boolean | string[];
   exclude_extensions?: string[];
+  mcp?: boolean;
   skills?: boolean | string[];
   preload_skills?: string[] | false;
   thinking?: string;
@@ -192,6 +193,7 @@ export function parseAgentFile(
     exclude_tools: parseStringArray(frontmatter, "exclude_tools"),
     extensions: parseExtensions(frontmatter.extensions),
     exclude_extensions: parseStringArray(frontmatter, "exclude_extensions"),
+    mcp: parseBoolean(frontmatter, "mcp"),
     skills: parseExtensions(frontmatter.skills),
     preload_skills: parsePreloadSkills(frontmatter.preload_skills),
     thinking: parseThinkingLevel(parseString(frontmatter, "thinking")),
@@ -320,6 +322,7 @@ function fromMd(md: AgentConfigFromMd): Partial<AgentConfig> {
     excludeTools: md.exclude_tools,
     extensions: md.extensions,
     excludeExtensions: md.exclude_extensions,
+    mcp: md.mcp,
     skills: md.skills,
     preloadSkills: md.preload_skills,
     thinkingLevel: md.thinking,

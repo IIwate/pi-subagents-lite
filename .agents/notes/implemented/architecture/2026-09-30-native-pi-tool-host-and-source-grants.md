@@ -20,13 +20,13 @@ export interface ToolSourceGrant {
 }
 ```
 
-source 使用已加载扩展的 SourceInfo.path, 包括 builtin:mcp、builtin:codemode 和 builtin:tool-search. 默认完整工具权限与 ext/* 固定到接受时选中的来源; 明确工具名单变成该来源的精确名字, 显式名单优先于 exclude. 通用代理的默认基础工具名单只决定初始选择, 已接受来源的 MCP 工具通过异步注册获得权限. restrictToRegisteredTools 继续限制未显式扩展工具范围的 Agent. Agent 从注册、声明、发现及嵌套执行中排除.
+source 使用已加载扩展的 SourceInfo.path, 包括 builtin:mcp、builtin:codemode 和 builtin:tool-search. 默认完整工具权限与 ext/* 固定到接受时选中的来源; 工具名单在该来源下保存完整工具名模式, 显式名单优先于 exclude. 模式仅将 * 解释为任意字符序列, 其余字符按字面匹配; ext/pattern 先限定来源再匹配工具名. 无通配符的名单保持精确匹配. 通用代理的默认基础工具名单只决定初始选择, 已接受来源的 MCP 工具通过异步注册获得权限. restrictToRegisteredTools 继续限制未显式扩展工具范围的 Agent. Agent 从注册、声明、发现及嵌套执行中排除.
 
-TaskPolicy.toolSources 是可选的附加授权: 缺少它的任务只有已保存的精确 tools 权限, 不推断全部扩展授权. 新任务保存选定来源及规则; 原生 task/outbox 的格式和地址保持可读, 该添加不要求迁移或丢弃既有结果. 持久输入检查来源字符串、名单形状和排除项, freezePolicy 复制并冻结规则. 没有匹配来源的扩展不能仅凭重用一个初始工具名获得权限.
+TaskPolicy.toolSources 是可选的附加授权: 缺少它的任务只有已保存的精确 tools 权限, 不推断全部扩展授权. 新任务保存选定来源及规则; 原生 task/outbox 的格式和地址保持可读, 模式直接保存在既有 tools/exclude 字符串数组中, 不更改文档版本或重写结果. 既有精确名字和全来源 true 的含义保持不变; 含 * 的条目按模式解释. 新模式任务需由支持模式的版本恢复, 不保证降级执行. 持久输入检查来源字符串、名单形状和排除项, freezePolicy 复制并冻结规则. 没有匹配来源的扩展不能仅凭重用一个初始工具名获得权限.
 
 ## Declarations and execution
 
-注册目录、授权规则、activeTools 和 callable tools 分别承担资源、权限、模型声明及编排入口. hidden 工具不能调用; direct 工具仅在 active 时可被编排; model-only 工具仅供模型直接调用; codemode/deferred 工具在授权且注册后即可被编排. prepareLoadout 接收已授权的目录, 描述替换和 hiddenDeclarations 只投影到 Provider 请求, 不改写原生保存的 activeTools.
+注册目录、授权规则、activeTools 和 callable tools 分别承担资源、权限、模型声明及编排入口. hidden 工具不能调用; direct 工具仅在 active 时可被编排; model-only 工具仅供模型直接调用; codemode/deferred 工具在授权且注册后即可被编排. 注册、发现、声明和直接/嵌套调用共用来源模式匹配; 恢复保留模式, 不将启动瞬间的工具列表当成全部授权. prepareLoadout 接收已授权的目录, 描述替换和 hiddenDeclarations 只投影到 Provider 请求, 不改写原生保存的 activeTools.
 
 registerTool 的 refreshTools 重建已授权实现, 由 PiResources 的串行配置队列发布到 Harness. 更新定义不重新启用已隐藏的同名工具. 新任务的工具按 exposure 和 defaultActive 决定默认声明. 恢复注册保留原生保存的声明集合, 不因重建定义重新激活已隐藏的工具. setActiveTools 与每次调用再次应用门禁, 已保存的越权声明在恢复入口拒绝. 资源未就绪不授予调用权, 权限存在不证明连接可用.
 
@@ -38,7 +38,7 @@ PiToolHost 将标准管线的 content、details、usage 和 isError 返回为原
 
 ## Native resources and lifecycle
 
-PiResources 通过公开工厂装配 MCP、codemode 和 tool-search, 使用官方 builtin/replaceable 规则和扩展配置. loadExtensionsImplicitly 关闭或 extensions=false 时, noExtensions 阻止普通扩展执行; DefaultPackageManager 按 Pi 的用户及可信项目配置解析启用的内建来源, 通过 additionalExtensionPaths 显式加载. 显式 extensions 名单和 excludeExtensions 继续过滤来源. 内建来源不因受限工具名单未选中其工具而产生未使用扩展警告.
+PiResources 通过公开工厂装配 MCP、codemode 和 tool-search, 使用官方 builtin/replaceable 规则和扩展配置. loadExtensionsImplicitly 关闭或 extensions=false 时, noExtensions 阻止普通扩展执行; DefaultPackageManager 按 Pi 的用户及可信项目配置解析启用的内建来源, 通过 additionalExtensionPaths 显式加载. Agent 定义的 mcp=false 通过 DefaultResourceLoader.disabledBuiltinExtensions 禁用内建 mcp, 优先于 Pi 配置中显式启用该内建来源; 不运行其工厂、连接、发现与提示 hooks. mcp=true 或未指定沿用 Pi 的来源配置, 不强行启用被 Pi 禁用的 MCP. 已保存的扩展路径集合表达恢复时的 MCP 选择, 当前 Agent 配置不改变已接受任务. 该开关不约束普通扩展自行建立的连接, 也不清洗继承提示或历史消息中的工具名字. 显式 extensions 名单和 excludeExtensions 继续过滤来源. 内建来源不因受限工具名单未选中其工具而产生未使用扩展警告.
 
 原生 MCP 读取 Pi profile 的 mcp.json 与可信 cwd 的项目配置; 协议、凭据、HTTP/stdio、发现、重连和 shutdown 归官方工厂. codemode 的额外 models 入口关闭, 子模型执行仍由已接受的模型授权和配额路径负责. 恢复只使用已保存的扩展路径和来源授权, 不因当前隐式加载开关或 Pi 来源排除配置改变已接受任务.
 
@@ -49,6 +49,9 @@ session_start 在新建及恢复时各派发一次. before_agent_start 保留官
 父 custom state 按 customType 取最后值继承. 子 appendEntry 按顺序保存每次追加, 使用原有 pair-array 的原生 value 表示, 保留 codemode-store 多次增量写入及删除的含义. 同步 SessionManager 投影重建这些记录, 不运行另一套 AgentSession.
 
 ## Alternatives considered
+
+- **仅保留精确名字和 ext/*.** 授权最直观且没有新增匹配语义, 但多个 MCP 服务共享 builtin:mcp 来源, 无法方便地按服务前缀筛选. 来源内模式提供粒度, 不引入 CLI 的隐式保留全部 MCP 规则.
+- **启动时展开模式或仅隐藏 MCP 声明.** 实现简单且复用当前工具列表, 但异步注册会漏授权, 隐藏声明也不能阻止连接与嵌套调用. 模式参与调用门禁, MCP 禁用发生在扩展加载入口.
 
 - **保留初始化时的精确工具名单.** 权限与恢复最直观, 且没有新策略结构. 但官方 MCP 的异步发现使默认工具永远不进入该名单; 来源授权保留接受时边界, 同时表达目录的延迟完成.
 - **让 noExtensions 同时控制原生服务和普通扩展.** 完全遵循 Pi CLI 的开关语义, 实现最少. 但要求使用 MCP 的子任务同时允许隐式普通扩展, 无法独立表达两者的资源选择. 当前复用 Pi 的来源配置解析, 只将启用的内建路径显式交给 Loader.
@@ -64,4 +67,4 @@ session_start 在新建及恢复时各派发一次. before_agent_start 保留官
 
 ## Verification
 
-[原生 MCP 场景](../../../../test/scenarios/drivers/pi-mcp.test.ts) 使用真实官方工厂、本地 stdio/HTTP 服务和离线模型, 在隐式扩展关闭时覆盖 codemode、结构化错误、搜索激活、恢复、子状态增量和单调用取消, 并验证普通扩展不执行、Pi 内建来源排除、Explore 及明确名单的调用限制、第三方编排门禁与脱敏. 恢复场景改变当前 Pi 排除配置, 仍实际调用已接受的 MCP 工具. [资源场景](../../../../test/scenarios/runtime-resources.test.ts) 覆盖异步定义刷新、固定名单、扩展状态、cwd/trust 和不可用资源下的结果读取. [领域检查](../../../../test/unit/domain/task-domain.test.ts) 验证来源规则不随调用方后续修改漂移. 这些检查不证明远程 OAuth 或物理终端兼容性.
+[原生 MCP 场景](../../../../test/scenarios/drivers/pi-mcp.test.ts) 使用真实官方工厂、本地 stdio/HTTP 服务和离线模型, 在隐式扩展关闭时覆盖 codemode、结构化错误、搜索激活、恢复、子状态增量和单调用取消, 并验证 MCP 禁用后没有服务进程启动、禁用与工具模式在配置改变后恢复仍有效、通配符排除的工具不能直接或通过 codemode 调用、普通扩展不执行、Pi 内建来源排除、Explore 及明确名单的调用限制、第三方编排门禁与脱敏. 恢复场景改变当前 Pi 排除配置, 仍实际调用已接受的 MCP 工具. [资源场景](../../../../test/scenarios/runtime-resources.test.ts) 覆盖异步定义刷新、固定名单、扩展状态、cwd/trust 和不可用资源下的结果读取. [领域检查](../../../../test/unit/domain/task-domain.test.ts) 验证来源规则不随调用方后续修改漂移. 这些检查不证明远程 OAuth 或物理终端兼容性.

@@ -25,6 +25,7 @@ import { PiToolHost } from "./pi-tool-host.js";
 import { ObservationSink, OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
 import { wrapMutationWithThenRun, type FusedFileQueue } from "./action-fusion.js";
 import type { ToolSourceGrant } from "../domain/policy.js";
+import { permitsSourceTool } from "../domain/policy.js";
 
 const GIT_EXEC_TIMEOUT_MS = 5000;
 const context = BACKGROUND_CONTEXT;
@@ -122,6 +123,7 @@ export class PiResources {
     const denied = new Set(policy?.definition.excludeExtensions ?? []);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
       noExtensions: restored !== undefined || policy?.extensions === false,
+      disabledBuiltinExtensions: policy?.definition.mcp === false ? ["mcp"] : undefined,
       extensionFactories,
       additionalExtensionPaths,
       noSkills: restored !== undefined || policy?.skills === false || Array.isArray(policy?.skills) || Array.isArray(policy?.definition.preloadSkills),
@@ -315,7 +317,7 @@ export class PiResources {
     }
     this.publishTools(); await this.flush();
     for (const name of this.initialTools) {
-      if (!this.toolHost.allTools().some(tool => tool.name === name) && !this.toolSources.some(grant => grant.tools === true || grant.tools.includes(name))) throw new Error(`Accepted tool is unavailable: ${name}`);
+      if (!this.toolHost.allTools().some(tool => tool.name === name) && !this.toolSources.some(grant => permitsSourceTool(grant, name))) throw new Error(`Accepted tool is unavailable: ${name}`);
     }
   }
 

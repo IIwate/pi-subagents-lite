@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,9 @@ describe("Native Pi MCP child tools", () => {
     parent.runtime.store.mutate.routing.configureAgentProviderAccess("general-purpose", parent.worker.provider.id);
     const server = join(parent.directory, "server.mjs");
     writeFileSync(server, `import { createInterface } from "node:readline";
-      const tools = [{ name: "lookup", description: "Look up a document", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }];
+      import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(join(parent.directory, "mcp-started"))}, "started");
+      const tools = ["lookup", "remove"].map(name => ({ name, description: "Look up a document", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }));
       createInterface({ input: process.stdin }).on("line", line => {
         const request = JSON.parse(line);
         if (request.id === undefined) return;
@@ -40,11 +42,46 @@ describe("Native Pi MCP child tools", () => {
     return parent;
   }
 
-  async function run(parent: Awaited<ReturnType<typeof host>>, runtime = parent.runtime) {
-    await executeAgentTool(runtime, "native-call", { agent: "general-purpose", prompt: "Use the document service",
+  async function run(parent: Awaited<ReturnType<typeof host>>, runtime = parent.runtime, agent = "general-purpose") {
+    await executeAgentTool(runtime, "native-call", { agent, prompt: "Use the document service",
       model: `${parent.worker.provider.id}/child` }, undefined, undefined, runtime.context);
     return runtime.engine.list().at(-1)!;
   }
+
+  it("disables MCP connections and discovery across agent changes and task restoration", async () => {
+    const parent = await host();
+    const file = join(parent.directory, "agents", "worker.md");
+    writeFileSync(file, "---\nname: worker\ntools: [read, codemode, tool_search, 'mcp__*']\nextensions: false\nmcp: false\n---\nInspect local files.");
+    parent.runtime.catalogue.registerAgents(await parent.runtime.catalogue.scanAndMerge());
+    const requests: Context[] = [];
+    const responses = () => [
+      fauxAssistantMessage(fauxToolCall("codemode", { code: `text(ALL_TOOLS.filter(tool => tool.name.startsWith("mcp__")));` }), { stopReason: "toolUse" }),
+      (request: Context) => { requests.push(request); return fauxAssistantMessage("MCP is unavailable"); },
+    ];
+    parent.worker.setResponses(responses());
+    const task = await run(parent, parent.runtime, "worker");
+    expect(existsSync(join(parent.directory, "mcp-started"))).toBe(false);
+    const ctx = parent.runtime.context;
+    await parent.runtime.dispose();
+    writeFileSync(file, "---\nname: worker\nmcp: true\n---\nInspect documents.");
+    const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });
+    harness.onDispose(() => replacement.dispose());
+    await replacement.start(ctx);
+    parent.worker.setResponses(responses());
+    await replacement.engine.continue(task.taskId, { text: "Inspect available tools again" });
+    await replacement.engine.wait(task.taskId);
+    expect(existsSync(join(parent.directory, "mcp-started"))).toBe(false);
+    for (const request of requests) {
+      const names = getCurrentTools(request.messages).map(tool => tool.name);
+      expect(names).toContain("read");
+      expect(names).toContain("codemode");
+      expect(names.some(name => name.startsWith("mcp__"))).toBe(false);
+      const result = request.messages.find(message => message.role === "toolResult" && message.toolName === "codemode");
+      expect(result).toMatchObject({ isError: false });
+      expect(JSON.stringify(result)).toContain("[]");
+    }
+    expect(parent.errors).toEqual([]);
+  });
 
   it("loads native MCP with implicit extensions disabled, preserves structured errors, and records nested calls", async () => {
     const parent = await host();
@@ -180,19 +217,35 @@ describe("Native Pi MCP child tools", () => {
     expect(parent.errors).toEqual([]);
   });
 
-  it("discovers deferred tools on the child branch and restores their activation", async () => {
+  it.each(["tools: [read, codemode, tool_search, 'mcp__docs__look*']", "exclude_tools: ['mcp__*__rem*']"])("retains deferred tool patterns across restoration: %s", async filter => {
     const parent = await host("deferred");
+    const agentFile = join(parent.directory, "agents", "general-purpose.md");
+    writeFileSync(agentFile, `---\nname: general-purpose\n${filter}\n---\nInspect documents.`);
+    parent.runtime.catalogue.registerAgents(await parent.runtime.catalogue.scanAndMerge());
     const requests: Context[] = [];
+    const deniedRequests: Context[] = [];
     parent.worker.setResponses([
       fauxAssistantMessage(fauxToolCall("tool_search", { query: "lookup document" }), { stopReason: "toolUse" }),
       request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("mcp__docs__lookup", { query: "fail" }), { stopReason: "toolUse" }); },
-      request => { requests.push(request); return fauxAssistantMessage("Failure inspected"); },
+      request => { requests.push(request); return fauxAssistantMessage(fauxToolCall("codemode", { code: `await tools.mcp__docs__remove({ query: "denied" });` }), { stopReason: "toolUse" }); },
+      request => {
+        deniedRequests.push(request);
+        return fauxAssistantMessage(fauxToolCall("mcp__docs__remove", { query: "denied" }), { stopReason: "toolUse" });
+      },
+      request => {
+        deniedRequests.push(request);
+        return fauxAssistantMessage("Failure inspected");
+      },
     ]);
     const task = await run(parent);
+    expect(task.state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
+    expect(deniedRequests[0].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "codemode", isError: true }));
+    expect(deniedRequests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp__docs__remove", isError: true }));
     expect(getCurrentTools(requests[0].messages).map(tool => tool.name)).toContain("mcp__docs__lookup");
     expect(requests[1].messages).toContainEqual(expect.objectContaining({ role: "toolResult", toolName: "mcp__docs__lookup", isError: true }));
     const context = parent.runtime.context;
     await parent.runtime.dispose();
+    writeFileSync(agentFile, "---\nname: general-purpose\ntools: [read]\n---\nInspect local files.");
     writeFileSync(join(parent.directory, "settings.json"), JSON.stringify({ ...parent.session.settingsManager.getSettings(),
       extensions: ["-builtin:mcp", "-builtin:codemode", "-builtin:tool-search"] }));
     const replacement = new ExtensionRuntime(parent.api, { agentDir: parent.directory });

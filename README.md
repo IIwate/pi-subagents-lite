@@ -84,7 +84,7 @@ max_turns: 12
 Review the requested changes. Prioritize correctness, regressions, and missing tests.
 ```
 
-Supported frontmatter fields: `tools`, `exclude_tools`, `extensions`, `skills`, `preload_skills`, `thinking`, `max_turns`, and `max_tokens`. Built-in agents (`general-purpose`, `Explore`) can be customized or disabled.
+Supported frontmatter fields: `tools`, `exclude_tools`, `mcp`, `extensions`, `skills`, `preload_skills`, `thinking`, `max_turns`, and `max_tokens`. Built-in agents (`general-purpose`, `Explore`) can be customized or disabled.
 
 ## MCP & Extension Tools
 
@@ -93,6 +93,19 @@ General-purpose subagents automatically inherit Pi's native MCP servers, codemod
 - **Isolation**: Each subagent manages its own independent connections; exclusive or interactive tools remain constrained.
 - **Safety**: Explore and restricted agents strictly preserve their read-only and allowlist boundaries.
 - **Asynchronous Discovery**: Deferred tools discovered via `tool_search` persist across session reloads.
+
+Tool lists accept `*` patterns matching the entire tool name. Other characters are literal. Source-qualified entries such as `my-extension/search*` match only that extension's tools. Quote patterns in YAML:
+
+```yaml
+tools:
+  - read
+  - codemode
+  - "mcp__docs__*"
+```
+
+Patterns also apply to tools discovered later and survive task restoration. `exclude_tools: ["mcp__docs__remove*"]` filters the default allowed set; an explicit `tools` list takes precedence over `exclude_tools`. Defaults and restricted agents retain their existing permissions. Listing `codemode` alone does not authorize MCP tools.
+
+Set `mcp: false` in an Agent's frontmatter to disable the built-in MCP extension before it creates connections. Its tools are absent from declarations, tool search, and codemode discovery. Local tools and codemode remain available according to the tool list. Omitted `mcp` or `mcp: true` follows Pi's enabled-source configuration. Restored tasks retain their accepted MCP selection even if the Agent definition changes. This setting does not prevent ordinary extensions from making their own connections or remove tool names already present in inherited prompts or history.
 
 ## Settings
 

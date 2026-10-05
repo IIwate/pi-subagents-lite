@@ -44,6 +44,23 @@ describe("resolveType name precedence", () => {
   });
 });
 
+describe("tool name patterns", () => {
+  const activeTools = ["read", "write", "mcp__docs__lookup", "mcp__docs__remove", "mcp__other__lookup", "Agent"];
+  it("matches full tool names and keeps source qualification", () => {
+    expect(resolveVisibleTools({ activeTools, tools: ["r*", "mcp__docs__*look*", "Agent"] }))
+      .toEqual(["read", "mcp__docs__lookup"]);
+    expect(resolveVisibleTools({ activeTools, tools: ["docs/*look*"],
+      extToolMap: new Map([["docs", ["mcp__docs__lookup"]], ["other", ["mcp__other__lookup"]]]) }))
+      .toEqual(["mcp__docs__lookup"]);
+  });
+  it("applies exclusion patterns without expanding restricted defaults", () => {
+    expect(resolveVisibleTools({ activeTools, excludeTools: ["mcp__*", "w*"] })).toEqual(["read"]);
+    expect(resolveVisibleTools({ activeTools: ["read"], tools: ["*"] })).toEqual(["read"]);
+    expect(resolveVisibleTools({ activeTools, tools: ["read"], excludeTools: ["*"] })).toEqual(["read"]);
+    expect(resolveVisibleTools({ activeTools: ["probe.x", "probeax"], tools: ["probe.*"] })).toEqual(["probe.x"]);
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /*  Sanity: constants                                                 */
 /* ------------------------------------------------------------------ */

@@ -16,7 +16,7 @@ export interface AgentConfig {
   /**
    * Controls which tool schemas the LLM sees. Can reference built-in tools
    * and extension tools. true = all, string[] = listed, false = none.
-   * Supports ext/* syntax to include all tools from an extension.
+   * Supports '*' tool patterns and ext/pattern source qualification.
    * Mutually exclusive with excludeTools.
    */
   tools?: true | string[] | false;
@@ -26,6 +26,8 @@ export interface AgentConfig {
   extensions?: true | string[] | false;
   /** Extension blacklist — all extensions except these load. Mutually exclusive with extensions (when extensions is string[]). */
   excludeExtensions?: string[];
+  /** false disables the built-in MCP extension; true/undefined follow Pi's configured sources. */
+  mcp?: boolean;
   /** Whitelist of allowed skills (metadata only in system prompt). true = all, string[] = listed, false = none. undefined = not set (uses global default). */
   skills?: true | string[] | false;
   /** Skills to preload with full content into system prompt. string[] = listed, false/undefined = none */
