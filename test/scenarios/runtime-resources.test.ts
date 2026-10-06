@@ -35,6 +35,7 @@ describe("ExtensionRuntime child resources", () => {
     }
   });
 
+  // Native Git, PowerShell, and Node startup share this budget on Windows CI.
   it("executes concurrent cwd tasks with independent tools, extensions, skills, and project context", async () => {
     const root = harness.createTempDir();
     const main = join(root, "main");
@@ -112,7 +113,7 @@ describe("ExtensionRuntime child resources", () => {
       expect(parent.runtime.engine.list().find(task => task.policy.cwd === directory)?.state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
     }
     expect(parent.errors).toEqual([]);
-  });
+  }, 15_000);
 
   it.each([
     { saved: true, defaultTrust: "never", trusted: true },
