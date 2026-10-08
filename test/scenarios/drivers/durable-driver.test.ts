@@ -101,6 +101,7 @@ describe("Execution adapters", () => {
     expect((await tasks.wait("reasoning")).state).toMatchObject({ status: "settled", outcome: { status: "completed", result: "Reasoned final answer" } });
     expect(requests).toHaveBeenCalledOnce();
     expect((await child.store.deliveries()).map(item => item.delivery.text)).toEqual(["Reasoned final answer"]);
+    await tasks.close();
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -145,6 +146,7 @@ describe("Execution adapters", () => {
     await opened[3];
     streams[3].finish("Queued task completed");
     expect((await tasks.wait("queued")).state).toMatchObject({ status: "settled", outcome: { status: "completed" } });
+    await tasks.close();
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -172,6 +174,7 @@ describe("Execution adapters", () => {
     expect(requests).toHaveBeenCalledTimes(3);
     streams[2].finish("Next task completed");
     await tasks.wait("next");
+    await tasks.close();
     expect(vi.getTimerCount()).toBe(0);
   });
 
