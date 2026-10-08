@@ -310,7 +310,8 @@ export class PiToolHost {
           record.status = outcome.isError ? "error" : "ok"; record.durationMs = Math.round(performance.now() - started);
           if (outcome.isError) record.error = outcome.result.content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 500);
         }
-        await this.runner.emit({ type: "tool_execution_end", toolCallId: id, toolName: name, result: outcome.result, isError: outcome.isError, parentToolCallId });
+        await this.runner.emit({ type: "tool_execution_end", toolCallId: id, toolName: name, result: outcome.result, isError: outcome.isError,
+          ...(outcome.durationMs === undefined ? {} : { durationMs: outcome.durationMs }), parentToolCallId });
       } else {
         if (root.usage) outcome.result.usage = addUsage(outcome.result.usage, root.usage);
         if (root.calls.length || !root.complete) outcome.result.details = {
