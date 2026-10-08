@@ -123,7 +123,10 @@ describe("Action fusion", () => {
       fused.execute("call-1", { path: "a.txt", content: "first", then_run: { command: "one" } }, undefined, undefined),
       fused.execute("call-2", { path: "a.txt", content: "second", then_run: { command: "two" } }, undefined, undefined),
     ]);
-    // Each fused pair is atomic: no second mutation may interleave between a mutation and its command.
-    expect(order).toEqual(["mutate:first", "run:one", "mutate:second", "run:two"]);
+    // Concurrent path lookups may resolve in either order; each fused pair must stay contiguous.
+    expect([
+      ["mutate:first", "run:one", "mutate:second", "run:two"],
+      ["mutate:second", "run:two", "mutate:first", "run:one"],
+    ]).toContainEqual(order);
   });
 });
