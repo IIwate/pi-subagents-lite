@@ -9,8 +9,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { visibleWidth, type AutocompleteProvider } from "@earendil-works/pi-tui";
 import { createTestHarness, type TestHarness } from "../../../support/harness.js";
 import { AgentNavigator } from "../../../../src/ui/agent-navigator.js";
+import type { NavigationAction, NavigationReply } from "../../../../src/ui/navigation.js";
 import {
   makeRecord,
   makeSource,
@@ -100,7 +102,209 @@ describe("AgentNavigator — Interaction", () => {
     expect(ui.baseEditor.getText()).toBe("");
 
     ui.baseEditor.onSubmit?.("/agents");
+    expect(parentSubmit).not.toHaveBeenCalled();
+    expect(routeInput).toHaveBeenCalledTimes(2);
+    ui.baseEditor.onSubmit?.("/main");
+    expect(navigator.selectedId()).toBeNull();
+    ui.baseEditor.onSubmit?.("/agents");
     expect(parentSubmit).toHaveBeenCalledWith("/agents");
+  });
+
+  it("shows local command responses without changing the child conversation or queue", () => {
+    const record = makeRecord();
+    const queued = "Review\x07 the diff\x1b]0;unsafe-title\x07\nKeep the summary short";
+    record.execution.session.getSteeringMessages = () => [queued];
+    const source = makeSource([record]);
+    const messages = source.transcript(record.id).messages;
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(source);
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    navigator.handleEditorSubmit("/help");
+    expect(tui.document.children[tui.chatIndex].render(120).join("\n")).toContain("/status - Inspect the active subagent");
+    navigator.handleEditorSubmit("/status");
+    const status = tui.document.children[tui.chatIndex].render(120).join("\n");
+    expect(status).toContain(record.id);
+    expect(status).toContain("openai-test/gpt-test");
+    expect(status).toContain("Control: Autonomous");
+    navigator.handleEditorSubmit("/queue");
+    const queue = tui.document.children[tui.chatIndex].render(120).join("\n");
+    expect(queue).toContain("Keep the summary short");
+    expect(queue).not.toContain("\x07");
+    expect(queue).not.toContain("unsafe-title");
+    expect(tui.document.children[tui.chatIndex].render(24).every((line: string) => visibleWidth(line) <= 24)).toBe(true);
+    expect(source.sendInput).not.toHaveBeenCalled();
+    expect(source.dequeueMessages).not.toHaveBeenCalled();
+    expect(source.transcript(record.id).messages).toEqual(messages);
+    expect(source.getRecord(record.id).queued[0].input.text).toBe(queued);
+
+    navigator.handleEditorSubmit("Inspect another file");
+    expect(tui.document.children[tui.chatIndex].render(120).join("\n")).not.toContain("/queue");
+    expect(source.sendInput).toHaveBeenCalledWith(record.id, "Inspect another file", undefined, "steer");
+  });
+
+  it("rejects unsupported commands, shell input, and extra arguments before parent submission", () => {
+    const record = makeRecord();
+    const source = makeSource([record]);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(source);
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const editor = tui.children[tui.editorIndex].children[0];
+    const parentSubmit = vi.fn();
+    const parentFollowUp = vi.fn();
+    editor.onSubmit = parentSubmit;
+    editor.actionHandlers.set("app.message.followUp", parentFollowUp);
+
+    ui.baseEditor.onSubmit?.("/model another-model");
+    expect(tui.document.children[tui.chatIndex].render(120).join("\n")).toContain("Unknown subagent command");
+    ui.baseEditor.onSubmit?.("/stop\nextra input");
+    expect(tui.document.children[tui.chatIndex].render(120).join("\n")).toContain("Usage: /stop");
+    ui.baseEditor.setText("! echo unintended");
+    ui.baseEditor.actionHandlers.get("app.message.followUp")?.();
+    expect(tui.document.children[tui.chatIndex].render(120).join("\n")).toContain("Shell commands are unavailable");
+    expect(parentSubmit).not.toHaveBeenCalled();
+    expect(parentFollowUp).not.toHaveBeenCalled();
+    expect(source.sendInput).not.toHaveBeenCalled();
+    expect(source.abort).not.toHaveBeenCalled();
+    expect(source.takeOver).not.toHaveBeenCalled();
+    expect(ui.ctx.notify).not.toHaveBeenCalled();
+  });
+
+  it("targets the active subagent for commands and explicit message selection", async () => {
+    const active = makeRecord("agent-active");
+    const candidate = makeRecord("agent-candidate");
+    const source = makeSource([active, candidate]);
+    const dispatch = vi.fn((action: NavigationAction): NavigationReply | Promise<NavigationReply> => source.dispatch(action));
+    const ui = makeUI({ value: "" });
+    const selection = Promise.withResolvers<boolean>();
+    harness.onDispose(() => { selection.resolve(false); });
+    let selector: { handleInput(data: string): void } | undefined;
+    const custom = vi.fn((factory: any) => {
+      selector = factory(tui, ui.theme, {}, selection.resolve);
+      return selection.promise;
+    });
+    navigator = new AgentNavigator(source, dispatch);
+    navigator.setUICtx({ ...ui.ctx, custom } as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    navigator.handleTerminalInput("\x1b[B");
+    expect(navigator.highlightedId()).toBe(candidate.id);
+    expect(navigator.selectedId()).toBe(active.id);
+
+    navigator.handleEditorSubmit("/stop");
+    expect(source.abort).toHaveBeenCalledWith(active.id, "user");
+    navigator.handleEditorSubmit("/deliver");
+    expect(custom).not.toHaveBeenCalled();
+    navigator.handleEditorSubmit("/takeover");
+    expect(source.takeOver).toHaveBeenCalledWith(active.id);
+    navigator.handleEditorSubmit("/deliver");
+    expect(custom).toHaveBeenCalledOnce();
+    expect(dispatch.mock.calls.some(([action]) => action.type === "deliver")).toBe(false);
+    selector!.handleInput("\r");
+    await selection.promise;
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "deliver", selection: expect.objectContaining({ taskId: active.id, operationId: active.id }),
+    }));
+    expect(candidate.lifecycle.takenOver).toBeUndefined();
+  });
+
+  it("keeps newer command output when an older action fails", async () => {
+    const record = makeRecord();
+    const pending = Promise.withResolvers<NavigationReply>();
+    harness.onDispose(() => { pending.resolve({ accepted: false, reason: "unavailable" }); });
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(makeSource([record]), () => pending.promise);
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+
+    navigator.handleEditorSubmit("/stop");
+    navigator.handleEditorSubmit("/status");
+    pending.resolve({ accepted: false, reason: "unavailable", message: "Delayed stop failure" });
+    await pending.promise;
+    const output = tui.document.children[tui.chatIndex].render(120).join("\n");
+    expect(output).toContain("/status");
+    expect(output).not.toContain("Delayed stop failure");
+  });
+
+  it("uses child command completion and restores the parent provider on Main", async () => {
+    const record = makeRecord();
+    const ui = makeUI({ value: "" });
+    const install = vi.fn();
+    Object.assign(ui.baseEditor, { setAutocompleteProvider: install });
+    navigator = new AgentNavigator(makeSource([record]));
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    const editor = tui.children[tui.editorIndex].children[0];
+    const parentSuggestions = { items: [{ value: "agents", label: "agents" }], prefix: "/a" };
+    const parent = {
+      getSuggestions: vi.fn(async () => parentSuggestions),
+      applyCompletion: vi.fn(),
+      shouldTriggerFileCompletion: vi.fn(() => true),
+    };
+    editor.setAutocompleteProvider(parent);
+    const provider = install.mock.lastCall![0] as AutocompleteProvider;
+    const options = { signal: new AbortController().signal, force: true };
+    expect(await provider.getSuggestions(["/a"], 0, 2, options)).toBe(parentSuggestions);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    parent.getSuggestions.mockClear();
+
+    const suggestions = await provider.getSuggestions(["/sta"], 0, 4, options);
+    expect(suggestions?.items.map(item => item.value)).toEqual(["status"]);
+    expect(provider.applyCompletion(["/sta"], 0, 4, suggestions!.items[0], suggestions!.prefix).lines).toEqual(["/status "]);
+    expect(provider.shouldTriggerFileCompletion?.(["/sta"], 0, 4)).toBe(false);
+    expect(await provider.getSuggestions(["/status @file"], 0, 13, options)).toBeNull();
+    expect(parent.getSuggestions).not.toHaveBeenCalled();
+    expect(parent.applyCompletion).not.toHaveBeenCalled();
+    navigator.handleEditorSubmit("/main");
+    expect(await provider.getSuggestions(["/a"], 0, 2, options)).toBe(parentSuggestions);
+    expect(provider.shouldTriggerFileCompletion?.(["/a"], 0, 2)).toBe(true);
+
+    const delayed = Promise.withResolvers<typeof parentSuggestions>();
+    harness.onDispose(() => { delayed.resolve(parentSuggestions); });
+    parent.getSuggestions.mockImplementationOnce(() => delayed.promise);
+    const completion = provider.getSuggestions(["/a"], 0, 2, options);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    delayed.resolve(parentSuggestions);
+    expect(await completion).toBeNull();
+  });
+
+  it("consumes input when the active task disappears before submission", () => {
+    const records = [makeRecord()];
+    const source = makeSource(records);
+    const ui = makeUI({ value: "" });
+    navigator = new AgentNavigator(source);
+    navigator.setUICtx(ui.ctx as any);
+    const { tui } = mountSelector(ui);
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\x1b[B");
+    navigator.handleTerminalInput("\r");
+    const editor = tui.children[tui.editorIndex].children[0];
+    const parentSubmit = vi.fn();
+    editor.onSubmit = parentSubmit;
+    records.length = 0;
+
+    ui.baseEditor.onSubmit?.("/stop");
+    expect(parentSubmit).not.toHaveBeenCalled();
+    expect(source.abort).not.toHaveBeenCalled();
+    expect(navigator.selectedId()).toBeNull();
+    expect(ui.ctx.notify).toHaveBeenCalledWith("The selected subagent is unavailable. Input was not sent.", "warning");
   });
 
   it("stops a running subagent when Escape is pressed in the editor while viewing it", () => {

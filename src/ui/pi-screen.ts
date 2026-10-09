@@ -20,6 +20,7 @@ export type NavigatorUICtx = Pick<ExtensionUIContext, "getEditorComponent" | "ge
 
 interface NavigationInput {
   handleEditorSubmit(text: string, kind?: "steer" | "followUp"): boolean;
+  getCommandProvider(): AutocompleteProvider | undefined;
   handleEditorDequeue(): boolean;
   handleTerminalInput(data: string): { consume?: boolean } | undefined;
   handleMouse?(event: TuiMouseEvent, terminalRows?: number): TuiMouseEventResult | undefined;
@@ -292,7 +293,23 @@ class AgentNavigationEditor implements EditorComponent, Focusable {
   }
 
   setAutocompleteProvider(provider: AutocompleteProvider): void {
-    this.base.setAutocompleteProvider?.(provider);
+    const select = (lines: string[], cursorLine: number, cursorCol: number) =>
+      cursorLine === 0 && lines[0]?.slice(0, cursorCol).trimStart().startsWith("/")
+        ? this.navigator.getCommandProvider() ?? provider : provider;
+    this.base.setAutocompleteProvider?.({
+      triggerCharacters: provider.triggerCharacters,
+      getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+        const selected = select(lines, cursorLine, cursorCol);
+        if (selected !== provider && /\s/.test(lines[cursorLine].slice(0, cursorCol).trimStart().slice(1))) return null;
+        const suggestions = await selected.getSuggestions(lines, cursorLine, cursorCol,
+          selected === provider ? options : { ...options, force: false });
+        return selected === select(lines, cursorLine, cursorCol) ? suggestions : null;
+      },
+      applyCompletion: (lines, cursorLine, cursorCol, item, prefix) =>
+        select(lines, cursorLine, cursorCol).applyCompletion(lines, cursorLine, cursorCol, item, prefix),
+      shouldTriggerFileCompletion: (lines, cursorLine, cursorCol) => select(lines, cursorLine, cursorCol) === provider
+        && (provider.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true),
+    });
   }
 
   setPaddingX(padding: number): void {

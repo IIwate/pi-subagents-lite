@@ -1,12 +1,22 @@
-import { Key, matchesKey, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { CombinedAutocompleteProvider, Key, matchesKey, type AutocompleteProvider, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { DeliverySelectorComponent } from "./delivery-selector.js";
-import type { StatsVisibility } from "./format.js";
+import { formatModelIdentity, formatMs, type StatsVisibility } from "./format.js";
 import type { TaskInput } from "../engine/contracts.js";
 import { PiScreen, type NavigatorUICtx } from "./pi-screen.js";
-import { NavigatorView, renderPending, renderRetry } from "./navigator-view.js";
+import { NavigatorView, plainAgentStatus, renderPending, renderRetry } from "./navigator-view.js";
 import { TranscriptView } from "./transcript.js";
 import type { NavigationAction, NavigationAgent, NavigationReply, NavigationSource, NavigationStatus, NavigatorViewState } from "./navigation.js";
+
+const CHILD_COMMANDS = [
+  { name: "help", description: "Show subagent commands" },
+  { name: "status", description: "Inspect the active subagent" },
+  { name: "queue", description: "Show queued input (Alt+Up restores it to the editor)" },
+  { name: "stop", description: "Stop the active subagent operation" },
+  { name: "takeover", description: "Take manual control of the active subagent" },
+  { name: "deliver", description: "Select existing messages to send to Main" },
+  { name: "main", description: "Return to Main" },
+];
 
 // Note: see .agents/notes/implemented/architecture/2026-09-10-navigator-screen-and-input-ownership.md
 export class AgentNavigator {
@@ -18,6 +28,8 @@ export class AgentNavigator {
   private highlightedAgentId: string | null = null;
   private confirmingClearId: string | null = null;
   private interactionNotice?: string;
+  private commandOutput?: string;
+  private readonly commandProvider = new CombinedAutocompleteProvider(CHILD_COMMANDS, "");
   private interactionRequestId = 0;
   private statsVisibility: StatsVisibility = {};
   private listExpanded: boolean;
@@ -45,7 +57,7 @@ export class AgentNavigator {
       transcript: width => {
         const record = this.selectedAgentId ? this.source.getRecord(this.selectedAgentId) : undefined;
         const theme = this.uiCtx?.theme;
-        return record && theme ? this.transcript.render(record, this.source.transcript(record.id), theme, width, this.screen.active) : [];
+        return record && theme ? this.transcript.render(record, this.source.transcript(record.id), theme, width, this.screen.active, this.commandOutput) : [];
       },
       pending: width => this.uiCtx ? renderPending(this.selectedAgentId ? this.source.getRecord(this.selectedAgentId) : undefined, width, this.uiCtx.theme) : [],
       status: width => this.uiCtx ? renderRetry(this.selectedAgentId ? this.source.getRecord(this.selectedAgentId) : undefined, width, this.uiCtx.theme, Date.now()) : [],
@@ -61,6 +73,7 @@ export class AgentNavigator {
     if (ctx === this.uiCtx) return;
     this.stopTranscript?.(); this.stopTranscript = undefined;
     this.selectedAgentId = null; this.highlightedAgentId = null; this.listFocused = false;
+    this.commandOutput = undefined;
     this.frozenOrder = undefined;
     this.interactionRequestId++;
     this.screen.setContext(ctx);
@@ -82,6 +95,7 @@ export class AgentNavigator {
     return this.selectedAgentId;
   }
   highlightedId(): string | null { return this.highlightedAgentId; }
+  getCommandProvider(): AutocompleteProvider | undefined { return !this.disposed && this.selectedAgentId ? this.commandProvider : undefined; }
   isListFocused(): boolean { return this.listFocused; }
   unfocusList(): void {
     if (!this.listFocused) return;
@@ -123,16 +137,92 @@ export class AgentNavigator {
   }
 
   handleEditorSubmit(text: string, kind: "steer" | "followUp" = "steer", images?: TaskInput["images"]): boolean {
-    const id = this.selectedId();
+    const id = this.selectedAgentId;
     const trimmed = text.trim();
-    if (!id || !trimmed || trimmed.startsWith("/") || trimmed.startsWith("!")) return false;
+    if (!id || !trimmed) return false;
     const record = this.source.getRecord(id);
-    if (!record) return false;
+    if (!record) {
+      this.activateMain();
+      this.uiCtx?.notify("The selected subagent is unavailable. Input was not sent.", "warning");
+      return true;
+    }
+    if (trimmed.startsWith("/") || trimmed.startsWith("!")) {
+      this.handleCommand(record, trimmed);
+      return true;
+    }
+    this.commandOutput = undefined;
     const requestId = this.beginInteraction(id);
     const type = record.execution.settled ? "continue" : kind;
     this.send({ type, taskId: id, operationId: record.operationId, input: { text: trimmed, ...(images ? { images } : {}) } },
       result => queueMicrotask(() => this.completeInteraction(requestId, id, text, result)));
     return true;
+  }
+
+  private handleCommand(record: NavigationAgent, text: string): void {
+    const requestId = this.beginInteraction(record.id);
+    this.commandOutput = undefined;
+    this.screen.requestRender();
+    const respond = (output: string) => {
+      if (!this.currentRequest(requestId, record.id)) return;
+      this.commandOutput = `${text}\n\n${output}`;
+      this.interactionNotice = undefined;
+      this.screen.requestRender();
+      this.update();
+    };
+    if (text.startsWith("!")) {
+      respond("Shell commands are unavailable in subagent views. Use /help for supported commands.");
+      return;
+    }
+    const [name, ...args] = text.slice(1).split(/\s+/);
+    if (!CHILD_COMMANDS.some(command => command.name === name)) {
+      respond("Unknown subagent command. Use /help for supported commands, or /main to return to Main.");
+      return;
+    }
+    if (args.length) { respond(`Usage: /${name}`); return; }
+    switch (name) {
+      case "help":
+        respond(CHILD_COMMANDS.map(command => `/${command.name} - ${command.description}`).join("\n"));
+        return;
+      case "status":
+        respond([
+          `Agent: ${record.display.name} (${record.id})`,
+          `Status: ${plainAgentStatus(record)}`,
+          `Model: ${formatModelIdentity(record.execution) ?? "Unavailable"}`,
+          `Control: ${record.lifecycle.takenOver ? "Manual" : "Autonomous"}`,
+          `Elapsed: ${formatMs((record.lifecycle.completedAt ?? Date.now()) - record.lifecycle.startedAt)}`,
+          `Tool calls: ${record.stats.toolUses}`,
+          `Turns: ${record.stats.turnCount ?? 0}${record.stats.maxTurns === undefined ? "" : ` / ${record.stats.maxTurns}`}`,
+          `Queued messages: ${record.queued.length}`,
+          ...(record.error ? [`Error: ${record.error}`] : []),
+        ].join("\n"));
+        return;
+      case "queue":
+        respond(record.queued.length ? record.queued.map((item, index) =>
+          `${index + 1}. ${item.kind === "steer" ? "Steering" : item.kind === "followUp" ? "Follow-up" : "Pending"}\n${item.input.text}`
+          + (item.input.images?.length ? `\n[${item.input.images.length} image(s)]` : "")).join("\n\n") : "No queued messages.");
+        return;
+      case "stop":
+        if (record.execution.settled) { respond(`Subagent is already ${plainAgentStatus(record)}.`); return; }
+        this.send({ type: "abort", taskId: record.id, operationId: record.operationId }, reply =>
+          respond(reply.accepted ? "Stop requested." : reply.message ?? "The subagent could not be stopped."));
+        return;
+      case "takeover":
+        this.send({ type: "takeover", taskId: record.id, operationId: record.operationId }, reply =>
+          respond(reply.accepted ? "Manual control enabled. Use /deliver to select messages for Main." : reply.message ?? "The subagent could not be taken over."));
+        return;
+      case "deliver":
+        if (!record.canDeliver) {
+          respond(record.lifecycle.takenOver ? "No text messages are available for delivery." : "Use /takeover before selecting messages for Main.");
+        } else if (!this.uiCtx?.custom) {
+          respond("Message selection is unavailable in this UI.");
+        } else {
+          void this.openDeliverySelector(undefined, record.id).catch(error => respond(String(error)));
+        }
+        return;
+      case "main":
+        this.unfocusList();
+        this.activateMain();
+    }
   }
 
   handleEditorDequeue(): boolean {
@@ -484,6 +574,7 @@ export class AgentNavigator {
     if (id && (!this.source.getRecord(id) || !this.screen.showChild())) return false;
     this.stopTranscript?.(); this.stopTranscript = undefined;
     this.selectedAgentId = id;
+    this.commandOutput = undefined;
     if (!id) {
       this.frozenOrder = undefined;
       this.screen.showMain();
@@ -503,8 +594,8 @@ export class AgentNavigator {
   forceLayoutReflow(): void { this.lastRenderSig = ""; this.screen.requestRender(true); }
   canDeliverRecord(record: NavigationAgent | undefined): boolean { return record?.canDeliver ?? false; }
 
-  async openDeliverySelector(customUICtx?: ExtensionUIContext): Promise<void> {
-    const record = this.highlightedAgentId ? this.source.getRecord(this.highlightedAgentId) : undefined;
+  async openDeliverySelector(customUICtx?: ExtensionUIContext, taskId = this.highlightedAgentId): Promise<void> {
+    const record = taskId ? this.source.getRecord(taskId) : undefined;
     const ui = customUICtx ?? this.uiCtx;
     if (this.isDeliverySelectorOpen || !record?.canDeliver || !ui?.custom) return;
     const messages = this.source.transcript(record.id).messages.filter(message => (message.role === "user" || message.role === "assistant") && message.text.trim());
@@ -513,6 +604,7 @@ export class AgentNavigator {
       status: record.lifecycle.status === "error" || record.lifecycle.status === "aborted" || record.lifecycle.status === "stopped" || record.lifecycle.status === "turn_limited"
         ? record.lifecycle.status : "completed" as const });
     const generation = this.interactionRequestId;
+    const listWasFocused = this.listFocused;
     this.isDeliverySelectorOpen = true;
     try {
       await ui.custom<boolean>((tui, theme, _kb, done) => {
@@ -536,7 +628,7 @@ export class AgentNavigator {
       }, { overlay: true, overlayOptions: { anchor: "center", width: "90%", maxHeight: "85%" } });
     } finally {
       this.isDeliverySelectorOpen = false;
-      if (!this.disposed && generation === this.interactionRequestId && ui === this.uiCtx) { this.listFocused = true; this.update(); }
+      if (!this.disposed && generation === this.interactionRequestId && ui === this.uiCtx) { this.listFocused = listWasFocused; this.update(); }
     }
   }
 
@@ -579,6 +671,7 @@ export class AgentNavigator {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true; this.interactionRequestId++; this.stopTimer();
+    this.commandOutput = undefined;
     this.frozenOrder = undefined;
     const ui = this.uiCtx;
     const failures: unknown[] = [];

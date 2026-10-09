@@ -20,7 +20,7 @@ export class TranscriptView {
 
   invalidate(): void { this.rows = new WeakMap(); }
 
-  render(record: NavigationAgent, snapshot: TranscriptSnapshot, theme: Theme, width: number, dockActive: boolean): string[] {
+  render(record: NavigationAgent, snapshot: TranscriptSnapshot, theme: Theme, width: number, dockActive: boolean, commandOutput?: string): string[] {
     if (this.theme !== theme || this.width !== width) {
       this.invalidate(); this.theme = theme; this.width = width;
     }
@@ -35,6 +35,11 @@ export class TranscriptView {
     if (snapshot.streaming) lines.push(...this.message(snapshot.streaming, theme, width));
     if (record.error) lines.push(truncateToWidth(theme.fg("error", `Error: ${displayText(record.error)}`), width));
     if (!dockActive) lines.push(...renderRetry(record, width, theme, Date.now()), ...renderPending(record, width, theme));
+    if (commandOutput) {
+      const output = ["", theme.fg("accent", theme.bold("Command"))];
+      appendWrapped(output, displayText(commandOutput), width);
+      lines.push(...output.map(line => truncateToWidth(line, width)));
+    }
     return lines;
   }
 

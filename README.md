@@ -53,6 +53,22 @@ When the list is expanded and the editor is empty, press `↓` to focus the list
 | `Ctrl+D` | Remove a completed or stopped subagent |
 | `Esc` | Stop the active child operation while viewing it; or return focus to the editor |
 
+### Subagent Commands
+
+While viewing a subagent, `/` completion and submitted commands belong to the active subagent, even when another list row is highlighted.
+
+| Command | Action |
+|---|---|
+| `/help` | Show subagent commands |
+| `/status` | Show identity, model, control mode, progress, and queue count |
+| `/queue` | Inspect queued messages; use `Alt+Up` to restore them to the editor |
+| `/stop` | Stop the current operation |
+| `/takeover` | Take manual control, leaving subsequent results for explicit delivery |
+| `/deliver` | Open the existing message selector for an eligible subagent |
+| `/main` | Return to Main and its native commands |
+
+Commands take no arguments. Their replies are temporary UI output, cleared by the next ordinary input or a view change. Unknown commands and `!` shell input receive a local rejection. Return to Main before using its native commands, including model/session changes and shell execution.
+
 ## Tools for LLM
 
 The extension registers three tools for the parent model:

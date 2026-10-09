@@ -40,7 +40,7 @@ export interface NavigationSource {
 
 普通 Enter 对 running/queued/waiting 任务派发 steer, 保持 foreground/background 和 autonomous/manual 身份. 对已经展示为 settled 的任务派发 continue. 若输入与结算竞争, 已接受的输入保留在原生队列中并显示等待继续, 不静默启动另一项 operation.
 
-FollowUp 使用宿主 KeybindingsManager 的 app.message.followUp 动作. 在 0.85.1 的 Windows/WSL 默认键位中它是 Ctrl+Q, 其他环境为 Alt+Enter. 宿主 dequeue 动作同样被委派到当前子任务, 同时保留明确的 Alt+Up 别名. 按键路由发生在父 editor 入队之前, Main 继续使用宿主处理. slash 与 shell 输入交给 Pi.
+FollowUp 使用宿主 KeybindingsManager 的 app.message.followUp 动作. 在 0.85.1 的 Windows/WSL 默认键位中它是 Ctrl+Q, 其他环境为 Alt+Enter. 宿主 dequeue 动作同样被委派到当前子任务, 同时保留明确的 Alt+Up 别名. 按键路由发生在父 editor 入队之前, Main 继续使用宿主处理. 子屏命令由 Controller 读取快照或复用已有 Action, 不把未知命令和 shell 输入转交 Main; [屏幕与输入所有权](2026-09-10-navigator-screen-and-input-ownership.md) 持有命令范围、补全和临时回复边界.
 
 Alt+T 是显式 takeover: 控制模式持久变为 manual, 前台观察可 detach, 执行本身继续. TaskEngine 保存控制模式, Source 管理 pin, 前台观察在控制模式改变后解除等待. [接管与选择交付](../feature/2026-09-10-human-takeover-and-selective-delivery.md) 记录父交付行为.
 

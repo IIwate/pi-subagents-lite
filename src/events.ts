@@ -25,7 +25,7 @@ export function setupEventListeners(pi: ExtensionAPI, runtime: ExtensionRuntime)
   pi.on("input", (event, ctx) => {
     if (!runtime.active) return;
     runtime.assertContext(ctx);
-    if (event.source !== "interactive" || event.text.trim().startsWith("/") || event.text.trim().startsWith("!")) return;
+    if (event.source !== "interactive") return;
     if (runtime.navigator?.handleEditorSubmit(event.text, "steer", event.images)) return { action: "handled" as const };
   });
   pi.on("agent_end", () => { runtime.reflow(); });

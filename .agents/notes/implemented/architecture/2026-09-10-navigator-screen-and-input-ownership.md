@@ -14,7 +14,13 @@ Pi regular/fullscreen renderer 共用 document 和 dock 组件, 直接替换 TUI
 
 子屏期间列表顺序冻结: 用户离开 Main (`selectedAgentId !== null`) 时快照当前排序, 期间子任务状态变更 (如手动 stop/abort、正常完成或错误) 仅就地刷新状态文本与属性, 相对顺序保持锁定; 期间新派发的子代理追加在冻结顺序末尾, 避免列表突发重排导致正在查看的子代理跳出折叠视口. 仅当用户返回 Main (`activate(null)`) 时失效顺序快照, 恢复全局优先级 rank 重排.
 
-[PiScreen](../../../../src/ui/pi-screen.ts) 的 AgentNavigationEditor 包裹宿主已有 editor, 不另建一套输入实现. 它转发 focused、提交、change、autocomplete、图片、Ctrl+D、扩展快捷键和 actionHandlers, 包括 Pi 在包装之后注册的 followUp/dequeue handler. 子屏普通提交在 Main 排队前派发 Steer Action, `app.message.followUp` 使用独立的 FollowUp Action, `app.message.dequeue` 只操作当前子任务. 按键匹配使用宿主提供的键位表并保留 Alt+Up 撤回别名, Alt+T 显式接管. slash 和 `!` 命令仍由 Pi 处理. retry Esc 与子任务 abort 的优先级见 [retry UI](../bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md).
+[PiScreen](../../../../src/ui/pi-screen.ts) 的 AgentNavigationEditor 包裹宿主已有 editor, 不另建一套输入实现. 它转发 focused、提交、change、图片、Ctrl+D、扩展快捷键和 actionHandlers, 包括 Pi 在包装之后注册的 followUp/dequeue handler. 子屏普通提交在 Main 排队前派发 Steer Action, `app.message.followUp` 使用独立的 FollowUp Action, `app.message.dequeue` 只操作当前子任务. 按键匹配使用宿主提供的键位表并保留 Alt+Up 撤回别名, Alt+T 显式接管. retry Esc 与子任务 abort 的优先级见 [retry UI](../bug-fix/2026-09-09-subagent-screen-retry-and-steering-visibility.md).
+
+子屏的 slash 命令以 selectedAgentId 为目标, 不采用高亮候选. Controller 的命令目录同时提供 help 和原生 CombinedAutocompleteProvider 补全; PiScreen 只替换子屏命令位置的补全, 其他位置及 Main 委派宿主 provider. 命令不接受参数, 不触发文件补全; 异步补全返回时再次检查 provider 归属, 防止 Main 的候选出现在子屏. [README](../../../../README.md#subagent-commands) 持有命令用法.
+
+help/status/queue 读取现有导航快照, stop/takeover 复用有 taskId/operationId 的 Action, deliver 为已激活且有交付资格的任务打开原选择器. 选择仍需用户确认, modal 关闭后恢复打开前的列表焦点. 未知命令及参数错误在当前子屏反馈. 人工 shell 没有独立的受控 operation 契约, `!` 输入因此在子屏拒绝, 不转交 Main 或模型执行. 提交时若原目标已消失, 消费本次输入并提示, 避免自动切回 Main 后执行原本面向子任务的命令.
+
+命令回复属于 Controller 的临时显示状态, 通过 TranscriptView 清洗终端控制字符并按当前宽度折行. 它不进入会话消息、结果或交付选择. 新命令、普通输入、视图切换及释放替换或清除回复; 操作回复复用交互身份检查, 迟到的结果不覆盖新命令.
 
 异步交互使用 requestId 与 selectedAgentId 校验回调. 旧回调不能改变新选中会话的提示或草稿; 拒绝只在当前 editor 为空时恢复原输入, 不覆盖用户新写的内容. Ctrl+D 仅清理非活动子记录且需要 Enter 确认; Ctrl+C 取消确认并向上透传, 不切断宿主中断/退出链.
 
@@ -24,6 +30,7 @@ ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内
 
 ## Alternatives considered
 
+- **继续把 slash 和 shell 输入交给 Main.** 可以完整复用宿主命令、补全和 shell, 无需子命令目录. 但正在查看的任务与实际执行目标不同, 状态查询和有副作用的操作都可能落错会话. 子屏采用有限命令集合, 通过 main 命令显式返回宿主上下文.
 - **高亮即切换, 或仅使用全局 terminal input listener.** 状态少、拦截早, 但会干扰 overlay/autocomplete 的焦点, 也无法表达“浏览候选但仍对原会话输入”. 包装被聚焦的 editor 保留宿主输入路径.
 - **直接换 root children 或同时支持多代私有布局.** Pi 0.83 的布局上可用, 但 0.84 fullscreen 保留容器引用, 简单换根数组失效. 多套私有布局扩大故障面; 当前仅接受已经检查的结构.
 - **无条件恢复旧组件.** 清理容易, 但会覆盖另一扩展在此期间获得的 UI 所有权. 引用相等检查是共存约束, 不是可随意删除的防御噪声.
@@ -41,4 +48,4 @@ ScreenSwap 只接受经过检查的 Pi 布局: 7 个 root children, document 内
 
 ## Verification
 
-[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复; input 套件同时覆盖鼠标点击切换、滚轮原生幅度导航、折叠行翻页与同级子代理平滑差分切屏 (无冗余清屏序列); interaction 套件覆盖子屏期间冻结列表顺序、原地状态刷新、新任务末尾追加与返回 Main 重新全局排序. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.
+[navigator input](../../../../test/unit/ui/navigator/agent-navigator.input.test.ts)、[interaction](../../../../test/unit/ui/navigator/agent-navigator.interaction.test.ts) 和 [lifecycle](../../../../test/unit/ui/navigator/agent-navigator.lifecycle.test.ts) 验证输入目标、草稿、迟到回复、容器替换与恢复; input 套件同时覆盖鼠标点击切换、滚轮原生幅度导航、折叠行翻页与同级子代理平滑差分切屏 (无冗余清屏序列); interaction 套件覆盖子屏期间冻结列表顺序、原地状态刷新、新任务末尾追加与返回 Main 重新全局排序, 以及命令回复不改变会话、未知命令与 shell 不穿透、已激活任务的动作与确认交付、迟到回复和补全失效、消失目标的输入归属. Mock TUI 证明组件契约, 不替代 physical terminal 的焦点/IME 联调.
