@@ -8,7 +8,9 @@ Status: implemented
 
 ## Decision
 
-[action-fusion.ts](../../../../src/drivers/action-fusion.ts) 装饰内建 edit/write 工具（语义复刻自 SoL-Pi action-fusion，MIT，保留 SPDX 头），在参数模式末尾追加可选 `then_run` 对象：变更成功则同轮以嵌套调用执行命令并合并为单次工具输出返回；变更失败立即抛错并标记 `[then_run:skipped]`，坚决不在脏状态下跑命令。该特性是显式 opt-in 的实验功能（`experimental.actionFusion`，默认 false），经 /agents 菜单 Experimental features 第二项开关。[PiResources](../../../../src/drivers/pi-resources.ts) 仅在开关开启时包装构造点（cwd 在构造闭包中锚定为任务解析后的工作目录），[ExtensionRuntime](../../../../src/runtime.ts) 持有跨全部子会话共享的 `FusedFileQueue` 并经 ResourceOptions 注入。
+[action-fusion.ts](../../../../src/drivers/action-fusion.ts) 装饰内建 edit/write 工具（语义复刻自 SoL-Pi action-fusion，MIT，保留 SPDX 头），在参数模式末尾追加可选 `then_run` 对象：变更成功则同轮以嵌套调用执行命令并合并为单次工具输出返回；变更失败立即抛错并标记 `[then_run:skipped]`，不在变更失败后执行命令。该特性是显式 opt-in 的实验功能（`experimental.actionFusion`，默认 false），经 /agents 菜单 Experimental features 设置。[PiResources](../../../../src/drivers/pi-resources.ts) 在开关开启时包装构造点（cwd 锚定为接受的工作目录），[ExtensionRuntime](../../../../src/runtime.ts) 持有跨全部子会话共享的 [FileLockManager](../../../../src/drivers/file-locks.ts)，经 ResourceHost 的 FileLocks 接口注入。
+
+FileLocks 按规范化路径返回独立租约身份, 释放依据 leaseId, 等待支持 AbortSignal 取消. 迟到的释放不影响下一持有者. [Worker 后端](2026-10-09-durable-worker-isolation.md) 仍向父 Runtime 请求同一锁, 故障时等待工具进程树清理后才回收租约.
 
 ```ts type-equiv: ThenRunInput from src/drivers/action-fusion.ts
 export interface ThenRunInput {

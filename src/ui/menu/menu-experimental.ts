@@ -18,6 +18,13 @@ export async function showExperimentalMenu(ctx: ExtensionCommandContext, runtime
 
   const items: SettingItem[] = [
     {
+      id: "executionBackend",
+      label: "Execution backend",
+      currentValue: store.experimental.executionBackend,
+      values: ["in-process", "worker"],
+      description: "Isolate new tasks in supervised worker processes on Linux and Windows. Existing tasks keep their backend.",
+    },
+    {
       id: "observationPacking",
       label: "Observation packing",
       currentValue: store.experimental.observationPacking ? "ON" : "OFF",
@@ -37,6 +44,10 @@ export async function showExperimentalMenu(ctx: ExtensionCommandContext, runtime
   const onChange = (id: string, newValue: string) => {
     const saved = saveSetting(ctx, () => {
       switch (id) {
+        case "executionBackend":
+          store.mutate.experimental.setExecutionBackend(newValue as "in-process" | "worker");
+          ctx.ui.notify(`Execution backend set to ${newValue}`, "info");
+          break;
         case "observationPacking":
           store.mutate.experimental.setObservationPacking(newValue === "ON");
           ctx.ui.notify(`Observation packing set to ${newValue}`, "info");
@@ -48,7 +59,8 @@ export async function showExperimentalMenu(ctx: ExtensionCommandContext, runtime
       }
     });
     if (!saved) {
-      const original = (id === "actionFusion" ? store.experimental.actionFusion : store.experimental.observationPacking) ? "ON" : "OFF";
+      const original = id === "executionBackend" ? store.experimental.executionBackend
+        : (id === "actionFusion" ? store.experimental.actionFusion : store.experimental.observationPacking) ? "ON" : "OFF";
       settingsList.updateValue(id, original);
     }
   };

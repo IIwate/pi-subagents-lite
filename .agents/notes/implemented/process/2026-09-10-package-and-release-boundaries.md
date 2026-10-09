@@ -8,7 +8,7 @@ Pi 扩展由宿主动态加载 TypeScript, 不适合另外打包一份宿主运�
 
 ## Decision
 
-[package.json](../../../../package.json) 通过 pi.extensions 指向 src/index.ts, npm 包白名单包含 src、README、LICENSE. Pi agent-core/AI/coding-agent/TUI 与 TypeBox 是 peer dependencies, 同时为本仓库开发验证固定 Pi 1.0.0; 子执行直接依赖 exact pi-durable/chord 1.0.0. Bun lockfile 固定依赖图, 本地不构建一个与宿主竞争的 Pi runtime 副本. 架构 Notes 权威记录版本能力与升级代价.
+[package.json](../../../../package.json) 通过 pi.extensions 指向 src/index.ts, npm 包白名单包含 src、dist/worker、README、LICENSE. Pi agent-core/AI/coding-agent/TUI 与 TypeBox 是 peer dependencies, 开发与直接执行依赖由 Bun lockfile 固定. Worker supervisor 通过 Koffi 调用原生进程监管 API. `build:worker` 只将扩展自有工作进程入口构建为 Node 可执行的 mjs, 第三方依赖保持 external; prepack 生成该产物, CI 在测试前构建. 父 Pi 继续直接加载 TypeScript 扩展, 不构建与宿主竞争的 Pi runtime 副本.
 
 兼容范围由 package peer range 表达, 开发测试针对 lockfile 实际版本. 核心升级点使用原生 Pi scopedModels、model.maxTokens、document/dock 和 TypeBox API; 私有 retry classifier/layout 仍有专门契约测试. 通过当前版本检查不能推导整个 semver 范围都兼容.
 

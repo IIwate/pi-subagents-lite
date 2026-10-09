@@ -322,6 +322,22 @@ describe("Execution adapters", () => {
     expect(provider.state.callCount).toBe(2);
   });
 
+  it("deduplicates accepted and withdrawn inputs after reopening with the same request identity", async () => {
+    const path = join(directory, "requests.sqlite");
+    const first = await driver(binding("requests"), { path });
+    const operationId = await first.accept({ text: "Accepted once" }, "operation-request");
+    const queuedId = await first.queue("steer", { text: "Withdraw once" }, "queued-request");
+    expect(await first.cancelQueued(queuedId)).toBe("cancelled");
+    await first.close();
+    const restored = await DurableDriver.open({ path, models });
+    resources.onDispose(() => restored.close());
+    expect(await restored.accept({ text: "Accepted once" }, "operation-request")).toBe(operationId);
+    expect(await restored.queue("steer", { text: "Withdraw once" }, "queued-request")).toBe(queuedId);
+    expect((await restored.snapshot()).queued).toEqual([]);
+    await expect(restored.queue("followUp", { text: "Different work" }, "queued-request")).rejects.toThrow("different queued input");
+    expect(provider.state.callCount).toBe(0);
+  });
+
   it("closes admitted effects before releasing ownership and never replays an unsafe interrupted tool", async () => {
     const path = join(directory, "task.sqlite");
     const entered = Promise.withResolvers<void>();

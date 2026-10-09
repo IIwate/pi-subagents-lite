@@ -61,6 +61,8 @@ export interface AgentSettings {
 }
 
 export interface ExperimentalSettings {
+  /** Execution backend for newly accepted tasks. Default: in-process. */
+  executionBackend?: "in-process" | "worker";
   /** Opt-in: replace large tool results (>10 KiB) with stable placeholders after 2 full sends. Default: false. */
   observationPacking?: boolean;
   /** Opt-in: decorate edit/write with an optional then_run command fused into the same turn. Default: false. */

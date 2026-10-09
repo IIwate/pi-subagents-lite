@@ -10,6 +10,7 @@ import { executeAgentTool } from "../../src/agents/tool-execution.js";
 import { PiResources } from "../../src/drivers/pi-resources.js";
 import { RESULT_MESSAGE_TYPE } from "../../src/drivers/pi-delivery-channel.js";
 import type { TestHarness } from "./harness.js";
+import type { TaskEngine } from "../../src/engine/task-engine.js";
 
 export async function createRuntimeHost(harness: TestHarness, name: string, agentBody = "tools: [read]\nextensions: false\nskills: false", cwd?: string) {
   const directory = harness.createTempDir(`pi-runtime-${name}-`);
@@ -53,7 +54,7 @@ export async function spawn(parent: Host, text = "Delegated task", background = 
     run_in_background: background }, undefined, undefined, parent.runtime.context);
   return parent.runtime.engine.list().at(-1)!;
 }
-export function settled(harness: TestHarness, runtime: ExtensionRuntime, id: string): Promise<void> {
+export function settled(harness: TestHarness, runtime: { engine: TaskEngine }, id: string): Promise<void> {
   const done = Promise.withResolvers<void>();
   const check = () => { if (runtime.engine.get(id).state.status === "settled") done.resolve(); };
   const stop = runtime.engine.subscribe(check); harness.onDispose(stop);

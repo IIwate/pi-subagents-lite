@@ -33,6 +33,7 @@ jobs:
       - run: bun run typecheck:test
       - run: bun run lint
       - run: bun run verify-notes
+      - run: bun run build:worker
       - run: bun run test
       - run: npm pack --dry-run
       - run: npm publish --access public

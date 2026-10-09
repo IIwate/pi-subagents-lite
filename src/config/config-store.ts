@@ -80,6 +80,7 @@ export interface ResolvedRoutingConfig {
 }
 
 export interface ResolvedExperimentalSettings {
+  readonly executionBackend: "in-process" | "worker";
   readonly observationPacking: boolean;
   readonly actionFusion: boolean;
 }
@@ -158,6 +159,7 @@ export class ConfigStore {
 
   get experimental(): ResolvedExperimentalSettings {
     return {
+      executionBackend: this.config.experimental?.executionBackend ?? "in-process",
       observationPacking: this.config.experimental?.observationPacking === true,
       actionFusion: this.config.experimental?.actionFusion === true,
     };
@@ -314,6 +316,9 @@ export class ConfigStore {
       },
     },
     experimental: {
+      setExecutionBackend: (backend: "in-process" | "worker"): void => {
+        this.commit(config => { config.experimental = { ...config.experimental, executionBackend: backend }; });
+      },
       setObservationPacking: (enabled: boolean): void => {
         this.commit(config => {
           config.experimental = { ...config.experimental, observationPacking: enabled };

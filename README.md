@@ -12,6 +12,7 @@ Lightweight subagents for [Pi](https://pi.dev) with isolated sessions, per-agent
 - **Steering & Explicit Takeover**: Send steering guidance mid-run (`Enter`), take manual control (`Alt+T`), and selectively deliver chosen messages (`Alt+S`) back to the parent.
 - **Hierarchical Concurrency**: Enforce model- and provider-level concurrency limits with automatic queuing.
 - **Experimental Observation Packing**: Opt-in context compression for large tool results with stable placeholders and paged recall (`obs_recall`).
+- **Experimental Worker Isolation**: Run child models, tools, and extensions in supervised processes on Linux and Windows.
 
 ## Install
 
@@ -135,6 +136,10 @@ Run `/agents` in Pi to open the interactive settings menu:
 - **Experimental Features**: Opt in to experimental mechanisms such as Observation Packing (`obs_recall`).
 
 Configuration is saved atomically in `subagents-lite-v3.json` inside Pi's agent directory.
+
+Under **Experimental Features**, set **Execution backend** to `worker` to isolate new tasks. The default is `in-process`; existing tasks retain their accepted backend and settings. Worker execution keeps the same navigator and SQLite delivery behavior. Custom providers must be available through child configuration or an enabled provider extension. An unavailable provider or unsupported platform produces an initialization error.
+
+Worker isolation adds an execution process and a supervisor per task, and uses Koffi's platform binaries for process cleanup. It does not impose CPU or memory limits. Reopening a task preserves saved results and requires explicit input to resume unfinished work.
 
 ## License
 

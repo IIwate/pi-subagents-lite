@@ -6,6 +6,7 @@
 
 | Command | Scope |
 |---|---|
+| `bun run build:worker` | Node worker and supervisor entry points; required before worker scenarios or local Worker use. |
 | `bun run typecheck` | Production TypeScript. |
 | `bun run typecheck:test` | Production code, all tests, shared fixtures, and Vitest configuration. |
 | `bun run lint` | ESLint correctness rules for production code, tests, and Vitest configuration; zero warnings allowed. |
@@ -17,6 +18,8 @@
 | `npm run verify-notes` | Note structure, links, source references, TypeScript examples, and type equivalence. |
 
 Pass a file or directory to a layer command for focused execution, for example `bun run test:unit test/unit/ui/delivery-selector.test.ts`.
+
+Worker scenarios use compiled entries with plain Node forks and offline providers. Build them after changing worker code. `prepack` generates the same external-dependency bundles for the npm package. Linux and Windows CI run the same crash, descendant cleanup, delivery, and control scenarios.
 
 [ESLint](../eslint.config.mjs) uses the recommended JavaScript and TypeScript correctness rules. TypeScript owns unused-symbol checks. Explicit `any` remains available for Pi adapters and test doubles whose host types are incomplete; lint does not impose formatting rules.
 

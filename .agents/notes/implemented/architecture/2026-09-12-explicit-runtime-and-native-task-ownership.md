@@ -14,7 +14,7 @@ Status: implemented
 
 ## Persistence and discovery
 
-任务使用 getAgentDir 下 subagents-lite-v3/durable/<encoded-parent-session-id>/<task-id>.sqlite. TaskBinding、接受请求、控制权和 outbox 位于 session-scoped document, 执行队列和答案由原生 Submission/Task 持久化. Runtime 只扫描当前父目录, 并校验文档中的父身份; 没有接受 operation 的准备记录不进入执行列表. 0.99.x JSONL 子会话不兼容, 不读取或迁移.
+任务使用 getAgentDir 下 subagents-lite-v3/durable/<encoded-parent-session-id>/<task-id>.sqlite; [Worker 后端](2026-10-09-durable-worker-isolation.md) 使用 <task-id>.worker.sqlite 并先取得监管租约. TaskBinding、接受请求、控制权和 outbox 位于 session-scoped document, 执行队列和答案由原生 Submission/Task 持久化. Runtime 只扫描当前父目录, 并校验文档中的父身份; 没有接受 operation 的准备记录不进入执行列表. 0.99.x JSONL 子会话不兼容, 不读取或迁移.
 
 ```ts type-equiv: TaskBinding from src/engine/contracts.ts
 export interface TaskBinding {
@@ -25,6 +25,14 @@ export interface TaskBinding {
   readonly control: "autonomous" | "manual";
   readonly display?: { readonly name: string; readonly description: string };
   readonly resources?: { readonly extensions: readonly string[]; readonly trusted: boolean };
+  readonly execution?: {
+    readonly backend: "in-process" | "worker";
+    readonly model: Model<any>;
+    readonly observationPacking: boolean;
+    readonly actionFusion: boolean;
+    readonly requireRegisteredProvider: boolean;
+    readonly settings: Pick<HarnessSettings, "retry" | "compaction">;
+  };
 }
 ```
 

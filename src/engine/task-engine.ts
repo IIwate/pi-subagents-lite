@@ -310,7 +310,7 @@ export class TaskEngine {
           : outcome.result || `Subagent ${outcome.status}.`,
         sourceEntryIds: result.sourceEntryIds, createdAt: result.completedAt,
       };
-      if (this.deliveryEligible(record, delivery)) await record.driver.store.saveDelivery(delivery, () => this.deliveryEligible(record, delivery));
+      if (this.deliveryEligible(record, delivery)) await record.driver.store.saveDelivery(delivery);
     }
     record.task = reduceTask(record.task, { type: "settled", operationId: result.operationId, outcome: result.outcome });
   }

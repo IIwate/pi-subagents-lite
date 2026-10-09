@@ -9,6 +9,7 @@ pi-subagents-lite is a Pi extension for isolated subagent sessions, model access
 | [src/index.ts](src/index.ts), [registration.ts](src/registration.ts), [events.ts](src/events.ts) | Extension entry, tool/shortcut registration, and service lifecycle assembly. |
 | [src/runtime.ts](src/runtime.ts) | Activation ownership, native task discovery, and resource teardown. |
 | [src/domain/](src/domain/), [src/engine/](src/engine/), [src/drivers/](src/drivers/) | Accepted policy, admission, native execution, durable results, and host adapters. |
+| [src/worker/](src/worker/) | Worker IPC, isolated execution, process supervision, and storage handoff. |
 | [src/agents/](src/agents/) | Agent definitions, accepted resource policy, working-directory validation, and tool handlers/results. |
 | [src/models/](src/models/), [src/config/](src/config/) | Model authorization and thinking resolution; configuration loading, persistence, and applied settings. |
 | [src/prompt/](src/prompt/) | Context extraction, skills, deterministic guidance, and selected-message formatting. |

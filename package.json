@@ -39,10 +39,13 @@
   },
   "files": [
     "src/",
+    "dist/worker/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build:worker": "bun build src/worker/main.ts src/worker/supervisor.ts --outdir dist/worker --target node --packages external --entry-naming \"[name].mjs\"",
+    "prepack": "bun run build:worker",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src test vitest.config.mts --max-warnings 0",
@@ -80,6 +83,7 @@
   },
   "dependencies": {
     "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0"
+    "@earendil-works/pi-durable": "1.1.0",
+    "koffi": "3.3.2"
   }
 }

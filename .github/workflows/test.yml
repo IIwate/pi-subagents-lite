@@ -27,6 +27,7 @@ jobs:
       - run: bun run typecheck
       - run: bun run typecheck:test
       - run: bun run lint
+      - run: bun run build:worker
       - name: Unit and scenario tests
         run: bun run test
       - name: Shuffled unit and scenario tests

@@ -173,8 +173,8 @@ describe("ExtensionRuntime ownership", () => {
     harness.onDispose(() => release.resolve());
     const open = PiResources.open;
     let childResources!: PiResources;
-    vi.spyOn(PiResources, "open").mockImplementation(async options => {
-      childResources = await open(options); prepared.resolve(); await release.promise; return childResources;
+    vi.spyOn(PiResources, "open").mockImplementation(async (options, host) => {
+      childResources = await open(options, host); prepared.resolve(); await release.promise; return childResources;
     });
     const pending = spawn(parent);
     const rejected = expect(pending).rejects.toThrow("closed");

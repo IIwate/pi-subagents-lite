@@ -110,10 +110,10 @@ export class DurableDriver implements ExecutionDriver {
     const watch = await this.conversation.watch(context);
     try { return watch.value; } finally { await watch.stop(); }
   }
-  async accept(input: TaskInput): Promise<string> {
+  async accept(input: TaskInput, requestId?: string): Promise<string> {
     this.assertOpen();
     const entries = (await this.view()).entries;
-    return this.store.accept(input, entries.at(-1)?.id ?? null);
+    return this.store.accept(input, entries.at(-1)?.id ?? null, requestId);
   }
   drive(operationId: string): Promise<DriveResult> {
     this.assertOpen();
@@ -162,8 +162,8 @@ export class DurableDriver implements ExecutionDriver {
       await this.harness.commit(() => undefined, context);
     }
   }
-  async queue(kind: "steer" | "followUp", input: TaskInput): Promise<string> {
-    this.assertOpen(); const id = await this.store.enqueue(kind, input);
+  async queue(kind: "steer" | "followUp", input: TaskInput, requestId?: string): Promise<string> {
+    this.assertOpen(); const id = await this.store.enqueue(kind, input, requestId);
     if (this.driving) await this.flushQueue();
     return id;
   }

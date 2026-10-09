@@ -15,10 +15,10 @@ pi-durable Harness 管理子任务的 Submission、工具任务和恢复, 官方
 ```ts type-equiv: ExecutionDriver from src/engine/contracts.ts
 export interface ExecutionDriver {
   readonly store: TaskStore;
-  accept(input: TaskInput): Promise<string>;
+  accept(input: TaskInput, requestId?: string): Promise<string>;
   drive(operationId: string): Promise<DriveResult>;
   requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void>;
-  queue(kind: "steer" | "followUp", input: TaskInput): Promise<string>;
+  queue(kind: "steer" | "followUp", input: TaskInput, requestId?: string): Promise<string>;
   cancelQueued(entryId: string): Promise<"cancelled" | "already_consumed" | "not_found">;
   snapshot(): Promise<ExecutionSnapshot>;
   observe(listener: () => void): Promise<() => void>;
@@ -72,7 +72,7 @@ export interface TaskDelivery {
 
 自动 deliveryId 由 taskId 和 terminal operationId 稳定构成. 重复保存使用原生 document commit 判重, 相同 ID 不允许覆盖不同正文. 人工选择具有新 UUID, 保存调用方选定的现有消息文本、entryId、operation、状态和时间, 不重新读取更新中的 transcript. 选择器可在尝试保存前保留该身份, 应对提交成功但响应丢失. 完整正文存入 outbox 和父消息, receipt 保存真实父 Entry ID. deliverSelection 返回表示 outbox 已保存, 后续父交付失败不抹掉该事实.
 
-自动 outbox 要求后台模式、自主控制且该 operation 没有用户停止意图, 写入发生在发布 terminal 领域状态前. NativeTaskStore.saveDelivery 在原生 document commit 内检查持久 stop 事实, 在最终 commit 前再次检查调用方的即时资格. 用户 stop 与撤销同一 operation 尚未确认的自动 outbox 共用一次原生提交, 因而自动写入先开始时也不会留下可发送的结果. 已确认 receipt 与子会话正文保留. stop 发起者中的 user 不被随后的 agent 停止覆盖; 选择性交付不受自动交付门禁影响.
+自动 outbox 要求后台模式、自主控制且该 operation 没有用户停止意图, 写入发生在发布 terminal 领域状态前. NativeTaskStore.saveDelivery 在原生 document commit 内检查持久 control、stop、后台模式和已结算 operation 身份, 不接收父端闭包. Takeover 的存储接受点是 manual 提交; 父 TaskEngine 在请求开始时即抑制最终父写入, 持久化失败明确报错并封闭交付. 用户 stop 与撤销同一 operation 尚未确认的自动 outbox 共用一次原生提交. 已确认 receipt 与子会话正文保留. stop 发起者中的 user 不被随后的 agent 停止覆盖; 选择性交付不受自动交付门禁影响.
 
 恢复读取原有 stop values, 不改写控制模式或伪造运行终态. 用户停止的已结算 operation 可以通过 Alt+S 选择已有片段; 当前 operation 变更后, 旧停止事实不授予新运行选择资格或阻止其自动交付. 结果写入失败时, 原生 terminal record 仍可重开读取并按资格重建交付. 停止持久化失败明确报告并阻止该活体记录继续交付. 父接收后子侧 ACK 写入失败时, outbox 仍未确认, 重试查询既有父 receipt 而不再次发送正文. native Session 关闭重开后保留任务、队列、各 operation 的结果及独立交付身份.
 
@@ -101,7 +101,7 @@ AgentStatus 返回的正文与 delivery 元数据在父日志中匹配后也形�
 
 ## Consequences
 
-执行、准入和父接收可单独替换并用真实离线 Provider 验证. 源码不需要同进程 DTO 深克隆或 RPC 层. 占用、取消、持久状态与显示状态具有不同责任.
+执行、准入和父接收可单独替换并用真实离线 Provider 验证. 进程内后端直接调用驱动; [Worker 后端](2026-10-09-durable-worker-isolation.md) 经有请求身份与边界校验的 RPC 使用同一契约. 占用、取消、持久状态与显示状态具有不同责任.
 
 每个任务具有独立 SQLite Session, Runtime 管理按父会话目录的发现、模型授权和资源准备. PiResources 把官方 Pi 工具和关键扩展 hook 接到durable Harness. 父文件 receipt 校验是交付边界上的同步读取, 成本随父日志增长. v3 配置和任务数据由激活实例管理.
 

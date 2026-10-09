@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
-  assertUnchangedBeforeCommand, type FusedFileQueue, THEN_RUN_FAILED, THEN_RUN_REJECTED, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED,
+  assertUnchangedBeforeCommand, THEN_RUN_FAILED, THEN_RUN_REJECTED, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED,
   type ThenRunInput, wrapMutationWithThenRun,
 } from "../../../src/drivers/action-fusion.js";
 import { createTestHarness, type TestHarness } from "../../support/harness.js";
+import { FileLockManager } from "../../../src/drivers/file-locks.js";
 
 function textResult(text: string): AgentToolResult<undefined> {
   return { content: [{ type: "text", text }], details: undefined };
@@ -34,8 +35,8 @@ function fakeWriteTool(directory: string, failure?: string): AgentTool<any> {
 describe("Action fusion", () => {
   let resources: TestHarness;
   let directory: string;
-  let queue: FusedFileQueue;
-  beforeEach(() => { resources = createTestHarness(); directory = resources.createTempDir("pi-action-fusion-"); queue = new Map(); });
+  let queue: FileLockManager;
+  beforeEach(() => { resources = createTestHarness(); directory = resources.createTempDir("pi-action-fusion-"); queue = new FileLockManager(); });
   afterEach(() => resources.dispose());
 
   const wrap = (tool: AgentTool<any>, shell: { available(): string | undefined; calls: ThenRunInput[]; outcome?: AgentToolCallOutcome }) =>

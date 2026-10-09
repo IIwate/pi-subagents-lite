@@ -264,11 +264,11 @@ describe("Native task delivery to an official Pi parent", () => {
     } });
     resources.onDispose(() => { releaseSave.resolve(); releaseDelivery.resolve(); });
     const save = native.driver.store.saveDelivery.bind(native.driver.store);
-    vi.spyOn(native.driver.store, "saveDelivery").mockImplementationOnce(async (delivery, eligible) => {
+    vi.spyOn(native.driver.store, "saveDelivery").mockImplementationOnce(async delivery => {
       stoppedDelivery = delivery;
-      if (position === "after") await save(delivery, eligible);
+      if (position === "after") await save(delivery);
       reached.resolve(); await releaseSave.promise;
-      if (position === "before") await save(delivery, eligible);
+      if (position === "before") await save(delivery);
     });
     const sent = vi.spyOn(parent.api, "sendMessage");
     const parentCalls = parent.provider.state.callCount;

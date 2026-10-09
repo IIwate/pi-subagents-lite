@@ -277,9 +277,13 @@ describe("ConfigStore non-routing behavior", () => {
     expect(concurrencies.length).toBeGreaterThan(1);
   });
 
-  it("defaults experimental settings to off and mutates observationPacking and actionFusion", () => {
+  it("persists opt-in execution and tool settings", () => {
     const { io, current } = memIO();
     const store = new ConfigStore(io);
+    expect(store.experimental.executionBackend).toBe("in-process");
+    store.mutate.experimental.setExecutionBackend("worker");
+    expect(store.experimental.executionBackend).toBe("worker");
+    expect(current().experimental?.executionBackend).toBe("worker");
     expect(store.experimental.observationPacking).toBe(false);
     expect(store.experimental.actionFusion).toBe(false);
     store.mutate.experimental.setObservationPacking(true);

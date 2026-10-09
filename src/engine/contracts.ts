@@ -1,5 +1,7 @@
 import type { TaskPolicy } from "../domain/policy.js";
 import type { TaskOutcome } from "../domain/task.js";
+import type { Model } from "@earendil-works/pi-ai";
+import type { HarnessSettings } from "@earendil-works/pi-durable";
 
 export interface ParentOrigin {
   readonly sessionId: string;
@@ -14,6 +16,14 @@ export interface TaskBinding {
   readonly control: "autonomous" | "manual";
   readonly display?: { readonly name: string; readonly description: string };
   readonly resources?: { readonly extensions: readonly string[]; readonly trusted: boolean };
+  readonly execution?: {
+    readonly backend: "in-process" | "worker";
+    readonly model: Model<any>;
+    readonly observationPacking: boolean;
+    readonly actionFusion: boolean;
+    readonly requireRegisteredProvider: boolean;
+    readonly settings: Pick<HarnessSettings, "retry" | "compaction">;
+  };
 }
 
 export interface TaskInput {
@@ -93,8 +103,8 @@ export interface StoredDelivery {
 export interface TaskStore {
   readonly binding: TaskBinding;
   takeOver(): Promise<void>;
-  /** Recheck eligibility at the storage commit boundary. */
-  saveDelivery(delivery: TaskDelivery, eligible?: () => boolean): Promise<void>;
+  /** Automatic delivery checks persisted control and stop state in its transaction. */
+  saveDelivery(delivery: TaskDelivery): Promise<void>;
   deliveries(): Promise<readonly StoredDelivery[]>;
   acknowledge(receipt: DeliveryReceipt): Promise<void>;
 }
@@ -102,10 +112,10 @@ export interface TaskStore {
 // Note: see .agents/notes/implemented/architecture/2026-09-11-native-execution-and-parent-delivery-adapters.md
 export interface ExecutionDriver {
   readonly store: TaskStore;
-  accept(input: TaskInput): Promise<string>;
+  accept(input: TaskInput, requestId?: string): Promise<string>;
   drive(operationId: string): Promise<DriveResult>;
   requestAbort(operationId: string, stoppedBy?: "user" | "agent"): Promise<void>;
-  queue(kind: "steer" | "followUp", input: TaskInput): Promise<string>;
+  queue(kind: "steer" | "followUp", input: TaskInput, requestId?: string): Promise<string>;
   cancelQueued(entryId: string): Promise<"cancelled" | "already_consumed" | "not_found">;
   snapshot(): Promise<ExecutionSnapshot>;
   observe(listener: () => void): Promise<() => void>;

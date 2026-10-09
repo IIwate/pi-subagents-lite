@@ -31,6 +31,7 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolCallOutcome, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { FileLocks } from "./file-locks.js";
 
 export const THEN_RUN_SUCCEEDED = "[then_run:succeeded]";
 export const THEN_RUN_FAILED = "[then_run:failed]";
@@ -42,9 +43,6 @@ export interface ThenRunInput {
   /** Seconds; no default timeout when omitted. */
   timeout?: number;
 }
-
-/** Per-path serialization tails. Owned by ExtensionRuntime, shared by all child sessions. */
-export type FusedFileQueue = Map<string, Promise<void>>;
 
 /** Shell access for the fused follow-up command, bound to the child session's tool host. */
 export interface ActionFusionShell {
@@ -115,19 +113,14 @@ async function canonicalQueueKey(filePath: string): Promise<string> {
  * queue, and it does not gate plain (unfused) mutations — its sha256 guard,
  * not the lock alone, detects interference from those.
  */
-export async function withFusedFileQueue<T>(tails: FusedFileQueue, filePath: string, work: () => Promise<T>): Promise<T> {
+export async function withFusedFileQueue<T>(locks: FileLocks, filePath: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   const key = await canonicalQueueKey(filePath);
-  const previous = tails.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const owned = new Promise<void>(resolveOwned => { release = resolveOwned; });
-  const tail = previous.then(() => owned);
-  tails.set(key, tail);
-  await previous;
+  const leaseId = await locks.acquire(key, signal);
   try {
+    signal?.throwIfAborted();
     return await work();
   } finally {
-    release();
-    if (tails.get(key) === tail) tails.delete(key);
+    await locks.release(leaseId);
   }
 }
 
@@ -167,7 +160,7 @@ async function executeMutationThenRun<TDetails>({ toolCallId, absolutePath, then
   thenRun: ThenRunInput | undefined;
   mutate: () => Promise<AgentToolResult<TDetails>>;
   shell: ActionFusionShell;
-  queue: FusedFileQueue;
+  queue: FileLocks;
   signal: AbortSignal | undefined;
 }): Promise<AgentToolResult<TDetails>> {
   return withFusedFileQueue(queue, absolutePath, async () => {
@@ -196,7 +189,7 @@ async function executeMutationThenRun<TDetails>({ toolCallId, absolutePath, then
       ...mutationResult,
       content: [...mutationResult.content, { type: "text" as const, text: output ? `${THEN_RUN_SUCCEEDED}\n${output}` : THEN_RUN_SUCCEEDED }],
     };
-  });
+  }, signal);
 }
 
 // Note: see .agents/notes/implemented/architecture/2026-10-01-action-fusion-then-run.md
@@ -208,7 +201,7 @@ async function executeMutationThenRun<TDetails>({ toolCallId, absolutePath, then
  */
 export function wrapMutationWithThenRun(tool: AgentTool<any>, options: {
   cwd: string;
-  queue: FusedFileQueue;
+  queue: FileLocks;
   shell: ActionFusionShell;
 }): AgentTool<any> {
   const description = `Command to run next on this file after the ${tool.name} succeeds — e.g. run, build, start/restart, `

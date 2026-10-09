@@ -53,7 +53,7 @@ function parent(input: unknown): ParentOrigin {
   return Object.freeze({ sessionId: string(data.sessionId), entryId: data.entryId === null ? null : string(data.entryId) });
 }
 
-function parseBinding(input: unknown): TaskBinding {
+export function parseBinding(input: unknown): TaskBinding {
   const data = object(input);
   const policy = object(data.policy);
   const model = object(policy.model);
@@ -80,11 +80,30 @@ function parseBinding(input: unknown): TaskBinding {
   };
   const display = data.display === undefined ? undefined : object(data.display);
   const resources = data.resources === undefined ? undefined : object(data.resources);
+  const execution = data.execution === undefined ? undefined : object(data.execution);
   if (display && (typeof display.name !== "string" || typeof display.description !== "string")) throw new Error("Invalid task display text");
   if (resources && typeof resources.trusted !== "boolean") throw new Error("Invalid task resource trust");
+  if (execution) {
+    if (execution.backend !== "in-process" && execution.backend !== "worker") throw new Error("Invalid task execution backend");
+    for (const key of ["observationPacking", "actionFusion", "requireRegisteredProvider"]) {
+      if (typeof execution[key] !== "boolean") throw new Error(`Invalid execution setting: ${key}`);
+    }
+    const descriptor = object(execution.model);
+    if (string(descriptor.provider) !== model.provider || string(descriptor.id) !== model.id) throw new Error("Execution model identity mismatch");
+    string(descriptor.api); number(descriptor.contextWindow, 1); number(descriptor.maxTokens, 1);
+    const settings = object(execution.settings);
+    for (const name of ["retry", "compaction"]) {
+      if (settings[name] === undefined) continue;
+      for (const [key, value] of Object.entries(object(settings[name]))) {
+        if (key === "enabled") { if (typeof value !== "boolean") throw new Error("Invalid execution switch"); }
+        else if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error("Invalid execution limit");
+      }
+    }
+  }
   return Object.freeze({ taskId: string(data.taskId), policy: freezePolicy(accepted), parent: parent(data.parent), mode: data.mode, control: data.control,
     display: display ? Object.freeze({ name: display.name as string, description: display.description as string }) : undefined,
-    resources: resources ? Object.freeze({ extensions: Object.freeze(strings(resources.extensions)), trusted: resources.trusted as boolean }) : undefined });
+    resources: resources ? Object.freeze({ extensions: Object.freeze(strings(resources.extensions)), trusted: resources.trusted as boolean }) : undefined,
+    execution: execution ? structuredClone(execution) as TaskBinding["execution"] : undefined });
 }
 
 function parseStoredDelivery(input: unknown): StoredDelivery {
@@ -157,12 +176,16 @@ export class NativeTaskStore implements TaskStore {
     if (!Object.hasOwn(operations, id)) throw new Error("Current task operation is missing");
     return operations[id];
   }
-  async accept(input: TaskInput, fromEntryId: number | null): Promise<string> {
-    const id = randomUUID();
+  async accept(input: TaskInput, fromEntryId: number | null, id: string = randomUUID()): Promise<string> {
     await this.session.commit(async tx => {
       const data = await tx.doc(TaskDocument);
+      if (Object.hasOwn(data.operations, id)) {
+        if (!isDeepStrictEqual(data.operations[id].input, JSON.parse(JSON.stringify(input)))) throw new Error("Request ID already belongs to a different input");
+        return;
+      }
       if (data.current && !data.operations[data.current].result) throw new Error("Task is already running");
-      data.operations[id] = JSON.parse(JSON.stringify({ id, input, fromEntryId, startedAt: Date.now() })); data.current = id;
+      data.operations = { ...data.operations, [id]: JSON.parse(JSON.stringify({ id, input, fromEntryId, startedAt: Date.now() })) };
+      data.current = id;
     }, context);
     return id;
   }
@@ -221,9 +244,19 @@ export class NativeTaskStore implements TaskStore {
     }
     return queue;
   }
-  async enqueue(kind: PendingInput["kind"], input: TaskInput): Promise<string> {
-    const id = randomUUID();
-    await this.session.commit(async tx => { (await tx.doc(TaskDocument)).queue.push(JSON.parse(JSON.stringify({ id, kind, input }))); }, context);
+  async enqueue(kind: PendingInput["kind"], input: TaskInput, id: string = randomUUID()): Promise<string> {
+    await this.session.commit(async tx => {
+      const data = await tx.doc(TaskDocument);
+      const item = JSON.parse(JSON.stringify({ id, kind, input }));
+      const accepted = data.inputs && Object.hasOwn(data.inputs, id) ? data.inputs[id] : undefined;
+      if (accepted) {
+        if (!isDeepStrictEqual(accepted, item)) throw new Error("Request ID already belongs to a different queued input");
+        return;
+      }
+      data.inputs ??= {};
+      data.inputs = { ...data.inputs, [id]: item };
+      data.queue.push(item);
+    }, context);
     return id;
   }
   async removePending(id: string): Promise<boolean> {
@@ -248,7 +281,7 @@ export class NativeTaskStore implements TaskStore {
     await this.session.commit(async tx => { (await tx.doc(TaskDocument)).binding.control = "manual"; }, context);
     this.current = Object.freeze({ ...this.current, control: "manual" });
   }
-  async saveDelivery(delivery: TaskDelivery, eligible: () => boolean = () => true): Promise<void> {
+  async saveDelivery(delivery: TaskDelivery): Promise<void> {
     this.checkDelivery(delivery);
     await this.session.commit(async tx => {
       const data = await tx.doc(TaskDocument); const existing = data.deliveries[delivery.deliveryId];
@@ -256,7 +289,12 @@ export class NativeTaskStore implements TaskStore {
         if (!isDeepStrictEqual(parseStoredDelivery(existing).delivery, delivery)) throw new Error("Delivery ID already belongs to a different result");
         return;
       }
-      if ((delivery.kind === "automatic" && data.operations[delivery.operationId]?.stoppedBy === "user") || !eligible()) return;
+      if (!Object.hasOwn(data.operations, delivery.operationId)) throw new Error("Delivery operation is unknown");
+      if (delivery.kind === "automatic") {
+        const operation = data.operations[delivery.operationId];
+        if (!operation.result) throw new Error("Automatic delivery requires a settled operation");
+        if (data.binding.mode !== "background" || data.binding.control !== "autonomous" || operation.stoppedBy === "user") return;
+      }
       data.deliveries[delivery.deliveryId] = JSON.parse(JSON.stringify({ delivery }));
     }, context);
   }

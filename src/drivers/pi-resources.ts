@@ -4,7 +4,7 @@ import {
   createMcpExtension, createCodemodeExtension, createToolSearchExtension,
   createBashTool, createEditTool, createFindTool, createGrepTool, createPowerShellTool, createReadTool, createWriteTool,
   DefaultPackageManager, DefaultResourceLoader, ExtensionRunner, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
-  loadProjectContextFiles, type ExtensionAPI, type ExtensionContext, type FileEntry,
+  loadProjectContextFiles, type ExtensionAPI, type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool, AgentMessage } from "@earendil-works/pi-agent-core";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -23,7 +23,8 @@ import { buildAgentPrompt, type EnvInfo, type PromptExtras } from "../prompt/pro
 import { loadSkillMeta, preloadSkills } from "../prompt/skill-loader.js";
 import { PiToolHost } from "./pi-tool-host.js";
 import { ObservationSink, OBS_RECALL_TOOL_NAME } from "./observation-sink.js";
-import { wrapMutationWithThenRun, type FusedFileQueue } from "./action-fusion.js";
+import { wrapMutationWithThenRun } from "./action-fusion.js";
+import type { FileLocks } from "./file-locks.js";
 import type { ToolSourceGrant } from "../domain/policy.js";
 import { permitsSourceTool } from "../domain/policy.js";
 
@@ -42,9 +43,7 @@ function extensionName(file: string): string {
   return basename(dirname(file));
 }
 
-interface ResourceOptions {
-  pi: Pick<ExtensionAPI, "exec">;
-  parent: ExtensionContext;
+export interface ResourceBootstrap {
   agentDir: string;
   cwd: string;
   projectTrusted: boolean;
@@ -52,12 +51,21 @@ interface ResourceOptions {
   thinking: ThinkingLevel;
   policy?: AcceptedRunPolicy;
   restored?: TaskBinding;
-  signal?: AbortSignal;
-  warnedConflicts?: Set<string>;
+  parentSystemPrompt?: string;
+  inheritedState?: readonly [string, unknown][];
   observationPacking?: boolean;
   actionFusion?: boolean;
+  extensionEntryPath?: string;
+}
+
+export interface ResourceHost {
+  exec: ExtensionAPI["exec"];
+  warn(message: string): void;
+  configureModels?(models: ModelRuntime): void;
+  signal?: AbortSignal;
+  warnedConflicts?: Set<string>;
   /** Runtime-owned fused file queue, shared across all child sessions. Required when actionFusion is on. */
-  fusedFileQueue?: FusedFileQueue;
+  fusedFileQueue?: FileLocks;
 }
 
 /** Owns official Pi resource factories and adapts their tool hooks to the native child. */
@@ -86,17 +94,18 @@ export class PiResources {
   extensionPaths: string[] = [];
 
   private constructor(readonly models: ModelRuntime, readonly settings: SettingsManager,
-    private readonly loader: DefaultResourceLoader, private readonly options: ResourceOptions) {
+    private readonly loader: DefaultResourceLoader, private readonly options: ResourceBootstrap, private readonly host: ResourceHost) {
     this.view = SessionManager.inMemory(options.cwd);
     this.packingEnabled = options.observationPacking ?? false;
     this.toolHost = new PiToolHost({ enter: signal => { this.abortSignal = signal; }, assertOpen: () => this.assertOpen(), flush: async () => { await this.refresh(); await this.flush(); },
       changed: () => this.publishTools(), warn: message => this.warn(message),
       messages: () => this.view.getBranch().flatMap(entry => entry.type === "message" ? [entry.message] : []),
-    }, options.warnedConflicts);
+    }, host.warnedConflicts);
   }
 
-  static async open(options: ResourceOptions): Promise<PiResources> {
-    const { parent, agentDir, cwd, policy, restored } = options;
+  static async open(options: ResourceBootstrap, host: ResourceHost): Promise<PiResources> {
+    options = structuredClone(options);
+    const { agentDir, cwd, policy, restored } = options;
     const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: options.projectTrusted });
     const extensionFactories = [
       { name: "mcp", factory: createMcpExtension(), builtin: true, replaceable: true },
@@ -112,13 +121,8 @@ export class PiResources {
       additionalExtensionPaths = resolved.extensions.filter(extension => extension.enabled && extension.path.startsWith("builtin:"))
         .map(extension => extension.path);
     }
-    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), signal: options.signal });
-    for (const id of parent.modelRegistry.getRegisteredProviderIds()) {
-      const provider = parent.modelRegistry.getRegisteredNativeProvider(id);
-      const config = parent.modelRegistry.getRegisteredProviderConfig(id);
-      if (provider) models.registerNativeProvider(provider);
-      else if (config) models.registerProvider(id, config);
-    }
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), signal: host.signal });
+    host.configureModels?.(models);
     const allowed = Array.isArray(policy?.extensions) ? new Set(policy.extensions.map(name => name.split("/")[0])) : undefined;
     const denied = new Set(policy?.definition.excludeExtensions ?? []);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
@@ -129,15 +133,15 @@ export class PiResources {
       noSkills: restored !== undefined || policy?.skills === false || Array.isArray(policy?.skills) || Array.isArray(policy?.definition.preloadSkills),
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
       extensionsOverride: result => ({ ...result, extensions: result.extensions.filter(extension => {
-        if (extension.resolvedPath === join(import.meta.dirname, "..", "index.ts")) return false;
+        if (extension.resolvedPath === (options.extensionEntryPath ?? join(import.meta.dirname, "..", "index.ts"))) return false;
         const name = extensionName(extension.path);
         return allowed ? allowed.has(name) : !denied.has(name);
       }) }),
     });
-    const resources = new PiResources(models, settings, loader, options);
+    const resources = new PiResources(models, settings, loader, options, host);
     try {
       await loader.reload({ resolveProjectTrust: async () => options.projectTrusted });
-      options.signal?.throwIfAborted();
+      host.signal?.throwIfAborted();
       const loaded = loader.getExtensions();
       if (loaded.errors.length) throw new Error(loaded.errors.map(error => `${error.path}: ${error.error}`).join("\n"));
       resources.extensionPaths = loaded.extensions.map(extension => extension.resolvedPath);
@@ -147,13 +151,7 @@ export class PiResources {
       resources.systemPrompt = restored?.policy.systemPrompt ?? await resources.buildPrompt(policy!);
       resources.bind();
       if (!restored) {
-        const inherited = new Map<string, unknown>();
-        for (const entry of parent.sessionManager.getBranch()) {
-          if (entry.type === "custom" && !entry.customType.startsWith("subagents-lite")) {
-            inherited.set(entry.customType, structuredClone(entry.data));
-          }
-        }
-        resources.customState.push(...inherited);
+        resources.customState.push(...structuredClone(options.inheritedState ?? []));
         for (const [type, data] of resources.customState) resources.view.appendCustomEntry(type, data);
         await resources.runner.emit({ type: "session_start", reason: "new" });
         resources.toolHost.refresh();
@@ -174,6 +172,7 @@ export class PiResources {
 
   private bind(): void {
     const { cwd, policy, restored, model, thinking } = this.options;
+    if (this.options.actionFusion && !this.host.fusedFileQueue) throw new Error("Action fusion requires runtime-owned file locks");
     // Fused commands route through the tool host's nested execution, so the accepted-policy
     // and active-set gates apply exactly as they would to a model-issued shell call.
     const fusionShell = {
@@ -183,7 +182,7 @@ export class PiResources {
     };
     const mutations: AgentTool<any>[] = [createEditTool(cwd), createWriteTool(cwd)].map(tool =>
       this.options.actionFusion
-        ? wrapMutationWithThenRun(tool, { cwd, queue: this.options.fusedFileQueue ?? new Map(), shell: fusionShell })
+        ? wrapMutationWithThenRun(tool, { cwd, queue: this.host.fusedFileQueue!, shell: fusionShell })
         : tool);
     const builtins: AgentTool<any>[] = [createReadTool(cwd), createBashTool(cwd), createPowerShellTool(cwd), ...mutations,
       createGrepTool(cwd), createFindTool(cwd)];
@@ -372,24 +371,24 @@ export class PiResources {
   }
 
   private async buildPrompt(policy: AcceptedRunPolicy): Promise<string> {
-    const { cwd, agentDir, parent, pi } = this.options;
+    const { cwd, agentDir } = this.options;
     const env: EnvInfo = { isGitRepo: undefined, branch: null, platform: process.platform };
     try {
-      const git = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
+      const git = await this.host.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
       if (git.code === 0) {
         env.isGitRepo = git.stdout.trim() === "true";
         if (env.isGitRepo) {
-          const branch = await pi.exec("git", ["branch", "--show-current"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
+          const branch = await this.host.exec("git", ["branch", "--show-current"], { cwd, timeout: GIT_EXEC_TIMEOUT_MS });
           if (branch.code === 0) env.branch = branch.stdout.trim() || null;
         }
       } else if (git.stderr.includes("not a git repository")) env.isGitRepo = false;
     } catch {
       // Git may be absent or unavailable; directory metadata does not own task admission.
-      this.options.signal?.throwIfAborted();
+      this.host.signal?.throwIfAborted();
     }
     const extras: PromptExtras = {};
     try {
-      if (policy.systemPromptMode === "inherit") extras.parentSystemPrompt = parent.getSystemPrompt();
+      if (policy.systemPromptMode === "inherit") extras.parentSystemPrompt = this.options.parentSystemPrompt;
       if (policy.systemPromptMode === "custom") {
         extras.customSystemPrompt = readFileSync(join(agentDir, "subagents-lite-prompt.md"), "utf8").trim();
         if (!extras.customSystemPrompt) this.warn("Custom prompt is empty; using the default header.");
@@ -413,8 +412,7 @@ export class PiResources {
   private saveState(): Promise<void> { return this.store!.session.commit(async tx => { (await tx.doc(TaskDocument)).extensionState = JSON.parse(JSON.stringify(this.customState)); }, context); }
   async flush(): Promise<void> { await this.writes; if (this.writeError) throw this.writeError; }
   private warn(message: string): void {
-    if (this.options.parent.hasUI) this.options.parent.ui.notify(`[subagents] ${message}`, "warning");
-    else console.warn(`[subagents] ${message}`);
+    this.host.warn(message);
   }
   private assertOpen(): void { if (this.closed || this.closing) throw new Error("Child resources are closed"); }
   private assertAttached(): void { this.assertOpen(); if (!this.driver) throw new Error("Child execution is not attached"); }
