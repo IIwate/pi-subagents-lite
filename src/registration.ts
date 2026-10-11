@@ -44,6 +44,7 @@ export function registerAgentTool(pi: ExtensionAPI, runtime: ExtensionRuntime): 
       })),
     }, { additionalProperties: false }),
     execute: (...args) => executeAgentTool(runtime, ...args),
+    exposure: "model-only",
 
     ...SILENT_TOOL_RENDERING,
   });
@@ -68,6 +69,7 @@ export function registerTools(pi: ExtensionAPI, runtime: ExtensionRuntime): void
       agent_id: Type.String(),
     }, { additionalProperties: false }),
     execute: (...args) => executeStopAgentTool(runtime, ...args),
+    exposure: "model-only",
     ...SILENT_TOOL_RENDERING,
   });
 
@@ -80,6 +82,7 @@ export function registerTools(pi: ExtensionAPI, runtime: ExtensionRuntime): void
       agent_id: Type.Optional(Type.String()),
     }, { additionalProperties: false }),
     execute: (...args) => executeAgentStatusTool(runtime, ...args),
+    exposure: "model-only",
     ...SILENT_TOOL_RENDERING,
   });
 
