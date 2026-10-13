@@ -221,7 +221,7 @@ export function wrapMutationWithThenRun(tool: AgentTool<any>, options: {
       ...(base.properties ?? {}),
       then_run: Type.Optional(Type.Object({
         command: Type.String({ description: "Shell command to run (the session's active shell: bash or powershell)" }),
-        timeout: Type.Optional(Type.Number({ minimum: 0, description: "Timeout in seconds (optional, no default timeout)" })),
+        timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Timeout in seconds (optional, no default timeout)" })),
       }, { description })),
     }),
     execute: (id: string, args: unknown, signal: AbortSignal | undefined, update: unknown) => {
