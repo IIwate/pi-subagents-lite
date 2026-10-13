@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { MemoryStorage, createSession } from "@earendil-works/pi-durable";
+import { MemoryStorage, createSession, type Storage } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TaskDocument, NativeTaskStore } from "../../../src/drivers/native-task-store.js";
 import {
@@ -405,5 +405,33 @@ describe("Execution adapters", () => {
     await expect(DurableDriver.open({ storage, models })).rejects.toThrow("Invalid task data string");
     expect(close).toHaveBeenCalledOnce();
     expect(provider.state.callCount).toBe(0);
+  });
+
+  it("fails the run visibly and closes deterministically when storage fails mid-run", async () => {
+    const inner = new MemoryStorage();
+    let armed = false;
+    // pi-durable 1.2.0: any storage throw (commit included) fails the Session; every later call
+    // and pending wait rejects with SessionFailed. The driver must surface the failure and close
+    // without hanging on the failed session.
+    const storage: Storage = new Proxy(inner, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target) as unknown;
+        if (key === "commit") {
+          return (...args: unknown[]) => {
+            if (armed) throw new Error("storage exploded mid-run");
+            return (value as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const child = await driver(binding("storage-failure"), { storage });
+    const operationId = await child.accept({ text: "Run until storage fails" });
+    armed = true;
+    let failure: unknown;
+    await child.drive(operationId).catch(error => { failure = error; });
+    const cause = failure instanceof Error ? failure.cause : undefined;
+    expect(String(cause instanceof Error ? cause.message : failure)).toContain("storage exploded mid-run");
+    await child.close();
   });
 });

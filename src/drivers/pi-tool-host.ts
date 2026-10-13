@@ -216,7 +216,9 @@ export class PiToolHost {
         this.inflight.add(operation);
         try {
           const outcome = await operation;
-          return { ...outcome.result, details: outcome.result.details === undefined ? undefined : JSON.parse(JSON.stringify(outcome.result.details)), isError: outcome.isError };
+          // pi-durable 1.2.0 reads ToolExecutionResult.output (pi-ai ToolResult keeps .content).
+          const { content, ...result } = outcome.result;
+          return { ...result, output: content, details: result.details === undefined ? undefined : JSON.parse(JSON.stringify(result.details)), isError: outcome.isError };
         } finally { this.inflight.delete(operation); }
       },
     } satisfies ToolRegistration));

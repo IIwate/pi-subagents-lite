@@ -345,7 +345,9 @@ export class PiResources {
   }
   async beforeRun(input: TaskInput): Promise<void> {
     await this.refresh(); await this.flush();
-    const result = await this.runner.emitBeforeAgentStart(input.text, input.images ? [...input.images] : undefined,
+    // pi-durable child runs are prompt-driven: always a "user" trigger (1.2.0 union trigger object).
+    const result = await this.runner.emitBeforeAgentStart(
+      { messageType: "user", prompt: input.text, ...(input.images ? { images: [...input.images] } : {}) },
       { forceSystemPrompt: this.systemPrompt, cwd: this.options.cwd, selectedTools: this.activeTools });
     this.systemPrompt = result.systemPromptOptions.forceSystemPrompt ?? this.systemPrompt;
     this.publishTools(); await this.flush();
