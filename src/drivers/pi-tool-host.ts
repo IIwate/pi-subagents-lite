@@ -216,9 +216,12 @@ export class PiToolHost {
         this.inflight.add(operation);
         try {
           const outcome = await operation;
-          // pi-durable 1.2.0 reads ToolExecutionResult.output (pi-ai ToolResult keeps .content).
-          const { content, ...result } = outcome.result;
-          return { ...result, output: content, details: result.details === undefined ? undefined : JSON.parse(JSON.stringify(result.details)), isError: outcome.isError };
+          // pi-durable 1.2.0 reads ToolExecutionResult.output (pi-ai ToolResult keeps .content). Only
+          // pi-durable fields are forwarded: structuredContent is dropped (registrations declare no
+          // structuredOutputSchema, where structuredOutput is not allowed) and pi-ai's terminate has
+          // no pi-durable counterpart (control is a different mechanism).
+          const { content, details, usage } = outcome.result;
+          return { output: content, details: details === undefined ? undefined : JSON.parse(JSON.stringify(details)), usage, isError: outcome.isError };
         } finally { this.inflight.delete(operation); }
       },
     } satisfies ToolRegistration));
