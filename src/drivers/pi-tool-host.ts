@@ -176,6 +176,7 @@ export class PiToolHost {
     return [...this.definitions.values()].filter(({ definition, sourceInfo }) => this.permits(definition.name, sourceInfo.path))
       .map(({ definition, sourceInfo }) => ({ name: definition.name, description: definition.description,
         parameters: definition.parameters, promptGuidelines: definition.promptGuidelines,
+        reachesTools: definition.reachesTools,
         exposure: definition.exposure ?? "direct", namespace: definition.namespace, annotations: definition.annotations, sourceInfo }));
   }
 
